@@ -12,8 +12,10 @@ Namun, sejak **Upgrade Pectra (Mei 2025)**, Ethereum secara resmi mengaktifkan *
 
 | Address Precompile | Nama Operasi | Fungsi dalam Nimbus |
 | :--- | :--- | :--- |
+| **`0x0b`** | `bls12_g1_add` | Point addition di G1, digunakan dalam kalkulasi parameter public inputs IC |
+| **`0x0c`** | `bls12_g1_msm` | Multi-scalar-multiplication di G1, digunakan untuk menghitung linear kombinasi public inputs IC secara on-chain |
 | **`0x0e`** | `bls12_g2_msm` | Menyamakan komitmen kunci masking: $k \cdot pk_{iss} == com_k$ |
-| **`0x0f`** | `bls12_pairing_check` | Memverifikasi tanda tangan BLS token RWA saat pembelanjaan (spend) |
+| **`0x0f`** | `bls12_pairing_check` | Memverifikasi tanda tangan BLS token RWA dan Groth16 pairing check |
 
 Dengan menggunakan precompile asli ini, gas fee untuk memproses transaksi privasi/RWA kita menjadi sangat murah. Formula gas cost untuk pairing check (`0x0f`) adalah:
 $$\text{Gas} = 32,600 \times \text{jumlah pasangan} + 37,700$$
@@ -147,9 +149,9 @@ sequenceDiagram
 
 ### H. ZK-Compliance & Proof of Innocence (Fase A)
 *   `register_clean_root(root: FixedBytes<32>)`: Mendaftarkan Merkle root dari set asosiasi bersih. Hanya bisa dipanggil oleh owner/oracle.
-*   `verify_merkle_proof(leaf: FixedBytes<32>, proof_bytes: Vec<u8>, root: FixedBytes<32>)`: Memverifikasi keanggotaan Merkle.
+*   `verify_merkle_proof(leaf: FixedBytes<32>, proof_bytes: Vec<u8>, root: FixedBytes<32>)`: Fungsi internal pembantu untuk memverifikasi keanggotaan Merkle jika diperlukan secara plaintext.
 *   `verify_groth16_proof(...)`: Memverifikasi ZK-proof Groth16 secara on-chain menggunakan precompile `BLS12_PAIRING_CHECK` (`0x0f`) dengan 4 pasang pairing (1536-byte payload).
-*   `verify_compliance(...)`: Melakukan pemeriksaan kepatuhan penuh (verifikasi Merkle root terdaftar, keanggotaan proof, dan validitas ZK-proof).
+*   `verify_compliance(root: FixedBytes<32>, nullifier: FixedBytes<32>, recipient: Address, amount: U256, proof_a_neg: Vec<u8>, proof_b: Vec<u8>, proof_c: Vec<u8>)`: Melakukan pemeriksaan kepatuhan penuh yang aman secara privasi. Fungsi ini menghapus parameter plaintext `leaf` dan `proof_bytes` dari on-chain (pengecekan Merkle proof dipindahkan ke dalam sirkuit ZK). Untuk mengikat data transaksi dengan bukti, kontrak menghitung kombinasi linear public inputs secara on-chain menggunakan precompile `0x0c` (G1 MSM) dan `0x0b` (G1 ADD) sebelum memanggil verifikator Groth16.
 
 ### I. CCIP Receiver Lintas Rantai (Fase B)
 *   `ccip_receive(message_id: FixedBytes<32>, source_chain_selector: u64, sender: Vec<u8>, payload: Vec<u8>) -> Result<(), Vec<u8>>`

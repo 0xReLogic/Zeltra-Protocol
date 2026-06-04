@@ -7,10 +7,10 @@ Dokumen ini mendokumentasikan desain teknis, endpoints, dan optimalisasi **Nimbu
 ## 0. Informasi Deployment Testnet L2
 
 Berikut adalah informasi deployment resmi kontrak Nimbus di testnet Arbitrum Sepolia untuk referensi integrasi relayer node:
-*   **Alamat Kontrak Nimbus (L2)**: `0x582fdc90f17a15d27b76175402898ab48f6e6ef3`
+*   **Alamat Kontrak Nimbus (L2)**: `0x7cdc38331f302be1c2fe6c882495ad81ff0d8228`
 *   **Jaringan**: Arbitrum Sepolia Testnet
 *   **Arbitrum RPC Endpoint**: `https://sepolia-rollup.arbitrum.io/rpc`
-*   **Explorer**: [Sepolia Arbiscan](https://sepolia.arbiscan.io/address/0x582fdc90f17a15d27b76175402898ab48f6e6ef3)
+*   **Explorer**: [Sepolia Arbiscan](https://sepolia.arbiscan.io/address/0x7cdc38331f302be1c2fe6c882495ad81ff0d8228)
 
 ---
 
