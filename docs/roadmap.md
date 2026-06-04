@@ -94,10 +94,11 @@ Dokumen ini memetakan seluruh tugas pengembangan, integrasi, dan pengujian yang 
     *   Jalankan skrip integrasi end-to-end untuk mensimulasikan alur transaksi testnet: Deposit -> Reveal -> Spend -> CCIP buy shares -> Refund.
 
 ## 8. Pengembangan Tokenomics $NIMB & Safety Module Staking (Fase Lanjutan)
-*   **Target Modul**: Kontrak Baru (`nimbus-token` & `nimbus-staking`)
+*   **Target Modul**: Kontrak Baru (`nimbus-token` & `nimbus-staking`) & [nimbus-sdk](file:///home/azureuser/crypto/nimbus-sdk/src/lib.rs)
 *   **Deskripsi Pekerjaan**:
     *   Buat kontrak ERC-20 untuk tata kelola token $NIMB.
     *   Buat kontrak **Safety Module Staking** tempat staker dapat mengunci $NIMB untuk mem-backstop risiko slashing merchant offline maupun exploit teknis.
+    *   **Migrasi Sirkuit ZK Utama**: Mengganti mock proof ZK local (dari Item 4) dengan sirkuit ZK produksi riil (Groth16/Plonk) dan men-deploy kontrak verifikator on-chain asli di mainnet. Langkah ini wajib diselesaikan bersamaan dengan peluncuran token agar utilitas dan keamanan kriptografi protokol terbukti nyata (menghindari persepsi token sebagai meme coin tanpa fundamentil teknologi).
     *   Implementasikan logic distribusi reward secara proporsional dalam bentuk USDC (40% dari yield DeFi/RWA yang dikumpulkan) kepada para staker di Safety Module.
     *   Implementasikan modul buyback & burn otomatis (40%) dari kas protokol di DEX L2 serta pengiriman 20% biaya ke Treasury.
 
