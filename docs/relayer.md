@@ -41,7 +41,49 @@ Untuk melindungi strategi perdagangan dan privasi pengguna/AI Agent dari seranga
 
 ---
 
-## 3. Spesifikasi HTTP API Endpoints
+## 3. Konfigurasi Node (Environment Variables)
+
+Setiap instance `nimbus-node` membaca konfigurasi threshold dari environment variables saat startup:
+
+| Variable | Default | Deskripsi |
+| :--- | :--- | :--- |
+| `NIMBUS_SHARE_INDEX` | `1` | Index share node ini dalam skema Shamir (1 hingga n). Setiap server fisik/cloud harus memiliki nilai unik. |
+| `NIMBUS_SHARE_KEY` | `Fr(12345)` | Hex-encoded scalar BLS12-381 Fr -- bagian kunci rahasia Issuer ($sk_{share_i}$) yang di-generate saat setup awal dengan `client_split_secret_key`. |
+
+Contoh konfigurasi untuk 5-node cluster (threshold t=3, n=5):
+
+```bash
+# Leader Node (Cloud -- AWS/GCP/Azure)
+NIMBUS_SHARE_INDEX=1 NIMBUS_SHARE_KEY=<share_1_hex> cargo run
+
+# Guardian Node 2 (Fisik -- STB Bekas)
+NIMBUS_SHARE_INDEX=2 NIMBUS_SHARE_KEY=<share_2_hex> cargo run
+
+# Guardian Node 3 (Fisik)
+NIMBUS_SHARE_INDEX=3 NIMBUS_SHARE_KEY=<share_3_hex> cargo run
+```
+
+---
+
+## 4. Topologi Deployment (Cloud + Fisik Hybrid)
+
+Arsitektur yang direkomendasikan untuk ketahanan sistem adalah **hybrid**: Leader Node di cloud dengan uptime 99.9%, dan Guardian Node di hardware fisik murah (STB bekas) yang terhubung via tunnel private (WireGuard/Tailscale).
+
+```mermaid
+graph TD
+    Client[Client / AI Agent] -->|HTTPS| Leader[Leader Node\nCloud - AWS/GCP/Azure\nUptime 99.9%]
+    Leader -->|LAN/VPN Private| G2[Guardian Node 2\nSTB Fisik]
+    Leader -->|LAN/VPN Private| G3[Guardian Node 3\nSTB Fisik]
+    Leader -->|LAN/VPN Private| G4[Guardian Node 4\nSTB Fisik]
+    Leader -->|LAN/VPN Private| G5[Guardian Node 5\nSTB Fisik]
+```
+
+- **Leader Node** (cloud): Menerima request dari client, men-generate masking key `k`, mengumpulkan partial signature dari semua Guardian, lalu mengagregasi menjadi `com_k` final.
+- **Guardian Nodes** (fisik, tidak terekspos internet): Hanya menerima request dari Leader via jaringan private. Setiap Guardian menyimpan satu share kunci. Tidak bisa diakses langsung dari luar.
+
+---
+
+## 5. Spesifikasi HTTP API Endpoints
 
 ### A. Health Check
 Mengecek status kesehatan node relayer, jumlah antrean transaksi, dan nullifier yang terproses.
@@ -206,3 +248,79 @@ Menerima batch bukti transaksi offline dari PWA POS merchant yang telah dikumpul
     }
     ```
     *   Jika `status` bernilai `DOUBLE_SPEND_DETECTED`, objek `blame` berisi identitas rahasia pelaku yang direkonstruksi dari dua bukti transaksi offline yang bertentangan. Relayer secara otomatis men-dispatch fungsi `slash_double_spender` ke smart contract L2 untuk menyita jaminan pelaku.
+
+### G. Threshold Minting: Guardian Sign-Share
+Dihubungi oleh Leader Node ke setiap Guardian Node via jaringan private untuk meminta partial signature menggunakan share kunci lokal node tersebut. Guardian Node tidak pernah mengekspos endpoint ini ke internet publik.
+*   **Method:** `POST`
+*   **Path:** `/api/sign-share`
+*   **Payload (JSON):**
+    ```json
+    {
+      "blinded_hex": "hex_encoded_blinded_message_G1_point...",
+      "k_hex": "hex_encoded_masking_key_fr_scalar...",
+      "share_sk_hex": null
+    }
+    ```
+    *   `blinded_hex`: Blinded message G1 point dari client (hex-encoded bytes).
+    *   `k_hex`: Masking key sementara $k$ yang di-generate oleh Leader untuk sesi ini.
+    *   `share_sk_hex`: Opsional -- override share secret key (hanya untuk keperluan testing). Jika `null`, node menggunakan `NIMBUS_SHARE_KEY` dari environment.
+*   **Response (JSON):**
+    ```json
+    {
+      "status": "SUCCESS",
+      "signature_share_hex": "hex_encoded_partial_bls_signature..."
+    }
+    ```
+
+### H. Threshold Minting: Leader Aggregate Sign
+Dihubungi oleh client untuk memulai proses minting token anonim secara terdesentralisasi. Leader Node men-generate masking key $k$, menghubungi semua Guardian secara paralel via private network, mengumpulkan partial signature, lalu mengembalikan semuanya ke client untuk diagregasi menggunakan `client_aggregate_signatures` di SDK.
+*   **Method:** `POST`
+*   **Path:** `/api/leader/sign`
+*   **Payload (JSON):**
+    ```json
+    {
+      "blinded_hex": "hex_encoded_blinded_message_G1_point...",
+      "guardian_urls": [
+        "http://10.0.0.2:8080",
+        "http://10.0.0.3:8080",
+        "http://10.0.0.4:8080",
+        "http://10.0.0.5:8080"
+      ],
+      "pk_iss_hex": "hex_encoded_issuer_public_key_g2_point..."
+    }
+    ```
+    *   `guardian_urls`: Daftar URL internal Guardian Node (IP private / VPN). Tidak pernah berupa alamat publik.
+    *   `pk_iss_hex`: Opsional -- public key Issuer untuk komputasi commitment $com_k = k \cdot pk_{iss}$.
+*   **Response (JSON):**
+    ```json
+    {
+      "status": "SUCCESS",
+      "com_k_hex": "hex_encoded_masking_key_commitment_g2_point...",
+      "k_hex": "hex_encoded_masking_key_fr_scalar...",
+      "partial_signatures": [
+        { "index": 1, "signature_hex": "hex_partial_sig_leader..." },
+        { "index": 2, "signature_hex": "hex_partial_sig_guardian2..." },
+        { "index": 3, "signature_hex": "hex_partial_sig_guardian3..." }
+      ]
+    }
+    ```
+    *   `com_k_hex`: Commitment kunci masking ($com_k = k \cdot pk_{iss}$) yang akan diverifikasi client sebelum unmasking.
+    *   `partial_signatures`: Daftar partial BLS signature dari setiap node yang berhasil merespons. Client membutuhkan minimal $t$ signature untuk aggregasi Lagrange.
+
+#### Alur Threshold Minting End-to-End (t=3, n=5)
+
+```mermaid
+sequenceDiagram
+    Client->>Leader Node: POST /api/leader/sign (blinded_hex)
+    Leader Node->>Guardian 2: POST /api/sign-share (blinded_hex, k)
+    Leader Node->>Guardian 3: POST /api/sign-share (blinded_hex, k)
+    Leader Node->>Guardian 4: POST /api/sign-share (blinded_hex, k)
+    Guardian 2-->>Leader Node: signature_share_2
+    Guardian 3-->>Leader Node: signature_share_3
+    Guardian 4-->>Leader Node: signature_share_4
+    Leader Node-->>Client: com_k, k, [partial_sigs index 1..4]
+    Client->>Client: client_aggregate_signatures([1,2,3], [sig1, sig2, sig3])
+    Client->>Client: client_unmask_signature(aggregated, r, k)
+    Note over Client: Token anonim final siap dibelanjakan
+```
+

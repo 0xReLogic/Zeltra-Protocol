@@ -123,7 +123,73 @@ console.log("EVM G1 (H(m)) Hex:", hmEvmHex);
 console.log("EVM G2 (pk_iss) Hex:", pkIssEvmHex);
 ```
 
+### C. Threshold Minting (Desentralisasi t-dari-n)
+
+Fungsi-fungsi ini digunakan untuk minting token secara terdesentralisasi. Kunci rahasia Issuer tidak pernah ada di satu server -- dipecah ke `n` Guardian Node dan butuh minimal `t` node untuk minting.
+
+```javascript
+// === SETUP AWAL (dilakukan SEKALI saat inisiasi sistem) ===
+
+// 1. Split master secret key menjadi 5 share (t=3, n=5)
+//    Minimal 3 dari 5 Guardian harus menandatangani untuk mint token valid.
+const masterSkHex = "...hex_master_secret_key...";
+const sharesJson = client_split_secret_key(masterSkHex, 3, 5);
+const shares = JSON.parse(sharesJson);
+// shares = [{ index: 1, share: "hex..." }, { index: 2, share: "hex..." }, ...]
+// Distribusikan setiap share ke Guardian Node masing-masing via NIMBUS_SHARE_KEY env var.
+
+// === ALUR MINTING PER TRANSAKSI ===
+
+// 2. Client memblind pesan seperti biasa
+const message = "my_ephemeral_key_abc123";
+const blindedOutput = await client_blind_message(message);
+const blindedHex = blindedOutput.blinded_message;
+const blindingFactorHex = blindedOutput.blinding_factor;
+
+// 3. Client mengirim request ke Leader Node
+const response = await fetch("https://leader.nimbus.cloud/api/leader/sign", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+        blinded_hex: blindedHex,
+        guardian_urls: [
+            "http://10.0.0.2:8080",
+            "http://10.0.0.3:8080",
+            "http://10.0.0.4:8080"
+        ],
+        pk_iss_hex: issuerPublicKeyHex
+    })
+});
+const { com_k_hex, k_hex, partial_signatures } = await response.json();
+
+// 4. Client mengambil t=3 share pertama dan mengagregasi
+const indices = partial_signatures.slice(0, 3).map(s => s.index);
+const sigHexes = partial_signatures.slice(0, 3).map(s => s.signature_hex);
+const aggregatedSigHex = client_aggregate_signatures(indices, sigHexes);
+
+// 5. Unmask signature menggunakan k dari Leader dan blinding factor r
+const finalTokenSigHex = client_unmask_signature(
+    aggregatedSigHex,
+    blindingFactorHex,
+    k_hex
+);
+console.log("Token Threshold Anonim:", finalTokenSigHex);
+
+// 6. Verifikasi final
+const isValid = client_verify_final_signature(message, finalTokenSigHex, issuerPublicKeyHex);
+console.log("Token valid:", isValid); // true
+```
+
+#### Referensi Fungsi Threshold WASM
+
+| Fungsi | Deskripsi |
+| :--- | :--- |
+| `client_split_secret_key(sk_hex, t, n)` | Memecah master secret key menjadi `n` share menggunakan Shamir Secret Sharing. Returns JSON array `[{index, share}]`. |
+| `client_sign_share(share_sk_hex, blinded_hex, k_hex)` | Guardian: menandatangani blinded message menggunakan share kunci lokal. Returns hex partial signature. |
+| `client_aggregate_signatures(indices[], sigs_hex[])` | Client: mengagregasi minimal `t` partial signature via interpolasi Lagrange Fr. Returns hex aggregated signature siap di-unmask. |
+
 ---
+
 
 ## 4. Modul x402: Pembayaran Otonom AI Agent (Fase C)
 
