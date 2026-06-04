@@ -1,0 +1,9 @@
+[workspace]
+members = [
+    "nimbus-core",
+    "nimbus-cli",
+    "nimbus-contracts",
+    "nimbus-sdk",
+    "nimbus-node"
+]
+resolver = "2"

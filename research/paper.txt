@@ -1,0 +1,2621 @@
+Cryptocurrency-Backed Trustless Anonymous Tokens and Their Applications
+Amit Agarwal1 , Kushal Babel1 , Sourav Das1 , Ari Juels2,3 , Peter Rindal1 , Aayush Yadav4
+1 Category Labs
+
+2 Cornell Tech
+
+3 IC3
+
+Abstract
+
+reliance on heavy-weight cryptographic techniques such as
+zero-knowledge proofs, which, in the resource-constrained
+blockchain environments, do not yet scale to high transaction
+throughputs. Consequently, these systems are only suitable
+for low-throughput applications, such as one-off private payments, but not for high-throughput environments or low-value
+transactions, such as fee payments. The need for private fee
+payment in particular is an acknowledged bottleneck in the
+construction of private transaction systems [6, 40].
+In this paper, we present Blockchain Anonymous Tokens
+(BAT), a lightweight, efficient cryptographic system that provides anonymity to payers or transaction senders on transparent blockchains. Our key observation is that for many
+applications (such as fee payments), users only need onetime-spendable anonymous currencies, not general-purpose
+privacy coins like Zcash that also hide recipients and transaction amounts and enable multiple payment hops. BAT is concerned with providing only transaction sender anonymity; hiding other transaction data, such as recipient address, amount,
+or smart contract calldata, is out of scope. BAT’s minimalist
+approach leads to a privacy-preserving payment system with
+superior performance (in both computation and communication costs) to general-purpose schemes, yet with a range of
+important practical applications.
+A prime example of such an application is the pervasive
+problem of front-running and Maximal Extractable Value
+(MEV) [5, 35, 60, 74], where miners or validators can exploit
+knowledge of pending transactions in the mempool to censor,
+reorder, or insert their own transactions for profit. While solutions such as encrypted mempools [2, 3, 17, 22, 23, 33, 34, 70]
+aim to hide transaction data to mitigate MEV attacks, they do
+not address the problem of sender metadata. Sender metadata
+can serve at the time of transaction inclusion to verify payment ability and thus prevent DoS attacks, but such metadata
+can itself facilitate MEV attacks—despite transaction encryption. BAT is particularly well-suited as a privacy-preserving
+alternative, as fee payments must happen with high throughput, low latency, and small communication overhead. Fee
+payments must also (in most cases) be denominated in the un-
+
+Public blockchains like Ethereum deliver transparency, but
+adding anonymity remains a fundamental challenge. Existing
+proposals either offer limited anonymity guarantees or rely on
+heavy cryptographic machinery, e.g., zero-knowledge proofs.
+We introduce Blockchain Anonymous Tokens (BAT), a system for efficient sender-anonymous transactions on transparent blockchains. Building on the observation that one-timespendable tokens suffice for many applications, BAT has a
+lightweight design using classic anonymous tokens due to
+Chaum (1983). Unlike such tokens, though, BAT is designed
+to work in a transparent decentralized setting, where issuers
+are untrusted (i.e., any single potentially malicious entity can
+be the issuer) and spends happen publicly. BAT issuance is
+compact: A client can receive ℓ tokens with just O (1) onchain communication and computation.
+We formalize the notion for BAT, and provide a concretely
+efficient construction. Our BAT construction requires no onchain verification of expensive zero-knowledge proofs; just a
+signature verification during spends and a single exponentiation on-chain during issuance. We present several applications
+of BAT in various blockchain contexts.
+We prove the security of our BAT scheme assuming hardness of the one-more computational Diffie-Hellman assumption in a bilinear pairing group in the random oracle model
+and with any secure digital signature scheme. We implement
+and evaluate BAT and show that compared to the closest
+baseline, Zcash transactions, BAT tokens are more than 50×
+shorter, 9× faster to verify, and 7,000× faster to generate.
+
+1
+
+4 George Mason University
+
+Introduction
+
+Transparent blockchains such as Ethereum do not provide
+anonymity to users, only the weaker privacy afforded by
+pseudononymous user addresses [13, 46, 54]. This limitation has motivated the development of smart-contract-based
+anonymity tools, such as Tornado Cash [57] and Privacy
+Pools [26], that enhance user anonymity. These tools, however, have seen very limited use. This is due in part to their
+1
+
+derlying currency of the blockchain, a property BAT achieves.
+We instantiate BAT as a form of classic e-cash system [30],
+but one that is backed by cryptocurrency and operates on
+top of a smart-contract enabled blockchain platform. This
+allows us to effectively solve a key problem of requiring a
+trusted issuer (or “bank”) in the e-cash and related anonymous
+tokens literature. Unlike e-cash, BAT tokens can be issued
+by any untrusted entity with sufficient cryptocurrency stake
+in the blockchain. Stated differently, BAT effectively allows
+anyone to start up their own “bank”. While e-cash like systems
+have been used previously for blockchain privacy, e.g., in
+Chaumian Coinjoin and other mixers, those systems are often
+tied to the mechanics of Bitcoin and designed for synchronous
+privacy operations over participating users. BAT can operate
+asynchronously in any smart-contract enabled setting.
+Finally, BAT offers flexible deployment across blockchain
+layers. It can operate natively in a blockchain—scaling to the
+blockchain’s full transaction load—or can be deployed as a
+smart contract to provide anonymity at the application layer.
+Challenges. Blockchains present unique challenges for designing anonymous token schemes such as BAT:
+
+• We design a BAT scheme with constant on-chain overhead
+(only one group exponentiation) for issuing tokens in arbitrary batches and an efficient spend procedure that involves
+only two signature verifications.
+• We prove selective security of our BAT scheme, assuming
+the hardness of the one-more computational Diffie-Hellman
+assumption in bilinear pairing groups in the random oracle
+model and any secure digital signature scheme.
+• We implement and benchmark the performance of all components, including client-side, issuer-side, and on-chain
+costs. Using published benchmarks for Zcash Orchard as a
+baseline [11], we show that BAT tokens are more than 50×
+smaller in size, approximately 9× faster to verify, and over
+7,000× faster to generate than Zcash proofs.
+Limitations. One limitation of our BAT scheme, compared
+to systems such as Zcash, is that it provides issuer-specific
+anonymity rather than global anonymity. In particular, for any
+given issuer, the anonymity set of a token is limited to the set
+of clients that obtained tokens from that issuer. Moreover, as in
+Zcash, we also need to maintain an ever-growing set of spent
+tokens (“the nullifier set”) for each issuer. However, in BAT,
+we can manage this set by periodically retiring issuers; once
+we retire an issuer, we can safely forget the state associated
+with that issuer.
+Paper organization. We present a technical overview of our
+construction in Section 2. In Section 3, we discuss some
+applications of BAT and related work, and present formal
+definitions and security notions for BAT in Section 4. We
+describe our construction in Section 5, analyze it in Section 6,
+and provide an evaluation of our implementation in Section 7.
+Finally, we discuss various deployment considerations for
+BAT in Section 8.
+
+• On-chain efficiency. Blockchains are a highly resourceconstrained environment. Therefore, the on-chain operations for issuance of BAT tokens and spend must be highly
+efficient in both communication and computation.
+• Permissionless issuance. BAT is meant to work with untrusted issuers without involving trusted committees running expensive threshold cryptography. To achieve this, we
+need to overcome two challenges: (i) a malicious issuer
+should not be able to cause clients to pay but refuse to issue
+tokens, or issue unspendable tokens and (ii) a malicious
+issuer should not be able to issue more tokens (e.g., offchain in a black market) than the payments made by clients
+on-chain for issuance; this would lead to insolvency, i.e.,
+more tokens available for redemption than paid for.
+
+2
+
+• Public spends. Due to the public nature of pending
+blockchain transactions and the anonymous nature of the
+tokens, BAT must ensure that one client cannot steal tokens from another client despite the tokens being broadcast
+publicly to the blockchain. Furthermore, for various applications such as paying fees anonymously for blockchain
+transactions, the tokens should enable binding to the client’s
+chosen associated data after issuance.
+
+Technical Overview
+
+Notation. We use λ to denote a computational security parameter, [a, b] to represent the set of integers {a, a + 1, . . . , b}
+and [n] := [1, n], x ←$ S to denote that x is an element sampled
+uniformly at random from set S. For a vector v of length n, we
+use the notation vi to indicate the ith element of v where i ∈ [n].
+1
+By poly(λ) and negl(λ), we mean the class λO(1) and λω(1)
+.
+For security parameter λ, we use PPT to denote probabilistic
+poly(λ)-time Turing Machines with poly(λ)-sized advice.
+Bilinear groups. A bilinear group is a set of three groups
+(G1 , G2 , GT ) of prime order p, with a (non-degenerate)
+bilinear map or pairing ◦ : G1 × G2 → GT . The groups
+(G1 , G2 ) are referred to as the source groups, while GT
+is the target group. The groups G1 , G2 have generators
+[[1]]1 , [[1]]2 . Let GGen be the group generation algorithm, i.e.,
+(G1 , G2 , GT , p, [[1]]1 , [[1]]2 , ◦) ← GGen(1λ ).
+Figure 1 shows an overview of our protocol.
+
+Contributions. We make the following contributions:
+• We formalize correctness and security definitions for
+cryptocurrency-backed anonymous token schemes, including unlinkability (sender anonymity), unforgeability, issuer
+fairness (honest issuer against malicious clients), client fairness (honest clients against malicious issuers), and a novel
+solvency condition that captures the 1:1 backing of tokens
+by the underlying cryptocurrency.
+2
+
+Figure 1: Overview of our blockchain anonymous token (BAT) architecture involving three entities - client, issuer, blockchain
+environment - and four main phases including registration, issuance, spend and refund. The circled numbers denote the sequence
+in which various steps are executed. The grey box depicting the issuance phase indicates that the phase is an interactive protocol.
+Here we abstract away the details of various checks that are performed by different entities for the ease of illustration.
+A BAT protocol involves three parties: clients who purchase anonymous tokens, issuers who issue these tokens, and
+a blockchain environment E that enforces the atomicity of
+issuance, and validates anonymous token spends and refunds
+for unspent tokens. Each token represents a fixed denomination of one unit of cryptocurrency.
+
+can derive a valid anonymous token.
+As described, this protocol does not provide solvency: a malicious issuer can locally mint unbounded number of tokens
+and spend them on-chain without paying for them. Moreover,
+the protocol incurs prohibitively high on-chain costs. To issue
+ℓ tokens, the client and the issuer must post O(ℓ) communication on-chain, and E must validate all posted messages.
+
+Desired properties. As we discuss in Section 1, informally,
+a BAT protocol must satisfy the following security properties.
+(i) Client anonymity: Spent tokens can not be linked to its
+issuance. (ii) Issuer-fairness: Malicious clients cannot spend
+or refund tokens they did not legitimately obtain. (iii) Clientfairness A client who pays for a token can either publicly
+spend the token successfully or get a refund for it. (iv) Solvency: A malicious issuer can not mint anonymous tokens
+without paying in the corresponding amount of cryptocurrency on-chain.
+In addition to security, the protocol must achieve practical efficiency, particularly in on-chain costs and the issuer’s
+computational and communication overhead.
+We first describe two baseline protocols, and their limitations to build intuition for our protocol.
+
+Baseline 2: BAT using fair-data exchange. One approach
+for lowering the on-chain communication and computation
+cost is to use the fair-data exchange protocol from [71].
+Briefly, using a fair-data exchange protocol, the issuer encrypts its blind signature messages and sends the ciphertexts
+to the client off-chain, together with a zero-knowledge proof
+that the ciphertexts encrypt valid blind signature messages.
+The client and issuer then execute a fair-exchange protocol
+on-chain to exchange payment for the decryption key. Although this approach reduces on-chain communication and
+computation, it significantly increases the issuer’s workload.
+The issuer must generate expensive zero-knowledge proofs,
+and it must do so for many clients concurrently. This requirement creates a substantial computational bottleneck and limits
+the practicality of the approach. We note that as in the first
+baseline, this protocol also does not guarantee solvency.
+
+Baseline 1: Protocol without compact issuance. Consider a
+protocol in which, for each anonymous token, the client interacts with the issuer to obtain a blind signature. The client then
+converts the blind signature into an unlinkable anonymous token using standard techniques and spends the token on-chain.
+To enforce fairness, the client and the issuer route all interactions of the blind signature protocol through the blockchain
+environment E . Concretely, the client first escrows the payment for the token on-chain. The blockchain releases this
+payment to the issuer only if the on-chain transcript of the
+blind signature protocol satisfies a pre-specified predicate.
+This predicate ensures that, given a valid transcript, the client
+
+Overview of our protocol. Unlike the baselines, our protocol achieves both on-chain and off-chain efficiency: our
+on-chain overhead is constant and independent of the number of tokens issued in a batch, and our protocol only adds
+a marginal overhead at the issuer compared to the standard
+signature generation. Similarly, the additional off-chain cost
+at the client involves one group exponentiation per token.
+Looking ahead, we adopt the ideas in the second baseline
+protocol, which achieves constant on-chain overhead using the
+fact that the blockchain does not need to verify each individual
+3
+
+on ad under pkeph , ensuring the owner of the token authorizes
+this specific spend bound to ad; (iii) pkeph does not appear in
+the set of previously spent tokens, preventing double-spends;
+and (iv) the total number of token spends for pkiss does not
+exceed the number of tokens issued by pkiss , which as we
+discuss in Section 6 is critical to ensure solvency.
+If all checks succeed, the blockchain accepts the token, and
+marks pkeph as spent. Additionally, it increments the spend
+counter associated with pkiss , and mints one token-equivalent
+worth of cryptocurrency for use with the associated data.
+
+blind signature during issuance. Instead, the blockchain only
+needs to ensure that the issuer has provided a valid decryption key. To lower the issuer’s overhead in this baseline, we
+instantiate both the blind signature scheme and the fair-data
+exchange protocol in a non-black box manner. In particular,
+in our scheme, we use the classic BLS blind signature scheme
+and rely on the underlying algebraic structure to efficiently
+mask ℓ blind signatures. Next, we provide more details of our
+protocol and discuss how it ensures solvancy in presence of a
+malicious issuer.
+Our protocol has five logical phases: registration, issuance,
+spend, refund, and retirement. We describe each phase below
+assuming ETH as the underlying cryptocurrency.
+
+Refund phase. In our protocol, a client can obtain refunds
+for ℓr unspent tokens by submitting them to the blockchain.
+Upon receiving a refund request, the blockchain verifies that
+(i) the tokens correspond to a valid on-chain issuance, (ii) the
+tokens are valid, and (iii) the tokens are unspent. If all checks
+pass, the blockchain marks these tokens as spent, mints ℓr
+units of cryptocurrency, and credits them to the public key
+specified by the client during issuance. We note that the refund
+protocol must ensure that an adversary cannot use a refund
+request to frontrun the client and spend the tokens before the
+client can claim the refund.
+Our basic refund protocol requires the client to submit a
+refund request and incurs O (ℓr ) on-chain communication and
+computation. In Section 5, we present an optimized protocol
+that reduces on-chain communication to O (1) and enables
+automated refunds without requiring an explicit client request.
+
+Registration phase. In this phase, any party that holds a
+private-public key pair (skiss , pkiss ) ∈ Z p × G1 registers as an
+issuer by escrowing ℓiss units of ETH on the blockchain.
+Issuance phase. In this phase, a client requests ℓ tokens
+from an issuer off-chain. Each token is a blind signature
+on an ephemeral public key of a digital signature scheme.
+Concretely, we use the BLS blind signature [15] where for
+each i ∈ [ℓ], the i-th blind signatures is defined as σ̃i := skiss ·
+Mi ∈ G2 , for some client chosen input Mi ∈ G2 .
+To ensure that the client pays for the requested tokens,
+the issuer does not send the blind signatures {σ̃i }i∈[ℓ] directly.
+Instead, the issuer sends masked blind signatures. Specifically,
+the issuer samples a session key k ∈ Z p and sends the masked
+signatures {k · σ̃i }i∈[ℓ] to the client. Here, using the same
+session key k for all ℓ tokens is critical for on-chain efficiency.
+Additionally, as a proof, the issuer sends a commitment of k
+which we define as comk := k · pkiss . As we show in Section 5,
+the client can use comk to verify the correctness of the masked
+signatures with no additional overhead beyond standard BLS
+blind-signature verification. It is easy to see that our protocol
+adds marginal overhead at the issuer.
+Finally, to close the issuance session, the client and the
+issuer atomically exchange the session key k and the corresponding payment on-chain. During this exchange, the
+blockchain performs the following checks: (i) the number
+of tokens issued by pkiss so far is less than ℓiss /2, i.e., half of
+pkiss ’s escrowed collateral; and (ii) k · pki = comk . The first
+check enforces solvency, while the second ensures that the
+client can recover k and thus obtain the blind signatures. Both
+checks incur minimal on-chain cost.
+
+Retirement phase. In this phase, a registered issuer submits
+an on-chain transaction declaring its intent to retire. Upon
+receiving this request, the blockchain checks whether the
+total number of spends and refunds associated with the issuer
+exceeds the number of tokens the issuer issued. If it does,
+the blockchain recovers the excess amount from the issuer’s
+collateral, possibly applying penalty. As we argue in Section 6,
+this mechanism suffices to ensure protocol solvency.
+
+3
+3.1
+
+Applications and Related Work
+Applications
+
+To motivate BAT, with its lightweight design choices—
+specifically, one-time-spendable tokens and sender-only
+anonymity—we briefly describe three example applications.
+MEV mitigation. As touched on in Section 1, Maximal Extractable Value (MEV) [5, 35, 60, 74] remains a pervasive
+challenge in blockchains. MEV refers to the practice of strategically manipulating transaction ordering and transaction inclusion for profit.
+MEV exploitation depends upon adversarial knowledge of
+transaction information prior to block finalization. A widely
+considered countermeasure against harmful forms of MEV is
+encrypted mempools [18, 27, 61, 68]. Encrypted mempools,
+though, require that metadata—specifically sender payment
+data—be revealed, so as to ensure fee payment. Otherwise,
+
+Spend phase. Let (skeph , pkeph ) be an ephemeral secretpublic key pair such that: (i) the client knows skeph , and (ii)
+the client obtained a (blind) signature σ on pkeph during the issuance phase. Given the tuple (σ, skeph , pkeph ) and associated
+data ad ∈ {0, 1}∗ (e.g., a transaction), the client generates an
+ephemeral signature γ on ad using the skeph . The client then
+posts the tuple ρ := (σ, pkeph , γ, ad) as an anonymous token.
+Upon receiving ρ, the blockchain performs the following
+checks: (i) σ is a valid BLS signature on pkeph , confirming that
+the claimed issuer issued the token; (ii) γ is a valid signature
+4
+
+an adversary can mount costless denial-of-service attacks.
+Sender metadata, however, opens up an encrypted mempool
+to MEV, i.e., sandwiching of target senders’ transactions.
+BAT can address this problem by removing the need for
+transactions to include sender payment data. Instead, senders
+can pay fees with BAT tokens. One-time token use suffices,
+and as the receiver is a blockchain’s transaction-ordering system, receiver anonymity isn’t needed.
+
+Ethereum. In these systems, the users deposit assets into a
+smart contract and later withdraw them using a cryptographic
+proof of deposit, thereby severing the on-chain link between
+source and destination addresses. However, these services
+either rely on costly multi-party coordination [63], expensive cryptographic primitives such as zk-SNARKs in Tornado
+Cash [57] or ring signatures in Möbius [52], which often
+limits anonymity sets; or incur high latency due to epochbased designs [43, 44]. By contrast, BAT allows users to act
+independently and achieves anonymity via blind signatures,
+with on-chain costs limited to efficient signature verification,
+resulting in substantially lower overhead.
+The use of e-cash-inspired anonymous tokens for mixing
+has been explored in CoinJoin [51] and in the ‘blindly signed
+contracts’ of Heilman, et al. [44]. The overall idea is familiar: a user escrows funds with an untrusted intermediary and
+engages in a fair-exchange protocol to obtain an anonymous
+token. The token can then be transferred to a recipient, who
+redeems it to claim escrowed funds, thereby breaking the link
+between sender and receiver on the blockchain.
+These protocols have several limitations. Most notably,
+they are tailored to pairwise payments in UTXO-based systems and do not generalize to broader blockchain applications.
+Further, while the CoinJoin protocol is vulnerable to DoS attacks due to unmitigated aborts by mix participants [21], later
+improvements have had to rely on complex multi-party systems [38, 63]. In comparison, [44] avoids such coordination
+but instead requires participants to synchronize across epochs
+(due to timing attacks), which introduces latency and limits
+flexibility. Beyond these liveness and coordination issues, the
+lack of a refund mechanism enables ‘griefing’ attacks. For
+example, if Bob colludes with the intermediary and refuses to
+post the anonymous token, Alice has no internal mechanism
+to recover her escrowed funds.
+BAT generalizes this paradigm, where tokens can be used
+across a wide range of applications beyond pairwise payments.
+Our design is epochless and avoids the timing attacks that
+motivated epoch-based constructions in prior work. We also
+provide the first formal treatment of this notion, including precise game-based security definitions and full security proofs.
+Moreover, BAT introduces an explicit refund mechanism that
+allows clients to recover funds associated with unspent tokens,
+a feature not addressed by existing approaches.
+
+Coercion-resistant on-chain voting. On-chain voting conducted by governance systems such as DAOs are susceptible
+to bribery and other forms of coercion if voter identities are
+known [45]. In fact, bribery is already a practical issue for
+DAOs [49].
+Coercion-resistant voting systems, e.g., [50, 58], require
+use of encrypted ballots. As in the case of MEV, however,
+preventing DoS attacks requires voters to pay transaction
+fees. BAT enables voters to pay fees anonymously, thereby
+addressing DoS attacks in these systems. The voting system
+of course need not receive payments anonymously.
+Private-payment on-ramps. Smart-contract systems such
+as Zether [25] enable private payments on transparent
+blockchains. However, they require users to fund private accounts with public accounts, thereby revealing the identity of
+the funding account. BAT can remove this linkage: a user first
+exchanges cryptocurrency for BAT tokens and then uses these
+tokens to fund private accounts anonymously. Token transferability isn’t required for the on-ramp in these systems, as the
+private-payment system itself enables subsequent payments.
+
+3.2
+
+Related Work
+
+Anonymous tokens and blockchain applications. Anonymous tokens allow a user to obtain and later redeem a token
+while preserving privacy which ensures that the issuer cannot link redemption to issuance. These tokens enable users
+to prove possession of some form of authorization without
+revealing their identity or allowing linkability. This unlinkability is an essential in applications such as private web browsing [4, 36], private contact tracing [69], fraud detection [69],
+and private click measurement [75]. These applications have
+inspired a rich body of research on anonymous tokens and
+blind signatures, with different trust, efficiency, and security
+tradeoffs [8, 12, 29, 36, 48, 56, 69].
+Anonymous tokens were originally devised as the basis for
+anonymous electronic cash (e-cash) systems [7, 32]. In this
+setting, a user deposits funds with a trusted bank and receives
+an anonymous token that the user can later transfer or redeem
+without revealing their identity, even to the bank itself.
+
+Blockchain-based confidential payment systems. Confidential payment systems aim to hide transaction flows and associated metadata, such as account balances, on the blockchain.
+Early UTXO-based systems such as Zerocoin [55] and Zerocash (Zcash) [11] rely on zk-SNARKs to provide strong
+anonymity, but incur high computational costs or require a
+trusted setup. Monero [73] avoids trusted setup by using ring
+signatures [62], at the cost of achieving only k-anonymity and
+linear verification overhead in k.
+These systems typically operate as separate ledgers and
+offer limited interoperability with existing smart-contract plat-
+
+Coin mixing and tumbling services. Cryptocurrency mixers for Bitcoin, such as CoinJoin [51], CoinShuffle [53, 63]
+and TumbleBit [43, 44] aim to provide transaction unlinkability by shuffling funds among multiple participants. Tornado Cash [57] and Möbius [52] provide a similar service on
+5
+
+forms. In the account-based model, Zether [25] provides a
+confidentiality layer for anonymous payments that can be implemented as a smart contract. However, their anonymity guarantee introduces significant overhead that scales linearly with
+the size of the anonymity set, and while followup works [37]
+have reduced this growth to logarithmic, our BAT achieves
+constant on-chain overhead for both issuance and spending,
+independent of the anonymity set size.
+The UTT system of Tomescu et al. [72] provides more efficient confidential payments than Zcash. In principle, UTT can
+be used to implement a BAT protocol by removing support
+for multiple denominations, recipient hiding, and multi-hop
+payments. However, even with these simplifications, UTT has
+two critical limitations. First, it relies on threshold issuance,
+and, second, spending UTT tokens requires an expensive zeroknowledge proof, in addition to signature verification.
+
+4
+
+a freshly generated issuer specific escrow, and outputs 1. It
+outputs 0 otherwise.
+• RetireE (pkiss ) → 0/1. Any existing issuer uses the retire interface with its public key pkiss . Upon successful execution,
+E returns ℓ′iss ∈ N ETH from the issuer’s escrow account to
+the issuer and outputs 1. Otherwise, it outputs 0.
+• Π-MIssue(pkiss , ℓ, skiss , stI ) → (sid, stI , stC ). The masked
+issuance protocol is a two-party protocol between a client
+and an issuer with public inputs being the issuer’s public
+key pkiss , the number of requested tokens ℓ, and the issuer’s
+private input being its secret issuance key skiss , and its internal state stI . The protocol outputs a public session identifier
+sid. Additionally, it outputs the modified issuer’s internal
+state and privately outputs its internal state stC to the client.
+• Π-ExecuteE (sid, ℓ, stI , stC ) → (stI , {σ j } j∈[ℓ] ). Π-Execute
+is a protocol between the client and the issuer (which also
+involves E ) with public inputs: a session identifier sid and
+the number of requested tokens ℓ, the client’s private internal state stC , and the issuer’s private internal state stI .
+Upon successful execution, the protocol privately outputs ℓ
+pre-tokens {σ j } j∈[ℓ] to the client, and burns ℓ ETH from its
+account, and outputs the issuer’s modified internal state stI .
+Otherwise, it outputs ⊥.
+
+Definition of Blockchain Anonymous Token
+
+A blockchain anonymous token (BAT) protocol is a protocol between a client and an issuer involving a transparent
+payment environment E as a trusted third party (TTP) (or a
+blockchain). The TTP E manages accounts where each account is identified by a public key and has some non-negative
+money mapped to it. Throughout the paper, we use ETH to
+denote the denominations of the money. The TTP E can mint
+and burn ETH, or transfer ETH from one participant’s account
+to another upon receiving an authorization from the sender
+in the form of a digital signature. Moreover, we assume that
+any messages sent to E are authorized and are received by E
+(i.e., included in the blockchain when we implement E using
+a blockchain) within a known bounded delay.
+
+4.1
+
+• TokGen(σ, ad) → ρ. A client uses the randomized token
+generation algorithm on input a pre-token σ and associated data ad ∈ {0, 1}∗ it wants to associate the token σ to
+generate an anonymous token ρ.
+• SpendE (pkiss , ad, ρ) → 0/1. Any client uses the spend interface to consume an anonymous token. The interface takes
+as input an issuer’s public key pkiss , some associated data
+ad ∈ {0, 1}∗ , and a token ρ. Upon successful execution, E
+mints 1 unit of ETH to be used by the associated data ad
+and outputs 1. Otherwise, it outputs 0.
+
+Interfaces
+
+A blockchain anonymous token protocol BAT consists of the
+following algorithms (or protocols), where for any algorithm
+(or protocol) A, we use AE to indicate that the execution of A
+involves the TTP E and potentially triggers state changes in
+E . We use the prefix Π in interfaces to indicate that it is an
+interactive protocol between the client and the issuer.
+
+• RefundE (sid, {σ j } j∈[ℓref ] , stC ) → 0/1. Any client with its
+internal state stC , uses the refund protocol to get a refund
+for a set of ℓref pre-tokens {σ j } j∈[ℓref ] associated with an
+issuance session sid. Upon successful execution of this
+protocol, E mints ℓref ETH for the client and outputs 1. It
+outputs 0 otherwise.
+
+• Setup(1λ ) → pp. The setup is a randomized algorithm that
+outputs the public parameters for the system (e.g., the description of appropriate spaces). All algorithms and protocols below implicitly take the pp as input.
+
+4.2
+
+• IssKGen(pp) → (skiss , pkiss ). An issuer uses the IssKGen
+algorithm to sample a secret issuing key skiss and the corresponding public verification key pkiss .
+
+Required Properties
+
+We now describe the properties a BAT protocol must satisfy.
+We begin with the standard notion of correctness that formalizes the behavior of the protocol when all parties act honBAT,E
+estly. We capture correctness using the game Gcor
+in Fig. 2.
+In all our figures, we use the notation “require ⟨condition⟩”
+as a shorthand for “if condition is false, then return ⊥, otherwise continue”.
+
+• RegisterE (pkiss , ℓiss ) → 0/1. Any party uses the registration interface Register with its public key pkiss and deposit
+amount ℓiss to register itself as an issuer to E . Upon successful registration, E transfers ℓiss ETH from the issuer to
+6
+
+BAT,E
+
+Game Gcor
+
+
+BAT,E ,A
+Game Gissuer-fair 1λ :
+
+
+1λ , ℓs , ℓ, {ad j } j∈[ℓs ] :
+
+1:
+
+pp ← Setup(1λ )
+
+1:
+
+pp ← Setup(1λ )
+
+2:
+
+(skiss , pkiss ) ← IssKGen(pp)
+
+2:
+
+(skiss , pkiss ) ← IssKGen(pp)
+
+3:
+
+require RegisterE (pk
+
+3:
+
+RegisterE (pkiss , ℓiss )
+
+4:
+
+(sid, stC , stI ) ← Π-MIssue(pkiss , ℓ, skiss )
+
+4:
+
+stI := ∅
+
+5:
+
+{σ j } j∈[ℓ] ← Π-ExecuteE (sid, ℓ, stC , stI )
+
+5:
+
+Nex := 0; Nspd := 0; Nref := 0
+
+6:
+
+for j ∈ [ℓs ] :
+
+6:
+
+done ← A E ,O -MIssue,O -Execute,O -Refund,O -Spend (·)
+return Nex < Nspd + Nref
+
+iss , ℓiss ) = 1
+
+7:
+
+ρ j ← TokGen(σ j , ad j )
+
+7:
+
+8:
+
+require SpendE (pk
+
+Oracle O -MIssue(ℓ):
+
+9:
+
+require RefundE (sid, {σ }
+
+10 :
+
+return 1
+
+iss , ad j , ρ j ) = 1
+j j∈(ℓs ,ℓ] , stC ) ̸= 0
+
+(sid, stI , ⋆) ← Π-MIssue(pkiss , ℓ, skiss )
+
+Oracle O -Execute sid, ℓ :
+1:
+
+1:
+
+BAT,E
+for a blockchain anonycor
+
+Figure 2: Correctness game G
+mous token protocol BAT.
+
+2:
+
+Nex := Nex + ℓ
+
+Oracle O -Spend(ad, ρ):
+1:
+
+Definition 4.1 (Correctness). A blockchain anonymous token
+protocol BAT is correct if for all ℓs , ℓ ∈ N with ℓs ≤ ℓ, all
+associated data {ad j } j∈[ℓ] ∈ {0, 1}∗ ,
+
+2:
+
+1:
+2:
+
+Next, we define issuer fairness which ensures that an honest issuer’s balance remains non-negative despite adversarial
+behavior by clients. In other words, we require that total number of tokens Nex issued by the issuer is always greater than or
+equal to the sum Nspd + Nref , where Nspd is the total number
+of spent tokens issued under the issuer’s key and Nref is the
+total amount refunded by the issuer.
+
+Nspd := Nspd + 1
+if RefundE (sid, {σ j } j∈[ℓref ] , stC ) = 1 :
+Nref := Nref + ℓref
+
+BAT,E ,A
+Figure 3: Issuer fairness game Gissuer
+-fair for a blockchain
+anonymous token protocol BAT.
+
+BAT,E ,A
+
+Game Gclient-fair (1λ , ℓ, {ad j } j∈[ℓ] )
+
+Definition 4.2 (Issuer Fairness). A blockchain anonymous
+token protocol BAT ensures issuer fairness if for all PPT
+adversaries A ,
+ BAT,E ,A λ 
+
+Pr Gissuer
+⇒ 1 = negl(λ)
+-fair 1
+We also define the complementary notion of client fairness
+which ensures that an honest client who pays for ℓ tokens can
+either spend up to ℓ tokens (with respect to any associated
+data ad j ∈ {0, 1}∗ of its choice) or receive a full refund for
+the remaining unspent tokens. More formally:
+Definition 4.3 (Client Fairness). A blockchain anonymous
+token protocol BAT ensures client fairness if for all PPT adversary A , for all ℓ ∈ N and all {ad j } j∈[ℓ] ∈ {0, 1}∗ ,
+
+1:
+
+pp ← Setup(1λ )
+
+2:
+
+(pkiss , ℓiss ) ← A (pp)
+
+3:
+
+require RegisterE (pkiss , ℓiss ) = 1
+
+4:
+
+(sid, ⋆, stC ) ← Π-MIssue(pkiss , ℓ, ⋆)
+
+5:
+
+( ⋆, {σ j } j∈[ℓ] ) ← Π-ExecuteE (sid, ℓ, ⋆, stC )
+
+6:
+
+for j ∈ [ℓ] :
+
+7:
+
+ρ j ← TokGen(σ j , ad j )
+
+8:
+
+if SpendE (pkiss , ad j , ρ j ) = 0 :
+
+9:
+
+require RefundE (sid, {σk }k∈[ j,ℓ] , stC ) = 0
+
+10 :
+
+return 1
+
+11 :
+
+return 0
+
+BAT,E ,A
+Figure 4: The client fairness game Gclient
+-fair for a blockchain
+anonymous token protocol BAT.
+
+BAT,E ,A
+λ
+Pr Gclient
+-fair 1 , ℓ, {ad j } j∈[ℓ] ⇒ 1 = negl(λ)
+
+
+
+if SpendE (pkiss , ρ, ad) = 1 :
+
+
+Oracle O -Refund sid, {σ j } j∈[ℓref ],stC :
+
+ BAT,E λ
+
+
+Pr Gcor
+1 , ℓs , ℓ, {ad j } j∈[ℓs ] ⇒ 1 = 1
+
+
+
+if Π-ExecuteE (sid, ℓ, stI , ⋆) ̸= ⊥ :
+
+
+
+The unlinkability property captures the core notion of
+anonymity in our protocol. At a high level, unlinkability guarantees that an adversary, controlling the issuer, cannot link
+the final token to its corresponding issuance. The formal
+
+definition is intuitively similar to the corresponding notion
+of blindness in two-move blind signatures, extended to the
+batched setting. In particular, the adversary engages in two
+7
+
+
+BAT,E ,A
+Game Gunlink
+1λ , ℓ0 , ℓ1 :
+
+BAT,E
+
+Game Gsol
+
+
+1λ :
+
+1:
+
+b ←$ {0, 1}
+
+1:
+
+pp ← Setup(1λ )
+
+2:
+
+pp ← Setup(1λ )
+
+2:
+
+(pkiss , ℓiss ) ← A (pp)
+
+3:
+
+(pkiss , ℓiss ) ← A (pp)
+
+3:
+
+require RegisterE (pkiss , ℓiss ) = 1
+
+4:
+
+require RegisterE (pkiss , ℓiss ) = 1
+
+4:
+
+t := ℓiss
+
+5:
+
+(sid0 , ⋆, stC ,0 ) ← Π-MIssue(pkiss , ℓ0 , ⋆, ⋆)
+
+5:
+
+done ← A E ,O -Execute,O -Refund,O -Spend (·)
+
+6:
+
+(⋆, {σ0, j } j∈[ℓ0 ] ) ← Π-ExecuteE (sid0 , ℓ0 , ⋆, stC ,0 )
+
+6:
+
+return t < 0
+
+7:
+
+(sid1 , ⋆, stC ,1 ) ← Π-MIssue(pkiss , ℓ1 , ⋆, ⋆)
+
+
+Oracle O -Execute sid, ℓ :
+
+8:
+
+(⋆, {σ1, j } j∈[ℓ0 ] ) ← Π-ExecuteE (sid1 , ℓ1 , ⋆, stC ,1 )
+
+1:
+
+9:
+
+ℓ̃0 := 0,
+
+2:
+
+10 :
+
+b ← A O -Token,O -Chal (·)
+
+11 :
+
+′
+
+ℓ̃1 := 0
+
+′
+
+if Π-ExecuteE (sid, ℓ, ⋆, ⋆) ̸= ⊥ :
+t := t + ℓ
+
+Oracle O -Spend(aux, ρ):
+
+return b = b
+
+1:
+
+Oracle O -Token(b̃, ad):
+
+2:
+
+if SpendE (pkiss , ρ, aux) = 1 :
+t := t − 1
+
+1:
+
+require (ℓ̃b̃ < ℓb̃ )
+
+
+Oracle O -Refund sid, ℓr , {σ j } j∈[ℓref ] :
+
+2:
+
+ℓ̃b̃ := ℓ̃b̃ + 1
+
+1:
+
+3:
+
+
+return TokGen σb̃,ℓ̃ , ad
+
+2:
+
+b̃
+
+if RefundE (sid, {σ j } j∈[ℓref ] , ⋆) = 1 :
+t := t − ℓref
+
+Oracle O -Chal(ad0 , ad1 ):
+1:
+
+BAT,E
+Figure 6: Solvency game Gsol
+for a blockchain anonymous
+token protocol BAT.
+
+require (ℓ̃0 < ℓ0 ) ∧ (ℓ̃1 < ℓ1 )
+
+2:
+
+ℓ̃0 := ℓ̃0 + 1;
+
+3:
+
+ρ̂0 := TokGen(σb,ℓ̃b , ad0 )
+
+4:
+
+ρ̂1 := TokGen(σ1−b,ℓ̃1−b , ad1 )
+
+5:
+
+if ρ̂0 = ⊥ or ρ̂1 = ⊥ : return (⊥, ⊥)
+
+6:
+
+return (ρ̂0 , ρ̂1 )
+
+ℓ̃1 := ℓ̃1 + 1
+
+mous tokens where a committee of n issuers with up to t
+corrupt issuers collective issue anonymous tokens. In a threshold issuance protocol, we can assume that all token issuances
+are recorded with the E . Contrary to threshold issuance, in
+a single issuer system like ours, a malicious issuer can issue
+unbounded number of anonymous tokens without ever reporting them to E . The solvency property we define next prevents
+such attacks. More formally,
+
+BAT,E ,A
+Figure 5: Unlinkability game Gunlink
+for a blockchain
+anonymous token protocol BAT.
+
+Definition 4.5 (Solvency). A blockchain anonymous token
+protocol BAT is solvent if for all PPT adversaries A ,
+ BAT,E λ 
+
+Pr Gsol
+1 ⇒ 1 = negl(λ)
+
+sessions of issuance protocols and is later shown finalized
+tokens in a random order. It must then guess which issuance
+session produced which token. Crucially, this guarantee holds
+for any two tokens or pairs of tokens, regardless of whether
+they were issued within the same batch (identified by a common sid) or across different batches. From the adversary’s
+perspective, tokens issued in the same batch and tokens issued
+in different batches should be indistinguishable.
+
+Efficiency requirements. In addition to the above properties,
+a BAT scheme must satisfy the following practical efficiency
+requirements: (i) For an issuance session involving ℓ tokens,
+the on-chain computation and communication must be sublinear in ℓ (ideally O(1)). (ii) The issuer’s off-chain issuance
+cost should be comparable to digitally signing ℓ short messages. (iii) The on-chain cost of verifying an anonymous token
+should be comparable to verifying standard digital signatures.
+
+Definition 4.4 (Unlinkability). A blockchain anonymous token protocol BAT is unlinkable if for all PPT adversaries A ,
+and all ℓ0 , ℓ1 ∈ N,
+h
+i 1
+
+BAT,E ,A
+Pr Gunlink
+1λ , ℓ0 , ℓ1 ⇒ 1 − = negl(λ)
+2
+
+5
+
+Finally, solvency prevents malicious issuers from minting
+and redeeming anonymous tokens without paying for them.
+Recall that we consider a single untrusted issuer who issues
+tokens to clients. This is unlike threshold issuance of anony-
+
+Design
+
+We summarize our protocol in Fig. 7 and describe it next.
+Setup and key generation. The public parameters consists of description of a bilinear pairing group G =
+8
+
+Requirements: Digital signature DS, pairing groups G := (G1 , G2 , GT , p, [[1]]1 , [[1]]2 , ◦) ← GGen(1λ ) and a hash function H : {0, 1}∗ → G1 .
+..............................................................................................................................
+Setup(1λ )
+Π-ExecuteE (sid, ℓ, stI , stC )
+
+C:
+
+1:
+
+ppDS ← DS.Setup(1λ )
+2 : return pp := (G , ppDS )
+
+IssKGen(pp)
+1:
+
+skiss ←$ Z p ; pkiss := [[skiss ]]2
+
+2:
+
+return (skiss , pkiss )
+
+2:
+3:
+4:
+5:
+
+parse stC as (⋆, ⋆, pkref , comk )
+
+2:
+
+send (sid, pkref , comk , ℓ) to E
+// Represented by pkiss
+
+3:
+
+require E .bal[pkc ] ≥ ℓ and
+
+4:
+
+require 2(stI .Niss + ℓ) ≤ ℓiss
+
+stI .sessions[sid] = (comk , ℓ, ⋆)
+
+I : send pkiss to E
+E : require E .bal[pkiss ] >= ℓiss and pkiss ∈/ E .esc
+E .bal[pkiss ] := E .bal[pkiss ] − ℓiss
+E .esc[pkiss ] := ℓiss ; E .Nspent[pkiss ] := 0
+E .Niss[pkiss ] := 0 ; E .Nref[pkiss ] := 0
+
+5:
+
+stI .Niss := stI .Niss + ℓ // stI .Niss initialized to 0
+
+6:
+
+parse stI .sessions[sid] as (⋆, ⋆, k)
+
+8:
+
+send (sid, k) to E
+E : require pkiss ∈/ E .retired
+
+9:
+
+require k · pkiss = comk
+
+10 :
+
+require E .Niss[pkiss ] + ℓ ≤
+
+11 :
+
+E .Niss[pkiss ] := E .Niss[pkiss ] + ℓ
+E .bal[pkc ] := E .bal[pkc ] − ℓ // Burn ℓ ETH
+E .sessions[sid] := (pkref , comk , ℓ)
+
+7:
+
+RetireE (pkiss )
+1:
+
+1:
+
+I:
+
+RegisterE (pkiss , ℓiss )
+1:
+
+// Represented by pkc
+
+∆ := max(0, E .Nspent[pkiss ] + E .Nref[pkiss ] − E .Niss[pkiss ])
+
+12 :
+
+E .bal[pkiss ] := E .bal[pkiss ] + E .esc[pkiss ] − ∆ // burn ∆ ETH
+3 : E .retired := E .retired ∪ {pkiss }
+
+E .esc[pkiss ]
+2
+
+2:
+
+13 :
+
+Π-MIssue(pkiss , ℓ, skiss , stI )
+
+14 :
+
+// Use k to unmask pre-tokens
+parse stC as ({ri , σ̃i , skeph,i , pkeph,i }i∈[ℓ] , ⋆, ⋆, ⋆)
+
+15 :
+
+return {σi := ((ri · k)−1 · σ̃i , skeph,i , pkeph,i )}i∈[ℓ]
+
+C:
+
+C : // Generating blinded message
+1:
+2:
+
+sid ←$ {0, 1}λ // session id
+{(skeph,i , pkeph,i ) ← DS.KGen(ppDS )}i∈[ℓ]
+
+3:
+
+X := {ri · H(pkeph,i )}i∈[ℓ] where ri ←$ Z p
+
+4:
+
+send (sid, X , ℓ) to I
+
+I:
+
+SpendE (pkiss , ad, ρ)
+
+C : send (pkiss , ad, ρ) to E
+E : require pkiss ∈/ E .retired
+require E .Nspent[pkiss ] < E .Niss[pkiss ]
+3:
+1:
+2:
+
+// Issuing masked blind signatures
+require sid ∈
+/ stI .sessions
+k ←$ Z p ; comk := k · pkiss
+
+5:
+6:
+
+8:
+
+stI .sessions[sid] := (comk , ℓ, k)
+{σ̃i := (k · skiss ) · Xi }i∈[ℓ]
+
+9:
+
+send ({σ̃i }i∈[ℓ] , comk ) to C
+
+7:
+
+C:
+
+4:
+
+parse ρ as (pkeph , α, γ)
+
+5:
+
+require α ◦ [[1]]2 = H(pkeph ) ◦ pkiss // Issuer’s signature
+
+6:
+
+require pkeph ∈
+/ E .Nullifiers
+
+7:
+
+require DS.Verify(pkeph , ad, γ) = 1
+
+8:
+
+E .Nullifiers := E .Nullifiers ∪ {pkeph }
+E .Nspent[pkiss ] := E .Nspent[pkiss ] + 1 // Mint 1 ETH
+
+9:
+
+// Verifying masked blind signatures
+
+RefundE (sid, {σi }i∈[ℓref ] , stC )
+
+10 :
+
+require ∀i ∈ [ℓ] : σ̃i ◦ [[1]]2 = Xi ◦ comk
+
+11 :
+
+(skref , pkref ) ← DS.KGen(ppDS )
+
+
+{ri , σ̃i , skeph,i , pkeph,i }i∈[ℓ] ,
+stC :=
+skref , pkref , comk
+
+3:
+
+return (sid, stC )
+
+4:
+
+12 :
+13 :
+
+1:
+2:
+
+parse σ as (α, skeph , pkeph )
+
+2:
+
+γ ← DS.Sign(skeph , ad)
+
+γref ← DS.Sign(skref , (sid, {αi , pkeph,i }i∈[ℓref ] ))
+
+send (sid, {αi , pkeph,i }i∈[ℓref ] , γref ) to E
+E : require DS.Verify(pkref , (sid, {αi , pkeph,i }i∈[ℓref ] ), γref )
+5:
+require sid ∈ E .sessions and sid ∈
+/ E .refundset
+parse E .sessions[sid] as (pkref , ⋆, ℓ)
+6:
+require ℓref ≤ ℓ and pkiss ∈
+/ E .retired
+7:
+
+TokGen(σ, ad)
+1:
+
+C : parse σi as (αi , ⋆, pkeph,i ) for i ∈ [ℓref ]
+
+3 : return ρ := (pkeph , α, γ)
+
+8:
+
+for i ∈ [ℓref ], require αi ◦ [[1]]2 = H(pkeph,i ) ◦ pkiss
+
+9:
+
+for i ∈ [ℓref ]: require pkeph,i ∈
+/ E .Nullifiers
+
+10 :
+
+E .bal[pkref ] := E .bal[pkref ] + ℓref // Mint ℓref ETH
+E .Nref[pkiss ] := E .Nref[pkiss ] + ℓref
+E .refundset := E .refundset ∪ {sid}
+E .Nullifiers := E .Nullifiers ∪ {pkeph,i |i ∈ [ℓref ]}
+
+11 :
+12 :
+13 :
+
+Figure 7: BAT protocol with compact issuance. C : denotes actions by the client, I : by the issuer, and E : by the environment E .
+9
+
+(G1 , G2 , GT , p, [[1]]1 , [[1]]2 , ◦) ← GGen(1λ ), and public parameters ppDS of a digital signature scheme DS. We also use a
+hash function H : {0, 1}∗ → G1 modeled as a random oracle.
+Our protocol uses the blind BLS signature as anonymous
+tokens [19]. Thus the private issuing key of an issuer is the
+BLS secret key skiss ←$ Z p and the associated public key is
+pkiss := [[skiss ]]2 . Clients generate a key pair (skref , pkref ) ←
+DS.KGen(ppDS ) to authorize and receive refunds.
+
+potential refunds.
+Upon obtaining k, C recovers the BLS signature αi = (r ·
+k)−1 · σ̃i on the i-th ephemeral public key, and stores the tuple
+σi := (αi , pkeph,i , skeph,i ) as the i-th pre-token.
+Token generation. Given a pre-token σ = (α, skeph , pkeph ),
+C binds it to some associated data ad by computing a digital
+signature γ = DS.Sign(skeph , ad). We define the tuple ρ =
+(pkeph , α, γ) to be the anonymous token.
+
+Issuer registration. Any issuer I registers its public issuing
+key pkiss with E using the RegisterE interface by depositing
+ℓ units of ETH as collateral. The registration is successful if I
+has sufficient balance and has not already registered. Upon
+successful registration, E locks ℓiss ETH from the I ’s balance
+into an escrow account E .esc[pkiss ] and initializes counters:
+E .Niss[pkiss ] := 0 to track the number of tokens issued by
+I , E .Nspent[pkiss ] := 0 to track tracks of spent tokens, and
+E .Nref[pkiss ] := 0 to track the number of refunded tokens.
+I also initializes a local variable stI .Niss := 0 to track the
+number of anonymous token it has issued so far.
+
+Token spending. To spend a token ρ, C posts (pkiss , ρ) to E .
+The spend is successful if: (i) I (with public key pkiss ) has not
+retired, (ii) Number of spent tokens associated with I is less
+than ℓiss . (iii) α is a valid BLS signature on pkeph under the
+issuer pkiss , i.e., α ◦ [[1]]2 = H(pkeph ) ◦ pkiss , (iv) γ is a valid
+signature on ad under pkeph , and (5) pkeph has not been spent
+before, i.e., pkeph ∈
+/ E .Nullifiers.
+Upon successful spend, E adds pkeph to the nullifier set
+E .Nullifiers, increments E .Nspent[pkiss ], and mints 1 unit of
+ETH to be used by the associated data ad.
+Refunds. To claim refunds of ℓref unspent tokens, C authorizes the refund request by signing sid, and the unspent ephemeral public keys and their BLS signatures using skref . Let γref := DS.Sign(skref , (sid, {αi , pkeph,i }i∈[ℓref ] ))
+be the digital signature. C submits the refund claim posting
+(sid, {αi , pkeph,i }i∈[ℓref ] , γref ) to E .
+Upon receiving the refund claim, E validates it by checking:
+(i) the session sid has not been refunded before, (ii) ℓref ≤ ℓ
+where ℓ is the batch size from session sid; (iii) for each i ∈
+[ℓref ], αi is a valid BLS signature, i.e., αi ◦ [[1]]2 = H(pkeph,i ) ◦
+pkiss , and (iv) None of the ephemeral keys has been spent.
+If all checks pass, E mints ℓref ETH coins to pkref , adds all
+ephemeral keys to the nullifier set, increments E .Nref[pkiss ]
+by ℓref , and marks session sid as refunded.
+Remark. We note that as an optimization, it is possible to use
+
+Masked token issuance. Π-MIssue is a two move off-chain
+protocol between a client C and an issuer I . At the end of this
+protocol, C obtains ℓ masked anonymous tokens issued by I .
+In the first move, C generates ℓ ephemeral key pairs
+{(skeph,i , pkeph,i )}i∈[ℓ] for the digital signature scheme DS.
+Next, for each i ∈ [ℓ], C samples a blinding factor ri ←$ Z p and
+computes the blinded values X = {Xi = ri · H(pkeph,i )}i∈[ℓ] ,
+and sends them to I along with a random session identifier
+sid.
+In the second move, I upon receiving the blinded message
+from C , checks that sid has not been used before. If so, I
+samples a fresh masking key k ← Z p and computes its commitment comk = k · pkiss . Next, I computes blind signatures
+σ̃i = (k · skiss ) · Xi for each i ∈ [ℓ]. I then sends the masked
+blind signatures ({σ̃i }i∈[ℓ] , comk ) to C .
+C upon receiving the masked blind signatures validates
+them by checking whether σ̃i ◦ [[1]]2 = Xi ◦ comk for each
+i ∈ [ℓ]. C can batch verify all ℓ masked tokens by sampling
+βi ←$ Z p and checking ∑i∈[ℓ] βi · σ̃i ◦ [[1]]2 = ∑i∈[ℓ] βi Xi ◦ comk .
+C also samples a key pair for use in potential refunds later.
+
+ℓ
+
+ref
+the BLS aggregate signature α = ∑i=1
+αi to prove the validity
+of all unspent tokens. However, proving this optimized protocol is issuer-fair requires additional techniques, which we
+leave for future work.
+
+Issuer retirement. When an issuer I with public key
+pkiss submits a retirement request to recover its collateral,
+E computes ∆ = max(0, E .Nspent[pkiss ] + E .Nref[pkiss ] −
+E .Niss[pkiss ]), which captures any deficit due to I maliciously
+issuing tokens without an on-chain exchange. E then returns
+E .esc[pkiss ] − ∆ units of ETH (after deducting some penalty)
+to the I , burns ∆ units of ETH, and marks pkiss as retired.
+
+On-chain atomic issuance. The Π-Execute protocol coordinates the masking key revelation and payment for it via the
+blockchain E . The client C submits (sid, pkref , comk , ℓ) to E ,
+where pkref is the refund public key, and escrows the payment
+for ℓ tokens. In response, I reveals the masking key k to E ,
+while ensuring that it does not issue more than ℓiss /2 tokens.
+Upon receiving k, E checks: (1) k matches the commitment, i.e., k · pkiss = comk , (2) the issuer has not retired, and
+(3) the issuer has sufficient collateral to back this issuance
+via E .Niss[pkiss ] + ℓ ≤ E .esc[pkiss ]/2. This last check implements our solvency condition, ensuring the issuer maintains
+at least twice the collateral as the total issued tokens. If all
+checks pass, E increments E .Niss[pkiss ] by ℓ, burns ℓ coins
+from the C ’s balance, and stores (pkref , comk , ℓ) for future
+
+Towards non-interactive refunds. In Fig. 9, we present an
+alternative BAT scheme with a different on-chain/off-chain
+cost tradeoff. In particular, this scheme enables refunding ℓr
+tokens using only O (1) on-chain data and provides provisions
+for non-interactive refunds, but at the cost of increased offchain costs for the client.
+In this scheme, during Π-MIssue, C generates the
+ephemeral keys using a pseudorandom function (PRF)
+10
+
+keyed with a random seed. Additionally, C provides a zeroknowledge proof to I proving that the blinded values correspond to ephemeral keys correctly derived using a PRF on
+the seed. I verifies this proof and proceeds with the masked
+issuance protocol as before. During Refund, E only requires
+the seed. In particular, E uses this seed and the PRF to deterministically regenerate the corresponding ephemeral keys
+and verify that the tokens are valid and unspent.
+Although this scheme still requires O (ℓref ) on-chain computation, it facilitates efficient automated refunds. A client seeking automated refunds can store the encryption of the seed
+on-chain using off-the-shelf time-lock encryption [1, 39] at
+issuance time. The seed can later be automatically decrypted
+and processed to issue a refund to the client without any client
+interaction. We also implement this variant and report benchmarks in Section 7.
+
+6
+
+Finally, if the spend capacity for pkiss is exhausted, C can
+request refunds for its unspent tokens. We note that, there is no
+bound on the number of tokens that may be refunded, provided
+that the refund request correctly indicates the corresponding
+issuance. In addition, the refund protocol returns funds to
+pkref , the public key selected by C at the time of issuance.
+Lemma 6.3 (Solvency). The BAT protocol in Fig. 7 is solvent
+as per Def. 4.5.
+Proof. To establish solvency, we show that an adversary can
+never mint more ETH than is burned, even if it controls all
+issuers and all clients.
+For any issuer with public key pkiss , our protocol mints
+ETH in exactly two cases: (i) each successful spend mints one
+unit of ETH; and (ii) each refund mints ℓr ≤ ℓ units of ETH,
+where ℓ is the number of tokens issued in the corresponding
+issuance session. Therefore, for issuer pkiss , we mint a total
+of E .Nspent[pkiss ] + E .Nref[pkiss ] units of ETH.
+Our protocol also burns ETH in two cases as well. First,
+during issuance, we burn ℓ units of ETH for issuing ℓ tokens.
+Second, while retiring pkiss we burn ∆ units of ETH, where:
+
+Analysis of BAT
+
+Lemma 6.1 (Correctness). The BAT protocol in Fig. 7 satisfies correctness as per Def. 4.1.
+Proof. To argue correctness, we assume that the issuer I escrows sufficient funds during registration. Recall that each
+masked pre-token in our scheme is of the form σ̃i = (k · skiss ) ·
+Xi and comk = k · pkiss . Thus, we get
+
+∆ := max(0, E .Nspent[pkiss ]+ E .Nref[pkiss ]− E .Niss[pkiss ])
+The quantity ∆ above precisely captures the excess ETH
+that the protocol mints on behalf of issuer pkiss beyond what
+is burnt during on-chain issuance associated with pkiss . Therefore, by burning ∆ units of ETH at retirement, the protocol
+maintains solvency.
+We now argue that the protocol can always burn ∆ units of
+ETH when retiring issuer pkiss . Note that in our protocol:
+
+σ̃i ◦ [[1]]2 = (k · skiss ) · Xi ◦ ·[[1]]2 = Xi ◦ k · pkiss .
+Therefore, the Π-MIssue protocol will successful. Moreover,
+once the client C obtains k as part of Π-Execute, it can unmask the pre-token by computing αi := (r ·k)−1 · σ̃i = skiss ·Xi ,
+which is a BLS signature on pkeph,i . Finally, the correctness of
+the Spend and Refund follows directly from the correctness
+of the underlying digital signature scheme DS.
+
+(i) for issuer pkiss , we issue at most half of its escrowed
+amount, i.e., E .Niss[pkiss ] ≤ E .esc[pkiss ]/2;
+
+Lemma 6.2 (Client Fairness). The BAT protocol in Fig. 7
+satisfies client-fairness as per Def. 4.3.
+
+(ii) we allow spends of at most E .Niss[pkiss ] spends, i.e.,
+E .Nspent[pkiss ] ≤ E .Niss[pkiss ] ≤ E .esc[pkiss ]/2; and
+
+Proof. To prove client fairness, we argue that if the Π-MIssue
+and Π-Execute protocols complete successfully, then the
+client C can either spend all issued tokens or obtain refunds
+for any unspent tokens.
+During Π-MIssue, the validity check σ̃i ◦ [[1]]2 = Xi ◦ comk
+implies that σ̃i = (k · skiss ) · Xi where comk = k · pkiss . Moreover, upon successful completion of Π-Execute, C learns the
+masking key k. Hence, using its knowledge of (r, k), C can
+unmask each pre-token by computing αi := (r · k)−1 · σ̃i =
+skiss · Xi , which is a BLS signature on pkeph,i .
+This guarantees that C can always spend the pre-token
+σi , unless the spend limit for the issuer public key pkiss has
+already been reached. Furthermore, since spending a token associated with an ephemeral public key pkeph requires a digital
+signature under pkeph , no adversary can steal and spend the
+token without violating the unforgeability of the underlying
+digital signature scheme.
+
+(iii) we allow refunds only for issued tokens, i.e.,
+E .Refund[pkiss ] ≤ E .Niss[pkiss ] ≤ E .esc[pkiss ]/2.
+Combining these bounds, we obtain
+
+E .Nspent[pkiss ] + E .Refund[pkiss ] ≤ E .esc[pkiss ]
+Since ∆ ≤ E .Nspent[pkiss ] + E .Refund[pkiss ], and the issuer
+pkiss escrows E .esc[pkiss ] units of ETH, we can always burn
+∆ units of ETH while retiring pkiss .
+Lemma 6.4 (Unlinkability). The BAT protocol in Fig. 7 is
+unlinkable as per Def. 4.4.
+Proof. We prove that our protocol achieves informationtheoretic unlinkability.
+Consider the adversary A ’s view in the unlinkability game
+BAT,E ,A
+Gunlink (see Fig. 5). First, note that we mask each in a
+11
+
+Book keeping. B uses Niss := 0 and Nex := 0 to maintain
+the number of tokens for which A has run the O -MIssue
+and O -Execute protocol, respectively. For each invocation of
+O -MIssue with request for ℓ tokens, B updates Niss := Niss + ℓ.
+Similarly, for each invocation of O -Execute with ℓ tokens, B
+updates Nex := Nex + ℓ.
+∗ and N ∗ be the values of N and N , at the time
+Let Niss
+iss
+ex
+ex
+when A breaks the issuer-fairness, respectively. Next, depend∗ and N ∗ , we will consider two mutually exclusive
+ing on Niss
+ex
+and exhaustive cases.
+
+session independent of other tokens. Therefore, it is sufficient
+to analyze A ’s view specific to the challenge token.
+Let pkeph and pk′eph denote the ephemeral public keys underlying the challenge token from sessions sid0 and sid1 ,
+respectively. During the issuance phase, A ’s observes the
+blinded ephemeral keys: Y0 := r · H(pkeph ) and Y1 := r′ ·
+H(pkeph ), for some uniformly random and independent blinding factors r, r′ ←$ Z p are the independent random blinding
+factors. This implies that the blinded values Y0 and Y1 are
+distributed uniformly and independently in G.
+Now, for the pair of ephemeral keys (pkeph , pk′eph ) and the
+group elements (Y0 ,Y1 ) ∈ G2 observed by A , there exist uniformly random and independent blinding factors s, s′ ∈ Z p
+such that:
+Y0 = s · H(pk′eph )
+
+∗ = N ∗ . Intuitively, this case captures the scenario
+Case-I: Niss
+ex
+in which A invokes O -Execute for all sessions for which it
+invoked O -MIssue. In this case, B interacts with A as follows.
+
+Simulating O -MIssue protocol. Consider an invocation of
+O -MIssue protocol with ℓ tokens. Let sid be its session id. Let
+{Xi }i∈[ℓ] ∈ Gℓ be the messages B receives from A . B does
+
+′
+
+and Y1 = s · H(pkeph )
+
+the following:
+
+Thus, A ’s view is equally consistent with either ordering of
+the challenge tokens. Therefore, we get:
+
+1. Update Niss := Niss + ℓ
+
+BAT,E ,A λ
+(1 , ℓ0 , ℓ1 ) ⇒ 1] = 1/2.
+unlink
+
+Pr[G
+
+2. For each i ∈ [ℓ], query the O -CDH oracle on input Xi to
+receive z0 · Xi
+
+Next, we prove that our protocol satisfies issuer fairness
+against any selective adversary. Specifically, we require an
+adversary A to be selective in the following sense: for
+each invocation of the issuance oracle O -MIssue, A commits in advance to whether it will invoke the execution oracle
+O -Execute for that session. This selectivity restriction is an
+artifact of our security proofs, and we are not aware of any
+attack that an adaptive adversary could mount against our
+protocol [16, 64]. We further conjecture that our protocol can
+be proven secure against adaptive adversaries in the Generic
+Group Model [67].
+
+3. Honestly sample ksid ←$ Z p , compute comk := ksid ·pkiss ,
+and store ksid for the session.
+4. Send ({σ̃i := ksid · (z0 · Xi )}i∈[ℓ] , comk ) to A .
+Simulating O -Execute protocol. For any invocation of
+O -Execute using session id sid, B follows the honest protocol to post ksid on-chain.
+Solving omCDH. Observe that to win the issuer-fairness
+∗ + 1 BLS signatures. Let
+game, A needs to output Niss
+∗ +1] be these message signature pairs.
+{(pkeph, j , α j )} j∈[Nex
+Without loss of generality, we can assume that A has
+queried H(pkeph, j ), i.e., Y j = H(pkeph, j ) = [[z j ]]1 , where [[z j ]]1
+is an element of the omCDH challenge. Now, since each α j is
+a valid BLS signature, we have α j := z0 · [[z j ]]1 . This implies
+∗ + 1 = N ∗ + 1 CDH solutions.
+that A outputs Nex
+iss
+Now, let’s calculate the number of O -CDH queries B makes
+while interacting with A . For each invocation of O -MIssue
+with ℓ tokens, B queries O -CDH on ℓ inputs. Therefore, B
+∗ times in total.
+queries O -CDH Niss
+∗ + 1 CDH solution that A outputs, and
+Thus, using the Niss
+∗ remaining O -CDH queries, B
+the remaining qH − 1 − Niss
+can solve the omCDH problem with parameter qH using only
+qH − 1 CDH queries to the O -CDH oracle.
+
+Lemma 6.5 (Issuer fairness). Assuming the hardness of
+one-more computational Diffie-Hellman (omCDH) assumption (Def. A.1), the BAT protocol in Fig. 7 ensures issuerfairness as per Def. 4.2 against any selective adversary.
+Proof of Issuer-fairness (Lemma 6.5). For the sake of contradiction, let A be a selective adversary that breaks the issuerfairness protocol. We will then use A to build an omCDH
+adversary B as follows.
+Simulating setup. B upon receiving the omCDH challenge ([[1]]1 , [[z0 ]]2 , {[[zi ]]1 }i∈[0,qH ] ), sets the issuer’s public key
+pkiss := [[z0 ]]2 , which implicitly sets skiss := z0 . Let qH be the
+upper bound on the number of H queries A makes.
+Simulating random oracle H(·). B maintains a list LH of
+all H queries so far. When A queries H(·) on input an
+ephemeral public key Xθ :
+
+∗ > N ∗ . This case captures the scenario where
+Case-II: Niss
+ex
+A does not invoke O -Execute for all the sessions it invoked
+O -MIssue for, i.e., there exists at least one O -MIssue session,
+for which A has not invoked the O -Execute oracle. Note
+that in this case, B we describe for Case-I can no longer use
+∗ + 1 BLS signatures output by A to compute CDH
+the Nex
+∗ + 1.
+solutions for Niss
+
+1. B checks if Xθ ∈ LH . If so, it returns the stored value.
+2. Otherwise, B sets LH [Xθ ] = [[zθ ]]1 , and outputs LH [Xθ ], and
+updates θ := θ + 1
+12
+
+7.1
+
+For this case, we assume that A is selective, i.e., for each
+invocation of O -MIssue, A specifies whether it will invoke
+O -Execute for the session or not. More precisely, for the i-th
+invocation of O -MIssue, A specifies a bit νi , where νi = 1
+implies that A will invoke O -Execute for the i-th session, and
+νi = 0, otherwise.
+
+In this section we describe additional implementation details
+and benchmarks results.
+Protocol A. Recall from Section 5, in Protocol A, refunds
+require revealing each unspent token individually. We also
+implement an optimization in which, during refunds, we aggregate all BLS signatures and verify all refunded tokens
+using only one multi-pairing of length two.
+Protocol B. We leverage a cycle of curves
+(BN254/Grumpkin1 ) to ensure that all elliptic curve
+operations are performed within the zero-knowledge
+(ZK) circuit over native fields, avoiding costly non-native
+emulations. Also, we use G1 and G2 elements of BN254 for
+ephemeral public keys and issuer public keys, respectively.
+Recursive folding. For efficiency, we use Nova [47] as the
+backend for our succinct non-interactive argument of knowledge (SNARK). We implement the Nova folding engine
+over the Grumpkin curve. Because Nova proofs are relatively large, we recursively verify the Nova verifier using
+the Spartan SNARK protocol [66]. We use Spartan instead of
+Groth16 [41] because Groth16 SNARK protocol requires a
+bilinear pairing, and Grumpkin is not pairing-friendly.
+Since a production-ready Spartan-on-Grumpkin SNARK
+protocol is not yet available, we adopt a hybrid benchmarking
+methodology. We measure the Nova folding time directly
+on Grumpkin using our implementation and use the official
+Spartan implementation on Ristretto255 [42] as a proxy for
+the final compression step. Ristretto255 and Grumpkin are
+both ≈254-bit prime-order groups with comparable arithmetic
+complexity, making this a conservative and reasonable proxy.
+For a batch of 64 tokens, folding requires 4.40 seconds,
+while Spartan compression of an equivalently sized circuit
+requires 3.70 seconds, yielding an end-to-end client latency
+of approximately 8.1 seconds.
+
+Simulating O -MIssue protocol. Consider the i-th issuance
+session for ℓ tokens and session id sid. Let {Xi }i∈[ℓ] ∈ Gℓ be
+the messages B receives from A .
+When νi = 1, B simulates the O -MIssue as in case-I. Alternatively, when νi = 0, B interacts with A as follows.
+1. Update Niss := Niss + ℓ.
+2. Sample µsid ←$ Z p , implicitly defining µsid = z0 · ksid for
+some ksid ∈ Z p .
+3. Compute comk := [[µsid ]]2 .
+4. Send ({σ̃i := µsid · Xi }i∈[ℓ] , comk ) to A .
+Note that since B samples µsid uniformly at random, A ’s
+view is identically distributed for both ν = 1 and ν = 0.
+Now, it is easy to see that B uses one CDH query for each of
+the tokens that A receives upon invoking O -Execute. There∗ + 1 tokens to win the
+fore, to see that when A outputs Nex
+∗ CDH
+game, B can use them, and the remaining qH − 1 − Nex
+queries to solve the omCDH problem with parameter qH using
+at most qH − 1 CDH oracle queries.
+
+7
+
+Implementation Details
+
+Implementation and Evaluation
+
+We implemented our BAT schemes (Fig. 7 and Fig. 9) in
+Rust, and evaluated the performance of each phase. We report
+execution time and communication cost, and break them down
+into client-side, issuer-side, and on-chain (environment-side)
+costs. While BAT on-chain components can be implemented
+as smart contracts, we implement our on-chain component
+natively.
+We henceforth refer to our protocol in Fig. 7 as Protocol
+A, and the protocol that facilitates non-interactive refunds in
+Fig. 9 as Protocol B. Protocol A and Protocol B use different
+cryptographic instantiations.
+For Protocol A, we use the BLS12-381 curve [9, 24]
+for issuer signatures and Schnorr signatures [65] over the
+edwards25519 curve [14] for clients’ signatures on the
+ephemeral keys. We instantiate Protocol B over the BN254
+curve [10] for both the issuer’s and the client’s signatures.
+We use the BN254 curve as it supports pairing-friendly curve
+cycles that enable more efficient zero-knowledge proofs.
+We benchmark both protocols for batch sizes ℓ ∈
+{10, 50, 100}. We measure single-threaded computation costs
+(on-chain and off-chain) on an Apple M3 Max with 48 GB
+RAM, and we compute communication costs using serialized
+message payload sizes.
+
+7.2
+
+Microbenchmark Results
+
+We report our benchmark results for Protocol A and Protocol
+B, in Table 1 and Table 2, respectively. One BAT token is 144
+bytes long, takes 0.24 milliseconds to generate (unblinding
+and binding), and 1.68 milliseconds to verify. In comparison,
+proofs for Zcash orchard—the version of Zcash with transparent setup—are 7KB long, take 1.7 seconds to generate, and 15
+milliseconds to verify [28]. We compare against Zcash as it is
+the closest baseline to BAT in terms of not having threshold
+or trusted issuer, but note that Zcash is a more general scheme
+offering confidentiality of transaction amounts and recipients
+(c.f. Section 1).
+Protocol A vs. Protocol B Our evaluation reveals a clean
+trade-off. Protocol A minimizes client-side cost but incurs
+1 The Grumpkin curve [59] is a Weierstrass elliptic curve designed for
+SNARK-efficient group operations, specifically as a cycle curve to the BN254
+curve.
+
+13
+
+ℓ = 10
+Component
+Client (off-chain issuance)
+Issuer (off-chain issuance)
+Client (unblind & bind)
+On-chain exchange
+On-chain spend (ℓ = 1)
+On-chain refund
+
+Time (ms)
+3.27 + 7.86
+3.80
+2.38
+0.61
+1.68
+7.04
+
+Size (B)
+512
+608
+–
+264
+144
+1,440
+
+ℓ = 50
+Time (ms)
+16.37 + 31.40
+16.44
+11.52
+0.60
+1.68
+28.79
+
+ℓ = 100
+Size (B)
+2,432
+2,528
+–
+264
+144
+7,200
+
+Time (ms)
+32.69 + 60.72
+32.23
+22.96
+0.61
+1.70
+55.87
+
+Size (B)
+4,832
+4,928
+–
+264
+144
+14,400
+
+Table 1: Protocol A: token-reveal refund using BLS12-381 and Ed25519. Time denotes local execution time of the corresponding
+component (client, issuer, or environment). For client off-chain issuance, time shows blinding + verification for the two protocol
+rounds. All times are for single-threaded execution. Size is serialized message size (bytes).
+ℓ = 10
+Component
+Client (off-chain issuance)
+Issuer (off-chain issuance)
+Client (unblind & bind)
+On-chain exchange
+On-chain spend (ℓ = 1)
+On-chain refund
+
+Time (ms)
+3,614.40 + 2.32
+1.22
+0.91
+0.19
+2.02
+1.79
+
+ℓ = 50
+Size (B)
+85,224
+480
+–
+296
+128
+32
+
+Time (ms)
+7,137.84 + 6.20
+5.05
+2.78
+0.19
+2.04
+8.86
+
+ℓ = 100
+Size (B)
+86,504
+1,760
+–
+296
+128
+32
+
+Time (ms)
+12,163.80 + 11.06
+9.72
+5.15
+0.19
+2.04
+17.74
+
+Size (B)
+88,104
+3,360
+–
+296
+128
+32
+
+Table 2: Protocol B: seed-reveal refund using BN254. We measure the time and size as in Table 1.
+linear communication cost for refunds. Protocol B shifts cost
+to the client through zero-knowledge proving during issuance,
+enabling compact, pairing-free refunds with constant on-chain
+communication. As we illustrate in Table 2, ZK proof generation dominates the client-side cost in Protocol B by several
+orders of magnitude. Finally, the same operations in Protocol B are faster than in Protocol A, as they are performed over
+the more efficient BN254 curve compared to BLS12-381, except for spends which use Ed25519 signatures in Protocol A.
+
+8
+
+to the refunds to prevent abuse of the system by an adversary
+that issues a large number of tokens only to refund them later.
+DoS prevention by malicious issuer. In our proposed BAT
+construction, a malicious issuer could prevent clients from
+spending the anonymous tokens it issues by exhausting its
+on-chain spend budget before clients attempt to spend their
+tokens. To disincentivize such issuers, clients can locally monitor their behavior and switch to more reputable issuers. We
+note that this attack does not allow a malicious issuer to steal
+tokens from honest clients, since clients can always claim
+refunds for any unspent tokens.
+
+Discussion for Practical Deployments
+
+Acknowledgments
+
+Token denomination. We describe our BAT protocol assuming the anonymous tokens have a fixed denomination. This
+simplification forces users to obtain multiple tokens for highvalue transactions. Practical deployments should support different denomination pools for efficiency.
+
+The authors would like to thank Michael Setrin for many
+helpful discussions related to this project. Ari Juels would
+like to acknowledge the generous support of IC3 partners and
+NSF CNS-2427390.
+
+Non-interactive refunds and unlinkability. In the alternate
+BAT scheme we describe in Fig. 9, we reveal the random
+seed that is used to generate all the ephemeral public keys.
+This links even the spent tokens at the time of refund. While
+this is acceptable for applications like MEV mitigation and
+on-chain voting, where the sender is revealed after a deadline,
+it may be problematic for other applications, such as on-ramp
+to private payment systems. If the anonymity of spent tokens
+is essential, our first construction should be used.
+
+References
+[1] Amit Agarwal, Kushal Babel, Sourav Das, and
+Babak Poorebrahim Gilkalaye. Time-lock encrypted
+storage for blockchains. Cryptology ePrint Archive,
+Paper 2025/2048, 2025.
+[2] Amit Agarwal, Kushal Babel, Sourav Das, Babak Poorebrahim Gilkalaye, Arup Mondal, Benny Pinkas, Peter
+
+Refund haircut. In practice, a small haircut should be applied
+14
+
+Rindal, and Aayush Yadav. Weighted batched threshold encryption with applications to mempool privacy.
+Cryptology ePrint Archive, Paper 2025/2115, 2025.
+
+Privacy, pages 459–474, Berkeley, CA, USA, May 18–
+21, 2014. IEEE Computer Society Press.
+[12] Fabrice Benhamouda, Tancrède Lepoint, Michele Orrù,
+and Mariana Raykova. Publicly verifiable anonymous
+tokens with private metadata bit. Cryptology ePrint
+Archive, Report 2022/004, 2022.
+
+[3] Amit Agarwal, Rex Fernando, and Benny Pinkas.
+Efficiently-thresholdizable batched identity based encryption, with applications. In Yael Tauman Kalai
+and Seny F. Kamara, editors, Advances in Cryptology
+– CRYPTO 2025, pages 69–100, Cham, 2025. Springer
+Nature Switzerland.
+
+[13] Ferenc Beres, Istvan A. Seres, Andras A. Benczur, and
+Mikerah Quintyne-Collins. Blockchain is Watching
+You: Profiling and Deanonymizing Ethereum Users . In
+2021 IEEE International Conference on Decentralized
+Applications and Infrastructures (DAPPS), pages 69–78,
+Los Alamitos, CA, USA, August 2021. IEEE Computer
+Society.
+
+icloud private relay overview.
+https:
+[4] Apple.
+//www.apple.com/icloud/docs/iCloud_Private_
+Relay_Overview_Dec2021.pdf, 2021.
+Accessed:
+2024-04-29.
+[5] Kushal Babel, Philip Daian, Mahimna Kelkar, and Ari
+Juels. Clockwork finance: Automated analysis of economic security in smart contracts. In 2023 IEEE Symposium on Security and Privacy (SP), pages 2499–2516.
+IEEE, 2023.
+
+[14] Daniel J. Bernstein, Niels Duif, Tanja Lange, Peter
+Schwabe, and Bo-Yin Yang. High-speed high-security
+signatures. In Bart Preneel and Tsuyoshi Takagi, editors, Cryptographic Hardware and Embedded Systems –
+CHES 2011, volume 6917 of Lecture Notes in Computer
+Science, pages 124–142, Nara, Japan, September 28 –
+October 1, 2011. Springer Berlin Heidelberg, Germany.
+
+[6] Foteini Baldimtsi, Kostas Kryptos Chalkias, Varun Madathil, and Arnab Roy. SoK: Privacy-preserving transactions in blockchains. Cryptology ePrint Archive, Paper
+2024/1959, 2024.
+
+[15] Alexandra Boldyreva. Threshold signatures, multisignatures and blind signatures based on the gap-diffiehellman-group signature scheme. In International
+Workshop on Public Key Cryptography, pages 31–46.
+Springer, 2002.
+
+[7] Foteini Baldimtsi, Melissa Chase, Georg Fuchsbauer,
+and Markulf Kohlweiss. Anonymous transferable Ecash. In Jonathan Katz, editor, PKC 2015: 18th International Conference on Theory and Practice of Public Key
+Cryptography, volume 9020 of Lecture Notes in Computer Science, pages 101–124, Gaithersburg, MD, USA,
+March 30 – April 1, 2015. Springer Berlin Heidelberg,
+Germany.
+
+[16] Dan Boneh and Xavier Boyen. Efficient selective-id
+secure identity-based encryption without random oracles. In International conference on the theory and applications of cryptographic techniques, pages 223–238.
+Springer, 2004.
+
+[8] Foteini Baldimtsi, Lucjan Hanzlik, Quan Nguyen, and
+Aayush Yadav. Non-interactive anonymous tokens with
+private metadata bit. Cryptology ePrint Archive, Report
+2025/430, 2025.
+
+[17] Dan Boneh, Benedikt Bünz, Kartik Nayak, Lior Rotem,
+and Victor Shoup. Context-dependent threshold decryption and its applications. In International Conference
+on the Theory and Application of Cryptology and Information Security, pages 506–538. Springer, 2025.
+
+[9] Paulo S. L. M. Barreto, Ben Lynn, and Michael Scott. Efficient implementation of pairing-based cryptosystems.
+Journal of Cryptology, 17(4):321–334, September 2004.
+
+[18] Dan Boneh, Evan Laufer, and Ertem Nusret Tas. Batch
+decryption without epochs and its application to encrypted mempools. Cryptology ePrint Archive, 2025.
+
+[10] Paulo S. L. M. Barreto and Michael Naehrig. Pairingfriendly elliptic curves of prime order. In Bart Preneel
+and Stafford Tavares, editors, SAC 2005: 12th Annual
+International Workshop on Selected Areas in Cryptography, volume 3897 of Lecture Notes in Computer Science,
+pages 319–331, Kingston, Ontario, Canada, August 11–
+12, 2006. Springer Berlin Heidelberg, Germany.
+
+[19] Dan Boneh, Ben Lynn, and Hovav Shacham. Short signatures from the Weil pairing. In Colin Boyd, editor, Advances in Cryptology – ASIACRYPT 2001, volume 2248
+of Lecture Notes in Computer Science, pages 514–532,
+Gold Coast, Australia, December 9–13, 2001. Springer
+Berlin Heidelberg, Germany.
+
+[11] Eli Ben-Sasson, Alessandro Chiesa, Christina Garman,
+Matthew Green, Ian Miers, Eran Tromer, and Madars
+Virza. Zerocash: Decentralized anonymous payments
+from Bitcoin. In 2014 IEEE Symposium on Security and
+
+[20] Dan Boneh and Victor Shoup. A graduate course in
+applied cryptography. Draft 0.6, 2023.
+15
+
+[21] Joseph Bonneau, Andrew Miller, Jeremy Clark, Arvind
+Narayanan, Joshua A. Kroll, and Edward W. Felten.
+SoK: Research perspectives and challenges for Bitcoin
+and cryptocurrencies. In 2015 IEEE Symposium on Security and Privacy, pages 104–121, San Jose, CA, USA,
+May 17–21, 2015. IEEE Computer Society Press.
+
+[30] David Chaum. Blind signatures for untraceable payments. In David Chaum, Ronald L. Rivest, and
+Alan T. Sherman, editors, Advances in Cryptology –
+CRYPTO’82, pages 199–203, Santa Barbara, CA, USA,
+1982. Plenum Press, New York, USA.
+[31] David Chaum. Showing credentials without identification transferring signatures between unconditionally unlinkable pseudonyms. In Jennifer Seberry
+and Josef Pieprzyk, editors, Advances in Cryptology
+– AUSCRYPT’90, volume 453 of Lecture Notes in Computer Science, pages 246–264, Sydney, Australia, January 8–11, 1990. Springer Berlin Heidelberg, Germany.
+
+[22] Jan Bormet, Arka Rai Choudhuri, Sebastian Faust, Sanjam Garg, Hussien Othman, Guru-Vamsi Policharla,
+Ziyan Qu, and Mingyuan Wang. Beast-mev: Batched
+threshold encryption with silent setup for mev prevention. Cryptology ePrint Archive, 2025.
+[23] Jan Bormet, Sebastian Faust, Hussien Othman, and
+Ziyan Qu. {BEAT-MEV}: Epochless approach to
+batched threshold encryption for {MEV} prevention.
+In 34th USENIX Security Symposium (USENIX Security
+25), pages 3457–3476, 2025.
+
+[32] David Chaum, Amos Fiat, and Moni Naor. Untraceable
+electronic cash. In Shafi Goldwasser, editor, Advances in
+Cryptology – CRYPTO’88, volume 403 of Lecture Notes
+in Computer Science, pages 319–327, Santa Barbara,
+CA, USA, August 21–25, 1990. Springer, New York,
+USA.
+
+Bls12-381: New zk-snark elliptic
+[24] Sean Bowe.
+curve construction.
+https://electriccoin.co/
+blog/new-snark-curve/, Mar 11 2017. Electric Coin
+Company Blog.
+
+[33] Arka Rai Choudhuri, Sanjam Garg, Julien Piet, and
+Guru-Vamsi Policharla. Mempool privacy via batched
+threshold encryption: Attacks and defenses. In Davide
+Balzarotti and Wenyuan Xu, editors, USENIX Security
+2024: 33rd USENIX Security Symposium, Philadelphia,
+PA, USA, August 14–16, 2024. USENIX Association.
+
+[25] Benedikt Bünz, Shashank Agrawal, Mahdi Zamani, and
+Dan Boneh. Zether: Towards privacy in a smart contract
+world. In Joseph Bonneau and Nadia Heninger, editors,
+FC 2020: 24th International Conference on Financial
+Cryptography and Data Security, volume 12059 of Lecture Notes in Computer Science, pages 423–443, Kota
+Kinabalu, Malaysia, February 10–14, 2020. Springer,
+Cham, Switzerland.
+
+[34] Arka Rai Choudhuri, Sanjam Garg, Guru Vamsi
+Policharla, and Mingyuan Wang. Practical mempool
+privacy via one-time setup batched threshold encryption.
+In 34th USENIX Security Symposium, 2025.
+
+[26] Vitalik Buterin, Jacob Illum, Matthias Nadler, Fabian
+Schär, and Ameen Soleimani. Blockchain privacy and
+regulatory compliance: Towards a practical equilibrium.
+Blockchain: Research and Applications, 5(1):100176,
+2024.
+
+[35] Philip Daian, Steven Goldfeder, Tyler Kell, Yunqi Li,
+Xueyuan Zhao, Iddo Bentov, Lorenz Breidenbach, and
+Ari Juels. Flash boys 2.0: Frontrunning in decentralized
+exchanges, miner extractable value, and consensus instability. In 2020 IEEE symposium on security and privacy
+(SP), pages 910–927. IEEE, 2020.
+
+[27] Christian Cachin, Klaus Kursawe, Frank Petzold, and
+Victor Shoup. Secure and efficient asynchronous broadcast protocols. In Annual International Cryptology Conference, pages 524–541. Springer, 2001.
+
+[36] Alex Davidson, Ian Goldberg, Nick Sullivan, George
+Tankersley, and Filippo Valsorda. Privacy pass: Bypassing internet challenges anonymously. Proceedings
+on Privacy Enhancing Technologies, 2018(3):164–180,
+July 2018.
+
+[28] Matteo Campanelli, Mathias Hall-Andersen, and Simon Holmgaard Kamp. Curve trees: Practical and
+transparent {Zero-Knowledge} accumulators. In 32nd
+USENIX Security Symposium (USENIX Security 23),
+pages 4391–4408, 2023.
+
+[37] Benjamin E. Diamond. Many-out-of-many proofs and
+applications to anonymous zether. In 2021 IEEE Symposium on Security and Privacy, pages 1800–1817, San
+Francisco, CA, USA, May 24–27, 2021. IEEE Computer
+Society Press.
+
+[29] Melissa Chase, F. Betül Durak, and Serge Vaudenay.
+Anonymous tokens with stronger metadata bit hiding
+from algebraic MACs. In Helena Handschuh and
+Anna Lysyanskaya, editors, Advances in Cryptology
+– CRYPTO 2023, Part II, volume 14082 of Lecture
+Notes in Computer Science, pages 418–449, Santa Barbara, CA, USA, August 20–24, 2023. Springer, Cham,
+Switzerland.
+
+[38] Ádám Ficsór, István András Seres, Yuval Kogman, and Lucas Ontivero.
+Wabisabi: Centrally
+Coordinated CoinJoins with Variable Amounts.
+Cryptoeconomic Systems, 1(2), oct 22 2021.
+https://cryptoeconomicsystems.pubpub.org/pub/ficsorwabisabi-coordinated.
+16
+
+[39] Nicolas Gailly, Kelsey Melissaris, and Yolan Romailler.
+tlock: Practical timelock encryption from threshold BLS.
+Cryptology ePrint Archive, Paper 2023/189, 2023.
+
+[48] Ben Kreuter, Tancrède Lepoint, Michele Orrù, and Mariana Raykova. Anonymous tokens with private metadata
+bit. In Daniele Micciancio and Thomas Ristenpart, editors, Advances in Cryptology – CRYPTO 2020, Part I,
+volume 12170 of Lecture Notes in Computer Science,
+pages 308–336, Santa Barbara, CA, USA, August 17–21,
+2020. Springer, Cham, Switzerland.
+
+[40] Pranav Garimidi, Joseph Bonneau, and Lioba Heimbach.
+On the limits of encrypted mempools, July 2025. a16z
+Crypto.
+[41] Jens Groth. On the size of pairing-based non-interactive
+arguments. In Marc Fischlin and Jean-Sébastien Coron,
+editors, Advances in Cryptology – EUROCRYPT 2016,
+Part II, volume 9666 of Lecture Notes in Computer
+Science, pages 305–326, Vienna, Austria, May 8–12,
+2016. Springer Berlin Heidelberg, Germany.
+
+[49] Thomas Lloyd, Daire O’Broin, and Martin Harrigan.
+Emergent outcomes of the vetoken model. In 2023
+IEEE international conference on omni-layer intelligent
+systems (COINS). IEEE, 2023.
+[50] Wouter Lueks, Iñigo Querejeta-Azurmendi, and
+Carmela Troncoso. {VoteAgain}: A scalable coercionresistant voting system. In 29th USENIX security
+symposium (USENIX Security 20), pages 1553–1570,
+2020.
+
+[42] Mike Hamburg. Decaf: Eliminating cofactors through
+point compression. In Rosario Gennaro and Matthew
+J. B. Robshaw, editors, Advances in Cryptology –
+CRYPTO 2015, Part I, volume 9215 of Lecture Notes in
+Computer Science, pages 705–723, Santa Barbara, CA,
+USA, August 16–20, 2015. Springer Berlin Heidelberg,
+Germany.
+
+[51] Gregory Maxwell. Coinjoin: Bitcoin privacy for the real
+world. Bitcointalk Forum, 2013.
+
+[43] Ethan Heilman, Leen Alshenibr, Foteini Baldimtsi,
+Alessandra Scafuro, and Sharon Goldberg. TumbleBit:
+An untrusted Bitcoin-compatible anonymous payment
+hub. In ISOC Network and Distributed System Security Symposium – NDSS 2017, San Diego, CA, USA,
+February 26 – March 1, 2017. The Internet Society.
+
+[52] Sarah Meiklejohn and Rebekah Mercer. Möbius: Trustless tumbling for transaction privacy. Proceedings
+on Privacy Enhancing Technologies, 2018(2):105–121,
+April 2018.
+[53] Sarah Meiklejohn and Claudio Orlandi. Privacyenhancing overlays in Bitcoin. In Michael Brenner,
+Nicolas Christin, Benjamin Johnson, and Kurt Rohloff,
+editors, FC 2015 Workshops, volume 8976 of Lecture
+Notes in Computer Science, pages 127–141, San Juan,
+Puerto Rico, January 30, 2015. Springer Berlin Heidelberg, Germany.
+
+[44] Ethan Heilman, Foteini Baldimtsi, and Sharon Goldberg.
+Blindly signed contracts: Anonymous on-blockchain
+and off-blockchain Bitcoin transactions. In Jeremy
+Clark, Sarah Meiklejohn, Peter Y. A. Ryan, Dan S. Wallach, Michael Brenner, and Kurt Rohloff, editors, FC
+2016 Workshops, volume 9604 of Lecture Notes in Computer Science, pages 43–60, Christ Church, Barbados,
+February 26, 2016. Springer Berlin Heidelberg, Germany.
+
+[54] Sarah Meiklejohn, Marjori Pomarole, Grant Jordan, Kirill Levchenko, Damon McCoy, Geoffrey M Voelker, and
+Stefan Savage. A fistful of bitcoins: characterizing payments among men with no names. In Proceedings of the
+2013 conference on Internet measurement conference,
+pages 127–140, 2013.
+
+[45] Ari Juels, Dario Catalano, and Markus Jakobsson.
+Coercion-resistant electronic elections. In Proceedings
+of the 2005 ACM Workshop on Privacy in the Electronic
+Society, WPES ’05, page 61–70, New York, NY, USA,
+2005. Association for Computing Machinery.
+[46] George Kappos, Haaroon Yousaf, Mary Maller, and
+Sarah Meiklejohn. An empirical analysis of anonymity
+in zcash. In 27th USENIX Security Symposium (USENIX
+Security 18), pages 463–477, 2018.
+
+[55] Ian Miers, Christina Garman, Matthew Green, and
+Aviel D. Rubin. Zerocoin: Anonymous distributed Ecash from Bitcoin. In 2013 IEEE Symposium on Security and Privacy, pages 397–411, Berkeley, CA, USA,
+May 19–22, 2013. IEEE Computer Society Press.
+
+[47] Abhiram Kothapalli, Srinath Setty, and Ioanna Tzialla.
+Nova: Recursive zero-knowledge arguments from folding schemes. In Yevgeniy Dodis and Thomas Shrimpton, editors, Advances in Cryptology – CRYPTO 2022,
+Part IV, volume 13510 of Lecture Notes in Computer
+Science, pages 359–388, Santa Barbara, CA, USA, August 15–18, 2022. Springer, Cham, Switzerland.
+
+[56] Michele Orrù, Stefano Tessaro, Greg Zaverucha, and
+Chenzhi Zhu. Oblivious issuance of proofs. In Leonid
+Reyzin and Douglas Stebila, editors, Advances in Cryptology – CRYPTO 2024, Part IX, volume 14928 of
+Lecture Notes in Computer Science, pages 254–287,
+Santa Barbara, CA, USA, August 18–22, 2024. Springer,
+Cham, Switzerland.
+17
+
+[57] Alexey Pertsev, Roman Semenov, and Roman Storm.
+Tornado cash privacy solution version 1.4, 2019. Accessed: 2026-02-01.
+[58] Privacy and Scaling Explorations.
+MACI, Referenced Jan. 2026.
+
+[67] Victor Shoup. Lower bounds for discrete logarithms and
+related problems. In International Conference on the
+Theory and Applications of Cryptographic Techniques,
+pages 256–266. Springer, 1997.
+
+Introduction to
+
+[68] Shutter Network. Shutter network introduces plan for
+first encrypted mempool on ethereum.
+
+[59] Aztec Protocol. Primitives - Aztec Connect: Grumpkin A curve on top of BN-254 for SNARK efficient group operations. https://tinyurl.com/aztec-grumpkin,
+2024. Elliptic curve used for native recursion in Aztec
+zk-SNARK systems.
+
+[69] Tjerand Silde and Martin Strand. Anonymous tokens
+with public metadata and applications to private contact
+tracing. In Ittay Eyal and Juan A. Garay, editors, FC
+2022: 26th International Conference on Financial Cryptography and Data Security, volume 13411 of Lecture
+Notes in Computer Science, pages 179–199, Grenada,
+May 2–6, 2022. Springer, Cham, Switzerland.
+
+[60] Kaihua Qin, Liyi Zhou, and Arthur Gervais. Quantifying
+blockchain extractable value: How dark is the forest? In
+2022 IEEE Symposium on Security and Privacy (SP),
+pages 198–214. IEEE, 2022.
+
+[70] Sora Suegami, Shinsaku Ashizawa, and Kyohei Shibano.
+Constant-cost batched partial decryption in threshold
+encryption. Cryptology ePrint Archive, 2024.
+
+[61] Michael K Reiter and Kenneth P Birman. How
+to securely replicate services. ACM Transactions
+on Programming Languages and Systems (TOPLAS),
+16(3):986–1009, 1994.
+
+[71] Ertem Nusret Tas, István András Seres, Yinuo Zhang,
+Márk Melczer, Mahimna Kelkar, Joseph Bonneau, and
+Valeria Nikolaenko. Atomic and fair data exchange
+via blockchain. In Proceedings of the 2024 on ACM
+SIGSAC Conference on Computer and Communications
+Security, pages 3227–3241, 2024.
+
+[62] Ronald L. Rivest, Adi Shamir, and Yael Tauman. How
+to leak a secret. In Colin Boyd, editor, Advances in
+Cryptology – ASIACRYPT 2001, volume 2248 of Lecture Notes in Computer Science, pages 552–565, Gold
+Coast, Australia, December 9–13, 2001. Springer Berlin
+Heidelberg, Germany.
+
+[72] Alin Tomescu, Adithya Bhat, Benny Applebaum, Ittai
+Abraham, Guy Gueta, Benny Pinkas, and Avishay Yanai.
+UTT: Decentralized ecash with accountable privacy.
+Cryptology ePrint Archive, Report 2022/452, 2022.
+
+[63] Tim Ruffing, Pedro Moreno-Sanchez, and Aniket Kate.
+CoinShuffle: Practical decentralized coin mixing for
+Bitcoin. In Miroslaw Kutylowski and Jaideep Vaidya,
+editors, ESORICS 2014: 19th European Symposium
+on Research in Computer Security, Part II, volume
+8713 of Lecture Notes in Computer Science, pages 345–
+364, Wroclaw, Poland, September 7–11, 2014. Springer,
+Cham, Switzerland.
+
+[73] Nicolas van Saberhagen. CryptoNote v 2.0. https://
+cryptonote.org/whitepaper.pdf, 2013. The foundational protocol for Monero.
+[74] Ben Weintraub, Christof Ferreira Torres, Cristina NitaRotaru, and Radu State. A flash (bot) in the pan: measuring maximal extractable value in private pools. In
+Proceedings of the 22nd ACM Internet Measurement
+Conference, pages 458–471, 2022.
+
+[64] Amit Sahai and Brent R. Waters. Fuzzy identity-based
+encryption. In Ronald Cramer, editor, Advances in Cryptology – EUROCRYPT 2005, volume 3494 of Lecture
+Notes in Computer Science, pages 457–473, Aarhus,
+Denmark, May 22–26, 2005. Springer Berlin Heidelberg, Germany.
+
+[75] John Wilander. Introducing private click measurement, pcm.
+https://webkit.org/blog/11529/
+introducing-private-click-measurement-pcm/,
+2021. Accessed: 2024-04-29.
+
+[65] Claus-Peter Schnorr. Efficient signature generation by
+smart cards. Journal of Cryptology, 4(3):161–174, January 1991.
+
+A
+
+[66] Srinath Setty. Spartan: Efficient and general-purpose zkSNARKs without trusted setup. In Daniele Micciancio
+and Thomas Ristenpart, editors, Advances in Cryptology – CRYPTO 2020, Part III, volume 12172 of Lecture
+Notes in Computer Science, pages 704–737, Santa Barbara, CA, USA, August 17–21, 2020. Springer, Cham,
+Switzerland.
+
+Additional Preliminaries
+
+Computational assumptions. We make the following computational assumptions for our scheme.
+Definition A.1 (One-more CDH). The one-more computational Diffie-Hellman (omCDH) assumption holds relative to
+18
+
+BLS blind signature [15, 31]. Recall from [31], in a blind signature scheme, a client seeks to get a signature on a message
+m where the signer learns no information about m.
+To obtain a blind signature on a message m ∈ M , the client
+samples a random blinding factor r ← Z p and computes the
+blinded message m̃ = r · H(m) ∈ G2 and sends m̃ to the signer.
+The signer computes a blind signature σ̃ = sk · m̃ = (r · sk) ·
+H(m) ∈ G2 and returns it to the user. The user then unblinds
+the signature by computing σ = (1/r) · σ̃ = sk · H(m) ∈ G2 ,
+which is a valid BLS signature on m. Similar to the BLS
+signature, the security of BLS blind signature also relies on
+the hardness of the co-CDH assumption in the ROM [15].
+
+
+A
+Game GomCDH
+1λ , k :
+1:
+
+ℓ̃ := 0
+
+2:
+
+{z0 , z1 , . . . , zk } ←$ Z p
+
+3:
+
+{Z̃i }i∈[k] ← A O -CDH ([[z0 ]]1 , [[z0 ]]2 , {[[zi ]]1 }i∈[k] )
+
+4:
+
+require ℓ̃ < k ∧ ∀ i ∈ [k] Z̃i = [[z0 · zi ]]1
+
+5:
+
+return 1
+
+Oracle O -CDH(H):
+1:
+
+require H ∈ G1
+
+2:
+
+ℓ̃ := ℓ̃ + 1
+
+3:
+
+return z0 · H
+
+A.2
+
+Commitment Schemes
+
+Figure 8: The one-more computational Diffie-Hellman game
+A
+GomCDH
+.
+
+Definition A.3 (Commitment Scheme). A commitment
+scheme is a tuple of four PPT algorithms Com =
+(Setup, Commit, Open, Verify) defined as follows:
+
+GGen, if for all PPT adversary A , for all k ∈ N, the following
+probability is negligible:
+
+• Setup(1λ ) → ppcom . The setup algorithm outputs public
+parameters ppcom , which are given as an implicit input to
+all subsequent algorithms.
+
+A
+Pr[GomCDH
+(1λ , k) ⇒ 1]
+
+• Commit(m) → (c, d). The commitment algorithm takes a
+message m and outputs a commitment c together with opening information d.
+
+where (G1 , G2 , GT , p, [[1]]1 , [[1]]2 , e) ← GGen(1λ ).
+
+A.1
+
+• Open(c, d) → m. The opening algorithm outputs (m, d).
+
+Digital signatures
+
+• Verify(c, m, d) → 0/1. The verification algorithm outputs
+1 if (m, d) is a valid opening of c, and 0 otherwise.
+
+Definition A.2 (Digital signature). A digital signature
+scheme consists of the following four PPT algorithms DS =
+(Setup, KGen, Sign, Verify), defined as follows:
+
+A commitment scheme must satisfy correctness, hiding,
+and binding properties. We refer the reader to standard references [20] for formal definitions.
+
+• Setup(1λ ) → pp. The setup algorithm that takes as input
+a security parameter λ and outputs system parameters pp.
+These parameters include the description of the message
+space and the key space. All algorithm below implicitly
+takes pp as input.
+
+A.3
+
+Non-Interactive Zero-Knowledge Proofs
+
+We use non-interactive zero-knowledge (NIZK) proof systems
+for proving statements about committed values.
+
+• KGen() → (sk, pk): The key generation algorithm outputs
+a pair of keys (sk, pk), where sk is the secret (signing) key
+and pk is the public (verification) key.
+
+Definition A.4 (NIZK Proof System). A non-interactive zeroknowledge proof system for a relation R consists of four
+PPT algorithms NIZK = (Setup, Prove, Verify, Sim) defined
+as follows:
+
+• Sign(sk, m) → σ: The signing algorithm that takes the secret key sk and a message m, and outputs a signature σ.
+
+• Setup(1λ , R ) → crs. The setup algorithm outputs a common reference string crs.
+
+• Verify(pk, m, σ) → 0/1: The verification algorithm is a deterministic algorithm that takes the public key pk, a message
+m, and a signature σ, and outputs a bit b ∈ {0, 1}. The output b = 1 indicates that the signature is valid, and b = 0
+indicates that it is invalid.
+
+• Prove(crs, x, w) → π. The proving algorithm takes a statement, witness tuple (x, w) ∈ R , and outputs a proof π.
+• Verify(crs, x, π) → 0/1. The verification algorithm checks
+if π is a valid proof for statement x.
+
+A digital signature scheme is secure if it satisfies correctness and unforgeability properties. We refer the reader to [20]
+for formal definitions of these properties.
+In this paper, we will be concretely using the bilinear pairing based BLS signature from [19] and its blinded version
+from [15]. We briefly describe them next.
+
+• Sim(crs, x) → π. The simulator generates a proof for statement x without a witness.
+A NIZK proof system must satisfy completeness, soundness, and zero-knowledge. We refer the reader to standard
+references [20] for formal definitions of these properties.
+19
+
+Requirements: Digital signature DS, pairing groups G := (G1 , G2 , GT , p, [[1]]1 , [[1]]2 , e) ← GGen(1λ ), hash H : {0, 1}∗ → G1 ,
+commitment Com, PRF PRF, and NIZK NIZK for Rseed , where Rseed = {((comseed , X , ℓ); (seed, dseed , r)) :
+Com.Verify(comseed , seed, dseed ) = 1 ∧ ∀i ∈ [ℓ] : (⋆, pkeph,i ) = DS.KGen(ppDS ; PRF(seed, i)) ∧ xi = H(pkeph,i )r }
+Π-ExecuteE (sid, ℓ, stI , stC )
+
+Setup(1λ )
+1:
+
+C:
+
+ppDS ← DS.Setup(1λ )
+
+// Represented by pkc
+
+← Com.Setup(1λ )
+
+1:
+
+parse stC as (⋆, ⋆, pkref , comk , comseed , ⋆)
+
+3:
+
+ppNIZK ← NIZK.Setup(1λ , Rseed )
+4 : return pp := (G , ppDS , ppCom , ppNIZK )
+
+2:
+
+send (sid, pkref , comk , comseed ) to E
+
+IssKGen, Register, Retire
+
+I : // Represented by pkiss
+require E .bal[pkc ] ≥ ℓ
+3:
+
+2:
+
+ppCom
+
+4:
+
+require stI .sessions[sid] = (comk , comseed , ℓ, ⋆)
+
+5:
+
+require 2(stI .Niss + ℓ) ≤ ℓiss
+
+6:
+
+stI .Niss := stI .Niss + ℓ // stI .Niss initialized to 0
+
+7:
+
+parse stI .sessions[sid] as (⋆, ⋆, ⋆, k)
+
+(comseed , dseed ) ← Com.Commit(seed)
+{(skeph,i , pkeph,i ) := DS.KGen(ppDS ; PRF(seed, i))}i∈[ℓ]
+
+8:
+
+send (sid, k) to E
+
+9:
+
+E : require pkiss ∈/ E .retired
+
+4:
+
+r ←$ Z p ; X := {r · H(pkeph,i )}i∈[ℓ]
+
+10 :
+
+require k · pkiss = comk
+
+5:
+
+π ← NIZK.Prove(Rseed , (comseed , X , ℓ), (seed, dseed , r))
+
+11 :
+
+require E .Niss[pkiss ] + ℓ ≤
+
+6:
+
+send (sid, comseed , X , ℓ, π) to I
+
+12 :
+
+E .Niss[pkiss ] := E .Niss[pkiss ] + ℓ
+E .bal[pkc ] := E .bal[pkc ] − ℓ // Burn ℓ ETH
+E .sessions[sid] := (pkref , comk , comseed , ℓ)
+
+1:
+
+Same as Figure 7
+
+Π-MIssue(pkiss , ℓ, skiss , stI )
+1:
+2:
+3:
+
+7:
+8:
+
+C : sid ←$ {0, 1}λ ; seed ←$ {0, 1}λ
+
+I : require sid ∈/ stI .sessions
+require NIZK.Verify(Rseed , (comseed , X , ℓ), π) = 1
+
+9:
+
+k ←$ Z p ; comk ← k · pkiss
+
+10 :
+11 :
+
+stI .sessions[sid] := (comk , comseed , ℓ, k)
+{σ̃i := (k · skiss ) · Xi }i∈[ℓ]
+
+12 :
+
+send ({σ̃i }i∈[ℓ] , comk ) to C
+
+13 :
+14 :
+15 :
+16 :
+17 :
+
+13 :
+14 :
+
+C:
+15 :
+
+C : require ∀i ∈ [ℓ] : σ̃i ◦ [[1]]2 = Xi ◦ comk
+
+2
+
+// Use k to unmask pre-tokens
+
+
+parse stC as {σ̃i , skeph,i , pkeph,i }i∈[ℓ] , ⋆, ⋆, ⋆, ⋆, w
+
+16 :
+
+parse w as (r, ⋆, ⋆)
+
+17 :
+
+return {σi := ((ri · k)−1 · σ̃i , skeph,i , pkeph,i )}i∈[ℓ]
+
+RefundE (sid, ℓref , stC )
+
+(skref , pkref ) ← DS.KGen(ppDS )
+w := (r, seed, dseed )
+
+
+{σ̃i , skeph,i , pkeph,i }i∈[ℓ] ,
+stC :=
+skref , pkref , comk , comseed , w
+return (sid, stC )
+
+TokGen, Spend
+1:
+
+E .esc[pkiss ]
+
+1:
+
+C : parse stC as (⋆, skref , ⋆, ⋆, ⋆, w)
+
+2:
+
+parse w as (⋆, seed, dseed )
+
+3:
+
+γref ← DS.Sign(skref , (sid, ℓref , seed, dseed ))
+
+4:
+
+send (sid, ℓref , seed, dseed , γref ) to E
+
+E : require DS.Verify(pkref , (sid, ℓref , seed, dseed ), γref ) = 1
+require sid ∈ E .sessions and sid ∈
+/ E .refundset
+parse E .sessions[sid] as (pkref , comk , comseed , ℓ)
+7:
+require ℓref ≤ ℓ and pkiss ∈
+/ E .retired
+8:
+5:
+
+6:
+
+Same as Figure 7
+
+9:
+
+require Com.Verify(comseed , seed, dseed ) = 1
+
+10 :
+
+for i ∈ (ℓ − ℓref , ℓ]:
+(⋆, pkeph,i ) ← DS.KGen(ppDS ; PRF(seed, i))
+
+11 :
+
+for i ∈ (ℓ − ℓref , ℓ] : require pkeph,i ∈
+/ Nullifiers
+
+12 :
+
+E .bal[pkref ] := E .bal[pkref ] + ℓref // Mint ℓref ETH
+E .Nref[pkiss ] := E .Nref[pkiss ] + ℓref
+E .refundset := E .refundset ∪ {sid}
+E .Nullifiers := E .Nullifiers ∪ {pkeph,i |i ∈ (ℓ − ℓref , ℓ]}
+
+13 :
+14 :
+15 :
+
+Figure 9: BAT protocol with compact issuance and refunds based on revealing the seed. C : denotes actions by the client, I : by
+the issuer, and E : by the environment E . Additional parts compared to Figure 7 are marked in blue.
+20
+
+
