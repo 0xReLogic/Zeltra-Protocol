@@ -12,13 +12,44 @@ use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
 use std::collections::HashMap;
 
 // Shared memory database for simulation
-#[derive(Clone, Default)]
+#[derive(Clone)]
 struct AppState {
     sessions: Arc<Mutex<Vec<Session>>>,
     spend_queue: Arc<Mutex<Vec<SpendRequest>>>,
     nullifiers: Arc<Mutex<Vec<String>>>,
     /// Offline claims indexed by token_id for double-spend detection (Fase D).
     offline_claims: Arc<Mutex<HashMap<String, Vec<OfflineClaim>>>>,
+    share_sk: Arc<nimbus_core::Fr>,
+    share_index: u32,
+}
+
+impl AppState {
+    fn new() -> Self {
+        let share_index = std::env::var("NIMBUS_SHARE_INDEX")
+            .unwrap_or_else(|_| "1".to_string())
+            .parse::<u32>()
+            .unwrap_or(1);
+            
+        let share_sk = if let Ok(hex_str) = std::env::var("NIMBUS_SHARE_KEY") {
+            if let Ok(bytes) = hex::decode(&hex_str) {
+                nimbus_core::deserialize_from_bytes(&bytes)
+                    .unwrap_or_else(|| nimbus_core::Fr::from(12345u64))
+            } else {
+                nimbus_core::Fr::from(12345u64)
+            }
+        } else {
+            nimbus_core::Fr::from(12345u64)
+        };
+
+        Self {
+            sessions: Arc::new(Mutex::new(Vec::new())),
+            spend_queue: Arc::new(Mutex::new(Vec::new())),
+            nullifiers: Arc::new(Mutex::new(Vec::new())),
+            offline_claims: Arc::new(Mutex::new(HashMap::new())),
+            share_sk: Arc::new(share_sk),
+            share_index,
+        }
+    }
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -180,7 +211,7 @@ struct SyncClaimsResponse {
 
 #[tokio::main]
 async fn main() {
-    let state = AppState::default();
+    let state = AppState::new();
 
     // Spawn background worker to batch and process spends every 2 seconds
     let worker_state = state.clone();
@@ -198,6 +229,8 @@ async fn main() {
         .route("/api/spend", post(handle_spend))
         .route("/api/x402/verify", post(handle_x402_verify))
         .route("/api/pos/sync-claims", post(handle_sync_claims))
+        .route("/api/sign-share", post(handle_sign_share))
+        .route("/api/leader/sign", post(handle_leader_sign))
         .with_state(state);
 
     let listener = tokio::net::TcpListener::bind("127.0.0.1:8080").await.unwrap();
@@ -606,4 +639,218 @@ trait TokioSleepExt {
 }
 impl<T> TokioSleepExt for T {
     fn async_wait(self) -> Self { self }
+}
+
+#[derive(Deserialize, Serialize)]
+struct SignShareRequest {
+    blinded_hex: String,
+    k_hex: String,
+    share_sk_hex: Option<String>,
+}
+
+#[derive(Serialize, Deserialize)]
+struct SignShareResponse {
+    status: String,
+    signature_share_hex: String,
+}
+
+#[derive(Deserialize)]
+struct LeaderSignRequest {
+    blinded_hex: String,
+    guardian_urls: Vec<String>,
+    pk_iss_hex: Option<String>,
+}
+
+#[derive(Serialize)]
+struct PartialSignatureInfo {
+    index: u32,
+    signature_hex: String,
+}
+
+#[derive(Serialize)]
+struct LeaderSignResponse {
+    status: String,
+    com_k_hex: String,
+    k_hex: String,
+    partial_signatures: Vec<PartialSignatureInfo>,
+}
+
+async fn handle_sign_share(
+    axum::extract::State(state): axum::extract::State<AppState>,
+    Json(payload): Json<SignShareRequest>,
+) -> Json<SignShareResponse> {
+    use nimbus_core::*;
+
+    let blinded_bytes = match hex::decode(&payload.blinded_hex) {
+        Ok(b) => b,
+        Err(e) => return Json(SignShareResponse {
+            status: "ERROR".to_string(),
+            signature_share_hex: format!("Invalid blinded hex: {}", e),
+        }),
+    };
+
+    let k_bytes = match hex::decode(&payload.k_hex) {
+        Ok(b) => b,
+        Err(e) => return Json(SignShareResponse {
+            status: "ERROR".to_string(),
+            signature_share_hex: format!("Invalid k hex: {}", e),
+        }),
+    };
+
+    let blinded: BlindedMessage = match deserialize_from_bytes(&blinded_bytes) {
+        Some(x) => x,
+        None => return Json(SignShareResponse {
+            status: "ERROR".to_string(),
+            signature_share_hex: "Failed to deserialize blinded message".to_string(),
+        }),
+    };
+
+    let k: Fr = match deserialize_from_bytes(&k_bytes) {
+        Some(val) => val,
+        None => return Json(SignShareResponse {
+            status: "ERROR".to_string(),
+            signature_share_hex: "Failed to deserialize masking key k".to_string(),
+        }),
+    };
+
+    let share_sk = if let Some(override_hex) = &payload.share_sk_hex {
+        if let Ok(bytes) = hex::decode(override_hex) {
+            deserialize_from_bytes(&bytes).unwrap_or(*state.share_sk)
+        } else {
+            *state.share_sk
+        }
+    } else {
+        *state.share_sk
+    };
+
+    let sig_share = sign_share(&share_sk, &blinded, &k);
+    let sig_share_hex = hex::encode(serialize_to_bytes(&sig_share));
+
+    Json(SignShareResponse {
+        status: "SUCCESS".to_string(),
+        signature_share_hex: sig_share_hex,
+    })
+}
+
+async fn handle_leader_sign(
+    axum::extract::State(state): axum::extract::State<AppState>,
+    Json(payload): Json<LeaderSignRequest>,
+) -> Json<LeaderSignResponse> {
+    use nimbus_core::*;
+
+    let blinded_bytes = match hex::decode(&payload.blinded_hex) {
+        Ok(b) => b,
+        Err(e) => return Json(LeaderSignResponse {
+            status: format!("ERROR: Invalid blinded hex: {}", e),
+            com_k_hex: String::new(),
+            k_hex: String::new(),
+            partial_signatures: vec![],
+        }),
+    };
+
+    let blinded: BlindedMessage = match deserialize_from_bytes(&blinded_bytes) {
+        Some(x) => x,
+        None => return Json(LeaderSignResponse {
+            status: "ERROR: Failed to deserialize blinded message".to_string(),
+            com_k_hex: String::new(),
+            k_hex: String::new(),
+            partial_signatures: vec![],
+        }),
+    };
+
+    let k = Fr::rand(&mut rand::thread_rng());
+
+    let pk_iss = if let Some(pk_hex) = &payload.pk_iss_hex {
+        if let Ok(bytes) = hex::decode(pk_hex) {
+            deserialize_from_bytes(&bytes).unwrap_or_else(|| {
+                let sk_iss = IssuerSecretKey(*state.share_sk);
+                sk_iss.public_key()
+            })
+        } else {
+            let sk_iss = IssuerSecretKey(*state.share_sk);
+            sk_iss.public_key()
+        }
+    } else {
+        let sk_iss = IssuerSecretKey(*state.share_sk);
+        sk_iss.public_key()
+    };
+
+    let com_k = pk_iss.0 * k;
+    let leader_share_sig = sign_share(&state.share_sk, &blinded, &k);
+
+    let mut partial_signatures = vec![
+        PartialSignatureInfo {
+            index: state.share_index,
+            signature_hex: hex::encode(serialize_to_bytes(&leader_share_sig)),
+        }
+    ];
+
+    let client_body = serde_json::to_string(&SignShareRequest {
+        blinded_hex: payload.blinded_hex.clone(),
+        k_hex: hex::encode(serialize_to_bytes(&k)),
+        share_sk_hex: None,
+    }).unwrap();
+
+    for (idx, url) in payload.guardian_urls.iter().enumerate() {
+        let target_url = format!("{}/api/sign-share", url.trim_end_matches('/'));
+        match post_http(&target_url, &client_body).await {
+            Ok(response_body) => {
+                if let Ok(res) = serde_json::from_str::<SignShareResponse>(&response_body) {
+                    if res.status == "SUCCESS" {
+                        partial_signatures.push(PartialSignatureInfo {
+                            index: (idx + 2) as u32,
+                            signature_hex: res.signature_share_hex,
+                        });
+                    }
+                }
+            }
+            Err(e) => {
+                println!("RELAYER: Error calling Guardian at {}: {}", url, e);
+            }
+        }
+    }
+
+    Json(LeaderSignResponse {
+        status: "SUCCESS".to_string(),
+        com_k_hex: hex::encode(serialize_to_bytes(&MaskingKeyCommitment(com_k))),
+        k_hex: hex::encode(serialize_to_bytes(&MaskingKey(k))),
+        partial_signatures,
+    })
+}
+
+async fn post_http(url: &str, body: &str) -> Result<String, String> {
+    let clean_url = url.trim_start_matches("http://").trim_start_matches("https://");
+    let parts: Vec<&str> = clean_url.splitn(2, '/').collect();
+    let host_port = parts[0];
+    let path = if parts.len() > 1 { format!("/{}", parts[1]) } else { "/".to_string() };
+    
+    let mut stream = tokio::net::TcpStream::connect(host_port)
+        .await
+        .map_err(|e| format!("Connect failed: {}", e))?;
+        
+    let request_str = format!(
+        "POST {} HTTP/1.1\r\n\
+         Host: {}\r\n\
+         Content-Type: application/json\r\n\
+         Content-Length: {}\r\n\
+         Connection: close\r\n\r\n\
+         {}",
+        path, host_port, body.len(), body
+    );
+    
+    use tokio::io::{AsyncWriteExt, AsyncReadExt};
+    stream.write_all(request_str.as_bytes())
+        .await
+        .map_err(|e| format!("Write failed: {}", e))?;
+        
+    let mut response = String::new();
+    stream.read_to_string(&mut response)
+        .await
+        .map_err(|e| format!("Read failed: {}", e))?;
+        
+    if let Some(pos) = response.find("\r\n\r\n") {
+        Ok(response[pos + 4..].to_string())
+    } else {
+        Err("Invalid HTTP response format".to_string())
+    }
 }
