@@ -145,3 +145,38 @@ Untuk mengatasi celah ini, Nimbus mengimplementasikan dua pengaman dinamis pada 
 2. **Congestion-Based Dynamic Premium (Congestion Pricing)**: Biaya premi likuiditas ($P$) berskala secara dinamis dari **0.05%** (base rate 5 bps) hingga **0.15%** (max rate 15 bps) berdasarkan tingkat utilitas pool LP ($U$):
    $$P = P_{\text{base}} + U \times (P_{\text{max}} - P_{\text{base}})$$
    Dengan demikian, semakin menipis likuiditas di pool LP, semakin mahal biaya yang harus dibayar untuk melakukan transaksi Fast-Path. Ini secara ekonomis membuat serangan pengurasan likuiditas (Liquidity Exhaustion Attack) menjadi tidak menguntungkan (*unprofitable*) bagi penyerang yang rasional.
+
+---
+
+## 5. Integrasi DeFi & RWA Yield (Rasio Brankas Bertingkat 30/50/20)
+
+Untuk meningkatkan efisiensi modal dan menghasilkan yield berkelanjutan bagi Treasury protokol, Nimbus menerapkan **Tiered Vault Model (30/50/20)**:
+- **30% Cash (USDC)**: Disimpan langsung di dalam kontrak untuk menangani penarikan instan berukuran kecil/sedang.
+- **50% Aave V3 Supply (aUSDC)**: Disuplai secara otomatis ke protokol pasar likuiditas Aave V3 untuk mendapatkan bunga APY dinamis (~3%-4%).
+- **20% RWA T-Bills (Ondo USDY / BlackRock BUIDL)**: Disuplai secara otomatis ke instrumen beragun Surat Utang AS untuk APY stabil tingkat tinggi (~5%).
+
+### A. Interface Protokol Eksternal
+Kontrak berinteraksi dengan Aave V3 dan penerbit RWA melalui interface berikut:
+```rust
+sol_interface! {
+    interface IAavePool {
+        function supply(address asset, uint256 amount, address onBehalfOf, uint16 referralCode) external;
+        function withdraw(address asset, uint256 amount, address to) external returns (uint256);
+    }
+
+    interface IRwaToken {
+        function deposit(uint256 amount) external returns (uint256);
+        function redeem(uint256 amount) external returns (uint256);
+    }
+}
+```
+
+### B. Cascading Liquidity Buffer (Peredam Likuiditas Bertingkat)
+Berdasarkan makalah ilmiah *Mitigating Liquidity Shortfalls in Multi-Chain Bridges (Liu 2026)*, untuk mencegah kegagalan penarikan akibat menipisnya kas liquid, Nimbus menerapkan strategi **Cascading Liquidity Buffer** saat pemrosesan `spend()`, `claim_refund()`, atau penarikan yield:
+1. **Tier 1 (Cash)**: Menggunakan saldo USDC kontrak. Jika saldo mencukupi, transaksi selesai seketika.
+2. **Tier 2 (Aave - Instant Liquidity)**: Jika terjadi *shortfall* (kekurangan USDC), kontrak akan menarik sisa kekurangan tersebut dari Aave V3 secara otomatis.
+3. **Tier 3 (RWA - Reserve Tier)**: Jika kas dan Aave masih belum mencukupi, kontrak akan melakukan penarikan dari RWA T-Bills (Ondo USDY/BlackRock BUIDL) sebagai lapis pertahanan terakhir.
+
+### C. Alokasi Otomatis & Penarikan APY Yield
+*   **Alokasi saat Deposit**: Setiap kali pengguna memanggil `deposit()`, dana bersih setelah dipotong biaya minting otomatis didistribusikan: 30% tetap sebagai kas liquid, 50% dikirim ke Aave (`supply`), dan 20% dikirim ke RWA (`deposit`).
+*   **Klaim Yield Protokol**: APY yield yang terakumulasi di atas saldo pokok setoran pengguna (`total_deposited_principal`) dapat ditarik oleh administrator protokol menggunakan method `claim_accumulated_yield()`, yang kemudian secara otomatis ditransfer ke alamat `fee_recipient`.

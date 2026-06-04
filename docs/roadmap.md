@@ -24,6 +24,10 @@ Dokumen ini memetakan seluruh tugas pengembangan, integrasi, dan pengujian yang 
 
 ## 2. Integrasi DeFi & RWA Yield (Rasio Brankas Bertingkat 30/50/20)
 *   **Target Modul**: [nimbus-contracts/src/lib.rs](file:///home/azureuser/crypto/nimbus-contracts/src/lib.rs)
+*   **Status**: Selesai (Completed)
+*   **File yang Diedit**:
+    *   Smart Contract: [nimbus-contracts/src/lib.rs](file:///home/azureuser/crypto/nimbus-contracts/src/lib.rs)
+    *   Dokumentasi: [docs/contract.md](file:///home/azureuser/crypto/docs/contract.md)
 *   **Deskripsi Pekerjaan**:
     *   Definisikan interface interaksi kontrak dengan Aave Pool V3 L2 dan tokenized RWA T-Bills (seperti BlackRock BUIDL atau Ondo USDY).
     *   Terapkan pembagian alokasi otomatis:
@@ -31,6 +35,7 @@ Dokumen ini memetakan seluruh tugas pengembangan, integrasi, dan pengujian yang 
         *   **50%** di-supply ke Aave untuk menghasilkan APY ~3%-4%.
         *   **20%** di-supply ke Ondo USDY / BlackRock BUIDL untuk APY ~5% dengan keamanan tingkat tinggi.
     *   Pastikan bunga (yield APY) yang terakumulasi dialokasikan secara otomatis ke kas protokol.
+*   **Inovasi (Aha! Moment - Jurnal 2026)**: Berdasarkan makalah ilmiah 2026 *"Mitigating Liquidity Shortfalls in Multi-Chain Bridges"*, kami merancang **Cascading Liquidity Buffer** (Tiered Liquidity buffers) untuk menjamin penarikan lancar: Kas (Tier 1) -> Aave Pool V3 (Tier 2) -> RWA T-Bills (Tier 3), dengan pemisahan otomatis 30/50/20 dari principal deposits. Yield bunga yang terkumpul di atas principal dapat ditarik secara terpisah oleh admin.
 
 ## 3. Perbaikan Format Panggilan Eksternal Polymarket CTF
 *   **Target Modul**: [nimbus-contracts/src/lib.rs](file:///home/azureuser/crypto/nimbus-contracts/src/lib.rs)

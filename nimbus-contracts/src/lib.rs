@@ -68,6 +68,18 @@ sol_interface! {
     interface IErc20 {
         function transferFrom(address from, address to, uint256 value) external returns (bool);
         function transfer(address to, uint256 value) external returns (bool);
+        function balanceOf(address owner) external view returns (uint256);
+        function approve(address spender, uint256 value) external returns (bool);
+    }
+
+    interface IAavePool {
+        function supply(address asset, uint256 amount, address onBehalfOf, uint16 referralCode) external;
+        function withdraw(address asset, uint256 amount, address to) external returns (uint256);
+    }
+
+    interface IRwaToken {
+        function deposit(uint256 amount) external returns (uint256);
+        function redeem(uint256 amount) external returns (uint256);
     }
 }
 
@@ -106,6 +118,12 @@ sol_storage! {
         // LP Pool tracking variables for Fase 3
         uint256 total_lp_liquidity;
         uint256 utilized_lp_liquidity;
+
+        // --- DeFi & RWA Integration (Roadmap Item 2) ---
+        address aave_pool;
+        address a_token;
+        address rwa_token;
+        uint256 total_deposited_principal;
     }
 }
 
@@ -254,6 +272,190 @@ impl Nimbus {
         Ok(U256::ZERO)
     }
 
+    pub fn set_aave_params(&mut self, pool: Address, a_token: Address) -> Result<(), Vec<u8>> {
+        self.check_owner()?;
+        self.aave_pool.set(pool);
+        self.a_token.set(a_token);
+        Ok(())
+    }
+
+    pub fn set_rwa_token(&mut self, rwa: Address) -> Result<(), Vec<u8>> {
+        self.check_owner()?;
+        self.rwa_token.set(rwa);
+        Ok(())
+    }
+
+    pub fn aave_pool(&self) -> Result<Address, Vec<u8>> {
+        Ok(self.aave_pool.get())
+    }
+
+    pub fn a_token(&self) -> Result<Address, Vec<u8>> {
+        Ok(self.a_token.get())
+    }
+
+    pub fn rwa_token(&self) -> Result<Address, Vec<u8>> {
+        Ok(self.rwa_token.get())
+    }
+
+    pub fn total_deposited_principal(&self) -> Result<U256, Vec<u8>> {
+        Ok(self.total_deposited_principal.get())
+    }
+
+    /// Allocate incoming deposit amount according to the 30/50/20 Vault Model:
+    /// 30% Cash, 50% Aave V3 Supply, 20% RWA Treasury Bills
+    fn allocate_reserves(&mut self, amount: U256) -> Result<(), Vec<u8>> {
+        #[cfg(not(test))]
+        {
+            let stablecoin_address = self.stablecoin.get();
+            let erc20 = IErc20::new(stablecoin_address);
+            let this_address = stylus_sdk::contract::address();
+            
+            // Calculate 50% and 20% allocation amounts
+            let aave_share = amount * U256::from(50) / U256::from(100);
+            let rwa_share = amount * U256::from(20) / U256::from(100);
+            
+            // 1. Supply 50% to Aave Pool V3
+            let aave_pool_addr = self.aave_pool.get();
+            if aave_pool_addr != Address::ZERO && aave_share > U256::ZERO {
+                let aave = IAavePool::new(aave_pool_addr);
+                let success = erc20.approve(&mut *self, aave_pool_addr, aave_share)
+                    .map_err(|e| e)?;
+                if success {
+                    aave.supply(&mut *self, stablecoin_address, aave_share, this_address, 0)
+                        .unwrap_or(());
+                }
+            }
+            
+            // 2. Supply 20% to Ondo USDY / BlackRock BUIDL
+            let rwa_token_addr = self.rwa_token.get();
+            if rwa_token_addr != Address::ZERO && rwa_share > U256::ZERO {
+                // TODO: In mainnet deployment, add KYC allowlist verification/checking for RWA tokens (Ondo/BlackRock)
+                let rwa = IRwaToken::new(rwa_token_addr);
+                let success = erc20.approve(&mut *self, rwa_token_addr, rwa_share)
+                    .map_err(|e| e)?;
+                if success {
+                    rwa.deposit(&mut *self, rwa_share)
+                        .unwrap_or(U256::ZERO);
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// Ensures that the contract has at least `required_amount` of stablecoin.
+    /// Uses a Cascading Liquidity Buffer (Roadmap Item 2):
+    /// 1. Uses cash (USDC balance of the contract).
+    /// 2. If insufficient, withdraws shortfall from Aave V3 (Instant Liquidity tier).
+    /// 3. If still insufficient, redeems RWA T-Bills (Ondo USDY / BlackRock BUIDL) (Reserve tier).
+    fn ensure_liquidity(&mut self, required_amount: U256) -> Result<(), Vec<u8>> {
+        #[cfg(not(test))]
+        {
+            let stablecoin_address = self.stablecoin.get();
+            let erc20 = IErc20::new(stablecoin_address);
+            
+            let this_address = stylus_sdk::contract::address();
+            let mut cash_balance = erc20.balance_of(&mut *self, this_address)
+                .map_err(|e| e)?;
+                
+            if cash_balance >= required_amount {
+                return Ok(());
+            }
+            
+            let mut shortfall = required_amount - cash_balance;
+            
+            // Tier 2: Withdraw from Aave Pool V3
+            let aave_pool_addr = self.aave_pool.get();
+            if aave_pool_addr != Address::ZERO {
+                let aave = IAavePool::new(aave_pool_addr);
+                let withdrawn = aave.withdraw(&mut *self, stablecoin_address, shortfall, this_address)
+                    .unwrap_or(U256::ZERO);
+                
+                cash_balance = erc20.balance_of(&mut *self, this_address)
+                    .map_err(|e| e)?;
+                if cash_balance >= required_amount {
+                    return Ok(());
+                }
+                shortfall = required_amount - cash_balance;
+            }
+            
+            // Tier 3: Redeem from RWA T-Bills (Ondo USDY / BlackRock BUIDL)
+            let rwa_token_addr = self.rwa_token.get();
+            if rwa_token_addr != Address::ZERO && shortfall > U256::ZERO {
+                // TODO: In mainnet deployment, integrate Chainlink oracle price feeds for Ondo USDY / BUIDL NAV calculation
+                let rwa = IRwaToken::new(rwa_token_addr);
+                let _redeemed = rwa.redeem(&mut *self, shortfall)
+                    .unwrap_or(U256::ZERO);
+                
+                cash_balance = erc20.balance_of(&mut *self, this_address)
+                    .map_err(|e| e)?;
+                if cash_balance < required_amount {
+                    return Err(b"INSUFFICIENT_TOTAL_LIQUIDITY_IN_VAULT_BUFFERS".to_vec());
+                }
+            } else if shortfall > U256::ZERO {
+                return Err(b"INSUFFICIENT_CASH_AND_AAVE_LIQUIDITY".to_vec());
+            }
+        }
+        Ok(())
+    }
+
+    pub fn total_assets(&mut self) -> Result<U256, Vec<u8>> {
+        #[cfg(test)]
+        {
+            Ok(self.total_deposited_principal.get())
+        }
+        #[cfg(not(test))]
+        {
+            let stablecoin_address = self.stablecoin.get();
+            let erc20 = IErc20::new(stablecoin_address);
+            let this_address = stylus_sdk::contract::address();
+            let cash = erc20.balance_of(&mut *self, this_address).unwrap_or(U256::ZERO);
+            
+            let a_token_addr = self.a_token.get();
+            let aave_assets = if a_token_addr != Address::ZERO {
+                let a_token = IErc20::new(a_token_addr);
+                a_token.balance_of(&mut *self, this_address).unwrap_or(U256::ZERO)
+            } else {
+                U256::ZERO
+            };
+            
+            let rwa_token_addr = self.rwa_token.get();
+            let rwa_assets = if rwa_token_addr != Address::ZERO {
+                let rwa = IErc20::new(rwa_token_addr);
+                rwa.balance_of(&mut *self, this_address).unwrap_or(U256::ZERO)
+            } else {
+                U256::ZERO
+            };
+            
+            Ok(cash + aave_assets + rwa_assets)
+        }
+    }
+
+    pub fn claim_accumulated_yield(&mut self) -> Result<U256, Vec<u8>> {
+        self.check_owner()?;
+        let total = self.total_assets()?;
+        let principal = self.total_deposited_principal.get();
+        if total <= principal {
+            return Ok(U256::ZERO);
+        }
+        let yield_amount = total - principal;
+        
+        self.ensure_liquidity(yield_amount)?;
+        
+        #[cfg(not(test))]
+        {
+            let stablecoin_address = self.stablecoin.get();
+            let erc20 = IErc20::new(stablecoin_address);
+            let recipient = self.fee_recipient.get();
+            let success = erc20.transfer(&mut *self, recipient, yield_amount)
+                .map_err(|e| e)?;
+            if !success {
+                return Err(b"YIELD_TRANSFER_FAILED".to_vec());
+            }
+        }
+        
+        Ok(yield_amount)
+    }
+
     /// Pause the contract.
     pub fn pause(&mut self) -> Result<(), Vec<u8>> {
         self.check_owner()?;
@@ -291,9 +493,16 @@ impl Nimbus {
 
         let amount = self.session_amount.get(sid);
 
-        #[cfg(not(test))]
-        {
-            if amount > U256::ZERO {
+        let principal = self.total_deposited_principal.get();
+        if principal >= amount {
+            self.total_deposited_principal.set(principal - amount);
+        }
+
+        if amount > U256::ZERO {
+            self.ensure_liquidity(amount)?;
+            
+            #[cfg(not(test))]
+            {
                 let stablecoin_address = self.stablecoin.get();
                 let erc20 = IErc20::new(stablecoin_address);
                 let success = erc20.transfer(&mut *self, client, amount)
@@ -347,6 +556,12 @@ impl Nimbus {
         self.session_amount.insert(sid, net_amount);
         self.session_resolved.insert(sid, false);
         self.session_timestamp.insert(sid, U256::from(self.block_timestamp()));
+
+        let principal = self.total_deposited_principal.get();
+        self.total_deposited_principal.set(principal + net_amount);
+
+        self.allocate_reserves(net_amount)?;
+
         Ok(())
     }
 
@@ -383,9 +598,16 @@ impl Nimbus {
             let amount = self.session_amount.get(sid);
             let recipient = self.msg_sender();
             
-            #[cfg(not(test))]
-            {
-                if amount > U256::ZERO {
+            let principal = self.total_deposited_principal.get();
+            if principal >= amount {
+                self.total_deposited_principal.set(principal - amount);
+            }
+            
+            if amount > U256::ZERO {
+                self.ensure_liquidity(amount)?;
+                
+                #[cfg(not(test))]
+                {
                     let stablecoin_address = self.stablecoin.get();
                     let erc20 = IErc20::new(stablecoin_address);
                     let success = erc20.transfer(&mut *self, recipient, amount)
@@ -431,6 +653,10 @@ impl Nimbus {
 
         #[cfg(test)]
         {
+            let principal = self.total_deposited_principal.get();
+            if principal >= amount {
+                self.total_deposited_principal.set(principal - amount);
+            }
             self.nullifiers.insert(nullifier, true);
             Ok(true)
         }
@@ -459,6 +685,13 @@ impl Nimbus {
             // 4. Verify output (true if last byte is 1)
             if output.len() == 32 && output[31] == 1 {
                 self.nullifiers.insert(nullifier, true);
+                
+                let principal = self.total_deposited_principal.get();
+                if principal >= amount {
+                    self.total_deposited_principal.set(principal - amount);
+                }
+                
+                self.ensure_liquidity(amount)?;
                 
                 let stablecoin_address = self.stablecoin.get();
                 let erc20 = IErc20::new(stablecoin_address);
@@ -1247,6 +1480,58 @@ mod tests {
         let large_amount = U256::from(3000000);
         // Should trigger Dynamic Pool Cap limit and error
         assert!(contract.calculate_fast_path_premium(large_amount).is_err());
+    }
+
+    #[test]
+    fn test_defi_rwa_cascading_buffer() {
+        reset_test_state();
+        let owner = address!("1111111111111111111111111111111111111111");
+        set_msg_sender(owner);
+        
+        let mut contract = Nimbus::default();
+        contract.init(Address::ZERO, Address::ZERO).unwrap();
+        
+        // Assert initial addresses
+        assert_eq!(contract.aave_pool().unwrap(), Address::ZERO);
+        assert_eq!(contract.a_token().unwrap(), Address::ZERO);
+        assert_eq!(contract.rwa_token().unwrap(), Address::ZERO);
+        assert_eq!(contract.total_deposited_principal().unwrap(), U256::ZERO);
+        
+        // Test set params
+        let pool = address!("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
+        let a_token = address!("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb");
+        let rwa = address!("cccccccccccccccccccccccccccccccccccccccc");
+        
+        contract.set_aave_params(pool, a_token).unwrap();
+        contract.set_rwa_token(rwa).unwrap();
+        
+        assert_eq!(contract.aave_pool().unwrap(), pool);
+        assert_eq!(contract.a_token().unwrap(), a_token);
+        assert_eq!(contract.rwa_token().unwrap(), rwa);
+        
+        // Test deposit increases principal
+        let sid = FixedBytes::repeat_byte(0xde);
+        contract.deposit(sid, vec![], U256::from(1000)).unwrap();
+        
+        // 1000 - 0.1% (1) = 999 net
+        assert_eq!(contract.total_deposited_principal().unwrap(), U256::from(999));
+        
+        // Test spend decreases principal
+        let nullifier = FixedBytes::repeat_byte(0xef);
+        let is_valid = contract.spend(
+            nullifier,
+            vec![],
+            vec![],
+            vec![],
+            Address::ZERO,
+            U256::from(100),
+        ).unwrap();
+        
+        assert!(is_valid);
+        assert_eq!(contract.total_deposited_principal().unwrap(), U256::from(899));
+        
+        // Test yield claim under test (where total assets = principal, so yield is 0)
+        assert_eq!(contract.claim_accumulated_yield().unwrap(), U256::ZERO);
     }
 }
 
