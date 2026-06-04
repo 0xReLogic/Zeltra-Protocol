@@ -115,8 +115,13 @@ sequenceDiagram
 2.  Keabsahan tanda tangan BLS menggunakan precompile **`BLS12_PAIRING_CHECK` (address `0x0f`)** dengan payload 768-byte.
 *   Jika valid, kontrak mencatat nullifier untuk mencegah double-spend, menghitung biaya dasar penarikan **0.15%**, menghitung biaya premi Fast-Path (jika Fase 2 atau Fase 3 aktif), lalu mengirimkan sisa dana bersih ke `recipient` dan total biaya ke `fee_recipient`.
 
-### F. `spend_and_buy_shares(...) -> Result<bool, Vec<u8>>`
-*   Melakukan verifikasi tanda tangan BLS (`spend`), lalu secara atomik melakukan panggilan eksternal (`RawCall`) ke kontrak target Polymarket (Conditional Tokens Contract) untuk membeli shares opsi taruhan menggunakan stablecoin yang dicairkan.
+### F. `spend_and_buy_shares(nullifier: FixedBytes<32>, alpha_neg_bytes: Vec<u8>, hm_bytes: Vec<u8>, pk_iss_bytes: Vec<u8>, polymarket_ctf: Address, collateral_token: Address, condition_id: FixedBytes<32>, amount: U256) -> Result<bool, Vec<u8>>`
+*   Melakukan verifikasi tanda tangan BLS (`spend`), menghitung sisa dana bersih (`payout`), menyetujui (`approve`) token USDC/stablecoin untuk didebit oleh Polymarket CTF, lalu secara atomik memicu fungsi `splitPosition` di kontrak target Polymarket (Conditional Tokens Contract) untuk mencetak shares opsi taruhan.
+*   **Mekanisme Try-Catch Fallback (Aha! Moment - Jurnal 2026)**: Jika panggilan eksternal ke `splitPosition` gagal/revert (misalnya karena pasar opsi di-pause, di-resolve, atau slippage terlalu tinggi), transaksi **tidak di-revert** agar status nullifier tetap dicatat dan dana tidak tersangkut di CCIP. Kontrak secara otomatis mencatat nominal refund di storage `failed_intent_refunds` untuk ditarik pengguna secara asinkron lewat `claim_failed_intent_refund`.
+
+### F2. Fungsi Pendukung Fallback Refund Lintas Rantai
+*   `get_failed_intent_refund(nullifier: FixedBytes<32>) -> Result<U256, Vec<u8>>`: Membaca jumlah dana refund (USDC) yang tersedia untuk diclaim akibat kegagalan intent di target chain.
+*   `claim_failed_intent_refund(nullifier: FixedBytes<32>, recipient: Address) -> Result<bool, Vec<u8>>`: Memungkinkan penarikan dana refund (USDC) ke alamat target penerima (`recipient`). Fungsi ini menerapkan pembersihan status mapping sebelum transfer untuk mencegah serangan *reentrancy*.
 
 ### G. `slash_double_spender(x1_bytes: Vec<u8>, y1_bytes: Vec<u8>, x2_bytes: Vec<u8>, y2_bytes: Vec<u8>) -> Result<Vec<u8>, Vec<u8>>`
 *   Menerima dua bukti transaksi offline ($x_1, y_1$) dan ($x_2, y_2$) yang menggunakan token yang sama.

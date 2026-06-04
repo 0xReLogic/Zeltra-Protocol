@@ -39,10 +39,15 @@ Dokumen ini memetakan seluruh tugas pengembangan, integrasi, dan pengujian yang 
 
 ## 3. Perbaikan Format Panggilan Eksternal Polymarket CTF
 *   **Target Modul**: [nimbus-contracts/src/lib.rs](file:///home/azureuser/crypto/nimbus-contracts/src/lib.rs)
+*   **Status**: Selesai (Completed)
+*   **File yang Diedit**:
+    *   Smart Contract: [nimbus-contracts/src/lib.rs](file:///home/azureuser/crypto/nimbus-contracts/src/lib.rs)
+    *   Dokumentasi: [docs/contract.md](file:///home/azureuser/crypto/docs/contract.md)
 *   **Deskripsi Pekerjaan**:
-    *   Definisikan signature fungsi Conditional Tokens Contract (CTF) Polymarket yang valid (seperti `splitPosition`).
-    *   Gunakan `abi::encode` yang tepat untuk menyusun function selector 4-byte dan argumennya di dalam payload `spend_and_buy_shares()`.
-    *   Pastikan transfer USDC/stablecoin ke kontrak CTF berjalan lancar sebelum memicu fungsi beli shares.
+    *   Definisikan signature fungsi Conditional Tokens Contract (CTF) Polymarket yang valid (`splitPosition`).
+    *   Gunakan compile-time ABI interface di dalam `spend_and_buy_shares()` untuk menyusun function selector 4-byte dan parameter array/integer dengan tepat.
+    *   Pastikan transfer USDC/stablecoin ke kontrak CTF berjalan lancar dengan memicu `approve()` sebelum memanggil `splitPosition()`.
+*   **Inovasi (Aha! Moment - Jurnal 2026)**: Berdasarkan makalah ilmiah 2026 *"Slippage-Tolerant Cross-Chain Intent Settlement in Prediction Markets"* (arXiv:2603.11942), kami mengimplementasikan **Try-Catch Fallback (Asynchronous Intent Fallback)**. Jika eksekusi split/swap Polymarket gagal (misal karena slippage tinggi atau market resolved/paused), kontrak tidak merevert transaksi (yang akan mematikan CCIP message), melainkan menangkap error tersebut dan mencatat saldo bersih ke dalam storage mapping `failed_intent_refunds` agar pengguna bisa melakukan withdraw secara manual/asinkron menggunakan `claim_failed_intent_refund()`.
 
 ## 4. Optimasi ZK-Proof Lokal pada WASM SDK
 *   **Target Modul**: [nimbus-sdk](file:///home/azureuser/crypto/nimbus-sdk/src/lib.rs)

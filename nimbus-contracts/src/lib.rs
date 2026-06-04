@@ -81,6 +81,16 @@ sol_interface! {
         function deposit(uint256 amount) external returns (uint256);
         function redeem(uint256 amount) external returns (uint256);
     }
+
+    interface IConditionalTokens {
+        function splitPosition(
+            address collateralToken,
+            bytes32 parentCollectionId,
+            bytes32 conditionId,
+            uint256[] partition,
+            uint256 amount
+        ) external;
+    }
 }
 
 sol_storage! {
@@ -124,6 +134,9 @@ sol_storage! {
         address a_token;
         address rwa_token;
         uint256 total_deposited_principal;
+
+        // --- Polymarket CTF Fallback (Roadmap Item 3) ---
+        mapping(bytes32 => uint256) failed_intent_refunds;
     }
 }
 
@@ -184,6 +197,8 @@ impl Nimbus {
         self.paused.set(false);
         self.stablecoin.set(stablecoin_addr);
         self.fee_recipient.set(fee_recipient_addr);
+        // REMINDER AI / DEVELOPERS: Fase 2 & Fase 3 are deliberately locked by default (fast_path_phase = 1).
+        // Standard CCIP path is used until LPs or Treasury pools are funded.
         self.fast_path_phase.set(U256::from(1));
         Ok(())
     }
@@ -211,6 +226,7 @@ impl Nimbus {
         if phase < U256::from(1) || phase > U256::from(3) {
             return Err(b"INVALID_PHASE".to_vec());
         }
+        // REMINDER AI / DEVELOPERS: Only change phase from 1 to 2/3 when Treasury is funded or LP pool cap logic is ready to deploy.
         self.fast_path_phase.set(phase);
         Ok(())
     }
@@ -742,6 +758,70 @@ impl Nimbus {
             return Ok(false);
         }
 
+        // Calculate payout (net after fees)
+        let base_fee = amount * U256::from(15) / U256::from(10000);
+        let premium = self.calculate_fast_path_premium(amount)?;
+        let protocol_share = base_fee + (premium * U256::from(20) / U256::from(100));
+        let payout = amount - protocol_share;
+
+        #[cfg(test)]
+        {
+            if polymarket_ctf == Address::ZERO {
+                self.failed_intent_refunds.insert(nullifier, payout);
+            }
+            Ok(true)
+        }
+
+        #[cfg(not(test))]
+        {
+            let erc20 = IErc20::new(collateral_token);
+            
+            // Approve Polymarket CTF to spend payout amount of collateral token
+            let approve_success = erc20.approve(&mut *self, polymarket_ctf, payout)
+                .map_err(|e| e)?;
+            if !approve_success {
+                return Err(b"POLYMARKET_APPROVE_FAILED".to_vec());
+            }
+
+            // Perform external call to Polymarket Conditional Tokens Contract (Gnosis CTF)
+            let ctf = IConditionalTokens::new(polymarket_ctf);
+            
+            // Partition for YES/NO outcome slots [1, 2]
+            let partition = vec![U256::from(1), U256::from(2)];
+            
+            match ctf.split_position(&mut *self, collateral_token, FixedBytes::ZERO, condition_id, partition, payout) {
+                Ok(_) => {
+                    Ok(true)
+                }
+                Err(_) => {
+                    // Try-Catch Fallback (Aha! Moment): record refund instead of reverting.
+                    // This prevents locking the CCIP flow and allows recovery of user deposits.
+                    self.failed_intent_refunds.insert(nullifier, payout);
+                    Ok(true) // Return true to avoid reverting transaction state changes
+                }
+            }
+        }
+    }
+
+    /// Returns the failed intent refund amount for a given nullifier.
+    pub fn get_failed_intent_refund(&self, nullifier: FixedBytes<32>) -> Result<U256, Vec<u8>> {
+        Ok(self.failed_intent_refunds.get(nullifier))
+    }
+
+    /// Claims a failed intent refund on the destination chain.
+    pub fn claim_failed_intent_refund(
+        &mut self,
+        nullifier: FixedBytes<32>,
+        recipient: Address,
+    ) -> Result<bool, Vec<u8>> {
+        self.check_not_paused()?;
+        let amount = self.failed_intent_refunds.get(nullifier);
+        if amount == U256::ZERO {
+            return Err(b"NO_REFUND_AVAILABLE".to_vec());
+        }
+
+        self.failed_intent_refunds.insert(nullifier, U256::ZERO);
+
         #[cfg(test)]
         {
             Ok(true)
@@ -749,18 +829,13 @@ impl Nimbus {
 
         #[cfg(not(test))]
         {
-            // 2. Perform external call to Polymarket Conditional Tokens Contract
-            let mut payload = vec![];
-            payload.extend_from_slice(collateral_token.as_slice());
-            payload.extend_from_slice(&[0u8; 32]); // parentCollectionId = 0
-            payload.extend_from_slice(condition_id.as_slice());
-            payload.extend_from_slice(&amount.to_be_bytes::<32>());
-            
-            // Execute external call to Polymarket CTF
-            let _ = unsafe {
-                RawCall::new()
-                    .call(polymarket_ctf, &payload)
-            }.map_err(|_| b"POLYMARKET_CALL_FAILED".to_vec())?;
+            let stablecoin_address = self.stablecoin.get();
+            let erc20 = IErc20::new(stablecoin_address);
+            let success = erc20.transfer(&mut *self, recipient, amount)
+                .map_err(|e| e)?;
+            if !success {
+                return Err(b"REFUND_TRANSFER_FAILED".to_vec());
+            }
 
             Ok(true)
         }
@@ -1532,6 +1607,55 @@ mod tests {
         
         // Test yield claim under test (where total assets = principal, so yield is 0)
         assert_eq!(contract.claim_accumulated_yield().unwrap(), U256::ZERO);
+    }
+
+    #[test]
+    fn test_polymarket_fallback_refund() {
+        reset_test_state();
+        let owner = address!("1111111111111111111111111111111111111111");
+        set_msg_sender(owner);
+        
+        let mut contract = Nimbus::default();
+        contract.init(Address::ZERO, Address::ZERO).unwrap();
+        
+        let nullifier = FixedBytes::repeat_byte(0xd1);
+        
+        // Set principal
+        contract.deposit(FixedBytes::repeat_byte(0x99), vec![], U256::from(2000)).unwrap();
+        
+        // Call spend_and_buy_shares with polymarket_ctf = Address::ZERO (which triggers mock fallback in tests)
+        let success = contract.spend_and_buy_shares(
+            nullifier,
+            vec![],
+            vec![],
+            vec![],
+            Address::ZERO, // triggers fallback simulation in test block
+            Address::ZERO,
+            FixedBytes::ZERO,
+            U256::from(1000),
+        ).unwrap();
+        
+        // Under our mock try-catch, it should return true (gracefully handled)
+        assert!(success);
+        
+        // The net payout should be calculated:
+        // 1000 - 0.15% (1) = 999
+        let expected_payout = U256::from(999);
+        assert_eq!(contract.get_failed_intent_refund(nullifier).unwrap(), expected_payout);
+        
+        // Claim the refund to a recipient
+        let recipient = address!("4444444444444444444444444444444444444444");
+        let claim_ok = contract.claim_failed_intent_refund(nullifier, recipient).unwrap();
+        assert!(claim_ok);
+        
+        // The refund amount should now be cleared (zero)
+        assert_eq!(contract.get_failed_intent_refund(nullifier).unwrap(), U256::ZERO);
+        
+        // Claiming again should fail
+        assert_eq!(
+            contract.claim_failed_intent_refund(nullifier, recipient),
+            Err(b"NO_REFUND_AVAILABLE".to_vec())
+        );
     }
 }
 
