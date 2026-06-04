@@ -340,10 +340,18 @@ pub fn client_generate_compliance_proof(
     let _sk_bytes = hex::decode(secret_key_hex)
         .map_err(|e| JsValue::from_str(&format!("Invalid secret key hex: {}", e)))?;
 
-    // In production, we run the Plonky3 or Halo2 prover circuit.
-    // To achieve the <5 seconds target on consumer hardware, we leverage:
-    // a. WASM-SIMD (128-bit vector instructions) to parallelize Pippenger MSM bucket operations.
-    // b. Web Worker thread pool (Rayon) to distribute multi-scalar multiplications and FFTs.
+    // =========================================================================
+    // WARNING / REMINDER FOR DEVELOPERS & AI AGENTS:
+    // THIS IS A SIMULATION / MOCK PROVER FOR PROOF OF CONCEPT (PoC) PURPOSES.
+    // - The curves (G1/G2) below are generated using random scalars to produce
+    //   compatible curve points for contract test validation.
+    // - Real multithreading (Rayon Web Workers) and WASM-SIMD calculations are NOT
+    //   yet running mathematically in this Rust code.
+    // - TO UPGRADE TO PRODUCTION: You must import a real ZK circuit prover library
+    //   (e.g., halo2_proofs or ark-groth16), initialize a WASM thread pool via
+    //   wasm_bindgen_rayon::init_thread_pool, compile using RUSTFLAGS SIMD targets,
+    //   and replace these mock curve calculations with actual circuit witnesses.
+    // =========================================================================
     
     #[cfg(target_arch = "wasm32")]
     {

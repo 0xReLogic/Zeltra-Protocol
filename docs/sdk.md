@@ -18,6 +18,15 @@ graph LR
 
 ## 2. Inovasi & Optimalisasi Performa (Riset Jurnal 2026)
 
+> [!WARNING]
+> **PERINGATAN UNTUK PENGEMBANG & AI AGENT**:
+> Saat ini, pembuatan ZK-Proof di dalam SDK (`client_generate_compliance_proof`) masih berstatus **SIMULASI (MOCK)** dengan menghasilkan pasangan kurva acak untuk memvalidasi kompatibilitas format EVM secara cepat. Proses paralelisasi Pippenger MSM menggunakan WASM-SIMD dan pool Web Workers (Rayon) didefinisikan secara konseptual di dalam dokumentasi ini dan log simulasi, tetapi **belum diaktifkan secara nyata** di kode matematika Rust.
+>
+> Untuk menaikkan status kode ini ke tingkat produksi (production-ready):
+> 1. Impor sirkuit pembuktian ZK riil (seperti `halo2_proofs` atau `ark-groth16`).
+> 2. Ganti hash Keccak dengan Poseidon Hash ramah-ZK.
+> 3. Integrasikan `wasm-bindgen-rayon` dan inisialisasikan pool Web Workers (`wasm_bindgen_rayon::init_thread_pool`) di sisi browser host.
+
 Untuk mencapai latensi serendah mungkin dan keamanan tingkat tinggi pada lingkungan browser, Nimbus SDK menerapkan prinsip optimalisasi dari jurnal riset terbaru 2026:
 
 ### A. Minimalisasi JS-WASM Boundary Crossing
