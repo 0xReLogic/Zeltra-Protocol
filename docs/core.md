@@ -58,7 +58,35 @@ graph LR
 5.  **Final Verification (Verifier/Smart Contract):**
     $$e(\alpha, G_2) == e(H(m), pk_{iss})$$
 
-## 3. Matematika Transaksi Offline & Pembagian Rahasia
+## 3. Desentralisasi Minting: Threshold BDHKE (Telah Diuji)
+
+Untuk memitigasi risiko sentralisasi (*Single Point of Failure*), `nimbus-core` mendukung desentralisasi validator/federasi menggunakan skema **Threshold Blind Diffie-Hellman Key Exchange (Threshold BDHKE)**. Kunci rahasia penerbitan ($sk_{iss}$) dipecah secara rahasia ke $n$ Guardians, dan tanda tangan hanya dapat dibuat jika setidaknya $t$ Guardians berkolaborasi.
+
+### A. Pembagian Kunci Rahasia (Shamir Secret Sharing)
+Kunci utama $sk_{iss}$ dipecah menggunakan polinomial acak derajat $t-1$:
+$$f(x) = sk_{iss} + a_1 x + a_2 x^2 + \dots + a_{t-1} x^{t-1} \pmod p$$
+Setiap Guardian $i$ menerima share kunci $sk_i = f(i)$ secara aman.
+
+### B. Tanda Tangan Parsial Terenkripsi (Partial Signing)
+Leader membagikan titik blinded $X$ dan masking key sementara $k$ ke masing-masing Guardian. Setiap Guardian $i$ memvalidasi deposit lalu menghasilkan tanda tangan parsial:
+$$C_i = (k \cdot sk_i) \cdot X \in G_1$$
+
+### C. Rekonstruksi & Agregasi Lagrange (Client-Side)
+Klien mengumpulkan $t$ tanda tangan parsial $\{C_i\}_{i \in S}$ dan menggabungkannya di sisi memori lokal klien menggunakan interpolasi Lagrange:
+$$L_i = \prod_{j \in S, j \neq i} \frac{j}{j - i} \pmod p$$
+$$C = \sum_{i \in S} (C_i \cdot L_i) = (k \cdot sk_{iss}) \cdot X \in G_1$$
+
+Tanda tangan teragregasi $C$ ini identik dengan tanda tangan yang diterbitkan seolah-olah oleh penerbit tunggal (EIP-2537 kompatibel).
+
+### D. Fungsi Utama yang Ditambahkan
+*   `split_secret_key`: Membagi $sk_{iss}$ menjadi $n$ share kunci skalar Fr dengan ambang batas $t$.
+*   `compute_lagrange_coefficient`: Menghitung koefisien Lagrange $L_i(0)$ untuk validator $i$ dari subset validator aktif.
+*   `sign_share`: Melakukan operasi tanda tangan parsial $C_i = k \cdot sk_i \cdot X$ oleh Guardian.
+*   `aggregate_shares`: Menggabungkan tanda tangan parsial menjadi satu `MaskedBlindSignature` teragregasi penuh.
+
+---
+
+## 4. Matematika Transaksi Offline & Pembagian Rahasia
 Untuk memfasilitasi transaksi offline tanpa ancaman pembelanjaan ganda (*double-spend*), `nimbus-core` menerapkan skema pembagian rahasia Shamir 2-titik pada medan skalar $\mathbb{Z}_p$ (kurva BLS12-381 `Fr`).
 
 1. **Persamaan Garis Rahasia (Dompet Pengirim)**:
@@ -91,16 +119,16 @@ Di dalam `nimbus-core`, kami menambahkan fungsi pembantu berikut:
 
 ---
 
-## 4. Status Pengujian & Performa
+## 5. Status Pengujian & Performa
 
-*   **Status Unit Test:** `LULUS` (semua pengujian integrasi core dan contracts lulus).
+*   **Status Unit Test:** `LULUS` (semua pengujian integrasi core, contracts, dan threshold bdhke lulus).
 *   **Waktu Pembuatan Tanda Tangan (Client Blinding):** $< 0.1$ milidetik.
 *   **Waktu Verifikasi (Pairing Check):** $\approx 1.5$ milidetik (diukur secara lokal).
 *   **Ukuran Token Anonim:** $\approx 144$ bytes (sangat ringkas dibanding ZK-proof).
 
 ---
 
-## 5. Rencana Kerja Selanjutnya (Status Milestones)
+## 6. Rencana Kerja Selanjutnya (Status Milestones)
 
 *   [x] **Milestone 1: nimbus-contracts (Arbitrum Stylus)**
     *   Implementasi logika verifikasi $k \cdot pk_{iss} == com_k$ menggunakan precompile EIP-2537.

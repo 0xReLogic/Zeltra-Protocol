@@ -80,6 +80,13 @@ sol_storage! {
 
         // Mapping of valid Merkle roots of clean association sets (Fase A: ZK-Compliance)
         mapping(bytes32 => bool) clean_association_roots;
+
+        // Owner address for admin operations (Fase E: Security)
+        address owner;
+        bool paused;
+
+        // Session timestamp to enforce timelocks for auto-refund
+        mapping(bytes32 => uint256) session_timestamp;
     }
 }
 
@@ -89,14 +96,102 @@ impl Default for Nimbus {
     }
 }
 
+impl Nimbus {
+    #[inline(always)]
+    fn msg_sender(&self) -> Address {
+        #[cfg(test)]
+        {
+            tests::MSG_SENDER.with(|s| *s.borrow())
+        }
+        #[cfg(not(test))]
+        {
+            stylus_sdk::msg::sender()
+        }
+    }
+
+    #[inline(always)]
+    fn block_timestamp(&self) -> u64 {
+        #[cfg(test)]
+        {
+            tests::BLOCK_TIMESTAMP.with(|t| *t.borrow())
+        }
+        #[cfg(not(test))]
+        {
+            stylus_sdk::block::timestamp()
+        }
+    }
+
+    fn check_owner(&self) -> Result<(), Vec<u8>> {
+        if self.owner.get() != self.msg_sender() {
+            return Err(b"NOT_OWNER".to_vec());
+        }
+        Ok(())
+    }
+
+    fn check_not_paused(&self) -> Result<(), Vec<u8>> {
+        if self.paused.get() {
+            return Err(b"CONTRACT_PAUSED".to_vec());
+        }
+        Ok(())
+    }
+}
+
 #[public]
 impl Nimbus {
+    /// Initialize the contract and set the owner.
+    pub fn init(&mut self) -> Result<(), Vec<u8>> {
+        if self.owner.get() != Address::ZERO {
+            return Err(b"ALREADY_INITIALIZED".to_vec());
+        }
+        self.owner.set(self.msg_sender());
+        self.paused.set(false);
+        Ok(())
+    }
+
+    /// Pause the contract.
+    pub fn pause(&mut self) -> Result<(), Vec<u8>> {
+        self.check_owner()?;
+        self.paused.set(true);
+        Ok(())
+    }
+
+    /// Unpause the contract.
+    pub fn unpause(&mut self) -> Result<(), Vec<u8>> {
+        self.check_owner()?;
+        self.paused.set(false);
+        Ok(())
+    }
+
+    /// Claim refund for a deposit if the timelock (24 hours) has expired.
+    pub fn claim_refund(&mut self, sid: FixedBytes<32>) -> Result<(), Vec<u8>> {
+        self.check_not_paused()?;
+        if self.session_resolved.get(sid) {
+            return Err(b"SESSION_ALREADY_RESOLVED".to_vec());
+        }
+        let client = self.session_client.get(sid);
+        if client != self.msg_sender() {
+            return Err(b"NOT_SESSION_CLIENT".to_vec());
+        }
+        let deposit_time = self.session_timestamp.get(sid);
+        if deposit_time == U256::ZERO {
+            return Err(b"NO_DEPOSIT_FOUND".to_vec());
+        }
+        let current_time = U256::from(self.block_timestamp());
+        // Enforce 24-hour timelock (86400 seconds)
+        if current_time < deposit_time + U256::from(86400) {
+            return Err(b"TIMELOCK_NOT_EXPIRED".to_vec());
+        }
+        self.session_resolved.insert(sid, true);
+        Ok(())
+    }
+
     /// Deposit funds for atomic token issuance.
     pub fn deposit(&mut self, sid: FixedBytes<32>, _com_k_bytes: Vec<u8>, amount: U256) -> Result<(), Vec<u8>> {
-        // Logika deposit: mengunci dana dari client untuk session id tertentu
-        self.session_client.insert(sid, stylus_sdk::msg::sender());
+        self.check_not_paused()?;
+        self.session_client.insert(sid, self.msg_sender());
         self.session_amount.insert(sid, amount);
         self.session_resolved.insert(sid, false);
+        self.session_timestamp.insert(sid, U256::from(self.block_timestamp()));
         Ok(())
     }
 
@@ -109,6 +204,7 @@ impl Nimbus {
         pk_iss_bytes: Vec<u8>,
         com_k_bytes: Vec<u8>,
     ) -> Result<bool, Vec<u8>> {
+        self.check_not_paused()?;
         if self.session_resolved.get(sid) {
             return Ok(false);
         }
@@ -145,6 +241,7 @@ impl Nimbus {
         pk_iss_bytes: Vec<u8>,      // pk_iss in G2 (256 bytes EVM format)
         _recipient: Address,
     ) -> Result<bool, Vec<u8>> {
+        self.check_not_paused()?;
         // 1. Check double spend (Nullifier)
         if self.nullifiers.get(nullifier) {
             return Ok(false);
@@ -201,6 +298,7 @@ impl Nimbus {
         condition_id: FixedBytes<32>,
         amount: U256,
     ) -> Result<bool, Vec<u8>> {
+        self.check_not_paused()?;
         // 1. Verify and invalidate the signature (same as spend)
         let is_valid = self.spend(nullifier, alpha_neg_bytes, hm_bytes, pk_iss_bytes, Address::ZERO)?;
         if !is_valid {
@@ -241,6 +339,7 @@ impl Nimbus {
         x2_bytes: Vec<u8>,
         y2_bytes: Vec<u8>,
     ) -> Result<Vec<u8>, Vec<u8>> {
+        self.check_not_paused()?;
         use ark_serialize::CanonicalDeserialize;
         
         let x1 = Fr::deserialize_compressed(&x1_bytes[..])
@@ -272,6 +371,8 @@ impl Nimbus {
 
     /// Registers a new clean association set Merkle root (Admin/Compliance Oracle).
     pub fn register_clean_root(&mut self, root: FixedBytes<32>) -> Result<(), Vec<u8>> {
+        self.check_not_paused()?;
+        self.check_owner()?;
         self.clean_association_roots.insert(root, true);
         Ok(())
     }
@@ -462,17 +563,75 @@ mod tests {
     use rand::thread_rng;
 
     // --- Mock Stylus HostIO Symbols to satisfy the linker during host tests ---
+    use std::cell::RefCell;
+    use std::collections::HashMap;
 
-    #[no_mangle]
-    pub unsafe extern "C" fn storage_load_bytes32(_key: *const u8, dest: *mut u8) {
-        let dest_slice = std::slice::from_raw_parts_mut(dest, 32);
-        for byte in dest_slice.iter_mut() {
-            *byte = 0;
-        }
+    thread_local! {
+        pub(crate) static STORAGE: RefCell<HashMap<[u8; 32], [u8; 32]>> = RefCell::new(HashMap::new());
+        pub(crate) static MSG_SENDER: RefCell<Address> = RefCell::new(Address::ZERO);
+        pub(crate) static BLOCK_TIMESTAMP: RefCell<u64> = RefCell::new(0);
+    }
+
+    fn reset_test_state() {
+        STORAGE.with(|s| s.borrow_mut().clear());
+        MSG_SENDER.with(|s| *s.borrow_mut() = Address::ZERO);
+        BLOCK_TIMESTAMP.with(|t| *t.borrow_mut() = 0);
+    }
+
+    fn set_msg_sender(sender: Address) {
+        MSG_SENDER.with(|s| *s.borrow_mut() = sender);
+    }
+
+    fn set_block_timestamp(ts: u64) {
+        BLOCK_TIMESTAMP.with(|t| *t.borrow_mut() = ts);
     }
 
     #[no_mangle]
-    pub unsafe extern "C" fn storage_cache_bytes32(_key: *const u8, _src: *const u8) {}
+    pub unsafe extern "C" fn msg_sender(dest: *mut u8) {
+        let dest_slice = std::slice::from_raw_parts_mut(dest, 20);
+        MSG_SENDER.with(|sender| {
+            dest_slice.copy_from_slice(sender.borrow().as_slice());
+        });
+    }
+
+    #[no_mangle]
+    pub unsafe extern "C" fn block_timestamp() -> u64 {
+        BLOCK_TIMESTAMP.with(|ts| {
+            *ts.borrow()
+        })
+    }
+
+    #[no_mangle]
+    pub unsafe extern "C" fn storage_load_bytes32(key: *const u8, dest: *mut u8) {
+        let key_slice = std::slice::from_raw_parts(key, 32);
+        let dest_slice = std::slice::from_raw_parts_mut(dest, 32);
+        let mut k = [0u8; 32];
+        k.copy_from_slice(key_slice);
+        
+        STORAGE.with(|storage| {
+            if let Some(val) = storage.borrow().get(&k) {
+                dest_slice.copy_from_slice(val);
+            } else {
+                for byte in dest_slice.iter_mut() {
+                    *byte = 0;
+                }
+            }
+        });
+    }
+
+    #[no_mangle]
+    pub unsafe extern "C" fn storage_cache_bytes32(key: *const u8, src: *const u8) {
+        let key_slice = std::slice::from_raw_parts(key, 32);
+        let src_slice = std::slice::from_raw_parts(src, 32);
+        let mut k = [0u8; 32];
+        k.copy_from_slice(key_slice);
+        let mut v = [0u8; 32];
+        v.copy_from_slice(src_slice);
+        
+        STORAGE.with(|storage| {
+            storage.borrow_mut().insert(k, v);
+        });
+    }
 
     #[no_mangle]
     pub unsafe extern "C" fn native_keccak256(bytes: *const u8, len: usize, output: *mut u8) {
@@ -691,5 +850,145 @@ mod tests {
             }
         }
     }
+
+    #[test]
+    fn test_initialization() {
+        reset_test_state();
+        let owner = address!("1111111111111111111111111111111111111111");
+        set_msg_sender(owner);
+        
+        let mut contract = Nimbus::default();
+        // First init should succeed
+        assert!(contract.init().is_ok());
+        
+        // Second init should fail
+        assert_eq!(contract.init(), Err(b"ALREADY_INITIALIZED".to_vec()));
+    }
+
+    #[test]
+    fn test_pause_unpause() {
+        reset_test_state();
+        let owner = address!("1111111111111111111111111111111111111111");
+        let non_owner = address!("2222222222222222222222222222222222222222");
+        
+        set_msg_sender(owner);
+        let mut contract = Nimbus::default();
+        contract.init().unwrap();
+        
+        // Non-owner pausing should fail
+        set_msg_sender(non_owner);
+        assert_eq!(contract.pause(), Err(b"NOT_OWNER".to_vec()));
+        
+        // Owner pausing should succeed
+        set_msg_sender(owner);
+        assert!(contract.pause().is_ok());
+        assert_eq!(contract.paused.get(), true);
+        
+        // Non-owner unpausing should fail
+        set_msg_sender(non_owner);
+        assert_eq!(contract.unpause(), Err(b"NOT_OWNER".to_vec()));
+        
+        // Owner unpausing should succeed
+        set_msg_sender(owner);
+        assert!(contract.unpause().is_ok());
+        assert_eq!(contract.paused.get(), false);
+    }
+
+    #[test]
+    fn test_guarded_functions_fail_when_paused() {
+        reset_test_state();
+        let owner = address!("1111111111111111111111111111111111111111");
+        set_msg_sender(owner);
+        
+        let mut contract = Nimbus::default();
+        contract.init().unwrap();
+        contract.pause().unwrap();
+        
+        // Try guarded operations
+        let sid = FixedBytes::ZERO;
+        assert_eq!(
+            contract.deposit(sid, vec![], U256::from(100)),
+            Err(b"CONTRACT_PAUSED".to_vec())
+        );
+        assert_eq!(
+            contract.reveal_mask_key(sid, vec![], vec![], vec![]),
+            Err(b"CONTRACT_PAUSED".to_vec())
+        );
+        assert_eq!(
+            contract.spend(sid, vec![], vec![], vec![], Address::ZERO),
+            Err(b"CONTRACT_PAUSED".to_vec())
+        );
+        assert_eq!(
+            contract.spend_and_buy_shares(sid, vec![], vec![], vec![], Address::ZERO, Address::ZERO, FixedBytes::ZERO, U256::ZERO),
+            Err(b"CONTRACT_PAUSED".to_vec())
+        );
+        assert_eq!(
+            contract.slash_double_spender(vec![], vec![], vec![], vec![]),
+            Err(b"CONTRACT_PAUSED".to_vec())
+        );
+        assert_eq!(
+            contract.register_clean_root(FixedBytes::ZERO),
+            Err(b"CONTRACT_PAUSED".to_vec())
+        );
+        assert_eq!(
+            contract.claim_refund(sid),
+            Err(b"CONTRACT_PAUSED".to_vec())
+        );
+    }
+
+    #[test]
+    fn test_claim_refund_timelock() {
+        reset_test_state();
+        let owner = address!("1111111111111111111111111111111111111111");
+        let client = address!("2222222222222222222222222222222222222222");
+        let other = address!("3333333333333333333333333333333333333333");
+        
+        set_msg_sender(owner);
+        let mut contract = Nimbus::default();
+        contract.init().unwrap();
+        
+        let sid = FixedBytes::repeat_byte(0xab);
+        
+        // Deposit
+        set_msg_sender(client);
+        set_block_timestamp(1000);
+        contract.deposit(sid, vec![], U256::from(500)).unwrap();
+        
+        // Claim refund from other address should fail
+        set_msg_sender(other);
+        assert_eq!(contract.claim_refund(sid), Err(b"NOT_SESSION_CLIENT".to_vec()));
+        
+        // Claim refund from client before timelock (24 hours = 86400 secs)
+        set_msg_sender(client);
+        set_block_timestamp(1000 + 86399); // 1 second before expiry
+        assert_eq!(contract.claim_refund(sid), Err(b"TIMELOCK_NOT_EXPIRED".to_vec()));
+        
+        // Claim refund at expiry should succeed
+        set_block_timestamp(1000 + 86400);
+        assert!(contract.claim_refund(sid).is_ok());
+        
+        // Claiming again should fail
+        assert_eq!(contract.claim_refund(sid), Err(b"SESSION_ALREADY_RESOLVED".to_vec()));
+    }
+
+    #[test]
+    fn test_register_clean_root_authorization() {
+        reset_test_state();
+        let owner = address!("1111111111111111111111111111111111111111");
+        let non_owner = address!("2222222222222222222222222222222222222222");
+        
+        set_msg_sender(owner);
+        let mut contract = Nimbus::default();
+        contract.init().unwrap();
+        
+        // Non-owner should not be able to register clean root
+        set_msg_sender(non_owner);
+        assert_eq!(contract.register_clean_root(FixedBytes::ZERO), Err(b"NOT_OWNER".to_vec()));
+        
+        // Owner should be able to register clean root
+        set_msg_sender(owner);
+        assert!(contract.register_clean_root(FixedBytes::ZERO).is_ok());
+    }
 }
+
 

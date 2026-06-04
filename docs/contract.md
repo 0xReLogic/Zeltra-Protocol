@@ -42,6 +42,15 @@ sol_storage! {
 
         // Pemetaan root Merkle set asosiasi bersih yang valid (Fase A: ZK-Compliance)
         mapping(bytes32 => bool) clean_association_roots;
+
+        // Alamat owner untuk operasi administratif (Fase E: Security)
+        address owner;
+        
+        // Status jeda darurat kontrak (Circuit Breaker)
+        bool paused;
+
+        // Pemetaan Session ID ke block timestamp untuk melacak timelock pengembalian dana
+        mapping(bytes32 => uint256) session_timestamp;
     }
 }
 ```
@@ -59,18 +68,33 @@ sequenceDiagram
     Note over Contract: Verifikasi pairing BLS -> Catat Nullifier -> Selesai
     CCIP Router->>Contract: 4. ccip_receive(message_id, source_chain_selector, sender, payload)
     Note over Contract: Dekode 648-byte payload -> spend_and_buy_shares
+    Client->>Contract: 5. claim_refund(sid)
+    Note over Contract: Klaim pengembalian dana setelah 24 jam jika Relayer offline
 ```
 
-### A. `deposit(sid: FixedBytes<32>, _com_k_bytes: Vec<u8>, amount: U256)`
+*Catatan Keamanan: Semua fungsi yang mengubah state (ditandai dengan `&mut self`) akan memeriksa apakah kontrak sedang dalam keadaan aktif (tidak di-pause) menggunakan `self.check_not_paused()?` sebelum melakukan eksekusi.*
+
+### A. Fitur Administrasi & Keamanan (Fase E: Security)
+*   `init()`: Menginisialisasi owner kontrak dengan alamat pengirim transaksi pertama. Mencegah inisialisasi ganda.
+*   `pause()`: Mengaktifkan status jeda darurat (`paused = true`). Hanya bisa dipanggil oleh owner.
+*   `unpause()`: Menonaktifkan status jeda darurat (`paused = false`). Hanya bisa dipanggil oleh owner.
+
+### B. `deposit(sid: FixedBytes<32>, _com_k_bytes: Vec<u8>, amount: U256)`
 *   Klien menyetorkan dana escrow (misalnya USDC) ke kontrak dengan ID sesi tertentu (`sid`).
 *   Kontrak mencatat alamat pengirim ke `session_client`, jumlah deposit ke `session_amount`, dan menginisialisasi `session_resolved` ke `false`.
+*   Kontrak juga mencatat waktu transaksi saat ini ke `session_timestamp` sebagai acuan waktu untuk sistem auto-refund timelock.
 
-### B. `reveal_mask_key(sid: FixedBytes<32>, k_bytes: Vec<u8>, pk_iss_bytes: Vec<u8>, com_k_bytes: Vec<u8>) -> Result<bool, Vec<u8>>`
+### C. `claim_refund(sid: FixedBytes<32>) -> Result<(), Vec<u8>>`
+*   Menyediakan jaminan keselamatan dana pengguna jika Relayer offline atau menolak membuka kunci masking.
+*   Dapat dipanggil oleh klien pembuat sesi deposit jika waktu saat ini (`block_timestamp`) sudah melewati **24 jam (86.400 detik)** sejak deposit dilakukan.
+*   Setelah berhasil diverifikasi, kontrak menandai sesi sebagai selesai (`session_resolved = true`) agar dana tidak dicairkan ganda oleh Relayer nantinya.
+
+### D. `reveal_mask_key(sid: FixedBytes<32>, k_bytes: Vec<u8>, pk_iss_bytes: Vec<u8>, com_k_bytes: Vec<u8>) -> Result<bool, Vec<u8>>`
 *   Penerbit (Issuer) menyerahkan kunci masking $k$ bersama kunci publik mereka $pk_{iss}$ dan komitmen $com_k$.
 *   Kontrak memanggil precompile **`BLS12_G2_MSM` (address `0x0e`)** dengan payload 288-byte (kombinasi $pk_{iss}$ dan $k$) untuk menghitung $k \cdot pk_{iss}$.
 *   Jika hasil perhitungan cocok dengan $com_k$, kontrak menandai sesi sebagai selesai (`session_resolved = true`) dan mencairkan escrow dana ke dompet Penerbit.
 
-### C. `spend(nullifier: FixedBytes<32>, alpha_neg_bytes: Vec<u8>, hm_bytes: Vec<u8>, pk_iss_bytes: Vec<u8>, _recipient: Address) -> Result<bool, Vec<u8>>`
+### E. `spend(nullifier: FixedBytes<32>, alpha_neg_bytes: Vec<u8>, hm_bytes: Vec<u8>, pk_iss_bytes: Vec<u8>, _recipient: Address) -> Result<bool, Vec<u8>>`
 *   Untuk mencairkan dana secara anonim, penerima mengirimkan tanda tangan BLS yang telah di-unblind.
 *   Kontrak memverifikasi:
     1.  Nullifier belum pernah terdaftar (`!nullifiers[nullifier]`).
@@ -78,21 +102,21 @@ sequenceDiagram
         $$e(-\alpha, G_2) \cdot e(H(m), pk_{iss}) == 1$$
 *   Jika valid, kontrak mencatat nullifier untuk mencegah double-spend dan mentransfer dana ke `recipient`.
 
-### D. `spend_and_buy_shares(...) -> Result<bool, Vec<u8>>`
+### F. `spend_and_buy_shares(...) -> Result<bool, Vec<u8>>`
 *   Melakukan verifikasi tanda tangan BLS (`spend`), lalu secara atomik melakukan panggilan eksternal (`RawCall`) ke kontrak target Polymarket (Conditional Tokens Contract) untuk membeli shares opsi taruhan menggunakan stablecoin yang dicairkan.
 
-### E. `slash_double_spender(x1_bytes: Vec<u8>, y1_bytes: Vec<u8>, x2_bytes: Vec<u8>, y2_bytes: Vec<u8>) -> Result<Vec<u8>, Vec<u8>>`
+### G. `slash_double_spender(x1_bytes: Vec<u8>, y1_bytes: Vec<u8>, x2_bytes: Vec<u8>, y2_bytes: Vec<u8>) -> Result<Vec<u8>, Vec<u8>>`
 *   Menerima dua bukti transaksi offline ($x_1, y_1$) dan ($x_2, y_2$) yang menggunakan token yang sama.
 *   Menggunakan interpolasi linier di atas kurva BLS12-381 scalar field (Fr) untuk mengungkap identitas rahasia pembeli $I$:
     $$I = y_1 - \left( \frac{y_2 - y_1}{x_2 - x_1} \right) \cdot x_1$$
 
-### F. ZK-Compliance & Proof of Innocence (Fase A)
-*   `register_clean_root(root: FixedBytes<32>)`: Mendaftarkan Merkle root dari set asosiasi bersih.
+### H. ZK-Compliance & Proof of Innocence (Fase A)
+*   `register_clean_root(root: FixedBytes<32>)`: Mendaftarkan Merkle root dari set asosiasi bersih. Hanya bisa dipanggil oleh owner/oracle.
 *   `verify_merkle_proof(leaf: FixedBytes<32>, proof_bytes: Vec<u8>, root: FixedBytes<32>)`: Memverifikasi keanggotaan Merkle.
 *   `verify_groth16_proof(...)`: Memverifikasi ZK-proof Groth16 secara on-chain menggunakan precompile `BLS12_PAIRING_CHECK` (`0x0f`) dengan 4 pasang pairing (1536-byte payload).
 *   `verify_compliance(...)`: Melakukan pemeriksaan kepatuhan penuh (verifikasi Merkle root terdaftar, keanggotaan proof, dan validitas ZK-proof).
 
-### G. CCIP Receiver Lintas Rantai (Fase B)
+### I. CCIP Receiver Lintas Rantai (Fase B)
 *   `ccip_receive(message_id: FixedBytes<32>, source_chain_selector: u64, sender: Vec<u8>, payload: Vec<u8>) -> Result<(), Vec<u8>>`
     *   Menerima pesan 648-byte dari router Chainlink CCIP.
     *   Mendekode payload ke parameter spend dan parameter pembelian Polymarket, lalu mengeksekusi `spend_and_buy_shares` secara atomik di rantai tujuan.
