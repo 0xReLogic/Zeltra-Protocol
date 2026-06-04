@@ -26,23 +26,7 @@ struct AppState {
 }
 
 impl AppState {
-    fn new() -> Self {
-        let share_index = std::env::var("NIMBUS_SHARE_INDEX")
-            .unwrap_or_else(|_| "1".to_string())
-            .parse::<u32>()
-            .unwrap_or(1);
-            
-        let share_sk = if let Ok(hex_str) = std::env::var("NIMBUS_SHARE_KEY") {
-            if let Ok(bytes) = hex::decode(&hex_str) {
-                nimbus_core::deserialize_from_bytes(&bytes)
-                    .unwrap_or_else(|| nimbus_core::Fr::from(12345u64))
-            } else {
-                nimbus_core::Fr::from(12345u64)
-            }
-        } else {
-            nimbus_core::Fr::from(12345u64)
-        };
-
+    fn new(share_sk: nimbus_core::Fr, share_index: u32) -> Self {
         Self {
             sessions: Arc::new(Mutex::new(Vec::new())),
             spend_queue: Arc::new(Mutex::new(Vec::new())),
@@ -221,7 +205,13 @@ struct SyncClaimsResponse {
 
 #[tokio::main]
 async fn main() {
-    let state = AppState::new();
+    let share_index = std::env::var("NIMBUS_SHARE_INDEX")
+        .unwrap_or_else(|_| "1".to_string())
+        .parse::<u32>()
+        .unwrap_or(1);
+        
+    let share_sk = load_share_key().await;
+    let state = AppState::new(share_sk, share_index);
 
     // Spawn background worker to batch and process spends every 2 seconds
     let worker_state = state.clone();
@@ -920,3 +910,129 @@ async fn post_http(url: &str, body: &str) -> Result<String, String> {
         Err("Invalid HTTP response format".to_string())
     }
 }
+
+async fn get_http_with_headers(url: &str, headers: &[(&str, &str)]) -> Result<String, String> {
+    let clean_url = url.trim_start_matches("http://").trim_start_matches("https://");
+    let parts: Vec<&str> = clean_url.splitn(2, '/').collect();
+    let host_port = parts[0];
+    
+    // Add port if not specified
+    let host_port_with_default = if host_port.contains(':') {
+        host_port.to_string()
+    } else {
+        format!("{}:80", host_port)
+    };
+    
+    let path = if parts.len() > 1 { format!("/{}", parts[1]) } else { "/".to_string() };
+    
+    let mut stream = tokio::net::TcpStream::connect(&host_port_with_default)
+        .await
+        .map_err(|e| format!("Connect failed to {}: {}", host_port_with_default, e))?;
+        
+    let mut headers_str = String::new();
+    for (k, v) in headers {
+        headers_str.push_str(&format!("{}: {}\r\n", k, v));
+    }
+        
+    let request_str = format!(
+        "GET {} HTTP/1.1\r\n\
+         Host: {}\r\n\
+         Connection: close\r\n\
+         {}\r\n",
+        path, host_port, headers_str
+    );
+    
+    use tokio::io::{AsyncWriteExt, AsyncReadExt};
+    stream.write_all(request_str.as_bytes())
+        .await
+        .map_err(|e| format!("Write failed: {}", e))?;
+        
+    let mut response = String::new();
+    stream.read_to_string(&mut response)
+        .await
+        .map_err(|e| format!("Read failed: {}", e))?;
+        
+    if let Some(pos) = response.find("\r\n\r\n") {
+        Ok(response[pos + 4..].to_string())
+    } else {
+        Err("Invalid HTTP response format".to_string())
+    }
+}
+
+async fn load_share_key() -> nimbus_core::Fr {
+    // 1. Check if Vault/OpenBao is configured
+    if let Ok(vault_token) = std::env::var("NIMBUS_VAULT_TOKEN") {
+        let vault_addr = std::env::var("NIMBUS_VAULT_ADDR")
+            .unwrap_or_else(|_| "http://127.0.0.1:8200".to_string());
+        let vault_path = std::env::var("NIMBUS_VAULT_PATH")
+            .unwrap_or_else(|_| "v1/secret/data/nimbus".to_string());
+        
+        let url = format!("{}/{}", vault_addr.trim_end_matches('/'), vault_path);
+        println!("KMS INTEGRATION: Fetching BLS share key from OpenBao/Vault at {}...", url);
+        
+        match get_http_with_headers(&url, &[("X-Vault-Token", &vault_token)]).await {
+            Ok(body) => {
+                #[derive(Deserialize)]
+                struct VaultSecretData {
+                    share_key: String,
+                }
+                #[derive(Deserialize)]
+                struct VaultSecretInner {
+                    data: VaultSecretData,
+                }
+                #[derive(Deserialize)]
+                struct VaultSecretResponse {
+                    data: VaultSecretInner,
+                }
+                
+                match serde_json::from_str::<VaultSecretResponse>(&body) {
+                    Ok(res) => {
+                        let hex_str = res.data.data.share_key;
+                        if let Ok(bytes) = hex::decode(&hex_str) {
+                            if let Some(fr) = nimbus_core::deserialize_from_bytes(&bytes) {
+                                println!("KMS INTEGRATION: Successfully loaded BLS share key from OpenBao/Vault.");
+                                return fr;
+                            }
+                        }
+                        println!("KMS INTEGRATION: Error parsing/deserializing share key bytes from Vault.");
+                    }
+                    Err(e) => {
+                        println!("KMS INTEGRATION: Error parsing Vault response JSON: {}. Response: {}", e, body);
+                    }
+                }
+            }
+            Err(e) => {
+                println!("KMS INTEGRATION: Failed to fetch secret from OpenBao/Vault: {}", e);
+            }
+        }
+    }
+
+    // 2. Fallback to NIMBUS_SHARE_KEY for local development / backward compatibility
+    if let Ok(hex_str) = std::env::var("NIMBUS_SHARE_KEY") {
+        println!("WARNING: Raw plain text 'NIMBUS_SHARE_KEY' env variable detected.");
+        println!("         This is unsafe for production. Use OpenBao/Vault KMS integration instead.");
+        if let Ok(bytes) = hex::decode(&hex_str) {
+            if let Some(fr) = nimbus_core::deserialize_from_bytes(&bytes) {
+                return fr;
+            }
+        }
+    }
+
+    println!("WARNING: No share key found via Vault or environment variables. Using default insecure key.");
+    nimbus_core::Fr::from(12345u64)
+}
+
+#[cfg(test)]
+mod node_tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn test_load_share_key_fallback() {
+        std::env::set_var("NIMBUS_SHARE_KEY", "0000000000000000000000000000000000000000000000000000000000000001");
+        let fr = load_share_key().await;
+        let bytes = nimbus_core::serialize_to_bytes(&fr);
+        assert_eq!(bytes[bytes.len() - 1], 1);
+        std::env::remove_var("NIMBUS_SHARE_KEY");
+    }
+}
+

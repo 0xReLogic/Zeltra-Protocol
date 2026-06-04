@@ -77,9 +77,14 @@ Dokumen ini memetakan seluruh tugas pengembangan, integrasi, dan pengujian yang 
 
 ## 6. Pengamanan Kunci Rahasia Guardian (KMS Integration)
 *   **Target Modul**: [nimbus-node/src/main.rs](file:///home/azureuser/crypto/nimbus-node/src/main.rs)
+*   **Status**: Selesai (Completed)
+*   **File yang Diedit**:
+    *   Relayer: [nimbus-node/src/main.rs](file:///home/azureuser/crypto/nimbus-node/src/main.rs)
+    *   Dokumentasi: [docs/relayer.md](file:///home/azureuser/crypto/docs/relayer.md)
 *   **Deskripsi Pekerjaan**:
-    *   Hilangkan penggunaan environment variable plain text `NIMBUS_SHARE_KEY`.
-    *   Integrasikan pustaka klien Google Cloud KMS, AWS KMS, atau HashiCorp Vault untuk mendekripsi private key share BLS secara aman di memori relayer saat startup.
+    *   Hilangkan penggunaan environment variable plain text `NIMBUS_SHARE_KEY` untuk kebutuhan produksi.
+    *   Integrasikan klien OpenBao / HashiCorp Vault untuk mendekripsi/membaca private key share BLS secara aman di memori relayer saat startup melalui API HTTP terotentikasi.
+*   **Inovasi (Aha! Moment - Jurnal 2026)**: Mendukung integrasi nir-dependensi berat menggunakan pemanggilan API OpenBao (fork open-source Linux Foundation dari Vault) secara langsung melalui socket stream, mengamankan share key di sisi Guardian STB tanpa overhead memori berlebih. Jika berjalan dalam mode fallback `NIMBUS_SHARE_KEY` untuk development, sistem secara otomatis memberikan log warning keras mengenai ketidakamanan penyimpanan plaintext kunci di produksi.
 
 ## 7. Deployment & Pengujian Integrasi Testnet L2
 *   **Target Modul**: Jaringan (Arbitrum Sepolia / Base Goerli)

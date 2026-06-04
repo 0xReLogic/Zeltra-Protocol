@@ -49,25 +49,34 @@ Berdasarkan riset L2 Gas Economics 2026, biaya transaksi L2 didominasi oleh L1 b
 
 ## 3. Konfigurasi Node (Environment Variables)
 
-Setiap instance `nimbus-node` membaca konfigurasi threshold dari environment variables saat startup:
+Every instance of `nimbus-node` reads configurations from environment variables at startup:
 
-| Variable | Default | Deskripsi |
+| Variable | Default | Description |
 | :--- | :--- | :--- |
 | `NIMBUS_SHARE_INDEX` | `1` | Index share node ini dalam skema Shamir (1 hingga n). Setiap server fisik/cloud harus memiliki nilai unik. |
-| `NIMBUS_SHARE_KEY` | `Fr(12345)` | Hex-encoded scalar BLS12-381 Fr -- bagian kunci rahasia Issuer ($sk_{share_i}$) yang di-generate saat setup awal dengan `client_split_secret_key`. |
+| `NIMBUS_SHARE_KEY` | `Fr(12345)` | **(Fallback / Dev Mode Only)** Hex-encoded scalar BLS12-381 Fr. Menghasilkan warning keras jika digunakan di produksi. |
+| `NIMBUS_VAULT_TOKEN` | `None` | Token otentikasi OpenBao / HashiCorp Vault. Mengaktifkan penarikan kunci otomatis via KMS. |
+| `NIMBUS_VAULT_ADDR` | `http://127.0.0.1:8200` | URL/Port server OpenBao / HashiCorp Vault. |
+| `NIMBUS_VAULT_PATH` | `v1/secret/data/nimbus` | Endpoint API path untuk mengambil rahasia (KV v2 engine). |
 
-Contoh konfigurasi untuk 5-node cluster (threshold t=3, n=5):
+### Integrasi OpenBao / Vault (Production Mode)
 
-```bash
-# Leader Node (Cloud -- AWS/GCP/Azure)
-NIMBUS_SHARE_INDEX=1 NIMBUS_SHARE_KEY=<share_1_hex> cargo run
+Untuk deployment di tingkat produksi (production-ready), kunci rahasia pembagian BLS tidak boleh disimpan dalam plaintext di environment variable `NIMBUS_SHARE_KEY`. Jalankan OpenBao/Vault server lokal di masing-masing STB/Guardian secara independen:
 
-# Guardian Node 2 (Fisik -- STB Bekas)
-NIMBUS_SHARE_INDEX=2 NIMBUS_SHARE_KEY=<share_2_hex> cargo run
+1. Simpan secret di OpenBao / Vault:
+   ```bash
+   vault kv put secret/nimbus share_key="<share_hex>"
+   ```
+2. Jalankan relayer dengan mengaitkan token dan alamat Vault:
+   ```bash
+   NIMBUS_SHARE_INDEX=1 \
+   NIMBUS_VAULT_ADDR="http://127.0.0.1:8200" \
+   NIMBUS_VAULT_TOKEN="hvs.xxxxxxxxxxxxxxxxxxxx" \
+   NIMBUS_VAULT_PATH="v1/secret/data/nimbus" \
+   cargo run
+   ```
 
-# Guardian Node 3 (Fisik)
-NIMBUS_SHARE_INDEX=3 NIMBUS_SHARE_KEY=<share_3_hex> cargo run
-```
+Metode ini memastikan kunci didekripsi langsung di memori RAM dan tidak pernah bocor ke disk server atau environment variable Linux.
 
 ---
 
