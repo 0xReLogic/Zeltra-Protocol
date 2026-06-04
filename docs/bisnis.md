@@ -68,18 +68,33 @@ Salah satu ketakutan terbesar toko dalam menerima pembayaran offline adalah risi
 
 ---
 
-## 5. Token Tata Kelola $NIMB (Digital Equity & Value Capture)
+## 5. Token Tata Kelola $NIMB (2026 Real Yield & Sustainable Tokenomics)
 
-Untuk menyelaraskan insentif antara pendiri (founders), investor, dan pengguna, Nimbus meluncurkan token utilitas & tata kelola **$NIMB** yang berfungsi sebagai "saham digital" dari ekosistem.
+Untuk menyelaraskan insentif jangka panjang antara pendiri, investor, dan komunitas tanpa menimbulkan risiko klasifikasi regulasi (*securities/investasi pasif*) atau ketidakstabilan kas, Nimbus mengadopsi model **Real Yield & Risk-Based Staking**:
 
-### Mekanisme Akumulasi Nilai:
-*   **Pembagian Pendapatan (Real Yield Dividen)**: Pengguna yang membeli dan mengunci (*stake*) token $NIMB berhak menerima pembagian **50% s.d. 70%** dari total pendapatan protokol. Dividen ini dikirimkan langsung dalam bentuk stablecoin (USDC) yang bersumber dari:
-    *   Bunga DeFi APY dana mengendap.
-    *   Biaya deposit/withdraw premium dari Whales.
-    *   Biaya routing nanopayment AI Agent (x402).
-    *   Margin markup gas relayer (EIP-7702).
-*   **Tata Kelola (Governance Voting)**: Pemegang token $NIMB menentukan parameter penting protokol, termasuk tarif biaya transaksi, pemilihan target platform DeFi yield, dan alokasi dana perbendaharaan (*Treasury Fund*).
-*   **Vesting Pendiri**: Alokasi koin awal untuk tim pengembang dikunci secara bertahap (*vesting schedule*) selama beberapa tahun untuk menjamin komitmen jangka panjang.
+```text
+Pendapatan Protokol (USDC)
+       │
+       ├──► 40% ──► Buyback & Burn $NIMB (Tekanan Deflasi Pasar)
+       │
+       ├──► 40% ──► Safety Module Staking (USDC Yield untuk Penanggung Risiko)
+       │
+       └──► 20% ──► Treasury Reserve Fund (Biaya Operasional & R&D)
+```
+
+### Mekanisme Akumulasi Nilai yang Berkelanjutan:
+
+1. **Buyback & Burn Dinamis (40% Pendapatan)**:
+   * Sebesar 40% dari total fee USDC yang dikumpulkan protokol digunakan untuk membeli kembali (*buyback*) token $NIMB dari pasar terbuka secara otomatis, lalu memusnahkannya (*burn*). 
+   * **Manfaat**: Menciptakan tekanan beli dan mengurangi total suplai token secara organik, meningkatkan nilai jangka panjang bagi seluruh pemegang token tanpa memicu klasifikasi sekuritas karena dividen pasif.
+
+2. **Safety Module Staking Yield (40% Pendapatan)**:
+   * Dividen USDC **tidak dibagikan secara pasif** kepada semua pemegang koin. Pengguna harus mengunci token $NIMB mereka ke dalam **Safety Module (Modul Pengaman)**.
+   * **Peran Penanggung Risiko**: Staker di Safety Module bertindak sebagai penyedia jaminan asuransi (*backstop*) jika protokol mengalami kegagalan teknis, eksploitasi smart contract, atau defisit akibat kegagalan pemotongan slashing luring.
+   * **Imbal Dagang**: Sebagai kompensasi atas risiko penjaminan tersebut, staker menerima yield USDC secara rutin. Hal ini mengubah dividen menjadi **biaya jasa penjaminan aktif** yang sehat secara ekonomi dan aman secara hukum.
+
+3. **Treasury Reserve Fund (20% Pendapatan)**:
+   * Sebesar 20% pendapatan disimpan secara ketat di kas protokol (*Treasury*) untuk membiayai operasional, audit kode berkala, riset kriptografi lanjutan, serta pemasaran.
 
 ---
 
