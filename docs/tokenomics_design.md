@@ -45,6 +45,11 @@ flowchart TD
     2.  Porsi potongan biaya transaksi / deposit minting fee.
 *   **Dampak Ekonomi**: Menawarkan dividen USDC membuat pemegang koin enggan menjual token $NIMB mereka. Mereka lebih memilih mengunci token demi mendapatkan passive income USDC pasif yang stabil.
 
+> [!NOTE]
+> **Status Implementasi (Fase Lanjutan - Ditunda)**:
+> Mekanisme staking Safety Module dan distribusi yield USDC ini **ditangguhkan** sementara pada rilis awal Nimbus V1 (Fase Bootstrap). Karena token $NIMB belum diluncurkan, logic distribusi ke staker belum diimplementasikan di smart contract awal. Seluruh yield DeFi/RWA yang dihasilkan brankas 30/50/20 untuk sementara dialokasikan penuh ke kas protokol (Treasury/Admin contract) untuk membiayai operasional, pengembangan sirkuit ZK utama, dan audit keamanan.
+
+
 ### C. Protokol Deflasi: Automated Buyback & Burn
 *   Setiap bulan, smart contract Treasury secara otomatis menggunakan **15% dari akumulasi hasil yield USDC** untuk membeli kembali (*buyback*) token $NIMB dari Uniswap LP.
 *   Token $NIMB hasil buyback tersebut kemudian dibakar secara permanen (*burn*).

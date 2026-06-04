@@ -102,14 +102,13 @@ Dokumen ini memetakan seluruh tugas pengembangan, integrasi, dan pengujian yang 
 *   **Tx Hash Aktivasi Stylus**: `0xc8d8f8f8f31196b54ebd904ef595aeac9731f827ea743600bb62af915bbe60a5`
 *   **Inovasi (Aha! Moment - Jurnal 2026)**: Kami merancang key loader dinamis yang dapat membedakan data share format `(usize, Fr)` 40-byte dan scalar `Fr` 32-byte untuk memastikan identitas dan share index dari validator (Leader & Guardians) terasosiasi secara otomatis tanpa konfigurasi manual yang rawan kesalahan. Hal ini mempermudah orkestrasi cluster dan mengurangi kegagalan verifikasi aggregate signature.
 
-## 8. Pengembangan Tokenomics $NIMB & Safety Module Staking (Fase Lanjutan)
-*   **Target Modul**: Kontrak Baru (`nimbus-token` & `nimbus-staking`) & [nimbus-sdk](file:///home/azureuser/crypto/nimbus-sdk/src/lib.rs)
+## 8. Migrasi Sirkuit ZK Utama & Verifikator On-Chain (Prioritas Fase Lanjutan)
+*   **Target Modul**: [nimbus-contracts/src/lib.rs](file:///home/azureuser/crypto/nimbus-contracts/src/lib.rs) & Verifikator Kriptografi L2
+*   **Status**: Belum Mulai (Not Started)
 *   **Deskripsi Pekerjaan**:
-    *   Buat kontrak ERC-20 untuk tata kelola token $NIMB.
-    *   Buat kontrak **Safety Module Staking** tempat staker dapat mengunci $NIMB untuk mem-backstop risiko slashing merchant offline maupun exploit teknis.
-    *   **Migrasi Sirkuit ZK Utama**: Mengganti mock proof ZK local (dari Item 4) dengan sirkuit ZK produksi riil (Groth16/Plonk) dan men-deploy kontrak verifikator on-chain asli di mainnet. Langkah ini wajib diselesaikan bersamaan dengan peluncuran token agar utilitas dan keamanan kriptografi protokol terbukti nyata (menghindari persepsi token sebagai meme coin tanpa fundamentil teknologi).
-    *   Implementasikan logic distribusi reward secara proporsional dalam bentuk USDC (50% dari yield DeFi/RWA yang dikumpulkan) kepada para staker di Safety Module.
-    *   Implementasikan modul buyback & burn otomatis penuh secara on-chain (fully automated on-chain buyback & burn) sebesar 30% dari yield kas protokol di DEX L2 dengan proteksi MEV/sandwich (menggunakan Uniswap TWAP / Chainlink Price Feed untuk menentukan `minAmountOut` dinamis), serta pengiriman 20% biaya ke Treasury.
+    *   Mengganti mock proof ZK local (dari Item 4) dengan sirkuit ZK produksi riil (Groth16/Plonk) untuk verifikasi kepatuhan privat (ZK-Compliance / Proof of Innocence).
+    *   Lakukan implementasi logika sirkuit verifikator Groth16 secara efisien di Rust Stylus atau menggunakan precompile pairing check (`0x0f`) untuk memverifikasi proof yang dikirim oleh client.
+    *   Langkah ini wajib diselesaikan terlebih dahulu agar utilitas dan keamanan kriptografi protokol terbukti nyata sebelum token diluncurkan (menghindari persepsi produk tanpa teknologi nyata).
 
 ## 9. Pemeliharaan Modul Offline POS & Slashing (IP B2B Showcase - Cadangan/Lisensi)
 *   **Target Modul**: [nimbus-contracts/src/lib.rs](file:///home/azureuser/crypto/nimbus-contracts/src/lib.rs) & [nimbus-node/src/main.rs](file:///home/azureuser/crypto/nimbus-node/src/main.rs)
@@ -122,3 +121,10 @@ Dokumen ini memetakan seluruh tugas pengembangan, integrasi, dan pengujian yang 
 *   **Deskripsi Pekerjaan**:
     *   Lakukan audit pihak ketiga terhadap implementasi precompile EIP-2537 BLS12-381 untuk memastikan tidak ada kerentanan memory leak di Rust Stylus.
     *   Audit sirkuit ZK-Compliance untuk memverifikasi keandalan Proof of Innocence.
+
+## 11. Pengembangan Tokenomics $NIMB & Safety Module Staking (Fase Lanjutan - Ditunda)
+*   **Status**: Ditunda (Postponed)
+*   **Deskripsi Pekerjaan**:
+    *   Implementasikan logic distribusi reward secara proporsional dalam bentuk USDC (50% dari yield DeFi/RWA yang dikumpulkan) kepada para staker di Safety Module.
+    *   *Catatan Relasi*: Logic ini **tidak relate** untuk dikerjakan sekarang karena token $NIMB ditunda peluncurannya. Tanpa token $NIMB, tidak ada mekanisme staking Safety Module yang aktif. Seluruh yield DeFi/RWA untuk sementara akan dialokasikan penuh ke kas protokol (Treasury/Admin contract) untuk membiayai operasional dan audit, sebelum didistribusikan ke modul staking di masa mendatang.
+
