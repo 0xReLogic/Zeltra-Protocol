@@ -39,6 +39,12 @@ Untuk melindungi strategi perdagangan dan privasi pengguna/AI Agent dari seranga
 *   Sebelum pekerja latar belakang (*background worker*) memproses dan menyetor batch transaksi multi-call ke L2, relayer secara acak mengacak (*shuffle*) urutan antrean transaksi di memori.
 *   Ini memutus korelasi kronologis antara waktu pengiriman request HTTP API oleh agen dengan urutan eksekusi transaksi yang tercatat pada blok on-chain L2. Pengamat luar tidak dapat mengaitkan transaksi berdasarkan urutan masuknya.
 
+### D. Dynamic Batch Gas Reimbursement & Share-of-Savings Markup
+Berdasarkan riset L2 Gas Economics 2026, biaya transaksi L2 didominasi oleh L1 batch posting cost (calldata/blobs) dan L2 execution cost. Dengan menggunakan batching, biaya L1 posting cost dapat dibagi rata di antara seluruh transaksi dalam batch tersebut. Nimbus Node mengadopsi model **Share-of-Savings Markup**:
+1.  **Estimasi Penghematan**: Relayer mengestimasi biaya transaksi jika dikirim secara individual versus biaya riil yang dibagi per transaksi dalam batch.
+2.  **Markup Dinamis**: Relayer memotong **10%** dari selisih penghematan gas (savings) tersebut sebagai margin operasional/profit relayer.
+3.  **Potongan Saldo Bersih (Net Payout)**: Biaya gas batched + markup langsung dikonversi ke nominal USDC dan dipotong dari stablecoin transaksi (`amount`). Penerima menerima *net payout* setelah dikurangi gas fee ini, menghilangkan kebutuhan wallet user untuk memiliki gas token native (ETH).
+
 ---
 
 ## 3. Konfigurasi Node (Environment Variables)
@@ -86,7 +92,7 @@ graph TD
 ## 5. Spesifikasi HTTP API Endpoints
 
 ### A. Health Check
-Mengecek status kesehatan node relayer, jumlah antrean transaksi, dan nullifier yang terproses.
+Mengecek status kesehatan node relayer, jumlah antrean transaksi, nullifier yang terproses, serta saldo wallet relayer dan akumulasi keuntungan.
 *   **Method:** `GET`
 *   **Path:** `/health`
 *   **Response (JSON):**
@@ -94,7 +100,9 @@ Mengecek status kesehatan node relayer, jumlah antrean transaksi, dan nullifier 
     {
       "status": "OK",
       "queued_transactions": 0,
-      "processed_nullifiers": 15
+      "processed_nullifiers": 15,
+      "relayer_wallet_balance_eth": 10.0,
+      "relayer_accumulated_profit_usdc": 0.0
     }
     ```
 

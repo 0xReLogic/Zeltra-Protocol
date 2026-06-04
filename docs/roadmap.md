@@ -64,10 +64,16 @@ Dokumen ini memetakan seluruh tugas pengembangan, integrasi, dan pengujian yang 
 
 ## 5. Wallet Billing & Gas Markup di Relayer Node
 *   **Target Modul**: [nimbus-node/src/main.rs](file:///home/azureuser/crypto/nimbus-node/src/main.rs)
+*   **Status**: Selesai (Completed)
+*   **File yang Diedit**:
+    *   Relayer: [nimbus-node/src/main.rs](file:///home/azureuser/crypto/nimbus-node/src/main.rs)
+    *   SDK: [nimbus-sdk/src/x402.rs](file:///home/azureuser/crypto/nimbus-sdk/src/x402.rs)
+    *   Dokumentasi: [docs/relayer.md](file:///home/azureuser/crypto/docs/relayer.md)
 *   **Deskripsi Pekerjaan**:
     *   Implementasikan pengelolaan balance wallet relayer (signer account) yang mendanai gas fee transaksi L2.
     *   Saat memproses `/api/spend` atau `/api/x402/verify`, hitung gas fee L2 aktual dari batch transaksi.
     *   Potong saldo USDC milik pengguna dari nominal spend transaksi sejumlah nilai gas fee + **5%-10% markup** dari sisa penghematan gas sebagai margin operasional relayer.
+*   **Inovasi (Aha! Moment - Jurnal 2026)**: Berdasarkan riset L2 Gas Economics 2026 mengenai optimalisasi paymaster/batching fee, kami mengimplementasikan skema **Dynamic Batch Gas Reimbursement with Share-of-Savings Markup** di mana relayer menghitung estimasi gas individu vs gas batch ril. Selisih penghematan gas (hingga 80% dari L1 base fee posting) dibagikan sebagian kepada pengguna (sehingga pengguna membayar jauh lebih murah dibanding transaksi mandiri), sementara relayer memotong **10% markup** dari sisa penghematan tersebut sebagai revenue operasional relayer, diselesaikan langsung secara off-chain dengan memotong saldo USDC milik token privat pengguna.
 
 ## 6. Pengamanan Kunci Rahasia Guardian (KMS Integration)
 *   **Target Modul**: [nimbus-node/src/main.rs](file:///home/azureuser/crypto/nimbus-node/src/main.rs)

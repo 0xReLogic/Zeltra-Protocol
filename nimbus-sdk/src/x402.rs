@@ -80,6 +80,8 @@ pub struct NimbusPaymentPayload {
     pub hm_hex: String,
     /// Issuer public key pk_iss (hex, 256 bytes EVM).
     pub pk_iss_hex: String,
+    /// The payment amount.
+    pub amount: u64,
 }
 
 /// The PAYMENT-SIGNATURE header payload for Nimbus x402 transactions.
@@ -161,6 +163,7 @@ pub fn build_nimbus_payment_signature(
     alpha_neg_hex: &str,
     hm_hex: &str,
     pk_iss_hex: &str,
+    amount: u64,
     scheme: &str,
     network: &str,
 ) -> X402PaymentSignature {
@@ -173,6 +176,7 @@ pub fn build_nimbus_payment_signature(
             alpha_neg_hex: alpha_neg_hex.to_string(),
             hm_hex: hm_hex.to_string(),
             pk_iss_hex: pk_iss_hex.to_string(),
+            amount,
         },
     }
 }
@@ -374,6 +378,7 @@ impl AgentTokenPool {
             &alpha_neg_bytes,
             &hm_bytes,
             &pk_iss_evm,
+            amount,
             scheme,
             network,
         );
@@ -432,6 +437,7 @@ mod tests {
             "0xalpha_neg_hex_data",
             "0xhm_hex_data",
             "0xpk_iss_hex_data",
+            1000,
             "exact",
             "eip155:42161",
         );
