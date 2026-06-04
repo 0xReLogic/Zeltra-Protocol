@@ -1,23 +1,23 @@
 # Model Bisnis & Konsep Monetisasi Nimbus Protocol
 
-Nimbus Protocol dirancang dengan model bisnis yang ramah bagi pengguna serta ekosistem terdesentralisasi, dengan memindahkan beban biaya operasional ke aktivitas bernilai tinggi (**Whales**, **AI Agents**, dan **Institusi**) serta optimalisasi yield on-chain. 
+Nimbus Protocol dirancang dengan model bisnis yang ramah bagi pengguna serta ekosistem terdesentralisasi, dengan memindahkan beban biaya operasional ke aktivitas bernilai tinggi (**Whales**, **AI Agents**, dan **Institusi**) serta optimalisasi yield on-chain secara aman menggunakan manajemen risiko modal yang kokoh.
 
-Pada saat yang sama, fitur pembayaran retail luring (offline merchant) tetap dipertahankan sebagai modul opsional bernilai tinggi jika ada perusahaan ritel khusus yang ingin mengakuisisinya.
+Pada saat yang sama, fitur pembayaran retail luring (offline merchant) tetap dipertahankan sebagai modul lisensi kekayaan intelektual (IP) opsional bernilai tinggi jika ada perusahaan ritel khusus yang ingin meraih lisensinya.
 
 ---
 
 ## 1. Filosofi Bisnis: Zero-Cost Retail & Cross-Subsidization
 
 Pada fase awal, tantangan terbesar protokol pembayaran baru adalah dinginnya adopsi jika pengguna dibebani biaya transaksi tinggi. Oleh karena itu, Nimbus menerapkan prinsip **subsidi silang (cross-subsidization)**:
-*   **Retail/Pengguna Kasual**: Biaya transaksi sangat murah hingga mendekati **0%**.
-*   **Whale & Institusi**: Menanggung biaya penarikan/minting premium kecil (0.1% - 0.2%) demi mendapatkan privasi mutlak dalam menyembunyikan strategi taruhan/aset mereka dari publik atau menjaga kepatuhan regulasi.
+*   **Retail/Pengguna Kasual**: Biaya transaksi sangat murah hingga mendekati **0%** (hanya membayar gas fee L2 dasar).
+*   **Whale & Institusi**: Menanggung biaya penarikan/minting premium kecil (0.1% - 0.2%) serta biaya likuiditas instan (*fast-path fee*) demi mendapatkan privasi mutlak dan kecepatan eksekusi tinggi tanpa slippage atau frontrunning.
 *   **AI Agents**: Membayar biaya routing mikro per transaksi API untuk mendapatkan kecepatan transaksi nanopayment tanpa latensi ZK-proof.
 
 ---
 
 ## 2. Struktur Biaya & Sumber Pendapatan Protokol
 
-### A. Untuk Toko / Merchant (Retail Pembayaran Offline - Cadangan/Opsional)
+### A. Untuk Toko / Merchant (Retail Pembayaran Offline - Cadangan/Opsional/Lisensi IP)
 *   **Merchant Discount Rate (MDR)**: 
     *   **Toko Kecil/Mikro**: **0%** biaya transaksi untuk volume di bawah batas tertentu.
     *   **Toko Menengah/Besar**: **0.1%** per transaksi (jauh lebih murah dari Visa/Mastercard atau QRIS lokal).
@@ -26,28 +26,36 @@ Pada fase awal, tantangan terbesar protokol pembayaran baru adalah dinginnya ado
 ### B. Untuk Pengguna & Whale (Polymarket Private Betting - Fase B)
 *   **Minting Fee (Deposit)**: **0.1%** dari nominal stablecoin yang dikunci ke dalam smart contract.
 *   **Redemption Fee (Penarikan)**: **0.15%** saat mencairkan token privat kembali ke alamat publik.
-*   **Mekanisme Transaksi**: Whale bersedia membayar biaya kecil ini karena nilai privasi yang mereka dapatkan mencegah strategi taruhan mereka di-frontrun atau dicopas oleh bot pelacak on-chain.
+*   **Fast-Path Liquidity Premium (Eksekusi Instan Lintas Rantai)**:
+    *   Pengguna dikenakan **biaya premi likuiditas 0.05% - 0.10%** dari nilai transaksi untuk menggunakan jalur talangan cepat relayer (<5 detik) dibanding antrean CCIP standar (15 menit).
+    *   **Penerapan 3 Fase Rilis Talangan**:
+        1.  *Fase 1 (Launch)*: Jalur cepat dinonaktifkan. Semua transaksi menggunakan CCIP standar (15 menit) untuk menghilangkan kebutuhan modal awal dan risiko finansial.
+        2.  *Fase 2 (Bootstrap)*: Fitur talangan diaktifkan menggunakan modal **hasil yield akumulasi Treasury Nimbus sendiri** secara mandiri (fee premi 100% milik protokol).
+        3.  *Fase 3 (Scaling)*: Membuka Public Liquidity Pool dengan sistem **Dynamic Pool Cap** (membatasi ukuran pool berdasarkan volume aktif) guna menjaga tingkat utilitas modal tinggi dan memberikan APY yang sangat kompetitif bagi penyedia likuiditas (LPs) tanpa inefisiensi modal.
 
 ### C. Pendapatan Relayer (Gas Markup EIP-7702)
 *   **Mekanisme**: Relayer batching (`nimbus-node`) menyatukan transaksi spend pengguna ke dalam satu antrean mempool (menghemat gas fee hingga 40%).
-*   **Markup**: Protokol mengambil margin sekitar **5% - 10%** dari penghematan gas fee tersebut saat menagih biaya gas dalam bentuk stablecoin (USDC) ke dompet pengguna. Pengguna tetap merasa membayar gas fee lebih murah dibanding melakukan transaksi mandiri.
+*   **Markup**: Protokol mengambil margin sekitar **5% - 10%** dari *nilai penghematan gas fee* tersebut saat menagih biaya gas dalam bentuk stablecoin (USDC) ke dompet pengguna. Pengguna tetap merasa membayar gas fee lebih murah dibanding melakukan transaksi mandiri.
 
-### D. DeFi Yield Integration (Dana Mengendap)
+### D. DeFi & RWA Yield Integration (Model Brankas Cadangan Bertingkat)
 *   **Mekanisme**: Setiap token Nimbus yang beredar dijamin 1:1 oleh stablecoin (USDC) yang terkunci di smart contract.
-*   **Optimalisasi**: Selama dana tersebut mengendap dan belum dicairkan oleh pemegang token, smart contract menyalurkan dana jaminan ini ke protokol peminjaman DeFi terpercaya (seperti Aave atau Compound) untuk menghasilkan bunga tahunan (APY ~3% s.d. 5%).
-*   **Keuntungan**: Bunga yang dihasilkan sepenuhnya menjadi milik kas protokol dan penyedia likuiditas (Issuer), tanpa mengurangi saldo pengguna sepeser pun.
+*   **Optimalisasi (Rasio 30/50/20)**: Selama dana tersebut mengendap dan belum dicairkan oleh pemegang token, smart contract menyalurkan dana jaminan ini ke sistem brankas bertingkat:
+    1.  **30% Cadangan Likuid (Liquid Reserve)**: Disimpan pasif di brankas utama Nimbus untuk memfasilitasi penarikan instan tanpa hambatan (0% APY, 100% liquid).
+    2.  **50% Likuiditas DeFi (Aave/Compound)**: Disalurkan ke pool peminjaman likuid Aave untuk menghasilkan bunga tahunan (~3% s.d. 4% APY).
+    3.  **20% Aset Dunia Nyata / RWA (BlackRock BUIDL / Ondo USDY)**: Diinvestasikan ke token surat utang negara AS (T-Bills) yang sangat aman secara regulasi dan memberikan yield stabil (~5% APY).
+*   **Keuntungan**: Bunga yang dihasilkan sepenuhnya menjadi milik kas protokol dan penyedia likuiditas (Issuer), tanpa mengurangi saldo pokok pengguna sepeser pun.
 
 ### E. AI Agents Nanopayments (x402 Facilitator - Fase C)
 *   **Mekanisme**: AI Agent menggunakan `AgentTokenPool` untuk membayar API secara otomatis melalui rute HTTP `402 Payment Required`.
-*   **Monetisasi**: Protokol memotong biaya routing mikro (**0.05%** per transaksi atau flat fee kecil per API call) untuk memfasilitasi transaksi mikro berfrekuensi tinggi ini. Pencipta AI Agent bersedia membayar karena melindungi rahasia komersial data yang mereka beli.
+*   **Monetisasi**: Protokol memotong biaya routing mikro (**0.05%** per transaksi atau flat fee kecil per API call) untuk memfasilitasi transaksi mikro berfrekuensi tinggi ini.
 
 ### F. ZK-Compliance Verification (Kepatuhan Institusi - Fase A)
-*   **Mekanisme**: Sebelum melakukan deposit, pengguna korporat/institusi melakukan pembuktian ZK-SNARK secara lokal bahwa alamat mereka berada di dalam daftar Merkle Tree bersih (tidak masuk daftar OFAC/sanksi).
+*   **Mekanisme**: Sebelum melakukan deposit, pengguna korporat melakukan pembuktian ZK-SNARK secara lokal bahwa alamat mereka berada di dalam daftar Merkle Tree bersih (tidak masuk daftar OFAC/sanksi).
 *   **Monetisasi**: Protokol menarik biaya verifikasi kepatuhan (*Compliance Verification Fee*) untuk memeriksa ZK-proof dan Merkle proof di kontrak on-chain L2.
 
 ---
 
-## 3. Skema Slashing (Pencegahan Kerugian Merchant)
+## 3. Skema Slashing (Pencegahan Kerugian Merchant - Lisensi B2B)
 
 Salah satu ketakutan terbesar toko dalam menerima pembayaran offline adalah risiko double-spending saat mereka tidak terhubung ke internet. Nimbus menyelesaikan ini secara kriptografis menggunakan skema Shamir Secret Sharing:
 *   Jika pembeli nakal mencoba membelanjakan token yang sama dua kali, identitas dompet mereka (Identity Secret) otomatis terbongkar secara instan di rantai L2.
@@ -61,10 +69,10 @@ Salah satu ketakutan terbesar toko dalam menerima pembayaran offline adalah risi
 | Pihak | Keuntungan Menggunakan Nimbus | Biaya yang Dikenakan |
 | :--- | :--- | :--- |
 | **Merchant / Toko** | Transaksi instan (< 1 detik), tanpa risiko penipuan/double-spend, tanpa biaya sewa alat EDC. | 0% (toko kecil) atau 0.1% (toko besar). |
-| **Whale / Bettor** | Melindungi alpha taruhan Polymarket, anti copy-trading, taruhan gasless satu klik. | 0.1% - 0.2% per aktivitas minting/redemption. |
+| **Whale / Bettor** | Melindungi alpha taruhan Polymarket, anti copy-trading, taruhan gasless satu klik. | 0.1% - 0.2% per aktivitas minting/redemption + 0.05% - 0.1% fast-path fee (setelah Fase 2). |
 | **AI Agents** | Pembayaran API otonom tanpa MetaMask, menjaga kerahasiaan kueri data komersial. | 0.05% routing fee per transaksi API. |
 | **Institusi** | Transaksi privat yang patuh hukum (OFAC/AML-compliant). | ZK-Compliance Verification Fee. |
-| **Protokol (Kita)** | Akumulasi pendapatan dari yield DeFi, markup gas relayer, biaya routing x402, dan biaya kepatuhan. | N/A (Penerima laba). |
+| **Protokol (Kita)** | Akumulasi pendapatan dari yield DeFi/RWA, markup gas relayer, biaya routing x402, dan biaya kepatuhan. | N/A (Penerima laba). |
 
 ---
 
@@ -101,7 +109,7 @@ Pendapatan Protokol (USDC)
 ## 6. Rencana Aksi Go-To-Market Awal
 
 1.  **Fase 1: Tarik Volume dari Whale Polymarket (Fase B)**
-    *   Fokus memasarkan fitur taruhan privat Polymarket. Ini akan menghasilkan volume transaksi besar (TVL) awal di smart contract kita, yang menghasilkan yield DeFi instan untuk mendanai operasional awal protokol.
+    *   Fokus memasarkan fitur taruhan privat Polymarket dengan pre-funding instan. Ini akan menghasilkan volume transaksi besar (TVL) awal di smart contract kita, yang menghasilkan yield DeFi/RWA instan untuk mendanai operasional awal protokol.
 2.  **Fase 2: Integrasi SDK AI Agent untuk API Provider (Fase C)**
     *   Menawarkan Nimbus x402 SDK kepada penyedia API kecerdasan buatan agar AI Agent dapat membayar kueri secara privat dan otonom.
 3.  **Fase 3: Layanan Kepatuhan Institusional (Fase A)**

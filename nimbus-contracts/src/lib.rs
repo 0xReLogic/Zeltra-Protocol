@@ -64,6 +64,13 @@ pub fn to_evm_scalar(scalar: &Fr) -> [u8; 32] {
     evm_buf
 }
 
+sol_interface! {
+    interface IErc20 {
+        function transferFrom(address from, address to, uint256 value) external returns (bool);
+        function transfer(address to, uint256 value) external returns (bool);
+    }
+}
+
 sol_storage! {
     #[entrypoint]
     pub struct Nimbus {
@@ -87,6 +94,18 @@ sol_storage! {
 
         // Session timestamp to enforce timelocks for auto-refund
         mapping(bytes32 => uint256) session_timestamp;
+
+        // The ERC-20 stablecoin contract address
+        address stablecoin;
+        // Address that receives the protocol fees
+        address fee_recipient;
+
+        // --- Fast-Path Liquidity Premium (Roadmap Fase 1-3) ---
+        // Active phase: 1 = Standard CCIP, 2 = Treasury-funded, 3 = Public LP with Dynamic Cap
+        uint256 fast_path_phase;
+        // LP Pool tracking variables for Fase 3
+        uint256 total_lp_liquidity;
+        uint256 utilized_lp_liquidity;
     }
 }
 
@@ -138,14 +157,101 @@ impl Nimbus {
 
 #[public]
 impl Nimbus {
-    /// Initialize the contract and set the owner.
-    pub fn init(&mut self) -> Result<(), Vec<u8>> {
+    /// Initialize the contract and set the owner, stablecoin, and fee recipient addresses.
+    pub fn init(&mut self, stablecoin_addr: Address, fee_recipient_addr: Address) -> Result<(), Vec<u8>> {
         if self.owner.get() != Address::ZERO {
             return Err(b"ALREADY_INITIALIZED".to_vec());
         }
         self.owner.set(self.msg_sender());
         self.paused.set(false);
+        self.stablecoin.set(stablecoin_addr);
+        self.fee_recipient.set(fee_recipient_addr);
+        self.fast_path_phase.set(U256::from(1));
         Ok(())
+    }
+
+    pub fn stablecoin(&self) -> Result<Address, Vec<u8>> {
+        Ok(self.stablecoin.get())
+    }
+
+    pub fn fee_recipient(&self) -> Result<Address, Vec<u8>> {
+        Ok(self.fee_recipient.get())
+    }
+
+    pub fn set_fee_recipient(&mut self, recipient: Address) -> Result<(), Vec<u8>> {
+        self.check_owner()?;
+        self.fee_recipient.set(recipient);
+        Ok(())
+    }
+
+    pub fn fast_path_phase(&self) -> Result<U256, Vec<u8>> {
+        Ok(self.fast_path_phase.get())
+    }
+
+    pub fn set_fast_path_phase(&mut self, phase: U256) -> Result<(), Vec<u8>> {
+        self.check_owner()?;
+        if phase < U256::from(1) || phase > U256::from(3) {
+            return Err(b"INVALID_PHASE".to_vec());
+        }
+        self.fast_path_phase.set(phase);
+        Ok(())
+    }
+
+    pub fn total_lp_liquidity(&self) -> Result<U256, Vec<u8>> {
+        Ok(self.total_lp_liquidity.get())
+    }
+
+    pub fn utilized_lp_liquidity(&self) -> Result<U256, Vec<u8>> {
+        Ok(self.utilized_lp_liquidity.get())
+    }
+
+    pub fn set_lp_liquidity(&mut self, total: U256, utilized: U256) -> Result<(), Vec<u8>> {
+        self.check_owner()?;
+        if utilized > total {
+            return Err(b"INVALID_UTILIZATION".to_vec());
+        }
+        self.total_lp_liquidity.set(total);
+        self.utilized_lp_liquidity.set(utilized);
+        Ok(())
+    }
+
+    /// Calculate the Fast-Path Liquidity Premium dynamically (Roadmap Fase 1-3).
+    /// Inspired by the 2026 academic paper "Exploiting Liquidity Exhaustion Attacks in Intent-Based Cross-Chain Bridges"
+    /// we implement dynamic congestion-based pricing to prevent liquidity exhaustion attacks.
+    pub fn calculate_fast_path_premium(&self, amount: U256) -> Result<U256, Vec<u8>> {
+        let phase = self.fast_path_phase.get();
+        if phase == U256::from(1) {
+            // Fase 1: Disabled (CCIP slow path only, zero premium)
+            return Ok(U256::ZERO);
+        } else if phase == U256::from(2) {
+            // Fase 2: Enabled via internal Treasury capital, flat 0.05% premium
+            let premium = amount * U256::from(5) / U256::from(10000);
+            return Ok(premium);
+        } else if phase == U256::from(3) {
+            // Fase 3: Public LP with Dynamic Cap and Congestion-based Pricing
+            let total = self.total_lp_liquidity.get();
+            let utilized = self.utilized_lp_liquidity.get();
+            if total == U256::ZERO {
+                return Err(b"ZERO_POOL_LIQUIDITY".to_vec());
+            }
+            let new_utilized = utilized + amount;
+            // Enforce Dynamic Pool Cap: reject if it exceeds total liquidity (prevents exhaustion attacks)
+            if new_utilized > total {
+                return Err(b"LP_POOL_EXHAUSTED_DYNAMIC_CAP".to_vec());
+            }
+            
+            // Calculate utilization rate: U = (utilized * 10000) / total (in basis points)
+            let u_bps = (new_utilized * U256::from(10000)) / total;
+            
+            // Dynamic premium rate: base 5 bps (0.05%) up to max 15 bps (0.15%)
+            // rate_bps = 5 + (10 * u_bps / 10000)
+            let rate_bps = U256::from(5) + (U256::from(10) * u_bps / U256::from(10000));
+            
+            let premium = amount * rate_bps / U256::from(10000);
+            return Ok(premium);
+        }
+        
+        Ok(U256::ZERO)
     }
 
     /// Pause the contract.
@@ -182,14 +288,63 @@ impl Nimbus {
             return Err(b"TIMELOCK_NOT_EXPIRED".to_vec());
         }
         self.session_resolved.insert(sid, true);
+
+        let amount = self.session_amount.get(sid);
+
+        #[cfg(not(test))]
+        {
+            if amount > U256::ZERO {
+                let stablecoin_address = self.stablecoin.get();
+                let erc20 = IErc20::new(stablecoin_address);
+                let success = erc20.transfer(&mut *self, client, amount)
+                    .map_err(|e| e)?;
+                if !success {
+                    return Err(b"REFUND_TRANSFER_FAILED".to_vec());
+                }
+            }
+        }
+
         Ok(())
     }
 
     /// Deposit funds for atomic token issuance.
     pub fn deposit(&mut self, sid: FixedBytes<32>, _com_k_bytes: Vec<u8>, amount: U256) -> Result<(), Vec<u8>> {
         self.check_not_paused()?;
-        self.session_client.insert(sid, self.msg_sender());
-        self.session_amount.insert(sid, amount);
+        
+        let client = self.msg_sender();
+        
+        // 1. Calculate deposit/minting fee of 0.1% (amount / 1000)
+        let fee = amount / U256::from(1000);
+        let net_amount = amount - fee;
+        
+        #[cfg(not(test))]
+        {
+            // 2. Transfer full amount from client to this contract
+            let stablecoin_address = self.stablecoin.get();
+            let erc20 = IErc20::new(stablecoin_address);
+            
+            let this_address = stylus_sdk::contract::address();
+            
+            // Call transferFrom to transfer the collateral from user to this contract
+            let success = erc20.transfer_from(&mut *self, client, this_address, amount)
+                .map_err(|e| e)?;
+            if !success {
+                return Err(b"TRANSFER_FROM_FAILED".to_vec());
+            }
+            
+            // 3. Send 0.1% fee to fee_recipient
+            if fee > U256::ZERO {
+                let recipient = self.fee_recipient.get();
+                let fee_success = erc20.transfer(&mut *self, recipient, fee)
+                    .map_err(|e| e)?;
+                if !fee_success {
+                    return Err(b"FEE_TRANSFER_FAILED".to_vec());
+                }
+            }
+        }
+        
+        self.session_client.insert(sid, client);
+        self.session_amount.insert(sid, net_amount);
         self.session_resolved.insert(sid, false);
         self.session_timestamp.insert(sid, U256::from(self.block_timestamp()));
         Ok(())
@@ -224,7 +379,23 @@ impl Nimbus {
         // Check if output equals com_k_bytes
         if result == com_k_bytes {
             self.session_resolved.insert(sid, true);
-            // In production, transfer the escrowed amount from client to issuer here
+            
+            let amount = self.session_amount.get(sid);
+            let recipient = self.msg_sender();
+            
+            #[cfg(not(test))]
+            {
+                if amount > U256::ZERO {
+                    let stablecoin_address = self.stablecoin.get();
+                    let erc20 = IErc20::new(stablecoin_address);
+                    let success = erc20.transfer(&mut *self, recipient, amount)
+                        .map_err(|e| e)?;
+                    if !success {
+                        return Err(b"REVEAL_TRANSFER_FAILED".to_vec());
+                    }
+                }
+            }
+
             Ok(true)
         } else {
             Ok(false)
@@ -239,13 +410,24 @@ impl Nimbus {
         alpha_neg_bytes: Vec<u8>,   // -alpha in G1 (128 bytes EVM format)
         hm_bytes: Vec<u8>,          // H(m) in G1 (128 bytes EVM format)
         pk_iss_bytes: Vec<u8>,      // pk_iss in G2 (256 bytes EVM format)
-        _recipient: Address,
+        recipient: Address,
+        amount: U256,
     ) -> Result<bool, Vec<u8>> {
         self.check_not_paused()?;
         // 1. Check double spend (Nullifier)
         if self.nullifiers.get(nullifier) {
             return Ok(false);
         }
+
+        // Calculate standard redemption/withdrawal fee of 0.15% (amount * 15 / 10000)
+        let base_fee = amount * U256::from(15) / U256::from(10000);
+        
+        // Calculate dynamic premium if Fase 2 or 3 is active
+        let premium = self.calculate_fast_path_premium(amount)?;
+        
+        // fee_recipient gets base_fee + 20% of premium
+        let protocol_share = base_fee + (premium * U256::from(20) / U256::from(100));
+        let payout = amount - protocol_share;
 
         #[cfg(test)]
         {
@@ -277,7 +459,29 @@ impl Nimbus {
             // 4. Verify output (true if last byte is 1)
             if output.len() == 32 && output[31] == 1 {
                 self.nullifiers.insert(nullifier, true);
-                // In production, release token payout to recipient here
+                
+                let stablecoin_address = self.stablecoin.get();
+                let erc20 = IErc20::new(stablecoin_address);
+                
+                // Transfer payout to recipient (if not zero address)
+                if recipient != Address::ZERO && payout > U256::ZERO {
+                    let success = erc20.transfer(&mut *self, recipient, payout)
+                        .map_err(|e| e)?;
+                    if !success {
+                        return Err(b"SPEND_TRANSFER_FAILED".to_vec());
+                    }
+                }
+                
+                // Transfer fee to fee_recipient
+                if protocol_share > U256::ZERO {
+                    let recipient_fee = self.fee_recipient.get();
+                    let fee_success = erc20.transfer(&mut *self, recipient_fee, protocol_share)
+                        .map_err(|e| e)?;
+                    if !fee_success {
+                        return Err(b"SPEND_FEE_TRANSFER_FAILED".to_vec());
+                    }
+                }
+
                 Ok(true)
             } else {
                 Ok(false)
@@ -300,7 +504,7 @@ impl Nimbus {
     ) -> Result<bool, Vec<u8>> {
         self.check_not_paused()?;
         // 1. Verify and invalidate the signature (same as spend)
-        let is_valid = self.spend(nullifier, alpha_neg_bytes, hm_bytes, pk_iss_bytes, Address::ZERO)?;
+        let is_valid = self.spend(nullifier, alpha_neg_bytes, hm_bytes, pk_iss_bytes, Address::ZERO, amount)?;
         if !is_valid {
             return Ok(false);
         }
@@ -595,6 +799,12 @@ mod tests {
     }
 
     #[no_mangle]
+    pub unsafe extern "C" fn contract_address(dest: *mut u8) {
+        let dest_slice = std::slice::from_raw_parts_mut(dest, 20);
+        dest_slice.copy_from_slice(&[5u8; 20]);
+    }
+
+    #[no_mangle]
     pub unsafe extern "C" fn block_timestamp() -> u64 {
         BLOCK_TIMESTAMP.with(|ts| {
             *ts.borrow()
@@ -859,10 +1069,10 @@ mod tests {
         
         let mut contract = Nimbus::default();
         // First init should succeed
-        assert!(contract.init().is_ok());
+        assert!(contract.init(Address::ZERO, Address::ZERO).is_ok());
         
         // Second init should fail
-        assert_eq!(contract.init(), Err(b"ALREADY_INITIALIZED".to_vec()));
+        assert_eq!(contract.init(Address::ZERO, Address::ZERO), Err(b"ALREADY_INITIALIZED".to_vec()));
     }
 
     #[test]
@@ -873,7 +1083,7 @@ mod tests {
         
         set_msg_sender(owner);
         let mut contract = Nimbus::default();
-        contract.init().unwrap();
+        contract.init(Address::ZERO, Address::ZERO).unwrap();
         
         // Non-owner pausing should fail
         set_msg_sender(non_owner);
@@ -901,7 +1111,7 @@ mod tests {
         set_msg_sender(owner);
         
         let mut contract = Nimbus::default();
-        contract.init().unwrap();
+        contract.init(Address::ZERO, Address::ZERO).unwrap();
         contract.pause().unwrap();
         
         // Try guarded operations
@@ -915,7 +1125,7 @@ mod tests {
             Err(b"CONTRACT_PAUSED".to_vec())
         );
         assert_eq!(
-            contract.spend(sid, vec![], vec![], vec![], Address::ZERO),
+            contract.spend(sid, vec![], vec![], vec![], Address::ZERO, U256::ZERO),
             Err(b"CONTRACT_PAUSED".to_vec())
         );
         assert_eq!(
@@ -945,7 +1155,7 @@ mod tests {
         
         set_msg_sender(owner);
         let mut contract = Nimbus::default();
-        contract.init().unwrap();
+        contract.init(Address::ZERO, Address::ZERO).unwrap();
         
         let sid = FixedBytes::repeat_byte(0xab);
         
@@ -979,7 +1189,7 @@ mod tests {
         
         set_msg_sender(owner);
         let mut contract = Nimbus::default();
-        contract.init().unwrap();
+        contract.init(Address::ZERO, Address::ZERO).unwrap();
         
         // Non-owner should not be able to register clean root
         set_msg_sender(non_owner);
@@ -988,6 +1198,55 @@ mod tests {
         // Owner should be able to register clean root
         set_msg_sender(owner);
         assert!(contract.register_clean_root(FixedBytes::ZERO).is_ok());
+    }
+
+    #[test]
+    fn test_fast_path_liquidity_premium_phases() {
+        reset_test_state();
+        let owner = address!("1111111111111111111111111111111111111111");
+        set_msg_sender(owner);
+        
+        let mut contract = Nimbus::default();
+        contract.init(Address::ZERO, Address::ZERO).unwrap();
+        
+        // Default phase should be 1
+        assert_eq!(contract.fast_path_phase().unwrap(), U256::from(1));
+        
+        // Fase 1: Premium is always 0
+        let amount = U256::from(1000000); // 1,000,000 (e.g. 1 USDC)
+        assert_eq!(contract.calculate_fast_path_premium(amount).unwrap(), U256::ZERO);
+        
+        // Change to Fase 2
+        contract.set_fast_path_phase(U256::from(2)).unwrap();
+        assert_eq!(contract.fast_path_phase().unwrap(), U256::from(2));
+        // Fase 2: 0.05% flat premium => 1,000,000 * 5 / 10,000 = 500
+        assert_eq!(contract.calculate_fast_path_premium(amount).unwrap(), U256::from(500));
+        
+        // Change to Fase 3
+        contract.set_fast_path_phase(U256::from(3)).unwrap();
+        assert_eq!(contract.fast_path_phase().unwrap(), U256::from(3));
+        
+        // Fase 3 with zero liquidity should fail
+        assert!(contract.calculate_fast_path_premium(amount).is_err());
+        
+        // Set LP liquidity: total = 10,000,000, utilized = 0
+        contract.set_lp_liquidity(U256::from(10000000), U256::from(0)).unwrap();
+        // New utilization after adding amount(1,000,000) is 1,000,000 / 10,000,000 = 10% (1,000 bps)
+        // Rate = 5 + 10 * 1,000 / 10,000 = 5 + 1 = 6 bps
+        // Premium = 1,000,000 * 6 / 10,000 = 600
+        assert_eq!(contract.calculate_fast_path_premium(amount).unwrap(), U256::from(600));
+        
+        // Set utilized to 8,000,000
+        contract.set_lp_liquidity(U256::from(10000000), U256::from(8000000)).unwrap();
+        // New utilization after adding amount(1,000,000) is 9,000,000 / 10,000,000 = 90% (9,000 bps)
+        // Rate = 5 + 10 * 9,000 / 10,000 = 5 + 9 = 14 bps
+        // Premium = 1,000,000 * 14 / 10,000 = 1400
+        assert_eq!(contract.calculate_fast_path_premium(amount).unwrap(), U256::from(1400));
+        
+        // Request amount exceeding capacity (capacity is 2,000,000, we request 3,000,000)
+        let large_amount = U256::from(3000000);
+        // Should trigger Dynamic Pool Cap limit and error
+        assert!(contract.calculate_fast_path_premium(large_amount).is_err());
     }
 }
 

@@ -51,6 +51,17 @@ sol_storage! {
 
         // Pemetaan Session ID ke block timestamp untuk melacak timelock pengembalian dana
         mapping(bytes32 => uint256) session_timestamp;
+
+        // Alamat token stablecoin ERC-20 (USDC)
+        address stablecoin;
+        // Alamat penerima biaya protokol (fee recipient)
+        address fee_recipient;
+
+        // Fase Fast-Path: 1 = CCIP Lambat, 2 = Treasury-funded, 3 = Public LP dengan Dynamic Cap
+        uint256 fast_path_phase;
+        // Total likuiditas dan likuiditas yang terpakai di pool LP (Fase 3)
+        uint256 total_lp_liquidity;
+        uint256 utilized_lp_liquidity;
     }
 }
 ```
@@ -74,33 +85,35 @@ sequenceDiagram
 
 *Catatan Keamanan: Semua fungsi yang mengubah state (ditandai dengan `&mut self`) akan memeriksa apakah kontrak sedang dalam keadaan aktif (tidak di-pause) menggunakan `self.check_not_paused()?` sebelum melakukan eksekusi.*
 
-### A. Fitur Administrasi & Keamanan (Fase E: Security)
-*   `init()`: Menginisialisasi owner kontrak dengan alamat pengirim transaksi pertama. Mencegah inisialisasi ganda.
+#### A. Fitur Administrasi & Keamanan (Fase E: Security)
+*   `init(stablecoin_addr: Address, fee_recipient_addr: Address)`: Menginisialisasi owner kontrak dengan alamat pengirim transaksi pertama, menyetel alamat token stablecoin dan fee recipient, serta menetapkan fase awal Fast-Path ke `1`.
 *   `pause()`: Mengaktifkan status jeda darurat (`paused = true`). Hanya bisa dipanggil oleh owner.
 *   `unpause()`: Menonaktifkan status jeda darurat (`paused = false`). Hanya bisa dipanggil oleh owner.
+*   `set_fast_path_phase(phase: uint256)`: Menyetel fase Fast-Path (1, 2, atau 3). Hanya bisa dipanggil oleh owner.
+*   `set_lp_liquidity(total: uint256, utilized: uint256)`: Menyetel parameter likuiditas pool LP untuk simulasi utilitas Fase 3. Hanya bisa dipanggil oleh owner.
 
 ### B. `deposit(sid: FixedBytes<32>, _com_k_bytes: Vec<u8>, amount: U256)`
-*   Klien menyetorkan dana escrow (misalnya USDC) ke kontrak dengan ID sesi tertentu (`sid`).
-*   Kontrak mencatat alamat pengirim ke `session_client`, jumlah deposit ke `session_amount`, dan menginisialisasi `session_resolved` ke `false`.
+*   Klien menyetorkan dana stablecoin ke kontrak dengan ID sesi tertentu (`sid`). Kontrak menarik stablecoin dari dompet klien menggunakan `transferFrom`.
+*   Biaya minting/deposit sebesar **0.1%** dipotong secara on-chain dan langsung ditransfer ke `fee_recipient`.
+*   Kontrak mencatat alamat pengirim ke `session_client`, jumlah deposit bersih (`amount - fee`) ke `session_amount`, dan menginisialisasi `session_resolved` ke `false`.
 *   Kontrak juga mencatat waktu transaksi saat ini ke `session_timestamp` sebagai acuan waktu untuk sistem auto-refund timelock.
 
 ### C. `claim_refund(sid: FixedBytes<32>) -> Result<(), Vec<u8>>`
 *   Menyediakan jaminan keselamatan dana pengguna jika Relayer offline atau menolak membuka kunci masking.
 *   Dapat dipanggil oleh klien pembuat sesi deposit jika waktu saat ini (`block_timestamp`) sudah melewati **24 jam (86.400 detik)** sejak deposit dilakukan.
-*   Setelah berhasil diverifikasi, kontrak menandai sesi sebagai selesai (`session_resolved = true`) agar dana tidak dicairkan ganda oleh Relayer nantinya.
+*   Setelah berhasil diverifikasi, kontrak menandai sesi sebagai selesai (`session_resolved = true`) dan mengembalikan dana bersih ke klien.
 
 ### D. `reveal_mask_key(sid: FixedBytes<32>, k_bytes: Vec<u8>, pk_iss_bytes: Vec<u8>, com_k_bytes: Vec<u8>) -> Result<bool, Vec<u8>>`
 *   Penerbit (Issuer) menyerahkan kunci masking $k$ bersama kunci publik mereka $pk_{iss}$ dan komitmen $com_k$.
 *   Kontrak memanggil precompile **`BLS12_G2_MSM` (address `0x0e`)** dengan payload 288-byte (kombinasi $pk_{iss}$ dan $k$) untuk menghitung $k \cdot pk_{iss}$.
 *   Jika hasil perhitungan cocok dengan $com_k$, kontrak menandai sesi sebagai selesai (`session_resolved = true`) dan mencairkan escrow dana ke dompet Penerbit.
 
-### E. `spend(nullifier: FixedBytes<32>, alpha_neg_bytes: Vec<u8>, hm_bytes: Vec<u8>, pk_iss_bytes: Vec<u8>, _recipient: Address) -> Result<bool, Vec<u8>>`
+### E. `spend(nullifier: FixedBytes<32>, alpha_neg_bytes: Vec<u8>, hm_bytes: Vec<u8>, pk_iss_bytes: Vec<u8>, recipient: Address, amount: U256) -> Result<bool, Vec<u8>>`
 *   Untuk mencairkan dana secara anonim, penerima mengirimkan tanda tangan BLS yang telah di-unblind.
 *   Kontrak memverifikasi:
-    1.  Nullifier belum pernah terdaftar (`!nullifiers[nullifier]`).
-    2.  Keabsahan tanda tangan BLS menggunakan precompile **`BLS12_PAIRING_CHECK` (address `0x0f`)** dengan payload 768-byte:
-        $$e(-\alpha, G_2) \cdot e(H(m), pk_{iss}) == 1$$
-*   Jika valid, kontrak mencatat nullifier untuk mencegah double-spend dan mentransfer dana ke `recipient`.
+1.  Nullifier belum pernah terdaftar (`!nullifiers[nullifier]`).
+2.  Keabsahan tanda tangan BLS menggunakan precompile **`BLS12_PAIRING_CHECK` (address `0x0f`)** dengan payload 768-byte.
+*   Jika valid, kontrak mencatat nullifier untuk mencegah double-spend, menghitung biaya dasar penarikan **0.15%**, menghitung biaya premi Fast-Path (jika Fase 2 atau Fase 3 aktif), lalu mengirimkan sisa dana bersih ke `recipient` dan total biaya ke `fee_recipient`.
 
 ### F. `spend_and_buy_shares(...) -> Result<bool, Vec<u8>>`
 *   Melakukan verifikasi tanda tangan BLS (`spend`), lalu secara atomik melakukan panggilan eksternal (`RawCall`) ke kontrak target Polymarket (Conditional Tokens Contract) untuk membeli shares opsi taruhan menggunakan stablecoin yang dicairkan.
@@ -120,3 +133,15 @@ sequenceDiagram
 *   `ccip_receive(message_id: FixedBytes<32>, source_chain_selector: u64, sender: Vec<u8>, payload: Vec<u8>) -> Result<(), Vec<u8>>`
     *   Menerima pesan 648-byte dari router Chainlink CCIP.
     *   Mendekode payload ke parameter spend dan parameter pembelian Polymarket, lalu mengeksekusi `spend_and_buy_shares` secara atomik di rantai tujuan.
+
+---
+
+## 4. Mekanisme Mitigasi Serangan Liquidity Exhaustion (Inovasi Jurnal 2026)
+
+Berdasarkan hasil analisis jurnal ilmiah terbitan awal 2026, *"Exploiting Liquidity Exhaustion Attacks in Intent-Based Cross-Chain Bridges" (arXiv:2602.17805)*, protokol berbasis intent rentan terhadap serangan pengurasan likuiditas relayer (solvers) tanpa perlu meretas logika kontrak. Penyerang dapat mengirimkan rangkaian transaksi bernilai besar secara beruntun untuk membekukan likuiditas solver selama jendela settlement.
+
+Untuk mengatasi celah ini, Nimbus mengimplementasikan dua pengaman dinamis pada **Fase 3 (Public LP dengan Dynamic Cap)**:
+1. **Dynamic Pool Cap (Batas Maksimum Dinamis)**: Transaksi Fast-Path akan ditolak seketika jika likuiditas yang dibutuhkan melebihi sisa kapasitas pool LP (`new_utilized > total_lp_liquidity`). Hal ini mencegah penyerang membekukan seluruh likuiditas pool.
+2. **Congestion-Based Dynamic Premium (Congestion Pricing)**: Biaya premi likuiditas ($P$) berskala secara dinamis dari **0.05%** (base rate 5 bps) hingga **0.15%** (max rate 15 bps) berdasarkan tingkat utilitas pool LP ($U$):
+   $$P = P_{\text{base}} + U \times (P_{\text{max}} - P_{\text{base}})$$
+   Dengan demikian, semakin menipis likuiditas di pool LP, semakin mahal biaya yang harus dibayar untuk melakukan transaksi Fast-Path. Ini secara ekonomis membuat serangan pengurasan likuiditas (Liquidity Exhaustion Attack) menjadi tidak menguntungkan (*unprofitable*) bagi penyerang yang rasional.

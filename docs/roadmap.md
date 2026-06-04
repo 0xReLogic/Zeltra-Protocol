@@ -1,67 +1,86 @@
-# Roadmap Pengembangan Teknis & Inovasi: Nimbus Protocol (Fase A - D)
+# Roadmap Kesiapan Produksi (Path to Live) Nimbus Protocol
 
-Dokumen ini memetakan rencana inovasi strategis Nimbus Protocol untuk bertransisi dari fungsionalitas dasar (MVP) menjadi protokol privasi tingkat institusional yang patuh regulasi, beroperasi lintas rantai, ramah kecerdasan buatan (AI), dan siap digunakan secara retail.
-
----
-
-## Fase A: ZK-Compliance & Privacy-Preserving Compliance (Kepatuhan Regulasi yang Menjaga Privasi) -- [DIIMPLEMENTASIKAN]
-
-### 1. Landasan Kajian & Teori (Academic Reference)
-Kami merujuk pada konsep **"Privacy Pools"** yang dipublikasikan oleh Vitalik Buterin, Ameen Soleimani, Jacob Illum, Matthias Nadler, dan Fabian Schär (2023/2024), serta perkembangan **ZK-Proof of Innocence (PoI)** pada tahun 2025/2026. 
-*   **Inti Teori**: Alih-alih menyembunyikan transaksi secara mutlak tanpa filter (seperti Tornado Cash yang akhirnya disanksi OFAC), pengguna membuktikan secara kriptografis bahwa dana mereka berasal dari kumpulan alamat yang bersih (*association sets*), tanpa membongkar alamat asli mereka.
-
-### 2. Spesifikasi Implementasi pada Nimbus
-Kami akan mengintegrasikan sirkuit ZK-SNARK (menggunakan Groth16 atau Plonky3) ke dalam fungsi deposit kontrak Nimbus:
-*   **Merkle Tree of Clean Addresses**: Protokol memelihara Merkle Tree berisi alamat-alamat yang tidak masuk daftar sanksi (misal dari basis data sanksi Chainanalysis/OFAC).
-*   **ZK-Proof Generation**: Sebelum pengguna diizinkan melakukan deposit, SDK (`nimbus-sdk`) menghasilkan ZK-proof secara lokal di browser yang membuktikan bahwa alamat pendeposit adalah anggota dari Merkle Tree bersih tersebut.
-*   **Verification on Stylus**: Kontrak di Arbitrum Stylus memverifikasi ZK-proof tersebut dalam fungsi `deposit()`. Jika valid, deposit diterima. Ini menjamin bahwa dana yang masuk ke Nimbus 100% legal tanpa mengorbankan kerahasiaan identitas pengguna.
-*   **Auditable View Key**: Implementasi kunci pemantau (*View Key*) berbasis kriptografi kunci publik asimetris, yang memungkinkan pengguna mendekripsi sejarah transaksi mereka sendiri untuk kebutuhan laporan pajak/auditor secara mandiri.
+Dokumen ini memetakan seluruh tugas pengembangan, integrasi, dan pengujian yang harus diselesaikan untuk membawa Nimbus Protocol dari status prototipe simulasi saat ini hingga siap dideploy secara aman di mainnet L2.
 
 ---
 
-## Fase B: Eksekusi Lintas Rantai Privat (Cross-Chain Private Execution) -- [DIIMPLEMENTASIKAN]
+## 1. Integrasi Token ERC-20, Penanganan Fee, & Fast-Path Likuiditas
+*   **Target Modul**: [nimbus-contracts/src/lib.rs](file:///home/azureuser/crypto/nimbus-contracts/src/lib.rs)
+*   **Status**: Selesai (Completed)
+*   **File yang Diedit**:
+    *   Smart Contract: [nimbus-contracts/src/lib.rs](file:///home/azureuser/crypto/nimbus-contracts/src/lib.rs)
+    *   Dokumentasi: [docs/contract.md](file:///home/azureuser/crypto/docs/contract.md)
+*   **Deskripsi Pekerjaan**:
+    *   Definisikan interface ERC-20 standar di dalam Stylus smart contract.
+    *   Ubah fungsi `deposit()` agar melakukan `transferFrom` USDC dari wallet pengguna ke escrow kontrak.
+    *   Implementasikan pemotongan biaya deposit/minting sebesar **0.1%** secara on-chain.
+    *   Ubah fungsi `reveal_mask_key()` dan `spend()` agar melakukan `transfer` USDC rill ke alamat tujuan.
+    *   Implementasikan pemotongan biaya penarikan/redemption sebesar **0.15%** saat token privat dibelanjakan.
+    *   Implementasikan fitur **Fast-Path Liquidity Premium (0.05% - 0.10%)** secara bertahap sesuai 3 fase rilis:
+        1.  *Fase 1*: Dinonaktifkan (hanya CCIP lambat untuk menghilangkan modal awal).
+        2.  *Fase 2*: Diaktifkan menggunakan modal hasil yield kas Treasury internal secara mandiri.
+        3.  *Fase 3*: Membuka pool publik yang dilindungi batas maksimum dinamis (*Dynamic Pool Cap*).
+*   **Inovasi (Aha! Moment - Jurnal 2026)**: Berdasarkan makalah ilmiah 2026 *"Exploiting Liquidity Exhaustion Attacks in Intent-Based Cross-Chain Bridges"* (arXiv:2602.17805), kami mengimplementasikan **Dynamic Pool Cap** dan **Congestion-Based Pricing** (linear/dynamic premium scaling berdasarkan tingkat utilitas pool LP) pada Fase 3 untuk memitigasi serangan pengurasan likuiditas solver/LP.
 
-### 1. Landasan Kajian & Teori (Technology Reference)
-Mengeksploitasi teknologi **Chainlink CCIP (Cross-Chain Interoperability Protocol)**, **Chainlink ACE (Associated Contract Execution)**, dan mekanisme jembatan pesan aman lintas L2.
-*   **Inti Teori**: Eksekusi kontrak di rantai A (misalnya Arbitrum Stylus untuk komputasi precompile BLS12-381 yang murah) dapat memicu panggilan fungsi kontrak di rantai B (misalnya Polygon PoS tempat Polymarket beroperasi) secara atomik dan terenkripsi tanpa kebocoran data alamat perantara.
+## 2. Integrasi DeFi & RWA Yield (Rasio Brankas Bertingkat 30/50/20)
+*   **Target Modul**: [nimbus-contracts/src/lib.rs](file:///home/azureuser/crypto/nimbus-contracts/src/lib.rs)
+*   **Deskripsi Pekerjaan**:
+    *   Definisikan interface interaksi kontrak dengan Aave Pool V3 L2 dan tokenized RWA T-Bills (seperti BlackRock BUIDL atau Ondo USDY).
+    *   Terapkan pembagian alokasi otomatis:
+        *   **30%** tetap disimpan di dalam brankas Nimbus secara liquid untuk penarikan instan.
+        *   **50%** di-supply ke Aave untuk menghasilkan APY ~3%-4%.
+        *   **20%** di-supply ke Ondo USDY / BlackRock BUIDL untuk APY ~5% dengan keamanan tingkat tinggi.
+    *   Pastikan bunga (yield APY) yang terakumulasi dialokasikan secara otomatis ke kas protokol.
 
-### 2. Spesifikasi Implementasi pada Nimbus
-*   **Cross-Chain Relayer Bridge**: Saat pengguna melakukan spend token privat di Arbitrum, relayer mengirimkan transaksi CCIP yang membawa pesan terenkripsi ke Polygon.
-*   **Ephemeral Target Wallet Execution**: Di Polygon, kontrak penerima CCIP Nimbus menerima instruksi, menyetor USDC ke Polymarket, dan membeli opsi taruhan atas nama dompet sekali pakai (*ephemeral wallet*) yang diotorisasi secara aman melalui pesan tanda tangan BLS lintas rantai.
-*   **Atomic Multicall**: Proses penarikan (Redemption) dari L2 asal hingga pembelian shares di target chain terjadi dalam satu bundle transaksi terpadu, menghilangkan risiko kegagalan transaksi di tengah jalan (*partial execution risk*).
+## 3. Perbaikan Format Panggilan Eksternal Polymarket CTF
+*   **Target Modul**: [nimbus-contracts/src/lib.rs](file:///home/azureuser/crypto/nimbus-contracts/src/lib.rs)
+*   **Deskripsi Pekerjaan**:
+    *   Definisikan signature fungsi Conditional Tokens Contract (CTF) Polymarket yang valid (seperti `splitPosition`).
+    *   Gunakan `abi::encode` yang tepat untuk menyusun function selector 4-byte dan argumennya di dalam payload `spend_and_buy_shares()`.
+    *   Pastikan transfer USDC/stablecoin ke kontrak CTF berjalan lancar sebelum memicu fungsi beli shares.
 
----
+## 4. Optimasi ZK-Proof Lokal pada WASM SDK
+*   **Target Modul**: [nimbus-sdk](file:///home/azureuser/crypto/nimbus-sdk/src/lib.rs)
+*   **Deskripsi Pekerjaan**:
+    *   Gunakan kerangka ZK Plonky3 atau Halo2 dengan kompilasi WASM-SIMD untuk optimasi multithreading di sisi klien.
+    *   Pastikan proses pembuatan proof berjalan lokal di perangkat pengguna dalam waktu <5 detik tanpa memerlukan server delegated proving berbayar eksternal.
 
-## Fase C: SDK Pembayaran AI Agents (x402 Protocol Integration) -- [DIIMPLEMENTASIKAN]
+## 5. Wallet Billing & Gas Markup di Relayer Node
+*   **Target Modul**: [nimbus-node/src/main.rs](file:///home/azureuser/crypto/nimbus-node/src/main.rs)
+*   **Deskripsi Pekerjaan**:
+    *   Implementasikan pengelolaan balance wallet relayer (signer account) yang mendanai gas fee transaksi L2.
+    *   Saat memproses `/api/spend` atau `/api/x402/verify`, hitung gas fee L2 aktual dari batch transaksi.
+    *   Potong saldo USDC milik pengguna dari nominal spend transaksi sejumlah nilai gas fee + **5%-10% markup** dari sisa penghematan gas sebagai margin operasional relayer.
 
-### 1. Landasan Kajian & Teori (Industry Reference)
-Mengadopsi **Protokol x402 v2** (standar pembayaran mesin-ke-mesin/M2M yang diluncurkan oleh Coinbase dan Cloudflare berbasis HTTP 402 Payment Required) serta infrastruktur pembayaran mikro otonom (Nanopayment Stack).
-*   **Inti Teori**: Agen AI otonom memerlukan cara untuk membayar layanan API, komputasi awan, atau data pasar secara mandiri menggunakan stablecoin dengan latensi sangat rendah dan privasi tinggi untuk melindungi proprietary trading model milik penciptanya.
-*   **Referensi Industri 2026**: Coinbase CDP facilitator (`api.cdp.coinbase.com/platform/v2/x402`), Cloudflare Agents SDK + MCP, Stripe x402 middleware, Exa API x402 endpoint.
+## 6. Pengamanan Kunci Rahasia Guardian (KMS Integration)
+*   **Target Modul**: [nimbus-node/src/main.rs](file:///home/azureuser/crypto/nimbus-node/src/main.rs)
+*   **Deskripsi Pekerjaan**:
+    *   Hilangkan penggunaan environment variable plain text `NIMBUS_SHARE_KEY`.
+    *   Integrasikan pustaka klien Google Cloud KMS, AWS KMS, atau HashiCorp Vault untuk mendekripsi private key share BLS secara aman di memori relayer saat startup.
 
-### 2. Spesifikasi Implementasi pada Nimbus
-*   **x402 Native Header Handling** [SELESAI]: Modul `nimbus-sdk/src/x402.rs` mengimplementasikan parser/encoder untuk header `PAYMENT-REQUIRED`, `PAYMENT-SIGNATURE`, dan `PAYMENT-RESPONSE` sesuai spesifikasi x402 v2 (Base64-encoded JSON, skema `exact`, jaringan CAIP-2).
-*   **Nimbus Anonymous Payment Payload** [SELESAI]: Struktur `NimbusPaymentPayload` menggantikan otorisasi EIP-3009 standar dengan bukti spend anonim BLS (`nullifier`, `alpha_neg_hex`, `hm_hex`, `pk_iss_hex`), menjaga privasi identitas AI Agent di on-chain.
-*   **x402 Facilitator Endpoint** [SELESAI]: Endpoint `POST /api/x402/verify` di `nimbus-node` menerima, mendekode, memvalidasi nullifier, dan menjadwalkan settlement pembayaran anonim AI Agent.
-*   **Non-Interactive Blind Signing** [SELESAI]: Mengembangkan manager pool token (`AgentTokenPool` di `nimbus-sdk/src/x402.rs`) yang mengotomatisasi siklus hidup blinding, registrasi tanda tangan, unmasking key, dan spend token secara luring & non-interaktif bagi AI Agent.
-*   **Agent Anonymization Pool** [SELESAI]: Mengimplementasikan background batching shuffler (`nimbus-node/src/main.rs`) yang mengacak antrean transaksi sebelum disubmit ke blockchain untuk memutus korelasi metadata waktu/indeks dari agen.
+## 7. Deployment & Pengujian Integrasi Testnet L2
+*   **Target Modul**: Jaringan (Arbitrum Sepolia / Base Goerli)
+*   **Deskripsi Pekerjaan**:
+    *   Deploy kontrak `Nimbus` hasil integrasi ERC-20 di Arbitrum Sepolia testnet.
+    *   Konfigurasikan cluster relayer node minimal $t=3$ dan $n=5$ menggunakan VM pengujian yang terdistribusi.
+    *   Jalankan skrip integrasi end-to-end untuk mensimulasikan alur transaksi testnet: Deposit -> Reveal -> Spend -> CCIP buy shares -> Refund.
 
----
+## 8. Pengembangan Tokenomics $NIMB & Safety Module Staking (Fase Lanjutan)
+*   **Target Modul**: Kontrak Baru (`nimbus-token` & `nimbus-staking`)
+*   **Deskripsi Pekerjaan**:
+    *   Buat kontrak ERC-20 untuk tata kelola token $NIMB.
+    *   Buat kontrak **Safety Module Staking** tempat staker dapat mengunci $NIMB untuk mem-backstop risiko slashing merchant offline maupun exploit teknis.
+    *   Implementasikan logic distribusi reward secara proporsional dalam bentuk USDC (40% dari yield DeFi/RWA yang dikumpulkan) kepada para staker di Safety Module.
+    *   Implementasikan modul buyback & burn otomatis (40%) dari kas protokol di DEX L2 serta pengiriman 20% biaya ke Treasury.
 
-## Fase D: Portal Merchant POS & Blame Slashing Offline (PWA) -- [DIIMPLEMENTASIKAN]
+## 9. Pemeliharaan Modul Offline POS & Slashing (IP B2B Showcase - Cadangan/Lisensi)
+*   **Target Modul**: [nimbus-contracts/src/lib.rs](file:///home/azureuser/crypto/nimbus-contracts/src/lib.rs) & [nimbus-node/src/main.rs](file:///home/azureuser/crypto/nimbus-node/src/main.rs)
+*   **Deskripsi Pekerjaan**:
+    *   Pertahankan fungsionalitas `slash_double_spender` dan endpoint `/api/pos/sync-claims` sebagai inovasi cadangan/modul IP untuk lisensi B2B.
+    *   Pastikan pengujian simulasi offline tetap terjangkau dan dapat divalidasi oleh calon mitra ritel besar.
 
-### 1. Landasan Kajian & Teori (UX & Cryptography Reference)
-Penerapan Shamir Secret Sharing ($y = a \cdot x + I \pmod p$) untuk sistem kasir retail offline tanpa konektivitas internet konstan (Desentralisasi E-Cash Offline).
-*   **Inti Teori**: Keberhasilan sistem pembayaran offline retail bergantung pada kemudahan penggunaan (UX) tingkat tinggi untuk merchant, di mana kasir fisik cukup menggunakan smartphone murah tanpa hardware tambahan.
-*   **Referensi Industri 2025/2026**:
-    *   Bank of England -- "Digital Pound Experiment Report: Offline Payments" (2025): Memakai secure element hardware + offline transaction limits (jumlah, waktu, nilai) + local transaction record + sync saat reconnect.
-    *   EDPB -- "Digital Euro Token-Based Offline Modality" (2025): Anomaly detection privasi-preserving; identitas hanya terungkap saat double-spend terdeteksi.
-    *   MDPI Sensors 2026 -- "Continuous Dual-Offline Payment of Cryptocurrency Based on Asset Credentials": Hash deduplication di payment center, zero-sum verification, credential decomposition.
-    *   Web NFC API (April 2026): Hanya ~6% global browser support (Chromium Android). QR Code harus menjadi metode transfer data utama; NFC bersifat opsional.
-    *   PWA 2026: Service Worker Background Sync API + Periodic Background Sync + IndexedDB tersedia di semua browser modern (Chrome, Edge, Firefox, Safari).
-
-### 2. Spesifikasi Implementasi pada Nimbus
-*   **Offline Claim Sync Endpoint** [SELESAI]: Endpoint `POST /api/pos/sync-claims` di `nimbus-node` menerima batch bukti transaksi offline dari PWA merchant. Data disimpan di `offline_claims` HashMap yang diindeks oleh `token_id`.
-*   **Blame Dispatcher & Identity Reconstruction** [SELESAI]: Saat klaim masuk, handler secara otomatis mencocokkan `token_id` yang sudah ada. Jika ditemukan dua klaim dengan `challenge_x_hex` berbeda, sistem merekonstruksi identitas pelaku double-spend menggunakan `nimbus_core::reconstruct_identity` (interpolasi Shamir Fr).
-*   **Programmatic API for POS Claim Sync** [SELESAI]: Membangun API merchant sync endpoint (`/api/pos/sync-claims`) pada relayer node untuk menerima, memvalidasi, dan mengantrekan data transaksi luring merchant secara efisien.
-*   **Programmatic Testing & Verification Harness** [SELESAI]: Membuat skrip Python test harness untuk memecahkan persamaan garis linear $y = a \cdot x + I \pmod P$, menyimulasikan transaksi luring ganda, dan memverifikasi API `/api/pos/sync-claims`.
+## 10. Audit Keamanan Kriptografi & Kode Kontrak
+*   **Target Modul**: Seluruh Repositori
+*   **Deskripsi Pekerjaan**:
+    *   Lakukan audit pihak ketiga terhadap implementasi precompile EIP-2537 BLS12-381 untuk memastikan tidak ada kerentanan memory leak di Rust Stylus.
+    *   Audit sirkuit ZK-Compliance untuk memverifikasi keandalan Proof of Innocence.
