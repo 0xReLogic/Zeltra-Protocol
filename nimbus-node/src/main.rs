@@ -205,12 +205,7 @@ struct SyncClaimsResponse {
 
 #[tokio::main]
 async fn main() {
-    let share_index = std::env::var("NIMBUS_SHARE_INDEX")
-        .unwrap_or_else(|_| "1".to_string())
-        .parse::<u32>()
-        .unwrap_or(1);
-        
-    let share_sk = load_share_key().await;
+    let (share_sk, share_index) = load_share_key().await;
     let state = AppState::new(share_sk, share_index);
 
     // Spawn background worker to batch and process spends every 2 seconds
@@ -233,8 +228,9 @@ async fn main() {
         .route("/api/leader/sign", post(handle_leader_sign))
         .with_state(state);
 
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:8080").await.unwrap();
-    println!("NIMBUS RELAYER NODE STARTED");
+    let port = std::env::var("PORT").unwrap_or_else(|_| "8080".to_string());
+    let listener = tokio::net::TcpListener::bind(format!("127.0.0.1:{}", port)).await.unwrap();
+    println!("NIMBUS RELAYER NODE STARTED ON PORT {}", port);
     println!("------------------------------------------------------------");
     println!("Listening on: http://{}", listener.local_addr().unwrap());
     println!("Gasless EIP-7702 delegation: ACTIVE");
@@ -959,7 +955,12 @@ async fn get_http_with_headers(url: &str, headers: &[(&str, &str)]) -> Result<St
     }
 }
 
-async fn load_share_key() -> nimbus_core::Fr {
+async fn load_share_key() -> (nimbus_core::Fr, u32) {
+    let env_index = std::env::var("NIMBUS_SHARE_INDEX")
+        .unwrap_or_else(|_| "1".to_string())
+        .parse::<u32>()
+        .unwrap_or(1);
+
     // 1. Check if Vault/OpenBao is configured
     if let Ok(vault_token) = std::env::var("NIMBUS_VAULT_TOKEN") {
         let vault_addr = std::env::var("NIMBUS_VAULT_ADDR")
@@ -989,9 +990,14 @@ async fn load_share_key() -> nimbus_core::Fr {
                     Ok(res) => {
                         let hex_str = res.data.data.share_key;
                         if let Ok(bytes) = hex::decode(&hex_str) {
-                            if let Some(fr) = nimbus_core::deserialize_from_bytes(&bytes) {
+                            if bytes.len() == 40 {
+                                if let Some((idx, fr)) = nimbus_core::deserialize_from_bytes::<(usize, nimbus_core::Fr)>(&bytes) {
+                                    println!("KMS INTEGRATION: Successfully loaded BLS share key (index {}) from OpenBao/Vault.", idx);
+                                    return (fr, idx as u32);
+                                }
+                            } else if let Some(fr) = nimbus_core::deserialize_from_bytes::<nimbus_core::Fr>(&bytes) {
                                 println!("KMS INTEGRATION: Successfully loaded BLS share key from OpenBao/Vault.");
-                                return fr;
+                                return (fr, env_index);
                             }
                         }
                         println!("KMS INTEGRATION: Error parsing/deserializing share key bytes from Vault.");
@@ -1012,14 +1018,18 @@ async fn load_share_key() -> nimbus_core::Fr {
         println!("WARNING: Raw plain text 'NIMBUS_SHARE_KEY' env variable detected.");
         println!("         This is unsafe for production. Use OpenBao/Vault KMS integration instead.");
         if let Ok(bytes) = hex::decode(&hex_str) {
-            if let Some(fr) = nimbus_core::deserialize_from_bytes(&bytes) {
-                return fr;
+            if bytes.len() == 40 {
+                if let Some((idx, fr)) = nimbus_core::deserialize_from_bytes::<(usize, nimbus_core::Fr)>(&bytes) {
+                    return (fr, idx as u32);
+                }
+            } else if let Some(fr) = nimbus_core::deserialize_from_bytes::<nimbus_core::Fr>(&bytes) {
+                return (fr, env_index);
             }
         }
     }
 
     println!("WARNING: No share key found via Vault or environment variables. Using default insecure key.");
-    nimbus_core::Fr::from(12345u64)
+    (nimbus_core::Fr::from(12345u64), env_index)
 }
 
 #[cfg(test)]
@@ -1028,10 +1038,22 @@ mod node_tests {
 
     #[tokio::test]
     async fn test_load_share_key_fallback() {
+        // Test 32-byte fallback
         std::env::set_var("NIMBUS_SHARE_KEY", "0000000000000000000000000000000000000000000000000000000000000001");
-        let fr = load_share_key().await;
+        let (fr, index) = load_share_key().await;
         let bytes = nimbus_core::serialize_to_bytes(&fr);
         assert_eq!(bytes[bytes.len() - 1], 1);
+        assert_eq!(index, 1);
+
+        // Test 40-byte fallback (index + Fr)
+        let share_tuple = (5usize, nimbus_core::Fr::from(1u64));
+        let share_bytes = nimbus_core::serialize_to_bytes(&share_tuple);
+        let share_hex = hex::encode(share_bytes);
+        std::env::set_var("NIMBUS_SHARE_KEY", share_hex);
+        let (fr2, index2) = load_share_key().await;
+        assert_eq!(index2, 5);
+        assert_eq!(fr2, nimbus_core::Fr::from(1u64));
+
         std::env::remove_var("NIMBUS_SHARE_KEY");
     }
 }

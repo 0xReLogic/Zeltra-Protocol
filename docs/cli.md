@@ -106,3 +106,29 @@ Jika pengguna curang dan melakukan transaksi belanja ganda ke Merchant A (tantan
 ```
 *Output:* `DOUBLE SPENDER DETECTED & SLASHED` disertai dengan nilai `Reconstructed Identity (I)` asli yang dibongkar dari pelaku kecurangan.
 
+---
+
+## 4. Mode Terdistribusi (Threshold Signature Ceremony t=3, n=5)
+
+Selain mode single-issuer, Nimbus CLI mendukung upacara tanda tangan threshold terdistribusi menggunakan skema Shamir Secret Sharing.
+
+### Langkah 1: Membagi Kunci Rahasia (Shamir Secret Sharing)
+Bagi kunci rahasia issuer ($sk_{iss}$) menjadi $n$ share dengan threshold $t$:
+```bash
+./target/debug/nimbus-cli split-key \
+  --sk <SECRET_KEY_HEX> \
+  --threshold 3 \
+  --total 5
+```
+*Output akan menghasilkan 5 share key terenkode hex (80 karakter / 40 byte, yang menyimpan tuple `(usize, Fr)`).*
+
+### Langkah 2: Mengagregasi Tanda Tangan Threshold
+Setelah mendapatkan minimal $t$ (dalam hal ini 3) partial signature dari relayer node/guardians, lakukan agregasi:
+```bash
+./target/debug/nimbus-cli aggregate \
+  --indices 1,2,3 \
+  --signatures <SIG1_HEX>,<SIG2_HEX>,<SIG3_HEX>
+```
+*Output:* `Masked Signature (sigma_tilde)` teragregasi yang siap di-unmask menggunakan perintah `unmask`.
+
+

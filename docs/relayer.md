@@ -4,6 +4,16 @@ Dokumen ini mendokumentasikan desain teknis, endpoints, dan optimalisasi **Nimbu
 
 ---
 
+## 0. Informasi Deployment Testnet L2
+
+Berikut adalah informasi deployment resmi kontrak Nimbus di testnet Arbitrum Sepolia untuk referensi integrasi relayer node:
+*   **Alamat Kontrak Nimbus (L2)**: `0x582fdc90f17a15d27b76175402898ab48f6e6ef3`
+*   **Jaringan**: Arbitrum Sepolia Testnet
+*   **Arbitrum RPC Endpoint**: `https://sepolia-rollup.arbitrum.io/rpc`
+*   **Explorer**: [Sepolia Arbiscan](https://sepolia.arbiscan.io/address/0x582fdc90f17a15d27b76175402898ab48f6e6ef3)
+
+---
+
 ## 1. Peran Utama Relayer (Nimbus Node)
 
 Nimbus Node berjalan sebagai server web API mandiri (ditulis menggunakan **Rust Axum**) yang bertindak sebagai **Paymaster/Relayer** untuk menyelesaikan dua kendala utama UX Web3:
@@ -53,8 +63,8 @@ Every instance of `nimbus-node` reads configurations from environment variables 
 
 | Variable | Default | Description |
 | :--- | :--- | :--- |
-| `NIMBUS_SHARE_INDEX` | `1` | Index share node ini dalam skema Shamir (1 hingga n). Setiap server fisik/cloud harus memiliki nilai unik. |
-| `NIMBUS_SHARE_KEY` | `Fr(12345)` | **(Fallback / Dev Mode Only)** Hex-encoded scalar BLS12-381 Fr. Menghasilkan warning keras jika digunakan di produksi. |
+| `NIMBUS_SHARE_INDEX` | `1` | Index share node ini dalam skema Shamir (1 hingga n). Digunakan sebagai fallback jika key share yang diload berupa scalar raw 32-byte. |
+| `NIMBUS_SHARE_KEY` | `Fr(12345)` | **(Fallback / Dev Mode Only)** Hex-encoded scalar BLS12-381 Fr (32-byte) atau tuple `(usize, Fr)` (40-byte). Jika data 40-byte terdeteksi, node secara otomatis mengekstrak share index dari kunci tersebut dan mengesampingkan `NIMBUS_SHARE_INDEX`. |
 | `NIMBUS_VAULT_TOKEN` | `None` | Token otentikasi OpenBao / HashiCorp Vault. Mengaktifkan penarikan kunci otomatis via KMS. |
 | `NIMBUS_VAULT_ADDR` | `http://127.0.0.1:8200` | URL/Port server OpenBao / HashiCorp Vault. |
 | `NIMBUS_VAULT_PATH` | `v1/secret/data/nimbus` | Endpoint API path untuk mengambil rahasia (KV v2 engine). |

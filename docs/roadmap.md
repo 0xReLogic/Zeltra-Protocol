@@ -88,10 +88,19 @@ Dokumen ini memetakan seluruh tugas pengembangan, integrasi, dan pengujian yang 
 
 ## 7. Deployment & Pengujian Integrasi Testnet L2
 *   **Target Modul**: Jaringan (Arbitrum Sepolia / Base Goerli)
+*   **Status**: Selesai (Completed)
+*   **File yang Diedit**:
+    *   Relayer: [nimbus-node/src/main.rs](file:///home/azureuser/crypto/nimbus-node/src/main.rs)
+    *   Deployment Helper: [scripts/deploy_testnet.sh](file:///home/azureuser/crypto/scripts/deploy_testnet.sh)
+    *   Orchestration Script: [scripts/simulate_cluster.py](file:///home/azureuser/crypto/scripts/simulate_cluster.py)
 *   **Deskripsi Pekerjaan**:
     *   Deploy kontrak `Nimbus` hasil integrasi ERC-20 di Arbitrum Sepolia testnet.
     *   Konfigurasikan cluster relayer node minimal $t=3$ dan $n=5$ menggunakan VM pengujian yang terdistribusi.
     *   Jalankan skrip integrasi end-to-end untuk mensimulasikan alur transaksi testnet: Deposit -> Reveal -> Spend -> CCIP buy shares -> Refund.
+*   **Alamat Kontrak Terdeploy**: `0x582fdc90f17a15d27b76175402898ab48f6e6ef3` (Arbitrum Sepolia L2)
+*   **Tx Hash Deployment**: `0x073fc6f808d567ef2b5aac0d0a107095456d30cc1e8db1013c710583386c4f6d`
+*   **Tx Hash Aktivasi Stylus**: `0xc8d8f8f8f31196b54ebd904ef595aeac9731f827ea743600bb62af915bbe60a5`
+*   **Inovasi (Aha! Moment - Jurnal 2026)**: Kami merancang key loader dinamis yang dapat membedakan data share format `(usize, Fr)` 40-byte dan scalar `Fr` 32-byte untuk memastikan identitas dan share index dari validator (Leader & Guardians) terasosiasi secara otomatis tanpa konfigurasi manual yang rawan kesalahan. Hal ini mempermudah orkestrasi cluster dan mengurangi kegagalan verifikasi aggregate signature.
 
 ## 8. Pengembangan Tokenomics $NIMB & Safety Module Staking (Fase Lanjutan)
 *   **Target Modul**: Kontrak Baru (`nimbus-token` & `nimbus-staking`) & [nimbus-sdk](file:///home/azureuser/crypto/nimbus-sdk/src/lib.rs)

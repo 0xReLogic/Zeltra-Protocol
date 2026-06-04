@@ -3,6 +3,9 @@ name = "nimbus-contracts"
 version = "0.1.0"
 edition = "2021"
 
+[lib]
+crate-type = ["cdylib", "rlib"]
+
 [dependencies]
 stylus-sdk = "0.6.0"
 alloy-primitives = "0.7.6"
