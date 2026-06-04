@@ -99,8 +99,8 @@ Dokumen ini memetakan seluruh tugas pengembangan, integrasi, dan pengujian yang 
     *   Buat kontrak ERC-20 untuk tata kelola token $NIMB.
     *   Buat kontrak **Safety Module Staking** tempat staker dapat mengunci $NIMB untuk mem-backstop risiko slashing merchant offline maupun exploit teknis.
     *   **Migrasi Sirkuit ZK Utama**: Mengganti mock proof ZK local (dari Item 4) dengan sirkuit ZK produksi riil (Groth16/Plonk) dan men-deploy kontrak verifikator on-chain asli di mainnet. Langkah ini wajib diselesaikan bersamaan dengan peluncuran token agar utilitas dan keamanan kriptografi protokol terbukti nyata (menghindari persepsi token sebagai meme coin tanpa fundamentil teknologi).
-    *   Implementasikan logic distribusi reward secara proporsional dalam bentuk USDC (40% dari yield DeFi/RWA yang dikumpulkan) kepada para staker di Safety Module.
-    *   Implementasikan modul buyback & burn otomatis (40%) dari kas protokol di DEX L2 serta pengiriman 20% biaya ke Treasury.
+    *   Implementasikan logic distribusi reward secara proporsional dalam bentuk USDC (50% dari yield DeFi/RWA yang dikumpulkan) kepada para staker di Safety Module.
+    *   Implementasikan modul buyback & burn otomatis penuh secara on-chain (fully automated on-chain buyback & burn) sebesar 30% dari yield kas protokol di DEX L2 dengan proteksi MEV/sandwich (menggunakan Uniswap TWAP / Chainlink Price Feed untuk menentukan `minAmountOut` dinamis), serta pengiriman 20% biaya ke Treasury.
 
 ## 9. Pemeliharaan Modul Offline POS & Slashing (IP B2B Showcase - Cadangan/Lisensi)
 *   **Target Modul**: [nimbus-contracts/src/lib.rs](file:///home/azureuser/crypto/nimbus-contracts/src/lib.rs) & [nimbus-node/src/main.rs](file:///home/azureuser/crypto/nimbus-node/src/main.rs)
