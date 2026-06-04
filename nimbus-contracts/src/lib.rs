@@ -73,7 +73,7 @@ sol_interface! {
     }
 
     interface IAavePool {
-        function supply(address asset, uint256 amount, address onBehalfOf, uint16 referralCode) external;
+        function supply(address asset, uint256 amount, address on_behalf_of, uint16 referral_code) external;
         function withdraw(address asset, uint256 amount, address to) external returns (uint256);
     }
 
@@ -84,9 +84,9 @@ sol_interface! {
 
     interface IConditionalTokens {
         function splitPosition(
-            address collateralToken,
-            bytes32 parentCollectionId,
-            bytes32 conditionId,
+            address collateral_token,
+            bytes32 parent_collection_id,
+            bytes32 condition_id,
             uint256[] partition,
             uint256 amount
         ) external;

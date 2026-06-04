@@ -1,10 +1,15 @@
 [package]
-name = "nimbus-contracts"
+name = "nimbus_contracts"
 version = "0.1.0"
 edition = "2021"
 
 [lib]
+name = "nimbus_contracts"
 crate-type = ["cdylib", "rlib"]
+
+[[bin]]
+name = "nimbus_contracts"
+path = "src/main.rs"
 
 [dependencies]
 stylus-sdk = "0.6.0"

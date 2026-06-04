@@ -21,6 +21,21 @@ Untuk transaksi Nimbus (membutuhkan 2 pasangan), hanya memakan **102,900 gas**!
 
 ---
 
+## 1.1 Penemuan Penting (Aha! Moment): Bug cargo-stylus CDylib Mismatch
+
+Selama proses validasi testnet, kami menemukan bug kritis pada CLI `cargo-stylus` (versi `0.10.x` ke bawah) saat menggunakan nama package dengan tanda hubung (`-`), seperti `nimbus-contracts`.
+
+**Masalahnya**:
+- `cargo-stylus` mendeteksi target library menggunakan pencarian `TargetKind::Lib` untuk mencari nama file WASM di direktori target build `deps/`.
+- Namun, kontrak Stylus di-compile sebagai tipe target `cdylib`, sehingga di dalam metadata cargo dipetakan sebagai `TargetKind::CDylib`, bukan `TargetKind::Lib`.
+- Karena kegagalan deteksi ini, `cargo-stylus` menggunakan fallback nama package langsung dari `Cargo.toml` (`nimbus-contracts`) dan mencari file `nimbus-contracts.wasm`.
+- Sementara itu, Cargo *selalu* otomatis mengganti tanda hubung menjadi garis bawah (`_`) untuk nama output library, menghasilkan `nimbus_contracts.wasm`. Hal ini memicu error fatal: `error: build did not generate wasm file`.
+
+**Solusi**:
+Kami mengganti nama package secara formal di `Cargo.toml` menjadi `nimbus_contracts` (menggunakan garis bawah) dan menyelaraskannya dengan target `[lib]`. Perubahan ini membuat proses validasi `cargo stylus check` dan `cargo stylus deploy` berjalan lancar tanpa modifikasi compiler pihak ketiga.
+
+---
+
 ## 2. Struktur Penyimpanan State (State Storage)
 
 Smart contract Nimbus ditulis menggunakan Rust Stylus SDK dan menggunakan makro `sol_storage!` untuk mendefinisikan layout penyimpanan state on-chain yang kompatibel dengan EVM:
@@ -68,29 +83,31 @@ sol_storage! {
 
 ---
 
-## 3. Alur Logika Method Utama (Smart Contract)
+### 3. Alur Logika Method Utama (Smart Contract)
 
 ```mermaid
 sequenceDiagram
     Client->>Contract: 1. deposit(sid, com_k_bytes, amount)
-    Issuer->>Contract: 2. reveal_mask_key(sid, k_bytes, pk_iss_bytes, com_k_bytes)
+    Issuer->>Contract: 2. revealMaskKey(sid, k_bytes, pk_iss_bytes, com_k_bytes)
     Note over Contract: Verifikasi k * pk_iss == com_k -> Set resolved = true
     Client->>Contract: 3. spend(nullifier, alpha_neg_bytes, hm_bytes, pk_iss_bytes, recipient)
     Note over Contract: Verifikasi pairing BLS -> Catat Nullifier -> Selesai
     CCIP Router->>Contract: 4. ccip_receive(message_id, source_chain_selector, sender, payload)
-    Note over Contract: Dekode 648-byte payload -> spend_and_buy_shares
-    Client->>Contract: 5. claim_refund(sid)
+    Note over Contract: Dekode 648-byte payload -> spendAndBuyShares
+    Client->>Contract: 5. claimRefund(sid)
     Note over Contract: Klaim pengembalian dana setelah 24 jam jika Relayer offline
 ```
 
 *Catatan Keamanan: Semua fungsi yang mengubah state (ditandai dengan `&mut self`) akan memeriksa apakah kontrak sedang dalam keadaan aktif (tidak di-pause) menggunakan `self.check_not_paused()?` sebelum melakukan eksekusi.*
 
+*Catatan Penting ABI: Stylus SDK secara otomatis mengonversi penamaan method snake_case milik Rust menjadi camelCase di Solidity ABI yang diekspor. Oleh karena itu, di level interaksi EVM/Web3, semua pemanggilan fungsi menggunakan nama camelCase.*
+
 #### A. Fitur Administrasi & Keamanan (Fase E: Security)
-*   `init(stablecoin_addr: Address, fee_recipient_addr: Address)`: Menginisialisasi owner kontrak dengan alamat pengirim transaksi pertama, menyetel alamat token stablecoin dan fee recipient, serta menetapkan fase awal Fast-Path ke `1`.
+*   `init(stablecoin_addr: Address, fee_recipient_addr: Address)`: Menginisialisasi owner kontrak dengan alamat pengirim transaksi pertama, menyetel alamat token stablecoin dan fee recipient (diekspos sebagai `feeRecipient()`), serta menetapkan fase awal Fast-Path ke `1`.
 *   `pause()`: Mengaktifkan status jeda darurat (`paused = true`). Hanya bisa dipanggil oleh owner.
 *   `unpause()`: Menonaktifkan status jeda darurat (`paused = false`). Hanya bisa dipanggil oleh owner.
-*   `set_fast_path_phase(phase: uint256)`: Menyetel fase Fast-Path (1, 2, atau 3). Hanya bisa dipanggil oleh owner.
-*   `set_lp_liquidity(total: uint256, utilized: uint256)`: Menyetel parameter likuiditas pool LP untuk simulasi utilitas Fase 3. Hanya bisa dipanggil oleh owner.
+*   `setFastPathPhase(phase: uint256)`: Menyetel fase Fast-Path (1, 2, atau 3). Hanya bisa dipanggil oleh owner (Rust internal: `set_fast_path_phase`).
+*   `setLpLiquidity(total: uint256, utilized: uint256)`: Menyetel parameter likuiditas pool LP untuk simulasi utilitas Fase 3. Hanya bisa dipanggil oleh owner (Rust internal: `set_lp_liquidity`).
 
 ### B. `deposit(sid: FixedBytes<32>, _com_k_bytes: Vec<u8>, amount: U256)`
 *   Klien menyetorkan dana stablecoin ke kontrak dengan ID sesi tertentu (`sid`). Kontrak menarik stablecoin dari dompet klien menggunakan `transferFrom`.
@@ -98,13 +115,13 @@ sequenceDiagram
 *   Kontrak mencatat alamat pengirim ke `session_client`, jumlah deposit bersih (`amount - fee`) ke `session_amount`, dan menginisialisasi `session_resolved` ke `false`.
 *   Kontrak juga mencatat waktu transaksi saat ini ke `session_timestamp` sebagai acuan waktu untuk sistem auto-refund timelock.
 
-### C. `claim_refund(sid: FixedBytes<32>) -> Result<(), Vec<u8>>`
-*   Menyediakan jaminan keselamatan dana pengguna jika Relayer offline atau menolak membuka kunci masking.
+### C. `claimRefund(sid: FixedBytes<32>) -> Result<(), Vec<u8>>`
+*   Menyediakan jaminan keselamatan dana pengguna jika Relayer offline atau menolak membuka kunci masking. Diekspos di ABI sebagai `claimRefund(bytes32 sid)` (Rust internal: `claim_refund`).
 *   Dapat dipanggil oleh klien pembuat sesi deposit jika waktu saat ini (`block_timestamp`) sudah melewati **24 jam (86.400 detik)** sejak deposit dilakukan.
 *   Setelah berhasil diverifikasi, kontrak menandai sesi sebagai selesai (`session_resolved = true`) dan mengembalikan dana bersih ke klien.
 
-### D. `reveal_mask_key(sid: FixedBytes<32>, k_bytes: Vec<u8>, pk_iss_bytes: Vec<u8>, com_k_bytes: Vec<u8>) -> Result<bool, Vec<u8>>`
-*   Penerbit (Issuer) menyerahkan kunci masking $k$ bersama kunci publik mereka $pk_{iss}$ dan komitmen $com_k$.
+### D. `revealMaskKey(sid: FixedBytes<32>, k_bytes: Vec<u8>, pk_iss_bytes: Vec<u8>, com_k_bytes: Vec<u8>) -> Result<bool, Vec<u8>>`
+*   Penerbit (Issuer) menyerahkan kunci masking $k$ bersama kunci publik mereka $pk_{iss}$ dan komitmen $com_k$ (Rust internal: `reveal_mask_key`).
 *   Kontrak memanggil precompile **`BLS12_G2_MSM` (address `0x0e`)** dengan payload 288-byte (kombinasi $pk_{iss}$ dan $k$) untuk menghitung $k \cdot pk_{iss}$.
 *   Jika hasil perhitungan cocok dengan $com_k$, kontrak menandai sesi sebagai selesai (`session_resolved = true`) dan mencairkan escrow dana ke dompet Penerbit.
 
@@ -115,13 +132,13 @@ sequenceDiagram
 2.  Keabsahan tanda tangan BLS menggunakan precompile **`BLS12_PAIRING_CHECK` (address `0x0f`)** dengan payload 768-byte.
 *   Jika valid, kontrak mencatat nullifier untuk mencegah double-spend, menghitung biaya dasar penarikan **0.15%**, menghitung biaya premi Fast-Path (jika Fase 2 atau Fase 3 aktif), lalu mengirimkan sisa dana bersih ke `recipient` dan total biaya ke `fee_recipient`.
 
-### F. `spend_and_buy_shares(nullifier: FixedBytes<32>, alpha_neg_bytes: Vec<u8>, hm_bytes: Vec<u8>, pk_iss_bytes: Vec<u8>, polymarket_ctf: Address, collateral_token: Address, condition_id: FixedBytes<32>, amount: U256) -> Result<bool, Vec<u8>>`
-*   Melakukan verifikasi tanda tangan BLS (`spend`), menghitung sisa dana bersih (`payout`), menyetujui (`approve`) token USDC/stablecoin untuk didebit oleh Polymarket CTF, lalu secara atomik memicu fungsi `splitPosition` di kontrak target Polymarket (Conditional Tokens Contract) untuk mencetak shares opsi taruhan.
-*   **Mekanisme Try-Catch Fallback (Aha! Moment - Jurnal 2026)**: Jika panggilan eksternal ke `splitPosition` gagal/revert (misalnya karena pasar opsi di-pause, di-resolve, atau slippage terlalu tinggi), transaksi **tidak di-revert** agar status nullifier tetap dicatat dan dana tidak tersangkut di CCIP. Kontrak secara otomatis mencatat nominal refund di storage `failed_intent_refunds` untuk ditarik pengguna secara asinkron lewat `claim_failed_intent_refund`.
+### F. `spendAndBuyShares(nullifier: FixedBytes<32>, alpha_neg_bytes: Vec<u8>, hm_bytes: Vec<u8>, pk_iss_bytes: Vec<u8>, polymarket_ctf: Address, collateral_token: Address, condition_id: FixedBytes<32>, amount: U256) -> Result<bool, Vec<u8>>`
+*   Melakukan verifikasi tanda tangan BLS (`spend`), menghitung sisa dana bersih (`payout`), menyetujui (`approve`) token USDC/stablecoin untuk didebit oleh Polymarket CTF, lalu secara atomik memicu fungsi `splitPosition` di kontrak target Polymarket (Conditional Tokens Contract) untuk mencetak shares opsi taruhan (Rust internal: `spend_and_buy_shares`).
+*   **Mekanisme Try-Catch Fallback (Aha! Moment - Jurnal 2026)**: Jika panggilan eksternal ke `splitPosition` gagal/revert (misalnya karena pasar opsi di-pause, di-resolve, atau slippage terlalu tinggi), transaksi **tidak di-revert** agar status nullifier tetap dicatat dan dana tidak tersangkut di CCIP. Kontrak secara otomatis mencatat nominal refund di storage `failed_intent_refunds` untuk ditarik pengguna secara asinkron lewat `claimFailedIntentRefund`.
 
 ### F2. Fungsi Pendukung Fallback Refund Lintas Rantai
-*   `get_failed_intent_refund(nullifier: FixedBytes<32>) -> Result<U256, Vec<u8>>`: Membaca jumlah dana refund (USDC) yang tersedia untuk diclaim akibat kegagalan intent di target chain.
-*   `claim_failed_intent_refund(nullifier: FixedBytes<32>, recipient: Address) -> Result<bool, Vec<u8>>`: Memungkinkan penarikan dana refund (USDC) ke alamat target penerima (`recipient`). Fungsi ini menerapkan pembersihan status mapping sebelum transfer untuk mencegah serangan *reentrancy*.
+*   `getFailedIntentRefund(nullifier: FixedBytes<32>) -> Result<U256, Vec<u8>>`: Membaca jumlah dana refund (USDC) yang tersedia untuk diclaim akibat kegagalan intent di target chain (Rust internal: `get_failed_intent_refund`).
+*   `claimFailedIntentRefund(nullifier: FixedBytes<32>, recipient: Address) -> Result<bool, Vec<u8>>`: Memungkinkan penarikan dana refund (USDC) ke alamat target penerima (`recipient`). Fungsi ini menerapkan pembersihan status mapping sebelum transfer untuk mencegah serangan *reentrancy* (Rust internal: `claim_failed_intent_refund`).
 
 ### G. `slash_double_spender(x1_bytes: Vec<u8>, y1_bytes: Vec<u8>, x2_bytes: Vec<u8>, y2_bytes: Vec<u8>) -> Result<Vec<u8>, Vec<u8>>`
 *   Menerima dua bukti transaksi offline ($x_1, y_1$) dan ($x_2, y_2$) yang menggunakan token yang sama.
