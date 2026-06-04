@@ -37,7 +37,8 @@ fi
 # 4. Perform compilation and optimization check
 echo "Performing Stylus validation check..."
 cd nimbus-contracts
-cargo stylus check
+CHECK_URL=${RPC_URL:-"https://sepolia-rollup.arbitrum.io/rpc"}
+cargo stylus check --endpoint="$CHECK_URL"
 
 echo "=========================================================="
 echo "STYLUS VALIDATION CHECK PASSED"

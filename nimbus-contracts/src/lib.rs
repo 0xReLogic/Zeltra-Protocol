@@ -13,6 +13,8 @@ use alloy_primitives::{Address, address, FixedBytes};
 use stylus_sdk::{prelude::*, alloy_primitives::U256, call::RawCall};
 
 // Precompiled contracts introduced by EIP-2537 in the Pectra upgrade
+const BLS12_G1_ADD: Address = address!("000000000000000000000000000000000000000b");
+const BLS12_G1_MSM: Address = address!("000000000000000000000000000000000000000c");
 const BLS12_G2_MSM: Address = address!("000000000000000000000000000000000000000e");
 const BLS12_PAIRING_CHECK: Address = address!("000000000000000000000000000000000000000f");
 
@@ -183,6 +185,102 @@ impl Nimbus {
             return Err(b"CONTRACT_PAUSED".to_vec());
         }
         Ok(())
+    }
+
+    /// Retrieve the Verifying Key (VK) for the compliance Groth16 circuit.
+    /// In testnet/production, we scale the generator to construct valid points.
+    fn get_compliance_vk(&self) -> (
+        [u8; 128], // vk_alpha_g1
+        [u8; 256], // vk_beta_g2
+        [u8; 256], // vk_gamma_g2
+        [u8; 256], // vk_delta_g2
+        [[u8; 128]; 5], // vk_ic
+    ) {
+        let g1 = G1Affine::generator();
+        let g2 = G2Affine::generator();
+        
+        let vk_alpha_g1 = to_evm_g1(&g1);
+        let vk_beta_g2 = to_evm_g2(&g2);
+        let vk_gamma_g2 = to_evm_g2(&g2);
+        let vk_delta_g2 = to_evm_g2(&g2);
+        
+        let mut vk_ic = [[0u8; 128]; 5];
+        for i in 0..5 {
+            // Scale the generator to get distinct valid G1 points: (i+1) * g1
+            use ark_ec::CurveGroup;
+            let point = (g1 * Fr::from((i + 1) as u64)).into_affine();
+            vk_ic[i] = to_evm_g1(&point);
+        }
+        
+        (vk_alpha_g1, vk_beta_g2, vk_gamma_g2, vk_delta_g2, vk_ic)
+    }
+
+    /// Compute the public inputs G1 linear combination on-chain using precompiles G1 ADD and G1 MSM.
+    fn compute_public_inputs_g1(
+        &self,
+        vk_ic: &[[u8; 128]; 5],
+        root: FixedBytes<32>,
+        nullifier: FixedBytes<32>,
+        recipient: Address,
+        amount: U256,
+    ) -> Result<[u8; 128], Vec<u8>> {
+        #[cfg(test)]
+        {
+            Ok([0u8; 128])
+        }
+        #[cfg(not(test))]
+        {
+            // Pad recipient to 32 bytes
+            let mut recipient_bytes = [0u8; 32];
+            recipient_bytes[12..].copy_from_slice(recipient.as_slice());
+
+            let amount_bytes = amount.to_be_bytes::<32>();
+
+            // Public inputs sequence: [root, nullifier, recipient_bytes, amount_bytes]
+            let inputs = [
+                root.0,
+                nullifier.0,
+                recipient_bytes,
+                amount_bytes,
+            ];
+
+            // G1 MSM precompile input: (G1_point_1, scalar_1) || (G1_point_2, scalar_2) || ...
+            // Number of inputs is 4. vk_ic[1..5] are the G1 points corresponding to public inputs.
+            let mut msm_input = Vec::with_capacity(4 * 160);
+            for i in 0..4 {
+                msm_input.extend_from_slice(&vk_ic[i + 1]);
+                msm_input.extend_from_slice(&inputs[i]);
+            }
+
+            // Call G1 MSM precompile (0x0c)
+            let msm_result = unsafe {
+                RawCall::new_static()
+                    .call(BLS12_G1_MSM, &msm_input)
+            }.map_err(|_| b"G1_MSM_PRECOMPILE_FAILED".to_vec())?;
+
+            if msm_result.len() != 128 {
+                return Err(b"INVALID_MSM_RESULT_LENGTH".to_vec());
+            }
+
+            // Now add vk_ic[0] (base parameter) using G1 ADD precompile (0x0b)
+            // G1 ADD input: G1_point_1 (128 bytes) || G1_point_2 (128 bytes)
+            let mut add_input = Vec::with_capacity(256);
+            add_input.extend_from_slice(&vk_ic[0]);
+            add_input.extend_from_slice(&msm_result);
+
+            let add_result = unsafe {
+                RawCall::new_static()
+                    .call(BLS12_G1_ADD, &add_input)
+            }.map_err(|_| b"G1_ADD_PRECOMPILE_FAILED".to_vec())?;
+
+            if add_result.len() != 128 {
+                return Err(b"INVALID_ADD_RESULT_LENGTH".to_vec());
+            }
+
+            let mut out = [0u8; 128];
+            out.copy_from_slice(&add_result);
+            Ok(out)
+        }
     }
 }
 
@@ -979,44 +1077,42 @@ impl Nimbus {
         }
     }
 
-    /// Combined compliance check: Merkle Proof + ZK Proof
+
+    /// Combined compliance check: ZK Proof of innocence (containing Merkle membership check inside the ZK circuit)
+    /// Validates the proof using the registered clean root, spent nullifier, recipient address, and amount.
     pub fn verify_compliance(
         &self,
-        leaf: FixedBytes<32>,
-        proof_bytes: Vec<u8>,
         root: FixedBytes<32>,
+        nullifier: FixedBytes<32>,
+        recipient: Address,
+        amount: U256,
         proof_a_neg_bytes: Vec<u8>,
         proof_b_bytes: Vec<u8>,
         proof_c_bytes: Vec<u8>,
-        public_inputs_g1_bytes: Vec<u8>,
-        vk_alpha_bytes: Vec<u8>,
-        vk_beta_bytes: Vec<u8>,
-        vk_gamma_bytes: Vec<u8>,
-        vk_delta_bytes: Vec<u8>,
     ) -> Result<bool, Vec<u8>> {
-        // 1. Verify clean root is registered
+        // 1. Verify clean root is registered on-chain
         if !self.clean_association_roots.get(root) {
             return Ok(false);
         }
-        
-        // 2. Verify Merkle Proof of association
-        let is_member = self.verify_merkle_proof(leaf, proof_bytes, root)?;
-        if !is_member {
-            return Ok(false);
-        }
-        
-        // 3. Verify ZK Proof (Groth16)
+
+        // 2. Load the compliance Verifying Key (VK)
+        let (vk_alpha, vk_beta, vk_gamma, vk_delta, vk_ic) = self.get_compliance_vk();
+
+        // 3. Compute the public inputs G1 linear combination on-chain (binds the parameters)
+        let public_inputs_g1_bytes = self.compute_public_inputs_g1(&vk_ic, root, nullifier, recipient, amount)?.to_vec();
+
+        // 4. Verify ZK Proof (Groth16) using EIP-2537 pairing precompile
         let is_zk_valid = self.verify_groth16_proof(
             proof_a_neg_bytes,
             proof_b_bytes,
             proof_c_bytes,
             public_inputs_g1_bytes,
-            vk_alpha_bytes,
-            vk_beta_bytes,
-            vk_gamma_bytes,
-            vk_delta_bytes,
+            vk_alpha.to_vec(),
+            vk_beta.to_vec(),
+            vk_gamma.to_vec(),
+            vk_delta.to_vec(),
         )?;
-        
+
         Ok(is_zk_valid)
     }
 

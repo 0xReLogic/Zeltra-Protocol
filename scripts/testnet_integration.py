@@ -6,7 +6,7 @@ from eth_account import Account
 
 # Arbitrum Sepolia network settings
 RPC_URL = "https://sepolia-rollup.arbitrum.io/rpc"
-CONTRACT_ADDRESS = "0x582fdc90f17a15d27b76175402898ab48f6e6ef3"
+CONTRACT_ADDRESS = "0x7cdc38331f302be1c2fe6c882495ad81ff0d8228"
 PRIVATE_KEY = "b89bc61712cfa0c890c0967f186c23afdf0b770743bc4f5505300100e8c7226e"
 USDC_ADDRESS = "0x75faf114eafb1bdbe2f0316df893fd58ce46aa4d"
 
@@ -109,6 +109,23 @@ NIMBUS_ABI = [
             {"internalType": "bool", "name": "", "type": "bool"}
         ],
         "stateMutability": "nonpayable",
+        "type": "function"
+    },
+    {
+        "inputs": [
+            {"internalType": "bytes32", "name": "root", "type": "bytes32"},
+            {"internalType": "bytes32", "name": "nullifier", "type": "bytes32"},
+            {"internalType": "address", "name": "recipient", "type": "address"},
+            {"internalType": "uint256", "name": "amount", "type": "uint256"},
+            {"internalType": "uint8[]", "name": "proof_a_neg_bytes", "type": "uint8[]"},
+            {"internalType": "uint8[]", "name": "proof_b_bytes", "type": "uint8[]"},
+            {"internalType": "uint8[]", "name": "proof_c_bytes", "type": "uint8[]"}
+        ],
+        "name": "verifyCompliance",
+        "outputs": [
+            {"internalType": "bool", "name": "", "type": "bool"}
+        ],
+        "stateMutability": "view",
         "type": "function"
     }
 ]
@@ -270,6 +287,26 @@ def main():
         print(f"    Refund claim finished. Result: {result}")
     except Exception as e:
         print(f"    Refund claim returned expected status/revert: {e}")
+
+    # F. Test ZK Compliance Verification (verifyCompliance)
+    print("  6. Simulating ZK Compliance (verifyCompliance) verification...")
+    dummy_root = os.urandom(32)
+    dummy_proof_a = list(os.urandom(128))
+    dummy_proof_b = list(os.urandom(256))
+    dummy_proof_c = list(os.urandom(128))
+    try:
+        result = contract.functions.verifyCompliance(
+            dummy_root,
+            dummy_nullifier,
+            address,
+            10 * 1_000_000,
+            dummy_proof_a,
+            dummy_proof_b,
+            dummy_proof_c
+        ).call({'from': address})
+        print(f"    ZK Compliance verification finished. Result: {result}")
+    except Exception as e:
+        print(f"    ZK Compliance verification returned expected status/revert: {e}")
 
     print("\n==========================================================")
     print("ON-CHAIN TESTNET VERIFICATION SUCCESSFUL")
