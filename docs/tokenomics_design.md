@@ -50,8 +50,21 @@ flowchart TD
 *   Token $NIMB hasil buyback tersebut kemudian dibakar secara permanen (*burn*).
 *   **Dampak Ekonomi**: Pasokan token $NIMB di sirkulasi akan terus berkurang secara matematis seiring berjalannya waktu, mendorong kenaikan harga secara organik seiring pertumbuhan volume transaksi platform.
 
----
+### D. Model Kesetimbangan Bakar & Cetak (Burn-and-Mint Equilibrium - BME)
+Mengacu pada publikasi ilmiah terbaru tahun 2025/2026 mengenai *DePIN Tokenomics Framework*, Nimbus menerapkan model **Burn-and-Mint Equilibrium (BME)** untuk menyeimbangkan dinamika suplai dan memicu roda ekonomi (*flywheel*) perangkat STB Guardian:
+1.  **Stabilitas Harga Jasa (USD Denominated)**: Pengguna membayar biaya transaksi flat dalam mata uang stabil (misal: $0.05 USDC per transaksi *spend* privat). Hal ini melindungi pengguna dari volatilitas harga koin $NIMB.
+2.  **Mekanisme Pembakaran (Burn)**: USDC biaya transaksi tersebut dikirim ke smart contract penukar otomatis yang membelinya menjadi token $NIMB di Uniswap, lalu membakarnya (*burn*) dari peredaran.
+3.  **Mekanisme Pencetakan (Mint)**: Jaringan secara berkala memproduksi (*mint*) token $NIMB baru dengan emisi linier tetap untuk menggaji pemilik STB Guardian atas kerja komputasi tanda tangan dan jaminan uptime mereka.
+4.  **Dinamika Equilibrium**:
+    *   **Ketika Transaksi Ramai (Demand Tinggi)**: Jumlah $NIMB yang dibakar dari biaya transaksi akan **jauh lebih besar** daripada jumlah koin baru yang dicetak untuk reward Guardian. Akibatnya, pasokan token deflasi drastis, meningkatkan harga $NIMB di pasar terbuka.
+    *   **Ketika Transaksi Sepi (Demand Rendah)**: Jumlah koin yang dicetak melebihi koin yang dibakar. Koin baru memotivasi para pemilik STB baru untuk masuk karena "biaya modal" membeli token jaminan di pasar sedang murah. Ini secara otomatis merekrut infrastruktur fisik baru (STB) saat kapasitas jaringan sedang murah.
 
+### E. Adaptive Value Capture Engine (Inovasi Jurnal Bisnis 2026)
+Sebagai antisipasi terhadap risiko de-pegging stablecoin atau guncangan likuiditas di pasar L2, Nimbus merancang mesin bagi-hasil adaptif (*Adaptive Value Capture Engine*) yang diatur oleh parameter algoritma on-chain:
+*   Jika TVL (Total Value Locked) di brankas 30/50/20 berada dalam zona aman dengan volatilitas rendah, **65% hasil yield** dibagikan langsung ke staker Safety Module dalam bentuk USDC.
+*   Jika terjadi volatilitas pasar ekstrem di DeFi (misal APY Aave jatuh di bawah 2% atau ada guncangan di stablecoin), kontrak secara dinamis mengalihkan porsi yield: **20% dialihkan ke kas darurat protokol**, **15% ke penambahan jaminan LP Uniswap**, dan sisa **30% ke staking dividends**. Ini memastikan dana investor dan pendiri terlindungi dari guncangan makro ekonomi kripto tanpa perlu campur tangan manual yang lambat.
+
+---
 ## 3. Distribusi Cap Table & Rencana Penguncian (Vesting)
 
 Untuk menjamin kelangsungan hidup proyek dan meyakinkan investor besar, pembagian 100.000.000 token $NIMB diatur secara ketat dengan kontrak vesting otomatis:
