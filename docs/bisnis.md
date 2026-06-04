@@ -68,7 +68,22 @@ Salah satu ketakutan terbesar toko dalam menerima pembayaran offline adalah risi
 
 ---
 
-## 5. Rencana Aksi Go-To-Market Awal
+## 5. Token Tata Kelola $NIMB (Digital Equity & Value Capture)
+
+Untuk menyelaraskan insentif antara pendiri (founders), investor, dan pengguna, Nimbus meluncurkan token utilitas & tata kelola **$NIMB** yang berfungsi sebagai "saham digital" dari ekosistem.
+
+### Mekanisme Akumulasi Nilai:
+*   **Pembagian Pendapatan (Real Yield Dividen)**: Pengguna yang membeli dan mengunci (*stake*) token $NIMB berhak menerima pembagian **50% s.d. 70%** dari total pendapatan protokol. Dividen ini dikirimkan langsung dalam bentuk stablecoin (USDC) yang bersumber dari:
+    *   Bunga DeFi APY dana mengendap.
+    *   Biaya deposit/withdraw premium dari Whales.
+    *   Biaya routing nanopayment AI Agent (x402).
+    *   Margin markup gas relayer (EIP-7702).
+*   **Tata Kelola (Governance Voting)**: Pemegang token $NIMB menentukan parameter penting protokol, termasuk tarif biaya transaksi, pemilihan target platform DeFi yield, dan alokasi dana perbendaharaan (*Treasury Fund*).
+*   **Vesting Pendiri**: Alokasi koin awal untuk tim pengembang dikunci secara bertahap (*vesting schedule*) selama beberapa tahun untuk menjamin komitmen jangka panjang.
+
+---
+
+## 6. Rencana Aksi Go-To-Market Awal
 
 1.  **Fase 1: Tarik Volume dari Whale Polymarket (Fase B)**
     *   Fokus memasarkan fitur taruhan privat Polymarket. Ini akan menghasilkan volume transaksi besar (TVL) awal di smart contract kita, yang menghasilkan yield DeFi instan untuk mendanai operasional awal protokol.
