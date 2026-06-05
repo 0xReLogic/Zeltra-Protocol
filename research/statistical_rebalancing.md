@@ -98,5 +98,6 @@ Gas Price Arbitrum: $0.1$ Gwei.
 ## 6. Rekomendasi Rencana Aksi
 
 Untuk fase pengembangan testnet dan mainnet Nimbus V1 mendatang, kita merekomendasikan:
-1.  **Fase 1 (Selesai)**: Menjaga logic cascading rebalancing on-demand tetap menyala untuk menjamin keamanan likuiditas mentah.
-2.  **Fase 2 (Berikutnya)**: Mengimplementasikan fungsi `rebalance()` berbasis Keeper dan mengalihkan seluruh pemanggilan Aave/Ondo keluar dari method `deposit()` dan `spend()` untuk meminimalkan gas pengguna ke titik terendah.
+1.  **Fase 1 (✅ Selesai)**: Menjaga logic cascading rebalancing on-demand tetap menyala untuk menjamin keamanan likuiditas mentah.
+2.  **Fase 2 (✅ Selesai)**: Mengimplementasikan **7-Epoch Moving Average Volume** di dalam kontrak (`update_epoch_and_rebalance_ratio`). Kontrak secara dinamis mengubah `target_cash_pct` (15% / 30% / 45%) berdasarkan analisis volume 7 epoch terakhir. Fungsi `allocate_reserves()` sekarang membagi non-cash portion 5:2 antara Aave dan RWA secara otomatis berdasarkan `target_cash_pct` terkini. Hook dipasang di `deposit()` dan `spend()`.
+3.  **Fase 3 (Berikutnya)**: Mengimplementasikan fungsi `rebalance()` berbasis Keeper (Chainlink Automation) dan mengalihkan seluruh pemanggilan Aave/Ondo keluar dari method `deposit()` dan `spend()` untuk meminimalkan gas pengguna ke titik terendah (Batch Rebalancing 24 jam).

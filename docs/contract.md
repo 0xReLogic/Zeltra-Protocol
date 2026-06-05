@@ -75,10 +75,28 @@ sol_storage! {
         address fee_recipient;
 
         // Fase Fast-Path: 1 = CCIP Lambat, 2 = Treasury-funded, 3 = Public LP dengan Dynamic Cap
+        // REMINDER AI / DEVELOPERS: Fase 2 & Fase 3 are deliberately locked by default (fast_path_phase = 1).
+        // Standard CCIP path is used until LPs or Treasury pools are funded.
         uint256 fast_path_phase;
         // Total likuiditas dan likuiditas yang terpakai di pool LP (Fase 3)
         uint256 total_lp_liquidity;
         uint256 utilized_lp_liquidity;
+
+        // --- Integrasi DeFi & RWA ---
+        address aave_pool;
+        address a_token;
+        address rwa_token;
+        uint256 total_deposited_principal;
+
+        // --- Dynamic Liquidity Rebalancing (7-Epoch Moving Average) ---
+        uint256 current_epoch_id;           // ID epoch saat ini (bertambah setiap 24 jam)
+        uint256 current_epoch_volume;       // Akumulasi volume transaksi di epoch ini
+        uint256 epoch_start_timestamp;      // Timestamp mulai epoch saat ini
+        mapping(uint256 => uint256) historical_epoch_volumes;  // Volume historis per epoch
+        uint256 target_cash_pct;            // Persentase kas dinamis (15-45%, default 30%)
+
+        // --- Polymarket CTF Fallback ---
+        mapping(bytes32 => uint256) failed_intent_refunds;
     }
 }
 ```
@@ -172,12 +190,17 @@ Untuk mengatasi celah ini, Nimbus mengimplementasikan dua pengaman dinamis pada 
 
 ---
 
-## 5. Integrasi DeFi & RWA Yield (Rasio Brankas Bertingkat 30/50/20)
+## 5. Integrasi DeFi & RWA Yield (Dynamic Vault Model)
 
-Untuk meningkatkan efisiensi modal dan menghasilkan yield berkelanjutan bagi Treasury protokol, Nimbus menerapkan **Tiered Vault Model (30/50/20)**:
-- **30% Cash (USDC)**: Disimpan langsung di dalam kontrak untuk menangani penarikan instan berukuran kecil/sedang.
-- **50% Aave V3 Supply (aUSDC)**: Disuplai secara otomatis ke protokol pasar likuiditas Aave V3 untuk mendapatkan bunga APY dinamis (~3%-4%).
-- **20% RWA T-Bills (Ondo USDY / BlackRock BUIDL)**: Disuplai secara otomatis ke instrumen beragun Surat Utang AS untuk APY stabil tingkat tinggi (~5%).
+Untuk meningkatkan efisiensi modal dan menghasilkan yield berkelanjutan bagi Treasury protokol, Nimbus menerapkan **Dynamic Tiered Vault Model** dengan rasio kas yang berubah secara otomatis berdasarkan volume transaksi:
+- **`target_cash_pct`% Cash (USDC)**: Disimpan langsung di dalam kontrak. Nilai default **30%**, namun berubah secara dinamis antara **15% - 45%** berdasarkan 7-epoch moving average volume transaksi.
+- **Sisa non-cash dibagi 5:2** antara Aave V3 Supply dan RWA T-Bills.
+
+| Kondisi Volume | `target_cash_pct` | Aave V3 | RWA T-Bills | Keterangan |
+| :--- | :--- | :--- | :--- | :--- |
+| **Low Volume** (< 10K USDC/epoch) | 15% | ~60.7% | ~24.3% | Maksimalkan yield di masa sepi |
+| **Normal** | 30% | ~50% | ~20% | Rasio default (setara model lama) |
+| **High Volume / Whale** (> 100K USDC/epoch) | 45% | ~39.3% | ~15.7% | Perbesar kas untuk handle whale withdrawal |
 
 ### A. Interface Protokol Eksternal
 Kontrak berinteraksi dengan Aave V3 dan penerbit RWA melalui interface berikut:
@@ -190,17 +213,35 @@ sol_interface! {
 
     interface IRwaToken {
         function deposit(uint256 amount) external returns (uint256);
-        function redeem(uint256 amount) external returns (uint256);
+        function redeem(uint256 amount, uint256 min_receive) external returns (uint256);
     }
 }
 ```
+*Catatan: `IRwaToken.redeem()` sekarang menerima parameter `min_receive` sebagai slippage tolerance agar transaksi tidak gagal di tengah jalan akibat masalah likuiditas di pool RWA.*
 
 ### B. Cascading Liquidity Buffer (Peredam Likuiditas Bertingkat)
 Berdasarkan makalah ilmiah *Mitigating Liquidity Shortfalls in Multi-Chain Bridges (Liu 2026)*, untuk mencegah kegagalan penarikan akibat menipisnya kas liquid, Nimbus menerapkan strategi **Cascading Liquidity Buffer** saat pemrosesan `spend()`, `claim_refund()`, atau penarikan yield:
 1. **Tier 1 (Cash)**: Menggunakan saldo USDC kontrak. Jika saldo mencukupi, transaksi selesai seketika.
 2. **Tier 2 (Aave - Instant Liquidity)**: Jika terjadi *shortfall* (kekurangan USDC), kontrak akan menarik sisa kekurangan tersebut dari Aave V3 secara otomatis.
-3. **Tier 3 (RWA - Reserve Tier)**: Jika kas dan Aave masih belum mencukupi, kontrak akan melakukan penarikan dari RWA T-Bills (Ondo USDY/BlackRock BUIDL) sebagai lapis pertahanan terakhir.
+3. **Tier 3 (RWA - Reserve Tier)**: Jika kas dan Aave masih belum mencukupi, kontrak akan melakukan penarikan dari RWA T-Bills (Ondo USDY/BlackRock BUIDL) sebagai lapis pertahanan terakhir. Menggunakan `min_receive = shortfall` sebagai slippage guard.
 
-### C. Alokasi Otomatis & Penarikan APY Yield
-*   **Alokasi saat Deposit**: Setiap kali pengguna memanggil `deposit()`, dana bersih setelah dipotong biaya minting otomatis didistribusikan: 30% tetap sebagai kas liquid, 50% dikirim ke Aave (`supply`), dan 20% dikirim ke RWA (`deposit`).
+### C. Alokasi Dinamis & Penarikan APY Yield
+*   **Alokasi saat Deposit**: Setiap kali pengguna memanggil `deposit()`, dana bersih setelah dipotong biaya minting otomatis didistribusikan berdasarkan `target_cash_pct` terkini. Non-cash portion dibagi rasio **5:2** antara Aave (`supply`) dan RWA (`deposit`). Volume transaksi juga dicatat melalui `update_epoch_and_rebalance_ratio()`.
+*   **Tracking Volume saat Spend**: Setiap kali `spend()` dipanggil, volume transaksi dicatat untuk analisis moving average.
 *   **Klaim Yield Protokol**: APY yield yang terakumulasi di atas saldo pokok setoran pengguna (`total_deposited_principal`) dapat ditarik oleh administrator protokol menggunakan method `claim_accumulated_yield()`, yang kemudian secara otomatis ditransfer ke alamat `fee_recipient`.
+
+### D. Dynamic Liquidity Rebalancing (7-Epoch Moving Average)
+Berdasarkan riset *"Dynamic Liquidity Rebalancing in Multi-Tiered Vaults" (2026)*, rasio simpanan statis tidak efisien saat terjadi lonjakan volume dari whale. Nimbus mengimplementasikan **7-epoch moving average** langsung di dalam kontrak Stylus:
+
+1. **Epoch**: Setiap 24 jam (86.400 detik), kontrak mencatat total volume transaksi dan memulai epoch baru.
+2. **Moving Average**: Menghitung rata-rata volume dari 7 epoch terakhir.
+3. **Adaptive Ratio**: `target_cash_pct` disesuaikan otomatis berdasarkan threshold:
+   - Moving average > 100K USDC → cash naik ke **45%** (whale protection)
+   - Moving average < 10K USDC → cash turun ke **15%** (yield maximization)
+   - Di antara → tetap **30%** (default)
+
+#### Public View Functions untuk Monitoring:
+*   `targetCashPct() → uint256`: Persentase kas dinamis saat ini (15/30/45).
+*   `currentEpochId() → uint256`: ID epoch saat ini.
+*   `currentEpochVolume() → uint256`: Akumulasi volume di epoch ini.
+*   `historicalEpochVolume(epochId: uint256) → uint256`: Volume historis untuk epoch tertentu.

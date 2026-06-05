@@ -81,7 +81,7 @@ sol_interface! {
 
     interface IRwaToken {
         function deposit(uint256 amount) external returns (uint256);
-        function redeem(uint256 amount) external returns (uint256);
+        function redeem(uint256 amount, uint256 min_receive) external returns (uint256);
     }
 
     interface IConditionalTokens {
@@ -136,6 +136,13 @@ sol_storage! {
         address a_token;
         address rwa_token;
         uint256 total_deposited_principal;
+
+        // --- Dynamic Liquidity Rebalancing (Moving Average Volatility) ---
+        uint256 current_epoch_id;
+        uint256 current_epoch_volume;
+        uint256 epoch_start_timestamp;
+        mapping(uint256 => uint256) historical_epoch_volumes;
+        uint256 target_cash_pct;
 
         // --- Polymarket CTF Fallback (Roadmap Item 3) ---
         mapping(bytes32 => uint256) failed_intent_refunds;
@@ -282,6 +289,66 @@ impl Nimbus {
             Ok(out)
         }
     }
+
+    /// Update the current epoch volume and recalculate the dynamic cash reserve ratio using a 7-epoch moving average.
+    fn update_epoch_and_rebalance_ratio(&mut self, amount: U256) -> Result<(), Vec<u8>> {
+        let current_vol = self.current_epoch_volume.get();
+        self.current_epoch_volume.set(current_vol + amount);
+
+        let current_time = U256::from(self.block_timestamp());
+        let epoch_start = self.epoch_start_timestamp.get();
+        
+        // Epoch duration: 24 hours (86400 seconds)
+        if current_time >= epoch_start + U256::from(86400) {
+            let epoch_id = self.current_epoch_id.get();
+            let epoch_vol = self.current_epoch_volume.get();
+            
+            // Store current epoch volume
+            self.historical_epoch_volumes.insert(epoch_id, epoch_vol);
+
+            // Compute Moving Average of the last 7 epochs (or fewer if we just started)
+            let mut sum_vol = U256::ZERO;
+            let start_idx = if epoch_id >= U256::from(6) {
+                epoch_id - U256::from(6)
+            } else {
+                U256::ZERO
+            };
+            
+            let mut count = U256::ZERO;
+            let mut idx = start_idx;
+            while idx <= epoch_id {
+                sum_vol += self.historical_epoch_volumes.get(idx);
+                count += U256::from(1);
+                idx += U256::from(1);
+            }
+            
+            let moving_average_volume = if count > U256::ZERO {
+                sum_vol / count
+            } else {
+                U256::ZERO
+            };
+
+            // High volume threshold: 100,000 USDC (in 6 decimals: 100_000_000_000)
+            // Low volume threshold: 10,000 USDC (in 6 decimals: 10_000_000_000)
+            let high_threshold = U256::from(100_000_000_000u64);
+            let low_threshold = U256::from(10_000_000_000u64);
+
+            if moving_average_volume > high_threshold {
+                self.target_cash_pct.set(U256::from(45));
+            } else if moving_average_volume < low_threshold {
+                self.target_cash_pct.set(U256::from(15));
+            } else {
+                self.target_cash_pct.set(U256::from(30));
+            }
+
+            // Reset epoch parameters
+            self.epoch_start_timestamp.set(current_time);
+            self.current_epoch_id.set(epoch_id + U256::from(1));
+            self.current_epoch_volume.set(U256::ZERO);
+        }
+
+        Ok(())
+    }
 }
 
 #[public]
@@ -295,9 +362,11 @@ impl Nimbus {
         self.paused.set(false);
         self.stablecoin.set(stablecoin_addr);
         self.fee_recipient.set(fee_recipient_addr);
-        // REMINDER AI / DEVELOPERS: Fase 2 & Fase 3 are deliberately locked by default (fast_path_phase = 1).
-        // Standard CCIP path is used until LPs or Treasury pools are funded.
         self.fast_path_phase.set(U256::from(1));
+        self.target_cash_pct.set(U256::from(30));
+        self.epoch_start_timestamp.set(U256::from(self.block_timestamp()));
+        self.current_epoch_id.set(U256::ZERO);
+        self.current_epoch_volume.set(U256::ZERO);
         Ok(())
     }
 
@@ -415,8 +484,29 @@ impl Nimbus {
         Ok(self.total_deposited_principal.get())
     }
 
-    /// Allocate incoming deposit amount according to the 30/50/20 Vault Model:
-    /// 30% Cash, 50% Aave V3 Supply, 20% RWA Treasury Bills
+    /// Returns the current dynamic cash reserve percentage (range 15-45, default 30).
+    pub fn target_cash_pct(&self) -> Result<U256, Vec<u8>> {
+        Ok(self.target_cash_pct.get())
+    }
+
+    /// Returns the current epoch ID (increments every 24h).
+    pub fn current_epoch_id(&self) -> Result<U256, Vec<u8>> {
+        Ok(self.current_epoch_id.get())
+    }
+
+    /// Returns the accumulated transaction volume in the current epoch.
+    pub fn current_epoch_volume(&self) -> Result<U256, Vec<u8>> {
+        Ok(self.current_epoch_volume.get())
+    }
+
+    /// Returns the historical volume for a given epoch ID.
+    pub fn historical_epoch_volume(&self, epoch_id: U256) -> Result<U256, Vec<u8>> {
+        Ok(self.historical_epoch_volumes.get(epoch_id))
+    }
+
+    /// Allocate incoming deposit amount according to the Dynamic Vault Model:
+    /// cash_pct% Cash (dynamic), remaining split 5:2 between Aave V3 and RWA T-Bills.
+    /// The target_cash_pct is updated by the 7-epoch moving average rebalancer.
     fn allocate_reserves(&mut self, amount: U256) -> Result<(), Vec<u8>> {
         #[cfg(not(test))]
         {
@@ -424,11 +514,18 @@ impl Nimbus {
             let erc20 = IErc20::new(stablecoin_address);
             let this_address = stylus_sdk::contract::address();
             
-            // Calculate 50% and 20% allocation amounts
-            let aave_share = amount * U256::from(50) / U256::from(100);
-            let rwa_share = amount * U256::from(20) / U256::from(100);
+            // Read dynamic cash percentage (default 30, range 15-45)
+            let cash_pct = self.target_cash_pct.get();
+            let non_cash_pct = U256::from(100) - cash_pct;
             
-            // 1. Supply 50% to Aave Pool V3
+            // Split non-cash portion 5:2 between Aave and RWA (≈71.4% / 28.6%)
+            // When cash=30 → Aave=50%, RWA=20% (original ratio preserved)
+            // When cash=45 → Aave=39.3%, RWA=15.7%
+            // When cash=15 → Aave=60.7%, RWA=24.3%
+            let aave_share = amount * non_cash_pct * U256::from(5) / (U256::from(100) * U256::from(7));
+            let rwa_share = amount * non_cash_pct * U256::from(2) / (U256::from(100) * U256::from(7));
+            
+            // 1. Supply to Aave Pool V3
             let aave_pool_addr = self.aave_pool.get();
             if aave_pool_addr != Address::ZERO && aave_share > U256::ZERO {
                 let aave = IAavePool::new(aave_pool_addr);
@@ -440,7 +537,7 @@ impl Nimbus {
                 }
             }
             
-            // 2. Supply 20% to Ondo USDY / BlackRock BUIDL
+            // 2. Supply to Ondo USDY / BlackRock BUIDL
             let rwa_token_addr = self.rwa_token.get();
             if rwa_token_addr != Address::ZERO && rwa_share > U256::ZERO {
                 // TODO: In mainnet deployment, add KYC allowlist verification/checking for RWA tokens (Ondo/BlackRock)
@@ -497,7 +594,7 @@ impl Nimbus {
             if rwa_token_addr != Address::ZERO && shortfall > U256::ZERO {
                 // TODO: In mainnet deployment, integrate Chainlink oracle price feeds for Ondo USDY / BUIDL NAV calculation
                 let rwa = IRwaToken::new(rwa_token_addr);
-                let _redeemed = rwa.redeem(&mut *self, shortfall)
+                let _redeemed = rwa.redeem(&mut *self, shortfall, shortfall)
                     .unwrap_or(U256::ZERO);
                 
                 cash_balance = erc20.balance_of(&mut *self, this_address)
@@ -676,6 +773,9 @@ impl Nimbus {
 
         self.allocate_reserves(net_amount)?;
 
+        // Track epoch volume for dynamic rebalancing (7-epoch moving average)
+        self.update_epoch_and_rebalance_ratio(net_amount)?;
+
         Ok(())
     }
 
@@ -772,6 +872,8 @@ impl Nimbus {
                 self.total_deposited_principal.set(principal - amount);
             }
             self.nullifiers.insert(nullifier, true);
+            // Track epoch volume for dynamic rebalancing
+            self.update_epoch_and_rebalance_ratio(amount)?;
             Ok(true)
         }
 
@@ -804,6 +906,9 @@ impl Nimbus {
                 if principal >= amount {
                     self.total_deposited_principal.set(principal - amount);
                 }
+                
+                // Track epoch volume for dynamic rebalancing
+                self.update_epoch_and_rebalance_ratio(amount)?;
                 
                 self.ensure_liquidity(amount)?;
                 
