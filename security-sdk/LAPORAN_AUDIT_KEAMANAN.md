@@ -222,25 +222,444 @@ pub fn register_signing_result(
 
 ---
 
-## 5. RINGKASAN REKOMENDASI
+## 5. ANCAMAN TAMBAHAN YANG DIIDENTIFIKASI
+
+### 5.1 Serangan Supply Chain (Kritis)
+**Lokasi:** `Cargo.toml`, semua dependencies
+
+**Masalah:** SDK tidak memiliki mekanisme verifikasi integritas dependencies dari crates.io.
+
+**Skenario Serangan:**
+- Penyerang mengompromikan akun maintainer package populer melalui credential stuffing
+- Mempublikasikan versi berbahaya dengan backdoor
+- Pengguna SDK mengunduh package yang terinfeksi secara otomatis
+- Backdoor dieksekusi saat build time
+
+**Pencegahan:**
+```toml
+# Cargo.toml - Tambahkan audit dan verifikasi
+[workspace.metadata.audit]
+db-path = "~/.cargo/advisory-db"
+db-urls = ["https://github.com/RustSec/advisory-db"]
+
+[workspace.metadata.deny]
+advisories = "deny"
+warnings = "deny"
+unmaintained = "warn"
+yanked = "deny"
+git = "deny"
+```
+
+**Best Practices:**
+- Gunakan `cargo-audit` untuk scanning CVE secara rutin
+- Implement `cargo-vet` untuk verifikasi checksum dependencies
+- Lock semua dependency versions di `Cargo.lock`
+- Gunakan SBOM (Software Bill of Materials) untuk tracking dependencies
+- Implement SLSA provenance untuk build verification
+
+### 5.2 Masalah Manajemen Key (Kritis)
+**Lokasi:** Seluruh SDK - tidak ada spesifikasi penyimpanan key
+
+**Masalah:** SDK tidak menentukan bagaimana private keys disimpan di client-side.
+
+**Skenario Serangan:**
+- Private keys tersimpan di plaintext di localStorage/IndexedDB
+- XSS attack mengekstrak keys dari storage browser
+- Attacker menggunakan keys untuk sign transaksi tanpa otorisasi
+
+**Pencegahan:**
+```rust
+// Gunakan Web Cryptography API untuk secure key storage
+use web_sys::{CryptoKey, Crypto};
+
+async fn generate_and_store_key() -> Result<CryptoKey, JsValue> {
+    let window = web_sys::window().unwrap();
+    let crypto = window.crypto().unwrap();
+    
+    let key = crypto.subtle()
+        .generate_key_with_object(
+            &wasm_bindgen::JsValue::from_serde(&serde_json::json!({
+                "name": "AES-GCM",
+                "length": 256
+            })).unwrap(),
+            true,
+            &["encrypt", "decrypt"]
+        ).await?;
+    
+    // Simpan di IndexedDB - key tidak pernah diekspos ke JavaScript
+    let db = window.indexed_db().unwrap()
+        .open("secure_keys", 1).await?;
+    
+    Ok(key)
+}
+```
+
+**Best Practices:**
+- Gunakan Web Cryptography API untuk operasi kriptografi di browser
+- Simpan keys di IndexedDB dengan `extractable: false`
+- Implement hardware-backed key storage jika tersedia (TPM, Secure Enclave)
+- Gunakan envelope encryption dengan KMS untuk production
+- Implement key rotation secara berkala
+
+### 5.3 Serangan Replay (Tinggi)
+**Lokasi:** `pool.rs:191` - nullifier generation
+
+**Masalah:** Nullifier menggunakan SHA256 dari message tanpa global nullifier registry.
+
+**Skenario Serangan:**
+- Token yang sama bisa di-spend berkali-kali jika tidak dicek on-chain
+- Attacker mereplay token yang valid untuk double-spend
+- Tidak ada mekanisme lokal untuk mencegah replay
+
+**Pencegahan:**
+```rust
+// pool.rs - Tambahkan local nullifier cache
+#[wasm_bindgen]
+#[derive(Default, Serialize, Deserialize)]
+pub struct AgentTokenPool {
+    #[wasm_bindgen(skip)]
+    pub pending_tokens: HashMap<String, PendingToken>,
+    #[wasm_bindgen(skip)]
+    pub ready_tokens: Vec<ReadyToken>,
+    #[wasm_bindgen(skip)]
+    pub spent_nullifiers: HashSet<String>, // Cache nullifier yang sudah dipakai
+}
+
+#[wasm_bindgen]
+impl AgentTokenPool {
+    #[wasm_bindgen]
+    pub fn spend_any_token(
+        &mut self,
+        amount: u64,
+        scheme: &str,
+        network: &str,
+        pk_iss_hex: &str,
+    ) -> Result<String, JsValue> {
+        // ... existing logic ...
+        
+        let nullifier = hex::encode(sha2::Sha256::digest(token.message.as_bytes()));
+        
+        // Cek apakah nullifier sudah dipakai
+        if self.spent_nullifiers.contains(&nullifier) {
+            return Err(JsValue::from_str("Token sudah di-spent sebelumnya (replay protection)"));
+        }
+        
+        // Tambahkan ke cache
+        self.spent_nullifiers.insert(nullifier.clone());
+        
+        // ... continue with spending logic ...
+    }
+}
+```
+
+**Best Practices:**
+- Implement local nullifier cache untuk mencegah replay lokal
+- Verifikasi dengan on-chain nullifier registry sebelum spending
+- Gunakan domain separation untuk nullifier (contract address + chain ID)
+- Implement nonce-based system untuk single-use tokens
+- Tambahkan timestamp expiration untuk tokens
+
+### 5.4 Serangan Browser Extension (Tinggi)
+**Lokasi:** Seluruh SDK yang diekspor ke JavaScript
+
+**Masalah:** Malicious extensions bisa inject JavaScript untuk intercept WASM calls.
+
+**Skenario Serangan:**
+- Attacker membuat extension yang terlihat legitimate
+- Extension intercepts semua WASM function calls
+- Data sensitif (blinding factors, signatures) dicuri sebelum dikirim
+- Extension mengirim data ke server attacker
+
+**Pencegahan:**
+```rust
+// Implement Content Security Policy di HTML host
+// <meta http-equiv="Content-Security-Policy" 
+//      content="default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; 
+//               object-src 'none'; connect-src 'self' https://trusted-api.com;">
+```
+
+**Best Practices:**
+- Implement strict Content Security Policy (CSP)
+- Gunakan Subresource Integrity (SRI) untuk WASM file
+- Detect extension interference dengan integrity checks
+- Gunakan browser isolation untuk production environments
+- Audit semua extensions yang diizinkan di enterprise environment
+
+### 5.5 Serangan Clipboard (Sedang)
+**Lokasi:** UI yang menampilkan hex strings
+
+**Masalah:** User mungkin copy-paste sensitive hex strings ke clipboard.
+
+**Skenario Serangan:**
+- User copy blinding factor atau private key
+- Malicious app di background read clipboard
+- Data sensitif diekspos tanpa sepengetahuan user
+
+**Pencegahan:**
+```javascript
+// Auto-clear clipboard setelah paste
+async function pasteSensitiveData() {
+    const text = await navigator.clipboard.readText();
+    // Process the text
+    
+    // Clear clipboard immediately
+    await navigator.clipboard.writeText('');
+    
+    // Show warning to user
+    showWarning('Clipboard telah dibersihkan untuk keamanan');
+}
+```
+
+**Best Practices:**
+- Auto-clear clipboard setelah paste data sensitif
+- Tampilkan warning saat user copy data sensitif
+- Gunakan secure paste dialog dengan konfirmasi
+- Implement clipboard access logging untuk audit
+- Hindari menampilkan raw sensitive data di UI
+
+### 5.6 Session Hijacking (Tinggi)
+**Lokasi:** Tidak ada session management di SDK
+
+**Masalah:** Tidak ada session token expiration atau refresh mechanism.
+
+**Skenario Serangan:**
+- Attacker hijack session token melalui XSS atau network sniffing
+- Menggunakan token untuk spend token tanpa otorisasi
+- Session tetap valid sampai user logout secara manual
+
+**Pencegahan:**
+```rust
+// Implement session management dengan expiration
+#[derive(Clone, Serialize, Deserialize)]
+pub struct UserSession {
+    pub session_id: String,
+    pub created_at: u64,
+    pub expires_at: u64,
+    pub last_activity: u64,
+}
+
+impl UserSession {
+    pub fn is_valid(&self) -> bool {
+        let now = current_timestamp();
+        now < self.expires_at && (now - self.last_activity) < SESSION_TIMEOUT
+    }
+    
+    pub fn refresh(&mut self) {
+        self.last_activity = current_timestamp();
+        self.expires_at = self.last_activity + SESSION_LIFETIME;
+    }
+}
+```
+
+**Best Practices:**
+- Implement session timeout (misal: 15 menit inactivity)
+- Gunakan refresh token rotation
+- Implement automatic logout pada risk signals
+- Gunakan secure cookie flags (HttpOnly, Secure, SameSite)
+- Implement back-channel logout untuk global session invalidation
+
+### 5.7 Serangan Cross-Origin (Sedang)
+**Lokasi:** SDK yang di-load dari domain berbeda
+
+**Masalah:** SDK di-load dari domain berbeda tanpa proper CORS policy.
+
+**Skenario Serangan:**
+- Malicious origin mengakses SDK functions
+- Data leakage ke unauthorized origins
+- Attacker menggunakan SDK untuk operasi berbahaya
+
+**Pencegahan:**
+```rust
+// Implement strict CORS policy di server
+const ALLOWED_ORIGINS: &[&str] = &[
+    "https://nimbus.io",
+    "https://app.nimbus.io",
+];
+
+pub fn validate_origin(origin: &str) -> bool {
+    ALLOWED_ORIGINS.contains(&origin)
+}
+
+// Di response headers
+res.header("Access-Control-Allow-Origin", validated_origin);
+res.header("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+res.header("Access-Control-Allow-Headers", "Content-Type, Authorization");
+res.header("Access-Control-Max-Age", "86400");
+```
+
+**Best Practices:**
+- Implement strict origin allowlist
+- Hindari wildcard (*) di Access-Control-Allow-Origin
+- Validasi Origin header sebelum mengizinkan request
+- Gunakan preflight OPTIONS request untuk validation
+- Implement environment-specific CORS policies (dev vs prod)
+
+### 5.8 Serangan Memory Dump (Sedang)
+**Lokasi:** WASM linear memory
+
+**Masalah:** Browser crash dump bisa mengandung WASM memory dengan data sensitif.
+
+**Skenario Serangan:**
+- Browser crash dan menghasilkan crash report
+- WASM memory termasuk dalam dump
+- Data sensitif (keys, signatures) terekam dalam report
+- Attacker dengan akses ke crash report bisa mengekstrak data
+
+**Pencegahan:**
+```rust
+// Disable crash reporting untuk production
+// Implement secure memory cleanup pada shutdown
+#[wasm_bindgen]
+pub fn secure_shutdown() {
+    // Clear all sensitive data from memory
+    unsafe {
+        // Zero out all sensitive memory regions
+        // This should be called before page unload
+    }
+}
+
+// Event listener untuk page unload
+window().add_event_listener_with_callback(
+    "beforeunload",
+    Closure::wrap(Box::new(move || {
+        secure_shutdown();
+    }))
+).unwrap();
+```
+
+**Best Practices:**
+- Disable crash reporting untuk production builds
+- Implement secure memory cleanup pada shutdown
+- Gunakan memory encryption jika tersedia
+- Implement memory zeroing setelah operasi sensitif
+- Monitor untuk abnormal memory access patterns
+
+### 5.9 Social Engineering / UI Spoofing (Tinggi)
+**Lokasi:** UI untuk transaksi approval
+
+**Masalah:** Tidak ada UI verification untuk critical operations.
+
+**Skenario Serangan:**
+- Attacker membuat fake UI yang meniru aplikasi asli
+- User tertipu approve transaksi palsu
+- Tidak ada mekanisme untuk memverifikasi authenticity UI
+
+**Pencegahan:**
+```rust
+// Implement transaction confirmation dengan detailed info
+#[wasm_bindgen]
+pub struct TransactionConfirmation {
+    pub recipient: String,
+    pub amount: u64,
+    pub token_id: String,
+    pub timestamp: u64,
+    pub expected_hash: String,
+}
+
+#[wasm_bindgen]
+impl TransactionConfirmation {
+    pub fn verify(&self, user_confirmed: bool) -> Result<bool, JsValue> {
+        if !user_confirmed {
+            return Err(JsValue::from_str("Transaksi dibatalkan oleh user"));
+        }
+        
+        // Verify hash matches expected
+        let calculated_hash = self.calculate_hash();
+        if calculated_hash != self.expected_hash {
+            return Err(JsValue::from_str("Hash transaksi tidak valid - kemungkinan spoofing"));
+        }
+        
+        Ok(true)
+    }
+}
+```
+
+**Best Practices:**
+- Implement transaction confirmation dengan detailed info
+- Tampilkan recipient address, amount, dan token ID
+- Gunakan hardware wallet integration untuk critical operations
+- Implement UI integrity verification
+- Tambahkan warning untuk transaksi besar atau unusual
+
+### 5.10 Random Number Generation Deterministik (Kritis)
+**Lokasi:** `zk_wasm.rs:82`, `blind_wasm.rs:12`, `threshold_wasm.rs:17`
+
+**Masalah:** `thread_rng()` mungkin tidak cryptographically secure di semua environments.
+
+**Skenario Serangan:**
+- Random numbers predictable karena seed yang lemah
+- Attacker memprediksi blinding factors
+- Compromise seluruh sistem blind signature
+
+**Pencegahan:**
+```rust
+// Gunakan OsRng atau Web Crypto API untuk cryptographic randomness
+#[cfg(target_arch = "wasm32")]
+use rand::rngs::OsRng;
+
+#[cfg(not(target_arch = "wasm32")]
+use rand::rngs::ThreadRng;
+
+#[cfg(target_arch = "wasm32")]
+fn get_crypto_rng() -> OsRng {
+    OsRng
+}
+
+#[cfg(not(target_arch = "wasm32")]
+fn get_crypto_rng() -> ThreadRng {
+    ThreadRng::entropy_from(&SystemRandom::new())
+}
+
+// Atau gunakan Web Crypto API langsung di WASM
+#[wasm_bindgen]
+pub async fn generate_secure_random() -> Result<Vec<u8>, JsValue> {
+    let window = web_sys::window().unwrap();
+    let crypto = window.crypto().unwrap();
+    let array = js_sys::Uint8Array::new_with_length(32);
+    crypto.get_random_values(&array).unwrap();
+    Ok(array.to_vec())
+}
+```
+
+**Best Practices:**
+- Gunakan `rand::rngs::OsRng` untuk cryptographic randomness
+- Di WASM, gunakan Web Crypto API `getRandomValues()`
+- Verifikasi entropy source sebelum production
+- Implement fallback mechanisms jika entropy source gagal
+- Test randomness quality dengan statistical tests
+
+---
+
+## 6. RINGKASAN REKOMENDASI
 
 **Tindakan Segera (Kritis):**
 1. Implementasikan pembersihan memori untuk semua rahasia kriptografi
 2. Tambahkan verifikasi HMAC ke semua deserialization payload x402
 3. Ganti pesan error verbose dengan respons generik
 4. Tambahkan verifikasi signature issuer ke registrasi token
+5. Implementasikan supply chain security dengan cargo-audit dan cargo-vet
+6. Gunakan cryptographic RNG (OsRng/Web Crypto API) untuk semua random generation
+7. Implementasikan secure key storage dengan Web Cryptography API
 
 **Tindakan Jangka Pendek (Tinggi):**
 1. Implementasikan whitelisting tipe untuk deserialization
 2. Tambahkan pemeriksaan batasan panjang input
 3. Implementasikan rate limiting untuk fungsi WASM
 4. Gunakan perbandingan constant-time untuk data rahasia
+5. Implementasikan local nullifier cache untuk replay protection
+6. Implementasikan Content Security Policy (CSP) untuk browser extension protection
+7. Implementasikan session management dengan expiration dan refresh rotation
+8. Implementasikan transaction confirmation dengan detailed info untuk anti-spoofing
 
 **Tindakan Jangka Panjang (Sedang):**
 1. Implementasikan alokasi memori aman (mlock/secure_alloc)
 2. Tambahkan logging audit komprehensif
 3. Implementasikan verifikasi formal untuk jalur kritis
 4. Tambahkan integrasi fuzzing ke CI/CD
+5. Implementasikan strict CORS policy dengan origin allowlist
+6. Implementasikan secure memory cleanup pada shutdown
+7. Implementasikan clipboard auto-clear untuk data sensitif
+8. Implementasikan hardware wallet integration untuk critical operations
 
 ---
 
