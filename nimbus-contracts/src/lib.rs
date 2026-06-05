@@ -6,6 +6,7 @@ mod types;
 mod interfaces;
 mod storage;
 mod constants;
+mod helpers;
 
 use alloc::vec::Vec;
 use ark_bls12_381::{Fr, G1Affine, G2Affine};
@@ -21,44 +22,6 @@ pub use storage::Nimbus;
 pub use constants::*;
 
 impl Nimbus {
-    #[inline(always)]
-    fn msg_sender(&self) -> Address {
-        #[cfg(test)]
-        {
-            tests::MSG_SENDER.with(|s| *s.borrow())
-        }
-        #[cfg(not(test))]
-        {
-            stylus_sdk::msg::sender()
-        }
-    }
-
-    #[inline(always)]
-    fn block_timestamp(&self) -> u64 {
-        #[cfg(test)]
-        {
-            tests::BLOCK_TIMESTAMP.with(|t| *t.borrow())
-        }
-        #[cfg(not(test))]
-        {
-            stylus_sdk::block::timestamp()
-        }
-    }
-
-    fn check_owner(&self) -> Result<(), Vec<u8>> {
-        if self.owner.get() != self.msg_sender() {
-            return Err(b"NOT_OWNER".to_vec());
-        }
-        Ok(())
-    }
-
-    fn check_not_paused(&self) -> Result<(), Vec<u8>> {
-        if self.paused.get() {
-            return Err(b"CONTRACT_PAUSED".to_vec());
-        }
-        Ok(())
-    }
-
     /// Retrieve the Verifying Key (VK) for the compliance Groth16 circuit.
     /// In testnet/production, we scale the generator to construct valid points.
     fn get_compliance_vk(&self) -> (
