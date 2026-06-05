@@ -4,6 +4,30 @@ Dokumen ini menjelaskan arsitektur smart contract **Nimbus Protocol** serta kepu
 
 ---
 
+## 0. Struktur Modul
+
+Nimbus Contracts telah direfaktor menjadi struktur modular yang terorganisir:
+
+```
+nimbus-contracts/src/
+├── lib.rs           # Main contract implementation (1649 baris)
+├── types.rs         # EVM conversion helpers (to_evm_g1, to_evm_g2, to_evm_scalar)
+├── interfaces.rs    # sol_interface! macros (ERC20, Aave, RWA, CTF)
+├── storage.rs       # sol_storage! Nimbus struct definition
+└── constants.rs     # EIP-2537 BLS12-381 precompile addresses
+```
+
+### Keunggulan Struktur Modular:
+- **Separation of Concerns**: Storage, interfaces, types, dan constants terpisah
+- **Reusability**: EVM conversion helpers dapat digunakan di module lain
+- **Maintainability**: Mudah menemukan dan update komponen spesifik
+- **Documentation**: 51 doc comments tersebar dengan rapi
+
+### Catatan Refactoring Lanjutan:
+Contract implementation methods masih dalam `lib.rs` (1649 lines) karena Stylus menggunakan **trait-based composition model**. Untuk modularisasi lebih lanjut, perlu menggunakan pattern `#[implements]` macro yang dijelaskan di [Arbitrum Stylus Inheritance Docs](https://docs.arbitrum.io/stylus/how-tos/using-inheritance). Ini akan menjadi improvement di fase berikutnya.
+
+---
+
 ## 1. Terobosan Penting (Aha! Moment): EIP-2537
 
 Sebelum tahun 2025, memverifikasi tanda tangan kurva **BLS12-381** di Ethereum/L2 sangat mahal karena harus mensimulasikan perhitungan pairing dalam Solidity secara manual (memakan jutaan gas fee).

@@ -5,24 +5,20 @@ extern crate alloc;
 mod types;
 mod interfaces;
 mod storage;
+mod constants;
 
 use alloc::vec::Vec;
 use ark_bls12_381::{Fr, G1Affine, G2Affine};
 use ark_ec::AffineRepr;
 use ark_ff::Field;
 
-use alloy_primitives::{Address, address, FixedBytes};
+use alloy_primitives::{Address, FixedBytes};
 use stylus_sdk::{prelude::*, alloy_primitives::U256, call::RawCall};
 
 pub use types::{to_evm_g1, to_evm_g2, to_evm_scalar};
 pub use interfaces::*;
 pub use storage::Nimbus;
-
-// Precompiled contracts introduced by EIP-2537 in the Pectra upgrade
-const BLS12_G1_ADD: Address = address!("000000000000000000000000000000000000000b");
-const BLS12_G1_MSM: Address = address!("000000000000000000000000000000000000000c");
-const BLS12_G2_MSM: Address = address!("000000000000000000000000000000000000000e");
-const BLS12_PAIRING_CHECK: Address = address!("000000000000000000000000000000000000000f");
+pub use constants::*;
 
 impl Nimbus {
     #[inline(always)]
