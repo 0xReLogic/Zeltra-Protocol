@@ -1121,6 +1121,11 @@ impl Nimbus {
 
     /// Combined compliance check: ZK Proof of innocence (containing Merkle membership check inside the ZK circuit)
     /// Validates the proof using the registered clean root, spent nullifier, recipient address, and amount.
+    ///
+    /// NOTE (Ephemeral Agent Identifiers Pathway):
+    /// To support stealth-identity-based AI Agents (Roadmap Section 10) and thwart Address Clustering Attacks,
+    /// future upgrades will verify that the spent nullifier and ephemeral public key are derived via Blind 
+    /// Signature Derivation from a valid master identity, while keeping the master identity hidden on-chain.
     pub fn verify_compliance(
         &self,
         root: FixedBytes<32>,

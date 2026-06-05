@@ -12,13 +12,13 @@ Agar protokol dan pendiri memenangkan "game ekonomi" ini, tokenomics harus menye
 
 ---
 
-## 2. Arsitektur Sirkulasi & Utilitas Token ($NIMB)
+### 2. Arsitektur Sirkulasi & Utilitas Token ($NIMB)
 
 ```mermaid
 flowchart TD
     User[User / Transactor] -->|Bayar Biaya Protokol USDC| Contract[Nimbus L2 Contract]
-    Contract -->|30% Kas | LPBuffer[Liquidity Buffer]
-    Contract -->|50% Aave V3 + 20% Ondo RWA| YieldGen[Yield Generator]
+    Contract -->|Dynamic Cash Buffer: 15%-45%| LPBuffer[Liquidity Buffer]
+    Contract -->|DeFi/RWA: 55%-85% split 5:2| YieldGen[Aave V3 + Ondo RWA]
     
     YieldGen -->|Akumulasi Bunga USDC| Treasury[Protocol Treasury]
     
@@ -41,13 +41,13 @@ flowchart TD
 *   **Mekanisme**: Pemegang token $NIMB (termasuk retail, investor, dan founder) dapat mengunci koin mereka ke dalam **Safety Module**.
 *   **Fungsi**: Kunci staking ini berfungsi sebagai *backstop* (asuransi sistem) jika terjadi kegagalan CCIP lintas rantai atau exploit teknis pada brankas likuiditas.
 *   **Reward (Real Yield)**: Sebagai kompensasi atas risiko ini, staker mendapatkan **pembagian keuntungan riil dalam bentuk USDC** (bukan token inflasi baru) yang bersumber dari:
-    1.  **65% APY Yield** yang dihasilkan oleh rasio brankas 30/50/20 (Aave & Ondo RWA).
+    1.  **65% APY Yield** yang dihasilkan oleh Brankas Likuiditas Dinamis (Aave V3 & Ondo RWA).
     2.  Porsi potongan biaya transaksi / deposit minting fee.
 *   **Dampak Ekonomi**: Menawarkan dividen USDC membuat pemegang koin enggan menjual token $NIMB mereka. Mereka lebih memilih mengunci token demi mendapatkan passive income USDC pasif yang stabil.
 
 > [!NOTE]
 > **Status Implementasi (Fase Lanjutan - Ditunda)**:
-> Mekanisme staking Safety Module dan distribusi yield USDC ini **ditangguhkan** sementara pada rilis awal Nimbus V1 (Fase Bootstrap). Karena token $NIMB belum diluncurkan, logic distribusi ke staker belum diimplementasikan di smart contract awal. Seluruh yield DeFi/RWA yang dihasilkan brankas 30/50/20 untuk sementara dialokasikan penuh ke kas protokol (Treasury/Admin contract) untuk membiayai operasional, pengembangan sirkuit ZK utama, dan audit keamanan.
+> Mekanisme staking Safety Module dan distribusi yield USDC ini **ditangguhkan** sementara pada rilis awal Nimbus V1 (Fase Bootstrap). Karena token $NIMB belum diluncurkan, logic distribusi ke staker belum diimplementasikan di smart contract awal. Seluruh yield DeFi/RWA yang dihasilkan Brankas Dinamis untuk sementara dialokasikan penuh ke kas protokol (Treasury/Admin contract) untuk membiayai operasional, pengembangan sirkuit ZK utama, dan audit keamanan.
 
 
 ### C. Protokol Deflasi: Automated Buyback & Burn
@@ -66,8 +66,21 @@ Mengacu pada publikasi ilmiah terbaru tahun 2025/2026 mengenai *DePIN Tokenomics
 
 ### E. Adaptive Value Capture Engine (Inovasi Jurnal Bisnis 2026)
 Sebagai antisipasi terhadap risiko de-pegging stablecoin atau guncangan likuiditas di pasar L2, Nimbus merancang mesin bagi-hasil adaptif (*Adaptive Value Capture Engine*) yang diatur oleh parameter algoritma on-chain:
-*   Jika TVL (Total Value Locked) di brankas 30/50/20 berada dalam zona aman dengan volatilitas rendah, **65% hasil yield** dibagikan langsung ke staker Safety Module dalam bentuk USDC.
+*   Jika TVL (Total Value Locked) di Brankas Dinamis berada dalam zona aman dengan volatilitas rendah, **65% hasil yield** dibagikan langsung ke staker Safety Module dalam bentuk USDC.
 *   Jika terjadi volatilitas pasar ekstrem di DeFi (misal APY Aave jatuh di bawah 2% atau ada guncangan di stablecoin), kontrak secara dinamis mengalihkan porsi yield: **20% dialihkan ke kas darurat protokol**, **15% ke penambahan jaminan LP Uniswap**, dan sisa **30% ke staking dividends**. Ini memastikan dana investor dan pendiri terlindungi dari guncangan makro ekonomi kripto tanpa perlu campur tangan manual yang lambat.
+
+### F. Model Brankas Dinamis (Dynamic Vault Model)
+Untuk memaksimalkan efisiensi gas dan mengoptimalkan perolehan hasil yield secara aman, Nimbus tidak lagi menggunakan alokasi statis 30/50/20, melainkan beralih ke **Model Brankas Dinamis** berbasis volume transaksi historis:
+1.  **Penyesuaian Target Kas ($\beta_{\text{cash}}$) Secara Dinamis**: Target kas likuid berkisar antara **15% hingga 45%** dari TVL, disesuaikan secara otomatis di setiap pergantian epoch (24 jam) menggunakan rata-rata bergerak volume transaksi selama 7 epoch terakhir (*7-Epoch Moving Average Volume*).
+    *   **Ketika Volatilitas Tinggi (Volume > 100,000 USDC)**: Target kas likuid dinaikkan menjadi **45%** untuk memastikan penarikan besar-besaran (misalnya oleh whale) dapat dipenuhi secara instan tanpa memicu gas penarikan DeFi/RWA yang mahal.
+    *   **Ketika Volatilitas Rendah (Volume < 10,000 USDC)**: Target kas likuid diturunkan hingga **15%** untuk memaksimalkan modal produktif yang bekerja di Aave V3 dan Ondo RWA demi memperoleh APY yield optimal.
+    *   **Kondisi Normal (Volume Sedang)**: Target kas likuid disetel ke level bawaan **30%** (Rasio 30/50/20 asli).
+2.  **Alokasi Bagian Non-Kas**: Porsi dana non-kas (yaitu $100\% - \beta_{\text{cash}}$) secara otomatis dibagi menggunakan rasio **5:2 (≈71.4% ke Aave V3 dan ≈28.6% ke Ondo USDY / BlackRock BUIDL RWA)**.
+    *   Pada rasio normal (Kas 30%), ini menghasilkan pembagian persis: 30% Kas, 50% Aave, dan 20% Ondo RWA.
+    *   Pada rasio kas tinggi (Kas 45%), pembagian menjadi: 45% Kas, 39.3% Aave, dan 15.7% RWA.
+    *   Pada rasio kas rendah (Kas 15%), pembagian menjadi: 15% Kas, 60.7% Aave, dan 24.3% RWA.
+3.  **Hysteresis & Batch Rebalancing**: Sistem ini diatur untuk meminimalisir transaksi interaksi eksternal on-chain dari pengguna demi menghemat pengeluaran gas operasional platform secara keseluruhan hingga **90%-99%**.
+
 
 ---
 ## 3. Distribusi Cap Table & Rencana Penguncian (Vesting)
@@ -106,7 +119,7 @@ gantt
 
 ### Fase 1: Bootstrap Tanpa Modal (Poin Loyalitas)
 1.  Luncurkan Nimbus V1 menggunakan stablecoin USDC murni.
-2.  Buka program **Nimbus Points** untuk pengguna yang bertransaksi atau mendepositkan dana ke brankas 30/50/20.
+2.  Buka program **Nimbus Points** untuk pengguna yang bertransaksi atau mendepositkan dana ke Brankas Dinamis.
 3.  Poin ini dihitung secara off-chain (gratis biaya database). Ini mengumpulkan data pasar asli (*Product-Market Fit*) tanpa mengeluarkan uang sepeser pun untuk tokenomics.
 
 ### Fase 2: Penggalangan Dana Investor ($250k) via SAFTE

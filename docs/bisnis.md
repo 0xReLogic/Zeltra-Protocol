@@ -37,12 +37,11 @@ Pada fase awal, tantangan terbesar protokol pembayaran baru adalah dinginnya ado
 *   **Mekanisme**: Relayer batching (`nimbus-node`) menyatukan transaksi spend pengguna ke dalam satu antrean mempool (menghemat gas fee hingga 40%).
 *   **Markup**: Protokol mengambil margin sekitar **5% - 10%** dari *nilai penghematan gas fee* tersebut saat menagih biaya gas dalam bentuk stablecoin (USDC) ke dompet pengguna. Pengguna tetap merasa membayar gas fee lebih murah dibanding melakukan transaksi mandiri.
 
-### D. DeFi & RWA Yield Integration (Model Brankas Cadangan Bertingkat)
+### D. DeFi & RWA Yield Integration (Model Brankas Dinamis / Dynamic Vault Model)
 *   **Mekanisme**: Setiap token Nimbus yang beredar dijamin 1:1 oleh stablecoin (USDC) yang terkunci di smart contract.
-*   **Optimalisasi (Rasio 30/50/20)**: Selama dana tersebut mengendap dan belum dicairkan oleh pemegang token, smart contract menyalurkan dana jaminan ini ke sistem brankas bertingkat:
-    1.  **30% Cadangan Likuid (Liquid Reserve)**: Disimpan pasif di brankas utama Nimbus untuk memfasilitasi penarikan instan tanpa hambatan (0% APY, 100% liquid).
-    2.  **50% Likuiditas DeFi (Aave/Compound)**: Disalurkan ke pool peminjaman likuid Aave untuk menghasilkan bunga tahunan (~3% s.d. 4% APY).
-    3.  **20% Aset Dunia Nyata / RWA (BlackRock BUIDL / Ondo USDY)**: Diinvestasikan ke token surat utang negara AS (T-Bills) yang sangat aman secara regulasi dan memberikan yield stabil (~5% APY).
+*   **Optimalisasi (Brankas Dinamis)**: Selama dana tersebut mengendap dan belum dicairkan oleh pemegang token, smart contract secara dinamis menyalurkan dana jaminan ini berdasarkan volume transaksi historis (7-Epoch Moving Average):
+    1.  **Cadangan Kas Dinamis (15% - 45%)**: Jumlah kas likuid yang disimpan di kontrak disesuaikan secara dinamis (default 30%, naik ke 45% saat volume tinggi untuk proteksi penarikan whale, turun ke 15% saat volume rendah).
+    2.  **Alokasi Non-Kas (Rasio 5:2)**: Sisa dana non-kas diinvestasikan secara produktif dengan pembagian ≈71.4% ke DeFi (Aave V3 APY ~3%-4%) dan ≈28.6% ke RWA T-Bills (BlackRock BUIDL / Ondo USDY APY ~5%).
 *   **Keuntungan**: Bunga yang dihasilkan sepenuhnya menjadi milik kas protokol dan penyedia likuiditas (Issuer), tanpa mengurangi saldo pokok pengguna sepeser pun.
 
 ### E. AI Agents Nanopayments (x402 Facilitator - Fase C)

@@ -268,6 +268,13 @@ extern "C" {
 /// Client: Generates a compliance ZK proof locally.
 /// It uses multithreading and WASM-SIMD optimizations (Pippenger MSM parallelization)
 /// to compute the proof in <5 seconds.
+///
+/// NOTE (Ephemeral Agent Identifiers Pathway):
+/// As planned in Section 10 of the roadmap, future versions will incorporate Blind Signature
+/// Derivation (AIP/EIP-2537). The client SDK will generate hundreds of ephemeral stealth public keys
+/// from a master AI Agent identity. The ZK compliance proof generated here will verify that these
+/// disposable keys belong to a valid registered master identity in the association set, completely
+/// hiding the master identity link on-chain to prevent Address Clustering Attacks.
 #[wasm_bindgen]
 pub fn client_generate_compliance_proof(
     root_hex: &str,
