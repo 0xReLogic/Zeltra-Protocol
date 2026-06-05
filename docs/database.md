@@ -190,6 +190,126 @@ If database is lost/corrupted:
 
 Database is operational cache, not source of truth.
 
+## Migration to PostgreSQL
+
+**When to migrate**: Traffic >1000 TPS or need multi-region.
+
+### Step 1: Install PostgreSQL and pgloader
+
+```bash
+# Install PostgreSQL
+sudo apt install postgresql postgresql-contrib
+
+# Install pgloader (SQLite to PostgreSQL migration tool)
+sudo apt install pgloader
+```
+
+### Step 2: Migrate Data
+
+```bash
+# Stop relayer node
+systemctl stop nimbus-relayer
+
+# Migrate SQLite to PostgreSQL
+pgloader nimbus-relayer.db postgresql://user:pass@localhost/nimbus
+
+# Verify migration
+psql -U user -d nimbus -c "SELECT COUNT(*) FROM sessions;"
+psql -U user -d nimbus -c "SELECT COUNT(*) FROM nullifiers;"
+```
+
+### Step 3: Update Code
+
+Replace `rusqlite` with `sqlx` in `Cargo.toml`:
+
+```toml
+# Remove
+# rusqlite = { version = "0.32", features = ["bundled"] }
+
+# Add
+sqlx = { version = "0.7", features = ["runtime-tokio-native-tls", "postgres"] }
+```
+
+Update `database.rs`:
+
+```rust
+// Change Connection to sqlx Pool
+use sqlx::{PgPool, postgres::PgPoolOptions};
+
+pub struct Database {
+    pool: PgPool,
+}
+
+impl Database {
+    pub async fn new(database_url: &str) -> Result<Self> {
+        let pool = PgPoolOptions::new()
+            .max_connections(50)
+            .connect(database_url)
+            .await?;
+        
+        // Run migrations
+        sqlx::migrate!("./migrations").run(&pool).await?;
+        
+        Ok(Self { pool })
+    }
+}
+```
+
+### Step 4: Update Queries
+
+SQLite to PostgreSQL differences:
+
+```rust
+// SQLite
+"INSERT OR IGNORE INTO nullifiers ..."
+
+// PostgreSQL  
+"INSERT INTO nullifiers ... ON CONFLICT (nullifier) DO NOTHING"
+```
+
+### Step 5: Deploy
+
+```bash
+# Set DATABASE_URL
+export DATABASE_URL=postgresql://user:pass@localhost/nimbus
+
+# Restart relayer
+systemctl start nimbus-relayer
+```
+
+### Migration Checklist
+
+- [ ] Backup SQLite database
+- [ ] Install PostgreSQL
+- [ ] Run pgloader migration
+- [ ] Verify row counts match
+- [ ] Update Cargo.toml dependencies
+- [ ] Update database.rs to use sqlx
+- [ ] Change INSERT OR IGNORE to ON CONFLICT
+- [ ] Test locally
+- [ ] Deploy to production
+- [ ] Monitor for errors
+- [ ] Keep SQLite backup for 7 days
+
+### Rollback Plan
+
+If migration fails:
+
+```bash
+# Stop new version
+systemctl stop nimbus-relayer
+
+# Restore SQLite version
+git checkout <previous-commit>
+cargo build --release
+
+# Use old SQLite database
+export NIMBUS_DB_PATH=/backup/nimbus-relayer.db
+
+# Restart
+systemctl start nimbus-relayer
+```
+
 ## Files Changed
 
 New:
