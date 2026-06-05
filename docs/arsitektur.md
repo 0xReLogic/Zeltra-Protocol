@@ -36,19 +36,11 @@ BAT menggabungkan teknik blinding tanda tangan (David Chaum) dengan transparansi
 5. Client mengunduh $S'$ dan melepas kebutaan (unblinds) menggunakan $r^{-1}$ untuk mendapatkan tanda tangan valid $S = k \cdot H(x)$. 
 6. Token anonim akhir adalah pasangan $(x, S)$.
 
-### B. Tahap 2: Pembayaran & Transfer Anonim (Off-chain & Offline)
+### B. Tahap 2: Pembayaran & Transfer Anonim (Off-chain)
 1. Pengirim memberikan token $(x, S)$ kepada Penerima secara off-chain (bisa lewat QR Code, NFC, atau chat aman).
 2. Penerima melakukan verifikasi cepat secara lokal (off-chain) bahwa $S$ adalah tanda tangan valid dari smart contract atas pesan $x$. Proses ini **instan** (< 1 milidetik) karena tidak membutuhkan ZK-proof.
 
-### C. Tahap 3: Pencegahan Double-Spending Offline (Self-Revealing Identity)
-Jika transaksi dilakukan secara offline tanpa koneksi internet ke L2:
-1. Merchant menantang dompet pengirim dengan nilai acak $x_1$.
-2. Dompet pengirim menghasilkan respon $y_1 = a \cdot x_1 + I \pmod p$, di mana $I$ adalah identitas rahasia pengguna (kunci privat dompet utama) dan $a$ adalah slope acak.
-3. Selama pengirim jujur (hanya membelanjakan koin sekali), identitas $I$ terlindungi sepenuhnya oleh kerahasiaan informasi satu titik.
-4. Jika pengirim curang dan membelanjakan koin yang sama ke merchant lain dengan tantangan $x_2$, dia harus merespon dengan $y_2 = a \cdot x_2 + I \pmod p$.
-5. Ketika kedua merchant kembali online dan menyetor bukti ke smart contract `Nimbus`, smart contract menyelesaikan sistem persamaan linear tersebut secara instan untuk membongkar identitas asli pelaku kecurangan ($I$) dan menyita dana jaminan mereka (*slashing*).
-
-### D. Tahap 4: Swapping / Pencairan (Double-Spend Protection Online)
+### C. Tahap 3: Swapping / Pencairan (Double-Spend Protection)
 1. Untuk transaksi online, Penerima segera mengirimkan $x$ dan $S$ ke smart contract `Nimbus`.
 2. Smart contract memverifikasi tanda tangan $S$ terhadap public key contract dan memeriksa tabel data **Nullifier List** (daftar rahasia $x$ yang sudah pernah dibelanjakan).
 3. Jika $x$ belum pernah digunakan, kontrak mencatat $x$ ke dalam *Nullifier List*, lalu mengirimkan USDC ke Penerima (atau menerbitkan token BAT baru yang bersih untuk Penerima).

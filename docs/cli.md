@@ -103,40 +103,6 @@ Verifier (misal: merchant atau smart contract) memverifikasi tanda tangan final 
 
 ---
 
-## 4. Simulasi Transaksi Offline & Slashing Belanja Ganda
-
-### Langkah 1: Membuat Parameter Offline (Identitas, Slope, Challenge)
-Wallet client menghasilkan kunci rahasia identitas ($I$), kemiringan acak ($a$), dan nilai tantangan awal dari merchant ($x$):
-```bash
-./target/debug/nimbus-cli generate-offline-params
-```
-*Output menampilkan `Identity Secret (I)`, `Slope Parameter (a)`, dan `Default Challenge (x)`.*
-
-### Langkah 2: Menghasilkan Bukti Offline (Spend Offline)
-Client menjawab tantangan merchant offline dengan parameter garis rahasianya:
-```bash
-./target/debug/nimbus-cli spend-offline \
-  -a <SLOPE_A_HEX> \
-  -x <CHALLENGE_X_HEX> \
-  --identity <IDENTITY_I_HEX>
-```
-*Output:*
-*   `Challenge (x)` (dalam Hex)
-*   `Response (y)` (dalam Hex)
-
-### Langkah 3: Eksekusi Slashing Kecurangan (Challenger/Smart Contract)
-Jika pengguna curang dan melakukan transaksi belanja ganda ke Merchant A (tantangan $x_1$, respon $y_1$) dan Merchant B (tantangan $x_2$, respon $y_2$), smart contract memproses penyitaan saldo jaminan:
-```bash
-./target/debug/nimbus-cli slash \
-  --x1 <CHALLENGE_X1_HEX> \
-  --y1 <RESPONSE_Y1_HEX> \
-  --x2 <CHALLENGE_X2_HEX> \
-  --y2 <RESPONSE_Y2_HEX>
-```
-*Output:* `DOUBLE SPENDER DETECTED & SLASHED` disertai dengan nilai `Reconstructed Identity (I)` asli yang dibongkar dari pelaku kecurangan.
-
----
-
 ## 5. Mode Terdistribusi (Threshold Signature Ceremony t=3, n=5)
 
 Selain mode single-issuer, Nimbus CLI mendukung upacara tanda tangan threshold terdistribusi menggunakan skema Shamir Secret Sharing.

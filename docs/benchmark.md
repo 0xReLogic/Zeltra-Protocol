@@ -24,8 +24,6 @@ Tabel berikut menunjukkan total waktu, waktu rata-rata, dan kapasitas pemrosesan
 | **Client Verify Masked (Pairing)** | 5.238.00 ms | 5.238.86 µs | 191 ops/detik |
 | **Client Unmask (Fr Inv)** | 684.00 ms | 684.50 µs | 1.461 ops/detik |
 | **Verify Unmasked (Pairing)** | 6.217.00 ms | 6.217.61 µs | 161 ops/detik |
-| **Spend Offline (Fr Mul+Add)** | 0.00 ms | **0.07 µs** (70 ns) | **15.128.364 ops/detik** |
-| **Reconstruct Identity (Slash)** | 4.00 ms | **4.03 µs** | **247.841 ops/detik** |
 
 ---
 
@@ -39,10 +37,6 @@ Tabel berikut menunjukkan total waktu, waktu rata-rata, dan kapasitas pemrosesan
     *   Verifikasi off-chain (`Client Verify Masked`) dan verifikasi final (`Verify Unmasked`) memerlukan kalkulasi operasi pairing:
         $$e(P, Q) \cdot e(R, S) == 1$$
     *   Operasi ini memakan waktu sekitar 5 hingga 6 milidetik. Ini adalah operasi terberat dalam protokol tetapi hanya dijalankan sesekali saat verifikasi transaksi on-chain.
-
-3.  **Skema Pembagian Rahasia Offline (Shamir's 2-point Secret Sharing):**
-    *   Pembuatan bukti respon belanja offline (`Spend Offline`) hanya membutuhkan waktu **70 nanodetik**! Hal ini dikarenakan operasi tersebut hanya berupa perkalian dan penjumlahan bilangan bulat modulo $p$ (Fr field arithmetic) tanpa melibatkan operasi perpindahan titik kurva eliptik yang berat.
-    *   Pemecahan persamaan linear untuk merekonstruksi identitas pelaku kecurangan (`Reconstruct Identity`) hanya memakan waktu **4 mikrodetik**.
 
 ---
 

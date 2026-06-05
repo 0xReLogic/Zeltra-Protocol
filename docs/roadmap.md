@@ -126,7 +126,7 @@ Dokumen ini memetakan seluruh tugas pengembangan, integrasi, dan pengujian yang 
 *   **Status**: Direncanakan (Planned)
 *   **Deskripsi Pekerjaan**:
     *   Implementasikan fungsi Blind Signature Derivation di memori lokal bot (SDK) untuk memecah identitas utama $I$ milik AI Agent menjadi disposable public keys sekali pakai (ephemeral keys) di grup $G_1$ [EIP-2537].
-    *   Gunakan disposable/ephemeral keys ini untuk menandatangani bukti pembelanjaan offline, memutus Address Clustering Attacks secara total di blockchain L2.
+    *   Gunakan disposable/ephemeral keys ini untuk memutus Address Clustering Attacks secara total di blockchain L2.
     *   Desain mekanisme slashing di smart contract agar dapat memetakan delta kunci ephemeral kembali ke identitas master kolateral saat terjadi double spending terdeteksi.
 *   **Inovasi (Aha! Moment - Jurnal 2026)**: Dinamika transaksi otonom AI Agent rawan terkena Address Clustering Attack. Pengamat on-chain bisa menebak identitas pemilik bot jika satu alamat AI Agent melakukan payout/spend token Nimbus berulang kali ke satu target API yang sama. Dengan menyerap prinsip Agent Identity Protocol (AIP) dan precompile EIP-2537, identitas otonom bot dipecah menjadi ratusan ephemeral keys unik, sehingga transaksi kelihatan dikirim oleh ratusan entitas independen berbeda tanpa mengurangi keandalan slashing.
 

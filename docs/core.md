@@ -86,28 +86,7 @@ Tanda tangan teragregasi $C$ ini identik dengan tanda tangan yang diterbitkan se
 
 ---
 
-## 4. Matematika Transaksi Offline & Pembagian Rahasia
-Untuk memfasilitasi transaksi offline tanpa ancaman pembelanjaan ganda (*double-spend*), `nimbus-core` menerapkan skema pembagian rahasia Shamir 2-titik pada medan skalar $\mathbb{Z}_p$ (kurva BLS12-381 `Fr`).
-
-1. **Persamaan Garis Rahasia (Dompet Pengirim)**:
-   $$y = a \cdot x + I \pmod p$$
-   Di mana:
-   * $I \in \mathbb{Z}_p$ adalah kunci rahasia identitas pemilik koin.
-   * $a \in \mathbb{Z}_p$ adalah slope/kemiringan acak yang dibentuk oleh dompet saat minting koin.
-   * $x$ adalah nilai tantangan (*challenge*) dari merchant.
-   * $y$ adalah respon hasil kalkulasi skalar.
-
-2. **Pembelanjaan Tunggal (Jujur)**:
-   * Pengirim memberikan pasangan $(x_1, y_1)$ ke Merchant A.
-   * Identitas $I$ aman penuh karena $a$ dan $I$ tidak dapat dicari hanya dari satu titik koordinat.
-
-3. **Pembelanjaan Ganda (Kecurangan)**:
-   * Pengirim memberikan koin yang sama ke Merchant B, menghasilkan koordinat $(x_2, y_2)$ dengan $x_1 \neq x_2$.
-   * Smart contract menerima $(x_1, y_1)$ dan $(x_2, y_2)$ lalu merekonstruksi identitas:
-     $$a = \frac{y_2 - y_1}{x_2 - x_1} \pmod p$$
-     $$I = y_1 - a \cdot x_1 \pmod p$$
-
-### A. Interoperabilitas EVM Big-Endian (Format Precompile)
+## 4. Interoperabilitas EVM Big-Endian (Format Precompile)
 Secara default, Arkworks memproses representasi koordinat kurva secara *little-endian*. Namun, precompile EVM EIP-2537 (`0x0e` & `0x0f`) membutuhkan data dalam format *big-endian* uncompressed (dilapisi padding 16-byte nol di setiap koordinat Fr 48-byte untuk membentuk blok 64-byte). 
 
 Di dalam `nimbus-core`, kami menambahkan fungsi pembantu berikut:
@@ -198,9 +177,9 @@ use nimbus_core::{
 
 *   [x] **Milestone 1: nimbus-contracts (Arbitrum Stylus)**
     *   Implementasi logika verifikasi $k \cdot pk_{iss} == com_k$ menggunakan precompile EIP-2537.
-    *   Penyimpanan Nullifier on-chain dan fungsi pemotongan jaminan `slash_double_spender` untuk transaksi offline.
+    *   Penyimpanan Nullifier on-chain dan fungsi pemotongan jaminan `slash_double_spender` untuk transaksi online.
 *   [x] **Milestone 2: nimbus-cli**
-    *   Wallet CLI lengkap untuk simulasi blinding, signing, unmasking, verifikasi, spend offline, dan slashing double spenders.
+    *   Wallet CLI lengkap untuk simulasi blinding, signing, unmasking, verifikasi, dan spend.
 *   [x] **Milestone 3: nimbus-sdk (WASM compiler)**
-    *   Kompilasi Rust ke WebAssembly (WASM) yang mengekspos semua fungsionalitas wallet (termasuk generator respon offline dan rekonstruksi identitas) ke JavaScript.
+    *   Kompilasi Rust ke WebAssembly (WASM) yang mengekspos semua fungsionalitas wallet ke JavaScript.
 

@@ -2,8 +2,6 @@
 
 Nimbus Protocol dirancang dengan model bisnis yang ramah bagi pengguna serta ekosistem terdesentralisasi, dengan memindahkan beban biaya operasional ke aktivitas bernilai tinggi (**Whales**, **AI Agents**, dan **Institusi**) serta optimalisasi yield on-chain secara aman menggunakan manajemen risiko modal yang kokoh.
 
-Pada saat yang sama, fitur pembayaran retail luring (offline merchant) tetap dipertahankan sebagai modul lisensi kekayaan intelektual (IP) opsional bernilai tinggi jika ada perusahaan ritel khusus yang ingin meraih lisensinya.
-
 ---
 
 ## 1. Filosofi Bisnis: Zero-Cost Retail & Cross-Subsidization
@@ -54,16 +52,7 @@ Pada fase awal, tantangan terbesar protokol pembayaran baru adalah dinginnya ado
 
 ---
 
-## 3. Skema Slashing (Pencegahan Kerugian Merchant - Lisensi B2B)
-
-Salah satu ketakutan terbesar toko dalam menerima pembayaran offline adalah risiko double-spending saat mereka tidak terhubung ke internet. Nimbus menyelesaikan ini secara kriptografis menggunakan skema Shamir Secret Sharing:
-*   Jika pembeli nakal mencoba membelanjakan token yang sama dua kali, identitas dompet mereka (Identity Secret) otomatis terbongkar secara instan di rantai L2.
-*   Smart contract akan menyita (slash) uang jaminan (collateral) pembeli tersebut.
-*   **Pembagian Dana Sitaan**: 90% diberikan kepada merchant sebagai ganti rugi + kompensasi ketidaknyamanan, dan 10% diambil oleh protokol sebagai biaya penegakan keamanan jaringan.
-
----
-
-## 4. Keuntungan bagi Masing-Masing Pihak
+## 3. Keuntungan bagi Masing-Masing Pihak
 
 | Pihak | Keuntungan Menggunakan Nimbus | Biaya yang Dikenakan |
 | :--- | :--- | :--- |
@@ -113,5 +102,4 @@ Pendapatan Protokol (USDC)
     *   Menawarkan Nimbus x402 SDK kepada penyedia API kecerdasan buatan agar AI Agent dapat membayar kueri secara privat dan otonom.
 3.  **Fase 3: Layanan Kepatuhan Institusional (Fase A)**
     *   Membuka pintu gerbang bagi dana korporat dengan menyediakan fitur ZK-Compliance agar mereka bisa bertransaksi secara privat namun tetap lolos audit hukum.
-4.  **Fase D (Opsi Lisensi): Ritel Raksasa / Merchant Khusus**
-    *   Menawarkan modul pembayaran luring ter-slashing kepada konsorsium ritel besar yang membutuhkan sistem kasir offline mandiri.
+

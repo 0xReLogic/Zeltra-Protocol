@@ -40,12 +40,7 @@ Semua titik di mana data luar masuk ke dalam sistem divalidasi secara ketat untu
 *   **Mitigasi**:
     *   **Auto-Refund Escrow (Timelock)**: Kontrak pintar memiliki mekanisme kunci waktu (*timelock*). Jika relayer tidak mempublikasikan kunci $k$ di blockchain dalam waktu 24 jam (misalnya), pengguna dapat memicu fungsi `claim_refund()` di smart contract untuk menarik kembali USDC mereka langsung dari brankas secara otomatis tanpa persetujuan relayer.
 
-### Skenario C: Serangan Pembelanjaan Ganda Luring (Offline Double-Spend)
-*   **Ancaman**: Pengguna membelanjakan tiket digital yang sama di dua toko berbeda secara offline (tidak terkoneksi internet).
-*   **Mitigasi**:
-    *   **Slashing & Blame Dispatcher**: Kriptografi linear Shamir ($y = a \cdot x + I \pmod P$) menjamin bahwa jika token yang sama digunakan dengan tantangan berbeda ($x_1 \neq x_2$), rahasia identitas pelaku ($I$) dihitung secara instan dari perbedaan respons ($y_1, y_2$). Kunci $I$ ini dikirim ke smart contract L2 untuk memotong jaminan $100$ USDC pelaku dan diberikan ke merchant sebagai ganti rugi.
-
-### Skenario D: Serangan Masuk Kembali (Reentrancy Attack)
+### Skenario C: Serangan Masuk Kembali (Reentrancy Attack)
 *   **Ancaman**: Saat mengeksekusi pembelian Polymarket di rantai target (`spend_and_buy_shares`), hacker mencoba memanggil kembali kontrak secara berulang (*reentrancy*) sebelum status token diperbarui, agar bisa menarik dana berkali-kali.
 *   **Mitigasi**:
     *   **Mekanisme Checks-Effects-Interactions**: Di kontrak L2 kita, penandaan nullifier dilakukan terlebih dahulu di memori penyimpanan sebelum panggilan eksternal (*raw call*) ke kontrak Polymarket dijalankan ([nimbus-contracts/src/lib.rs:L205](file:///home/azureuser/crypto/nimbus-contracts/src/lib.rs#L205)). Ini mencegah serangan reentrancy secara absolut.

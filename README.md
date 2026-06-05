@@ -14,7 +14,7 @@ Nimbus menyelesaikan dilema privasi Web3: memberikan transaksi yang sepenuhnya a
 
 ### 2. 100% Trustless (Melompati Cashu & Fedimint di Bitcoin)
 *   **Masalah E-Cash Tradisional:** Protokol E-Cash seperti Cashu atau Fedimint mewajibkan pengguna mempercayai "Mint" (pihak ketiga/kasir) untuk memegang jaminan dana. Jika kasir kabur, uang pengguna lenyap.
-*   **Solusi Nimbus:** Jaminan dana (misal: USDC) dikunci secara terdesentralisasi di dalam smart contract EVM. Penerbit token (Issuer) tidak perlu dipercayai. Jika Issuer bertindak curang atau offline, smart contract akan secara otomatis melakukan pengembalian dana (*auto-refund*) secara adil.
+*   **Solusi Nimbus:** Jaminan dana (misal: USDC) dikunci secara terdesentralisasi di dalam smart contract EVM. Penerbit token (Issuer) tidak perlu dipercayai. Jika Issuer bertindak curang atau tidak tersedia, smart contract akan secara otomatis melakukan pengembalian dana (*auto-refund*) secara adil.
 
 ### 3. Memanfaatkan EIP-2537 (Era Baru Ethereum L2)
 *   Nimbus memanfaatkan precompiled contracts **BLS12-381** asli EVM yang diaktifkan pada **Upgrade Pectra (EIP-2537)**. 
@@ -101,34 +101,6 @@ Verifier (smart contract) memverifikasi tanda tangan final yang bersih terhadap 
   --pk <PUBLIC_KEY_HEX>
 ```
 *Output:* `VALID: The signature is verified and authentic under the Issuer's Public Key!`
-
-### 3. Jalankan Uji Coba Transaksi Offline & Slashing
-Untuk menyimulasikan deteksi belanja ganda offline:
-
-#### Langkah A: Membuat Parameter Offline (Identity & Slope)
-```bash
-./target/debug/nimbus-cli generate-offline-params
-```
-*Catat Identity Secret (I), Slope Parameter (a), dan Default Challenge (x).*
-
-#### Langkah B: Membuat Bukti Belanja Offline Pertama
-```bash
-./target/debug/nimbus-cli spend-offline -a <SLOPE_A_HEX> -x <CHALLENGE_X1_HEX> --identity <IDENTITY_I_HEX>
-```
-*Menghasilkan Response (y1).*
-
-#### Langkah C: Membuat Bukti Belanja Offline Kedua (Belanja Ganda)
-Gunakan challenge $x_2$ yang berbeda (misal dari generate parameter kedua):
-```bash
-./target/debug/nimbus-cli spend-offline -a <SLOPE_A_HEX> -x <CHALLENGE_X2_HEX> --identity <IDENTITY_I_HEX>
-```
-*Menghasilkan Response (y2).*
-
-#### Langkah D: Melakukan Slashing On-Chain (Identity Reconstruction)
-```bash
-./target/debug/nimbus-cli slash --x1 <X1_HEX> --y1 <Y1_HEX> --x2 <X2_HEX> --y2 <Y2_HEX>
-```
-*Smart contract akan menyita dana jaminan dan membongkar Identity Secret (I) asli dari pelaku.*
 
 ---
 
