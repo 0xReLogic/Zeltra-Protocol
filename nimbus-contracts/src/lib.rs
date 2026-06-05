@@ -1858,6 +1858,46 @@ mod tests {
             Err(b"NO_REFUND_AVAILABLE".to_vec())
         );
     }
+
+    #[test]
+    fn test_verify_compliance_flow() {
+        reset_test_state();
+        let mut contract = Nimbus::default();
+        contract.init(Address::ZERO, Address::ZERO).unwrap();
+
+        let root = FixedBytes::repeat_byte(0x11);
+        let nullifier = FixedBytes::repeat_byte(0x22);
+        let recipient = address!("3333333333333333333333333333333333333333");
+        let amount = U256::from(1000);
+
+        // When root is not registered, verify_compliance should return Ok(false)
+        let is_valid_unregistered = contract.verify_compliance(
+            root,
+            nullifier,
+            recipient,
+            amount,
+            vec![0; 128],
+            vec![0; 256],
+            vec![0; 128],
+        ).unwrap();
+        assert!(!is_valid_unregistered);
+
+        // Register clean root
+        contract.clean_association_roots.insert(root, true);
+
+        // When root is registered, it calls get_compliance_vk, compute_public_inputs_g1, and verify_groth16_proof.
+        // Under #[cfg(test)], these are mocked to succeed, so it should return Ok(true).
+        let is_valid_registered = contract.verify_compliance(
+            root,
+            nullifier,
+            recipient,
+            amount,
+            vec![0; 128],
+            vec![0; 256],
+            vec![0; 128],
+        ).unwrap();
+        assert!(is_valid_registered);
+    }
 }
 
 
