@@ -4,7 +4,36 @@ Dokumen ini menjelaskan cara menjalankan utilitas command-line **Nimbus Protocol
 
 ---
 
-## 1. Instalasi & Build
+## 1. Struktur Modul
+
+Nimbus CLI telah direfaktor menjadi struktur modular yang terorganisir dengan baik:
+
+```
+nimbus-cli/src/
+├── main.rs              # Entry point minimal (8 baris)
+├── cli.rs               # Definisi CLI Clap (pure definitions)
+└── commands/
+    ├── mod.rs           # Command dispatcher (handle_command)
+    ├── keys.rs          # Key generation & splitting (2 commands)
+    ├── blind.rs         # Blind signature protocol (5 commands)
+    └── threshold.rs     # Threshold aggregation (1 command)
+```
+
+### Keunggulan Struktur Modular:
+- **Pemisahan Tanggung Jawab**: Definisi CLI terpisah dari logika command
+- **Modularitas Tinggi**: Setiap kategori command memiliki modul sendiri
+- **Maintainability**: Mudah menambah command baru tanpa mengubah file lain
+- **Testability**: Setiap modul command dapat ditest secara independen
+- **Dokumentasi Lengkap**: 26 doc comments tersebar di semua modul
+
+### Organisasi Command:
+- **keys.rs**: Operasi kriptografi kunci (generate, split)
+- **blind.rs**: Protokol blind signature penuh (blind, sign, verify, unmask)
+- **threshold.rs**: Agregasi threshold signature terdistribusi
+
+---
+
+## 2. Instalasi & Build
 
 Pastikan Anda berada di direktori root project, lalu jalankan perintah compile berikut:
 ```bash
@@ -14,7 +43,7 @@ Hasil compile binary akan berada di lokasi: `./target/debug/nimbus-cli`.
 
 ---
 
-## 2. Alur Simulasi Langkah-demi-Langkah (End-to-End)
+## 3. Alur Simulasi Langkah-demi-Langkah (End-to-End)
 
 ### Langkah 1: Membuat Keypair Issuer
 Issuer men-generate kunci rahasia ($sk_{iss}$) dan kunci publik ($pk_{iss}$):
@@ -74,7 +103,7 @@ Verifier (misal: merchant atau smart contract) memverifikasi tanda tangan final 
 
 ---
 
-## 3. Simulasi Transaksi Offline & Slashing Belanja Ganda
+## 4. Simulasi Transaksi Offline & Slashing Belanja Ganda
 
 ### Langkah 1: Membuat Parameter Offline (Identitas, Slope, Challenge)
 Wallet client menghasilkan kunci rahasia identitas ($I$), kemiringan acak ($a$), dan nilai tantangan awal dari merchant ($x$):
@@ -108,7 +137,7 @@ Jika pengguna curang dan melakukan transaksi belanja ganda ke Merchant A (tantan
 
 ---
 
-## 4. Mode Terdistribusi (Threshold Signature Ceremony t=3, n=5)
+## 5. Mode Terdistribusi (Threshold Signature Ceremony t=3, n=5)
 
 Selain mode single-issuer, Nimbus CLI mendukung upacara tanda tangan threshold terdistribusi menggunakan skema Shamir Secret Sharing.
 
