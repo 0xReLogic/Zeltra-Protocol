@@ -9,7 +9,6 @@ pub use ark_bls12_381::{Bls12_381, Fr, G1Projective, G2Projective};
 pub use ark_ec::pairing::Pairing;
 pub use ark_ec::Group;
 pub use ark_ff::{Field, PrimeField, UniformRand};
-use rand::Rng;
 
 // Re-export types for backward compatibility
 pub use types::{

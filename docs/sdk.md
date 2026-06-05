@@ -14,6 +14,32 @@ graph LR
     WASM -->|Execution| Core[nimbus-core]
 ```
 
+### Struktur Modul SDK
+
+Nimbus SDK telah direfactor menjadi struktur modular untuk meningkatkan maintainability dan separation of concerns:
+
+```
+nimbus-sdk/src/
+├── lib.rs                  — Module declarations + re-exports
+├── wasm_types.rs           — WASM wrapper structs (BlindedOutput, ZkComplianceProof)
+├── blind_wasm.rs           — Blind signature WASM bindings
+├── evm_wasm.rs             — EVM format conversion helpers
+├── threshold_wasm.rs       — Threshold cryptography bindings
+├── zk_wasm.rs              — ZK compliance proof generation
+└── x402/                   — x402 payment protocol module
+    ├── mod.rs              — Module integration + tests
+    ├── types.rs            — x402 data structures
+    ├── codec.rs            — Encoding/decoding helpers
+    └── pool.rs             — Agent token pool manager
+```
+
+**Keuntungan Modularisasi:**
+- **Separation of Concerns:** Setiap modul memiliki tanggung jawab yang jelas
+- **Easier Testing:** Test dapat difokuskan per modul
+- **Better Code Navigation:** Developer dapat dengan mudah menemukan fungsi yang dibutuhkan
+- **Reduced Compilation Time:** Incremental compilation lebih efisien
+- **Team Collaboration:** Developer bisa bekerja di modul berbeda tanpa konflik
+
 ---
 
 ## 2. Inovasi & Optimalisasi Performa (Riset Jurnal 2026)
