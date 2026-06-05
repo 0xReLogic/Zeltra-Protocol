@@ -2,158 +2,27 @@
 #![allow(unused_variables, dead_code, unused_imports)]
 extern crate alloc;
 
-use alloc::vec;
+mod types;
+mod interfaces;
+mod storage;
+
 use alloc::vec::Vec;
 use ark_bls12_381::{Fr, G1Affine, G2Affine};
 use ark_ec::AffineRepr;
 use ark_ff::Field;
-use ark_serialize::CanonicalSerialize;
 
 use alloy_primitives::{Address, address, FixedBytes};
 use stylus_sdk::{prelude::*, alloy_primitives::U256, call::RawCall};
+
+pub use types::{to_evm_g1, to_evm_g2, to_evm_scalar};
+pub use interfaces::*;
+pub use storage::Nimbus;
 
 // Precompiled contracts introduced by EIP-2537 in the Pectra upgrade
 const BLS12_G1_ADD: Address = address!("000000000000000000000000000000000000000b");
 const BLS12_G1_MSM: Address = address!("000000000000000000000000000000000000000c");
 const BLS12_G2_MSM: Address = address!("000000000000000000000000000000000000000e");
 const BLS12_PAIRING_CHECK: Address = address!("000000000000000000000000000000000000000f");
-
-/// Helper to serialize a G1 point to EVM Big-Endian format (128 bytes)
-/// EVM G1 point: X (64 bytes, big-endian), Y (64 bytes, big-endian)
-/// Arkworks G1Affine uncompressed: X (48 bytes, little-endian), Y (48 bytes, little-endian)
-pub fn to_evm_g1(point: &G1Affine) -> [u8; 128] {
-    let mut buf = vec![];
-    point.serialize_uncompressed(&mut buf).unwrap();
-    let mut evm_buf = [0u8; 128];
-    // Each coordinate has a 64-byte block in EVM, padded with 16 leading zeros
-    for i in 0..2 {
-        for j in 0..48 {
-            evm_buf[i * 64 + 16 + j] = buf[i * 48 + (47 - j)];
-        }
-    }
-    evm_buf
-}
-
-/// Helper to serialize a G2 point to EVM Big-Endian format (256 bytes)
-/// EVM G2 point: X1, X0, Y1, Y0 (each 64 bytes, big-endian)
-/// Arkworks G2Affine uncompressed: X0, X1, Y0, Y1 (each 48 bytes, little-endian)
-pub fn to_evm_g2(point: &G2Affine) -> [u8; 256] {
-    let mut buf = vec![];
-    point.serialize_uncompressed(&mut buf).unwrap();
-    let mut evm_buf = [0u8; 256];
-    
-    // EVM blocks: block 0 is X1, block 1 is X0, block 2 is Y1, block 3 is Y0
-    // Arkworks order of elements: coeff 0 is X0, coeff 1 is X1, coeff 2 is Y0, coeff 3 is Y1
-    let src_indices = [1, 0, 3, 2];
-    for i in 0..4 {
-        let src_idx = src_indices[i];
-        for j in 0..48 {
-            evm_buf[i * 64 + 16 + j] = buf[src_idx * 48 + (47 - j)];
-        }
-    }
-    evm_buf
-}
-
-/// Helper to serialize a scalar Fr to EVM Big-Endian format (32 bytes)
-/// Arkworks Fr uncompressed: 32 bytes (little-endian)
-pub fn to_evm_scalar(scalar: &Fr) -> [u8; 32] {
-    let mut buf = vec![];
-    scalar.serialize_uncompressed(&mut buf).unwrap();
-    let mut evm_buf = [0u8; 32];
-    for j in 0..32 {
-        evm_buf[j] = buf[31 - j];
-    }
-    evm_buf
-}
-
-sol_interface! {
-    interface IErc20 {
-        function transferFrom(address from, address to, uint256 value) external returns (bool);
-        function transfer(address to, uint256 value) external returns (bool);
-        function balanceOf(address owner) external view returns (uint256);
-        function approve(address spender, uint256 value) external returns (bool);
-    }
-
-    interface IAavePool {
-        function supply(address asset, uint256 amount, address on_behalf_of, uint16 referral_code) external;
-        function withdraw(address asset, uint256 amount, address to) external returns (uint256);
-    }
-
-    interface IRwaToken {
-        function deposit(uint256 amount) external returns (uint256);
-        function redeem(uint256 amount, uint256 min_receive) external returns (uint256);
-    }
-
-    interface IConditionalTokens {
-        function splitPosition(
-            address collateral_token,
-            bytes32 parent_collection_id,
-            bytes32 condition_id,
-            uint256[] partition,
-            uint256 amount
-        ) external;
-    }
-}
-
-sol_storage! {
-    #[entrypoint]
-    pub struct Nimbus {
-        // Mapping of Issuer Public Key hash to their escrowed collateral
-        mapping(bytes32 => uint256) collateral;
-        
-        // Mapping of Session ID to their client address, masking key commitment, and deposit amount
-        mapping(bytes32 => address) session_client;
-        mapping(bytes32 => uint256) session_amount;
-        mapping(bytes32 => bool) session_resolved;
-        
-        // Nullifier mapping to prevent double-spending of ephemeral keys
-        mapping(bytes32 => bool) nullifiers;
-
-        // Mapping of valid Merkle roots of clean association sets (Fase A: ZK-Compliance)
-        mapping(bytes32 => bool) clean_association_roots;
-
-        // Owner address for admin operations (Fase E: Security)
-        address owner;
-        bool paused;
-
-        // Session timestamp to enforce timelocks for auto-refund
-        mapping(bytes32 => uint256) session_timestamp;
-
-        // The ERC-20 stablecoin contract address
-        address stablecoin;
-        // Address that receives the protocol fees
-        address fee_recipient;
-
-        // --- Fast-Path Liquidity Premium (Roadmap Fase 1-3) ---
-        // Active phase: 1 = Standard CCIP, 2 = Treasury-funded, 3 = Public LP with Dynamic Cap
-        uint256 fast_path_phase;
-        // LP Pool tracking variables for Fase 3
-        uint256 total_lp_liquidity;
-        uint256 utilized_lp_liquidity;
-
-        // --- DeFi & RWA Integration (Roadmap Item 2) ---
-        address aave_pool;
-        address a_token;
-        address rwa_token;
-        uint256 total_deposited_principal;
-
-        // --- Dynamic Liquidity Rebalancing (Moving Average Volatility) ---
-        uint256 current_epoch_id;
-        uint256 current_epoch_volume;
-        uint256 epoch_start_timestamp;
-        mapping(uint256 => uint256) historical_epoch_volumes;
-        uint256 target_cash_pct;
-
-        // --- Polymarket CTF Fallback (Roadmap Item 3) ---
-        mapping(bytes32 => uint256) failed_intent_refunds;
-    }
-}
-
-impl Default for Nimbus {
-    fn default() -> Self {
-        unsafe { Self::new(stylus_sdk::alloy_primitives::U256::ZERO, 0) }
-    }
-}
 
 impl Nimbus {
     #[inline(always)]
