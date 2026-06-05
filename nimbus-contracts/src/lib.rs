@@ -1092,33 +1092,7 @@ impl Nimbus {
         Ok(())
     }
 
-    /// Verifies a Merkle proof of association (clean set membership) on-chain.
-    pub fn verify_merkle_proof(
-        &self,
-        leaf: FixedBytes<32>,
-        proof_bytes: Vec<u8>,
-        root: FixedBytes<32>,
-    ) -> Result<bool, Vec<u8>> {
-        if proof_bytes.len() % 32 != 0 {
-            return Err(b"INVALID_PROOF_LENGTH".to_vec());
-        }
-        let mut computed_hash = leaf;
-        for i in 0..(proof_bytes.len() / 32) {
-            let mut sibling = [0u8; 32];
-            sibling.copy_from_slice(&proof_bytes[i * 32 .. (i + 1) * 32]);
-            
-            let mut preimage = [0u8; 64];
-            if computed_hash.as_slice() < &sibling[..] {
-                preimage[..32].copy_from_slice(computed_hash.as_slice());
-                preimage[32..].copy_from_slice(&sibling);
-            } else {
-                preimage[..32].copy_from_slice(&sibling);
-                preimage[32..].copy_from_slice(computed_hash.as_slice());
-            }
-            computed_hash = alloy_primitives::keccak256(&preimage).into();
-        }
-        Ok(computed_hash == root)
-    }
+
 
     /// Verifies the Groth16 ZK-Proof on-chain using the EIP-2537 pairing check precompile.
     /// Formula: e(-A, B) * e(IC, gamma) * e(C, delta) * e(alpha, beta) == 1
@@ -1493,27 +1467,7 @@ mod tests {
         assert_eq!(slashed_identity, identity, "Reconstructed identity does not match original!");
     }
 
-    #[test]
-    fn test_merkle_proof_verification() {
-        let leaf1: FixedBytes<32> = alloy_primitives::keccak256(b"leaf1").into();
-        let leaf2: FixedBytes<32> = alloy_primitives::keccak256(b"leaf2").into();
-        
-        let mut preimage = [0u8; 64];
-        if leaf1.as_slice() < leaf2.as_slice() {
-            preimage[..32].copy_from_slice(leaf1.as_slice());
-            preimage[32..].copy_from_slice(leaf2.as_slice());
-        } else {
-            preimage[..32].copy_from_slice(leaf2.as_slice());
-            preimage[32..].copy_from_slice(leaf1.as_slice());
-        }
-        let root: FixedBytes<32> = alloy_primitives::keccak256(&preimage).into();
-        
-        let proof = leaf2.as_slice().to_vec();
-        
-        let nimbus_contract = Nimbus::default();
-        let is_valid = nimbus_contract.verify_merkle_proof(leaf1, proof, root).unwrap();
-        assert!(is_valid, "Merkle proof verification failed!");
-    }
+
 
     #[test]
     fn test_groth16_input_length_validation() {
