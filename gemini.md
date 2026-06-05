@@ -75,7 +75,7 @@ Protokol x402 adalah standar terbuka untuk pembayaran mesin-ke-mesin (M2M) otono
 
 ---
 
-## 4. Integrasi Nimbus & x402 (Fase C)
+## 4. Integrasi Nimbus & x402 
 
 Untuk melindungi kerahasiaan strategi trading AI Agent dari pelacakan publik, Nimbus mengintegrasikan fungsionalitas x402 dengan skema privasi on-chain:
 *   **Anonymous Payments**: Alih-alih melampirkan tanda tangan EIP-3009 yang membongkar identitas dompet pengirim ke rantai publik, AI Agent menggunakan token privat Nimbus (tanda tangan BLS ter-unblind) dalam header `PAYMENT-SIGNATURE`.
