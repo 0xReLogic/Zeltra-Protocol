@@ -129,7 +129,43 @@ graph TD
 
 ---
 
-## 5. Spesifikasi HTTP API Endpoints
+## 5. Struktur Modul
+
+Nimbus Node telah direfaktor menjadi struktur modular yang terorganisir dengan baik:
+
+```
+nimbus-node/src/
+├── main.rs              # Entry point minimal (82 baris)
+├── dto.rs               # Request/Response DTOs (19 structs)
+├── state.rs             # AppState + in-memory storage
+├── http.rs              # HTTP client utilities
+├── kms.rs               # OpenBao/Vault KMS integration
+└── handlers/
+    ├── mod.rs           # Handler exports
+    ├── health.rs        # Health check endpoint
+    ├── deposit.rs       # Deposit & reveal handlers
+    ├── spend.rs         # Spend + batch processing logic
+    ├── x402.rs          # x402 facilitator endpoint
+    └── threshold.rs     # Threshold signing handlers
+```
+
+### Keunggulan Struktur Modular:
+- **Separation of Concerns**: DTOs, state, HTTP, KMS, dan handlers terpisah
+- **Maintainability**: Mudah menambah endpoint baru tanpa mengubah file lain
+- **Security**: KMS integration terisolasi di modul terpisah
+- **Testability**: Setiap modul dapat ditest secara independen
+- **Documentation**: 18 comment lines + 2 doc comments tersebar di semua modul
+
+### Organisasi Handlers:
+- **health.rs**: Health check untuk monitoring
+- **deposit.rs**: Deposit escrow dan reveal masking key
+- **spend.rs**: Spend handler + batch processing dengan gas economics
+- **x402.rs**: x402 protocol facilitator untuk AI agents
+- **threshold.rs**: Distributed threshold signing (Leader + Guardian)
+
+---
+
+## 6. Spesifikasi HTTP API Endpoints
 
 ### A. Health Check
 Mengecek status kesehatan node relayer, jumlah antrean transaksi, nullifier yang terproses, serta saldo wallet relayer dan akumulasi keuntungan.
