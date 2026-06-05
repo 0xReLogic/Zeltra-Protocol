@@ -116,19 +116,13 @@ Dokumen ini memetakan seluruh tugas pengembangan, integrasi, dan pengujian yang 
 *   **Inovasi (Aha! Moment - Jurnal 2026)**: Sesuai standar industri Privacy Pools, verifikasi Merkle proof dipindahkan seluruhnya ke dalam sirkuit ZK agar pengamat luar tidak dapat mencocokkan plaintext leaf transaksi spend/withdraw dengan set deposit, menjaga anonimitas pengguna 100% utuh. Kombinasi linear public inputs (`root`, `nullifier`, `recipient`, `amount`) dikunci secara ketat on-chain melalui precompile MSM sebelum pairing check dijalankan.
 
 
-## 9. Pemeliharaan Modul Offline POS & Slashing (IP B2B Showcase - Cadangan/Lisensi)
-*   **Target Modul**: [nimbus-contracts/src/lib.rs](file:///home/azureuser/crypto/nimbus-contracts/src/lib.rs) & [nimbus-node/src/main.rs](file:///home/azureuser/crypto/nimbus-node/src/main.rs)
-*   **Deskripsi Pekerjaan**:
-    *   Pertahankan fungsionalitas `slash_double_spender` dan endpoint `/api/pos/sync-claims` sebagai inovasi cadangan/modul IP untuk lisensi B2B.
-    *   Pastikan pengujian simulasi offline tetap terjangkau dan dapat divalidasi oleh calon mitra ritel besar.
-
-## 10. Audit Keamanan Kriptografi & Kode Kontrak
+## 9. Audit Keamanan Kriptografi & Kode Kontrak
 *   **Target Modul**: Seluruh Repositori
 *   **Deskripsi Pekerjaan**:
     *   Lakukan audit pihak ketiga terhadap implementasi precompile EIP-2537 BLS12-381 untuk memastikan tidak ada kerentanan memory leak di Rust Stylus.
     *   Audit sirkuit ZK-Compliance untuk memverifikasi keandalan Proof of Innocence.
 
-## 11. Integrasi Ephemeral Agent Identifiers & Keamanan Privasi Lanjutan (Riset 2026)
+## 10. Integrasi Ephemeral Agent Identifiers & Keamanan Privasi Lanjutan (Riset 2026)
 *   **Target Modul**: [nimbus-sdk](file:///home/azureuser/crypto/nimbus-sdk/src/lib.rs) & [nimbus-contracts](file:///home/azureuser/crypto/nimbus-contracts/src/lib.rs)
 *   **Status**: Direncanakan (Planned)
 *   **Deskripsi Pekerjaan**:
@@ -137,7 +131,7 @@ Dokumen ini memetakan seluruh tugas pengembangan, integrasi, dan pengujian yang 
     *   Desain mekanisme slashing di smart contract agar dapat memetakan delta kunci ephemeral kembali ke identitas master kolateral saat terjadi double spending terdeteksi.
 *   **Inovasi (Aha! Moment - Jurnal 2026)**: Dinamika transaksi otonom AI Agent rawan terkena Address Clustering Attack. Pengamat on-chain bisa menebak identitas pemilik bot jika satu alamat AI Agent melakukan payout/spend token Nimbus berulang kali ke satu target API yang sama. Dengan menyerap prinsip Agent Identity Protocol (AIP) dan precompile EIP-2537, identitas otonom bot dipecah menjadi ratusan ephemeral keys unik, sehingga transaksi kelihatan dikirim oleh ratusan entitas independen berbeda tanpa mengurangi keandalan slashing.
 
-## 12. Pengembangan Tokenomics $NIMB & Safety Module Staking (Fase Lanjutan - Ditunda)
+## 11. Pengembangan Tokenomics $NIMB & Safety Module Staking (Fase Lanjutan - Ditunda)
 *   **Status**: Ditunda (Postponed)
 *   **Deskripsi Pekerjaan**:
     *   Implementasikan logic distribusi reward secara proporsional dalam bentuk USDC (50% dari yield DeFi/RWA yang dikumpulkan) kepada para staker di Safety Module.

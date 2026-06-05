@@ -104,42 +104,7 @@ enum Commands {
         pk: String,
     },
 
-    /// Generate a random offline identity parameter (scalar I) or slope (scalar a)
-    GenerateOfflineParams,
 
-    /// Spend a koin offline by answering the merchant challenge: y = a * x + I (mod p)
-    SpendOffline {
-        /// Slope scalar (a) in hex
-        #[arg(short, long)]
-        a: String,
-
-        /// Challenge scalar (x) in hex
-        #[arg(short, long)]
-        x: String,
-
-        /// Identity scalar (I) in hex
-        #[arg(short, long)]
-        identity: String,
-    },
-
-    /// Reconstruct the identity of a double spender given two different challenges and responses
-    Slash {
-        /// Challenge 1 (x1) in hex
-        #[arg(long)]
-        x1: String,
-
-        /// Response 1 (y1) in hex
-        #[arg(long)]
-        y1: String,
-
-        /// Challenge 2 (x2) in hex
-        #[arg(long)]
-        x2: String,
-
-        /// Response 2 (y2) in hex
-        #[arg(long)]
-        y2: String,
-    },
 }
 
 fn main() {
@@ -309,79 +274,6 @@ fn main() {
             println!("------------------------------------------------------------");
         }
         
-        Commands::GenerateOfflineParams => {
-            let mut rng = thread_rng();
-            let identity = Fr::rand(&mut rng);
-            let a = Fr::rand(&mut rng);
-            let x = Fr::rand(&mut rng);
-            
-            let identity_hex = hex::encode(serialize_to_bytes(&identity));
-            let a_hex = hex::encode(serialize_to_bytes(&a));
-            let x_hex = hex::encode(serialize_to_bytes(&x));
-            
-            println!("OFFLINE PARAMS GENERATED");
-            println!("------------------------------------------------------------");
-            println!("Identity Secret (I)  :\n{}", identity_hex);
-            println!("\nSlope Parameter (a)  :\n{}", a_hex);
-            println!("\nDefault Challenge (x):\n{}", x_hex);
-            println!("------------------------------------------------------------");
-        }
-        
-        Commands::SpendOffline { a, x, identity } => {
-            let a_bytes = hex::decode(a).expect("Invalid a hex");
-            let x_bytes = hex::decode(x).expect("Invalid x hex");
-            let identity_bytes = hex::decode(identity).expect("Invalid identity hex");
-            
-            let a_scalar: Fr = deserialize_from_bytes(&a_bytes)
-                .expect("Failed to deserialize a");
-            let x_scalar: Fr = deserialize_from_bytes(&x_bytes)
-                .expect("Failed to deserialize x");
-            let identity_scalar: Fr = deserialize_from_bytes(&identity_bytes)
-                .expect("Failed to deserialize identity");
-                
-            let y_scalar = generate_offline_response(a_scalar, x_scalar, identity_scalar);
-            let y_hex = hex::encode(serialize_to_bytes(&y_scalar));
-            
-            println!("OFFLINE SPEND PROOF GENERATED");
-            println!("------------------------------------------------------------");
-            println!("Challenge (x) :\n{}", hex::encode(x_bytes));
-            println!("\nResponse (y)  :\n{}", y_hex);
-            println!("------------------------------------------------------------");
-        }
-        
-        Commands::Slash { x1, y1, x2, y2 } => {
-            let x1_bytes = hex::decode(x1).expect("Invalid x1 hex");
-            let y1_bytes = hex::decode(y1).expect("Invalid y1 hex");
-            let x2_bytes = hex::decode(x2).expect("Invalid x2 hex");
-            let y2_bytes = hex::decode(y2).expect("Invalid y2 hex");
-            
-            let x1_scalar: Fr = deserialize_from_bytes(&x1_bytes)
-                .expect("Failed to deserialize x1");
-            let y1_scalar: Fr = deserialize_from_bytes(&y1_bytes)
-                .expect("Failed to deserialize y1");
-            let x2_scalar: Fr = deserialize_from_bytes(&x2_bytes)
-                .expect("Failed to deserialize x2");
-            let y2_scalar: Fr = deserialize_from_bytes(&y2_bytes)
-                .expect("Failed to deserialize y2");
-                
-            let proof1 = OfflineSpendProof { x: x1_scalar, y: y1_scalar };
-            let proof2 = OfflineSpendProof { x: x2_scalar, y: y2_scalar };
-            
-            match reconstruct_identity(&proof1, &proof2) {
-                Some(identity) => {
-                    let identity_hex = hex::encode(serialize_to_bytes(&identity));
-                    println!("DOUBLE SPENDER DETECTED & SLASHED");
-                    println!("------------------------------------------------------------");
-                    println!("Reconstructed Identity (I) :\n{}", identity_hex);
-                    println!("------------------------------------------------------------");
-                }
-                None => {
-                    println!("SLASHING FAILED");
-                    println!("------------------------------------------------------------");
-                    println!("Failed to reconstruct identity. Ensure x1 != x2.");
-                    println!("------------------------------------------------------------");
-                }
-            }
-        }
+
     }
 }

@@ -148,67 +148,7 @@ pub fn client_generate_random_scalar() -> String {
     hex::encode(serialize_to_bytes(&scalar))
 }
 
-/// Client: Generates the offline response y = a * x + I (mod p).
-#[wasm_bindgen]
-pub fn client_generate_offline_response(
-    a_hex: &str,
-    x_hex: &str,
-    identity_hex: &str,
-) -> Result<String, JsValue> {
-    let a_bytes = hex::decode(a_hex)
-        .map_err(|e| JsValue::from_str(&format!("Invalid a hex: {}", e)))?;
-    let x_bytes = hex::decode(x_hex)
-        .map_err(|e| JsValue::from_str(&format!("Invalid x hex: {}", e)))?;
-    let identity_bytes = hex::decode(identity_hex)
-        .map_err(|e| JsValue::from_str(&format!("Invalid identity hex: {}", e)))?;
 
-    let a: Fr = deserialize_from_bytes(&a_bytes)
-        .ok_or_else(|| JsValue::from_str("Failed to deserialize slope a"))?;
-    let x: Fr = deserialize_from_bytes(&x_bytes)
-        .ok_or_else(|| JsValue::from_str("Failed to deserialize challenge x"))?;
-    let identity: Fr = deserialize_from_bytes(&identity_bytes)
-        .ok_or_else(|| JsValue::from_str("Failed to deserialize identity"))?;
-
-    let y = generate_offline_response(a, x, identity);
-    let y_bytes = serialize_to_bytes(&y);
-    Ok(hex::encode(y_bytes))
-}
-
-/// Smart Contract / Challenger: Reconstructs the identity I of a double spender from two offline transaction proofs.
-#[wasm_bindgen]
-pub fn client_reconstruct_identity(
-    x1_hex: &str,
-    y1_hex: &str,
-    x2_hex: &str,
-    y2_hex: &str,
-) -> Result<String, JsValue> {
-    let x1_bytes = hex::decode(x1_hex)
-        .map_err(|e| JsValue::from_str(&format!("Invalid x1 hex: {}", e)))?;
-    let y1_bytes = hex::decode(y1_hex)
-        .map_err(|e| JsValue::from_str(&format!("Invalid y1 hex: {}", e)))?;
-    let x2_bytes = hex::decode(x2_hex)
-        .map_err(|e| JsValue::from_str(&format!("Invalid x2 hex: {}", e)))?;
-    let y2_bytes = hex::decode(y2_hex)
-        .map_err(|e| JsValue::from_str(&format!("Invalid y2 hex: {}", e)))?;
-
-    let x1: Fr = deserialize_from_bytes(&x1_bytes)
-        .ok_or_else(|| JsValue::from_str("Failed to deserialize x1"))?;
-    let y1: Fr = deserialize_from_bytes(&y1_bytes)
-        .ok_or_else(|| JsValue::from_str("Failed to deserialize y1"))?;
-    let x2: Fr = deserialize_from_bytes(&x2_bytes)
-        .ok_or_else(|| JsValue::from_str("Failed to deserialize x2"))?;
-    let y2: Fr = deserialize_from_bytes(&y2_bytes)
-        .ok_or_else(|| JsValue::from_str("Failed to deserialize y2"))?;
-
-    let proof1 = OfflineSpendProof { x: x1, y: y1 };
-    let proof2 = OfflineSpendProof { x: x2, y: y2 };
-
-    let identity = reconstruct_identity(&proof1, &proof2)
-        .ok_or_else(|| JsValue::from_str("Failed to reconstruct identity (challenges might be identical)"))?;
-
-    let identity_bytes = serialize_to_bytes(&identity);
-    Ok(hex::encode(identity_bytes))
-}
 
 #[derive(serde::Serialize)]
 struct KeyShare {

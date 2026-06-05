@@ -243,61 +243,7 @@ Menerima payload PAYMENT-SIGNATURE terenkode Base64 dari AI Agent yang menggunak
     }
     ```
 
-### F. Sinkronisasi Klaim Offline Merchant POS (Fase D: Blame Slashing)
-Menerima batch bukti transaksi offline dari PWA POS merchant yang telah dikumpulkan secara lokal (IndexedDB) saat offline, kemudian memverifikasi setiap klaim dan secara otomatis mendeteksi pembelanjaan ganda (double-spend) menggunakan rekonstruksi identitas Shamir.
-*   **Method:** `POST`
-*   **Path:** `/api/pos/sync-claims`
-*   **Payload (JSON):**
-    ```json
-    {
-      "merchant_id": "warung_maju_001",
-      "claims": [
-        {
-          "token_id": "0xtokenhash1...",
-          "merchant_id": "",
-          "challenge_x_hex": "aabbcc...(Fr scalar hex)",
-          "response_y_hex": "ddeeff...(Fr scalar hex)",
-          "timestamp": "2026-06-03T12:30:00Z",
-          "amount": 50000
-        },
-        {
-          "token_id": "0xtokenhash2...",
-          "merchant_id": "",
-          "challenge_x_hex": "112233...",
-          "response_y_hex": "445566...",
-          "timestamp": "2026-06-03T12:35:00Z",
-          "amount": 25000
-        }
-      ]
-    }
-    ```
-    *   `merchant_id`: Identitas toko/kasir yang mengirimkan batch klaim.
-    *   `claims[]`: Daftar bukti transaksi offline, masing-masing berisi `token_id` (hash kunci efemeral token), skalar tantangan `challenge_x_hex` dan respons `response_y_hex` (dari protokol Shamir $y = a \cdot x + I$), timestamp, dan nominal.
-*   **Response (JSON):**
-    ```json
-    {
-      "accepted": 1,
-      "double_spends_detected": 1,
-      "results": [
-        {
-          "token_id": "0xtokenhash1...",
-          "status": "ACCEPTED"
-        },
-        {
-          "token_id": "0xtokenhash2...",
-          "status": "DOUBLE_SPEND_DETECTED",
-          "blame": {
-            "reconstructed_identity_hex": "aabb11...(hex identity I)",
-            "claim_a_merchant": "toko_a",
-            "claim_b_merchant": "warung_maju_001"
-          }
-        }
-      ]
-    }
-    ```
-    *   Jika `status` bernilai `DOUBLE_SPEND_DETECTED`, objek `blame` berisi identitas rahasia pelaku yang direkonstruksi dari dua bukti transaksi offline yang bertentangan. Relayer secara otomatis men-dispatch fungsi `slash_double_spender` ke smart contract L2 untuk menyita jaminan pelaku.
-
-### G. Threshold Minting: Guardian Sign-Share
+### F. Threshold Minting: Guardian Sign-Share
 Dihubungi oleh Leader Node ke setiap Guardian Node via jaringan private untuk meminta partial signature menggunakan share kunci lokal node tersebut. Guardian Node tidak pernah mengekspos endpoint ini ke internet publik.
 *   **Method:** `POST`
 *   **Path:** `/api/sign-share`
@@ -320,7 +266,7 @@ Dihubungi oleh Leader Node ke setiap Guardian Node via jaringan private untuk me
     }
     ```
 
-### H. Threshold Minting: Leader Aggregate Sign
+### G. Threshold Minting: Leader Aggregate Sign
 Dihubungi oleh client untuk memulai proses minting token anonim secara terdesentralisasi. Leader Node men-generate masking key $k$, menghubungi semua Guardian secara paralel via private network, mengumpulkan partial signature, lalu mengembalikan semuanya ke client untuk diagregasi menggunakan `client_aggregate_signatures` di SDK.
 *   **Method:** `POST`
 *   **Path:** `/api/leader/sign`

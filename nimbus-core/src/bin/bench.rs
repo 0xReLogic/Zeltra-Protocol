@@ -101,49 +101,5 @@ fn main() {
         println!("{:<30} | {:<12.2} | {:<12.2} | {:<12.0}", "Verify Unmasked (Pairing)", total_ms, avg_us, ops_per_sec);
     }
 
-    // 6. Generate Offline Response
-    {
-        let identity = Fr::rand(&mut rng);
-        let a = Fr::rand(&mut rng);
-        let x = Fr::rand(&mut rng);
-
-        let start = Instant::now();
-        for _ in 0..ITERATIONS {
-            let _ = generate_offline_response(a, x, identity);
-        }
-        let elapsed = start.elapsed();
-        let total_ms = elapsed.as_millis() as f64;
-        let avg_us = elapsed.as_micros() as f64 / ITERATIONS as f64;
-        let ops_per_sec = ITERATIONS as f64 / elapsed.as_secs_f64();
-        println!("{:<30} | {:<12.2} | {:<12.2} | {:<12.0}", "Spend Offline (Fr Mul+Add)", total_ms, avg_us, ops_per_sec);
-    }
-
-    // 7. Reconstruct Identity
-    {
-        let identity = Fr::rand(&mut rng);
-        let a = Fr::rand(&mut rng);
-        
-        let x1 = Fr::rand(&mut rng);
-        let y1 = generate_offline_response(a, x1, identity);
-        let proof1 = OfflineSpendProof { x: x1, y: y1 };
-
-        let mut x2 = Fr::rand(&mut rng);
-        while x2 == x1 {
-            x2 = Fr::rand(&mut rng);
-        }
-        let y2 = generate_offline_response(a, x2, identity);
-        let proof2 = OfflineSpendProof { x: x2, y: y2 };
-
-        let start = Instant::now();
-        for _ in 0..ITERATIONS {
-            let _ = reconstruct_identity(&proof1, &proof2);
-        }
-        let elapsed = start.elapsed();
-        let total_ms = elapsed.as_millis() as f64;
-        let avg_us = elapsed.as_micros() as f64 / ITERATIONS as f64;
-        let ops_per_sec = ITERATIONS as f64 / elapsed.as_secs_f64();
-        println!("{:<30} | {:<12.2} | {:<12.2} | {:<12.0}", "Reconstruct Identity (Slash)", total_ms, avg_us, ops_per_sec);
-    }
-
     println!("================================================================================");
 }

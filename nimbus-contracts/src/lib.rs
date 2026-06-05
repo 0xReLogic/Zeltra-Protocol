@@ -1044,45 +1044,7 @@ impl Nimbus {
         }
     }
 
-    /// Reconstructs the identity I of a double spender from two offline transaction proofs.
-    /// y = a * x + I => I = y - a * x
-    /// Returns the reconstructed identity in bytes if successful.
-    pub fn slash_double_spender(
-        &mut self,
-        x1_bytes: Vec<u8>,
-        y1_bytes: Vec<u8>,
-        x2_bytes: Vec<u8>,
-        y2_bytes: Vec<u8>,
-    ) -> Result<Vec<u8>, Vec<u8>> {
-        self.check_not_paused()?;
-        use ark_serialize::CanonicalDeserialize;
-        
-        let x1 = Fr::deserialize_compressed(&x1_bytes[..])
-            .map_err(|_| b"INVALID_X1".to_vec())?;
-        let y1 = Fr::deserialize_compressed(&y1_bytes[..])
-            .map_err(|_| b"INVALID_Y1".to_vec())?;
-        let x2 = Fr::deserialize_compressed(&x2_bytes[..])
-            .map_err(|_| b"INVALID_X2".to_vec())?;
-        let y2 = Fr::deserialize_compressed(&y2_bytes[..])
-            .map_err(|_| b"INVALID_Y2".to_vec())?;
-            
-        if x1 == x2 {
-            return Err(b"SAME_CHALLENGE_NOT_ALLOWED".to_vec());
-        }
-        
-        // a = (y2 - y1) / (x2 - x1)
-        let y_diff = y2 - y1;
-        let x_diff = x2 - x1;
-        let x_diff_inv = x_diff.inverse().ok_or_else(|| b"NO_INVERSE".to_vec())?;
-        let a = y_diff * x_diff_inv;
-        
-        // I = y1 - a * x1
-        let identity = y1 - (a * x1);
-        
-        let mut out = vec![];
-        identity.serialize_compressed(&mut out).map_err(|_| b"SERIALIZE_FAILED".to_vec())?;
-        Ok(out)
-    }
+
 
     /// Registers a new clean association set Merkle root (Admin/Compliance Oracle).
     pub fn register_clean_root(&mut self, root: FixedBytes<32>) -> Result<(), Vec<u8>> {
@@ -1428,44 +1390,7 @@ mod tests {
         assert_eq!(evm_scalar.len(), 32);
     }
 
-    #[test]
-    fn test_slash_double_spender_contract_flow() {
-        let mut rng = thread_rng();
-        let identity = Fr::rand(&mut rng);
-        let a = Fr::rand(&mut rng);
-        
-        let x1 = Fr::rand(&mut rng);
-        let y1 = (a * x1) + identity;
-        
-        let mut x2 = Fr::rand(&mut rng);
-        while x2 == x1 {
-            x2 = Fr::rand(&mut rng);
-        }
-        let y2 = (a * x2) + identity;
-        
-        let mut x1_bytes = vec![];
-        let mut y1_bytes = vec![];
-        let mut x2_bytes = vec![];
-        let mut y2_bytes = vec![];
-        
-        x1.serialize_compressed(&mut x1_bytes).unwrap();
-        y1.serialize_compressed(&mut y1_bytes).unwrap();
-        x2.serialize_compressed(&mut x2_bytes).unwrap();
-        y2.serialize_compressed(&mut y2_bytes).unwrap();
-        
-        let mut nimbus_contract = Nimbus::default();
-        let slashed_identity_bytes = nimbus_contract.slash_double_spender(
-            x1_bytes,
-            y1_bytes,
-            x2_bytes,
-            y2_bytes,
-        ).expect("Contract slashing failed!");
-        
-        let slashed_identity = Fr::deserialize_compressed(&slashed_identity_bytes[..])
-            .expect("Failed to deserialize reconstructed identity");
-            
-        assert_eq!(slashed_identity, identity, "Reconstructed identity does not match original!");
-    }
+
 
 
 
@@ -1595,10 +1520,7 @@ mod tests {
             contract.spend_and_buy_shares(sid, vec![], vec![], vec![], Address::ZERO, Address::ZERO, FixedBytes::ZERO, U256::ZERO),
             Err(b"CONTRACT_PAUSED".to_vec())
         );
-        assert_eq!(
-            contract.slash_double_spender(vec![], vec![], vec![], vec![]),
-            Err(b"CONTRACT_PAUSED".to_vec())
-        );
+
         assert_eq!(
             contract.register_clean_root(FixedBytes::ZERO),
             Err(b"CONTRACT_PAUSED".to_vec())

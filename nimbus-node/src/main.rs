@@ -13,15 +13,13 @@ use std::collections::HashMap;
 
 // WARNING / REMINDER FOR DEVELOPERS & AI AGENTS:
 // THIS IS AN IN-MEMORY SIMULATION DATABASE FOR PROOF OF CONCEPT (PoC) / TESTING.
-// - Sessions, nullifiers, and offline claims are stored in memory and will be lost on restart.
+// - Sessions and nullifiers are stored in memory and will be lost on restart.
 // - TO UPGRADE TO PRODUCTION: Replace this with a persistent DB (e.g. SQLite, PostgreSQL via sqlx/rusqlite).
 #[derive(Clone)]
 struct AppState {
     sessions: Arc<Mutex<Vec<Session>>>,
     spend_queue: Arc<Mutex<Vec<SpendRequest>>>,
     nullifiers: Arc<Mutex<Vec<String>>>,
-    /// Offline claims indexed by token_id for double-spend detection (Fase D).
-    offline_claims: Arc<Mutex<HashMap<String, Vec<OfflineClaim>>>>,
     share_sk: Arc<nimbus_core::Fr>,
     share_index: u32,
     relayer_wallet_balance_eth: Arc<Mutex<f64>>,
@@ -34,7 +32,6 @@ impl AppState {
             sessions: Arc::new(Mutex::new(Vec::new())),
             spend_queue: Arc::new(Mutex::new(Vec::new())),
             nullifiers: Arc::new(Mutex::new(Vec::new())),
-            offline_claims: Arc::new(Mutex::new(HashMap::new())),
             share_sk: Arc::new(share_sk),
             share_index,
             relayer_wallet_balance_eth: Arc::new(Mutex::new(10.0)),
@@ -155,56 +152,7 @@ struct X402VerifyResponse {
     message: String,
 }
 
-// Fase D: Offline POS Merchant DTOs
 
-/// A single offline spend proof submitted by a merchant's PWA POS.
-#[derive(Clone, Debug, Serialize, Deserialize)]
-struct OfflineClaim {
-    /// Unique token identifier (e.g. hash of ephemeral public key).
-    token_id: String,
-    /// Merchant identifier (shop address / name).
-    merchant_id: String,
-    /// Challenge scalar x (hex-encoded Fr).
-    challenge_x_hex: String,
-    /// Response scalar y (hex-encoded Fr).
-    response_y_hex: String,
-    /// Timestamp of the offline transaction (ISO 8601).
-    timestamp: String,
-    /// Amount in stablecoin base units.
-    amount: u64,
-}
-
-/// Request payload for batch syncing offline claims from a PWA POS merchant.
-#[derive(Deserialize)]
-struct SyncClaimsRequest {
-    merchant_id: String,
-    claims: Vec<OfflineClaim>,
-}
-
-/// Response for each synced claim, indicating if a double-spend was detected.
-#[derive(Serialize)]
-struct SyncClaimResult {
-    token_id: String,
-    status: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    blame: Option<BlameDetail>,
-}
-
-#[derive(Clone, Serialize)]
-struct BlameDetail {
-    /// Reconstructed identity of the double-spender (hex).
-    reconstructed_identity_hex: String,
-    /// The two conflicting claims.
-    claim_a_merchant: String,
-    claim_b_merchant: String,
-}
-
-#[derive(Serialize)]
-struct SyncClaimsResponse {
-    accepted: usize,
-    double_spends_detected: usize,
-    results: Vec<SyncClaimResult>,
-}
 
 #[tokio::main]
 async fn main() {
@@ -226,7 +174,6 @@ async fn main() {
         .route("/api/reveal", post(handle_reveal))
         .route("/api/spend", post(handle_spend))
         .route("/api/x402/verify", post(handle_x402_verify))
-        .route("/api/pos/sync-claims", post(handle_sync_claims))
         .route("/api/sign-share", post(handle_sign_share))
         .route("/api/leader/sign", post(handle_leader_sign))
         .with_state(state);
@@ -238,7 +185,6 @@ async fn main() {
     println!("Listening on: http://{}", listener.local_addr().unwrap());
     println!("Gasless EIP-7702 delegation: ACTIVE");
     println!("x402 Facilitator endpoint:   ACTIVE");
-    println!("Offline POS claim sync:      ACTIVE");
     println!("Relayer batch queue interval: 2 seconds");
     println!("------------------------------------------------------------");
 
@@ -542,156 +488,7 @@ async fn handle_x402_verify(
     })
 }
 
-// Fase D: Offline POS Claim Sync & Blame Dispatcher
-async fn handle_sync_claims(
-    axum::extract::State(state): axum::extract::State<AppState>,
-    Json(payload): Json<SyncClaimsRequest>,
-) -> Json<SyncClaimsResponse> {
-    let mut claims_store = state.offline_claims.lock().await;
-    let mut results: Vec<SyncClaimResult> = Vec::new();
-    let mut double_spend_count = 0usize;
-    let mut accepted_count = 0usize;
 
-    println!("------------------------------------------------------------");
-    println!("POS SYNC: Receiving {} offline claims from merchant '{}'",
-        payload.claims.len(), payload.merchant_id);
-
-    for claim in &payload.claims {
-        let mut claim_with_merchant = claim.clone();
-        claim_with_merchant.merchant_id = payload.merchant_id.clone();
-
-        let existing = claims_store
-            .entry(claim.token_id.clone())
-            .or_insert_with(Vec::new);
-
-        // Check for double-spend: same token_id but different challenge_x
-        let conflicting = existing.iter().find(|prev| {
-            prev.challenge_x_hex != claim.challenge_x_hex
-        });
-
-        if let Some(prev_claim) = conflicting {
-            // Double-spend detected! Reconstruct identity using Shamir interpolation.
-            // I = y1 - ((y2 - y1) / (x2 - x1)) * x1
-            let clean_x_a = prev_claim.challenge_x_hex.trim_start_matches("0x").trim_start_matches('0');
-            let display_x_a = if clean_x_a.is_empty() { "0" } else { clean_x_a };
-            let clean_x_b = claim.challenge_x_hex.trim_start_matches("0x").trim_start_matches('0');
-            let display_x_b = if clean_x_b.is_empty() { "0" } else { clean_x_b };
-
-            println!("  DOUBLE-SPEND DETECTED for token: {}", &claim.token_id);
-            println!("    Claim A: merchant='{}', x=0x{}", prev_claim.merchant_id,
-                &display_x_a[..core::cmp::min(12, display_x_a.len())]);
-            println!("    Claim B: merchant='{}', x=0x{}", payload.merchant_id,
-                &display_x_b[..core::cmp::min(12, display_x_b.len())]);
-
-            // Attempt identity reconstruction using nimbus_core
-            let identity_hex = reconstruct_identity_from_hex(
-                &prev_claim.challenge_x_hex,
-                &prev_claim.response_y_hex,
-                &claim.challenge_x_hex,
-                &claim.response_y_hex,
-            );
-
-            let blame = BlameDetail {
-                reconstructed_identity_hex: identity_hex.unwrap_or_else(|e| {
-                    format!("RECONSTRUCTION_FAILED: {}", e)
-                }),
-                claim_a_merchant: prev_claim.merchant_id.clone(),
-                claim_b_merchant: payload.merchant_id.clone(),
-            };
-
-            println!("    Reconstructed Identity: {}", &blame.reconstructed_identity_hex);
-            println!("    -> Auto-dispatching slash_double_spender to L2 contract");
-
-            results.push(SyncClaimResult {
-                token_id: claim.token_id.clone(),
-                status: "DOUBLE_SPEND_DETECTED".to_string(),
-                blame: Some(blame),
-            });
-            double_spend_count += 1;
-        } else {
-            // No conflict -- accept the claim
-            existing.push(claim_with_merchant);
-            accepted_count += 1;
-
-            results.push(SyncClaimResult {
-                token_id: claim.token_id.clone(),
-                status: "ACCEPTED".to_string(),
-                blame: None,
-            });
-
-            println!("  Accepted: token={}, amount={}, ts={}",
-                &claim.token_id[..core::cmp::min(12, claim.token_id.len())],
-                claim.amount,
-                claim.timestamp);
-        }
-    }
-
-    println!("POS SYNC COMPLETE: {} accepted, {} double-spends detected",
-        accepted_count, double_spend_count);
-    println!("------------------------------------------------------------");
-
-    Json(SyncClaimsResponse {
-        accepted: accepted_count,
-        double_spends_detected: double_spend_count,
-        results,
-    })
-}
-
-/// Reconstructs the double-spender's identity from two offline proofs using
-/// Shamir secret sharing interpolation over BLS12-381 scalar field (Fr).
-fn decode_hex_padded(hex_str: &str) -> Result<Vec<u8>, String> {
-    let clean = hex_str.trim_start_matches("0x");
-    let mut padded = clean.to_string();
-    if padded.len() % 2 != 0 {
-        padded = format!("0{}", padded);
-    }
-    let mut bytes = hex::decode(&padded).map_err(|e| format!("{}", e))?;
-    if bytes.len() < 32 {
-        let mut new_bytes = vec![0u8; 32 - bytes.len()];
-        new_bytes.extend_from_slice(&bytes);
-        bytes = new_bytes;
-    }
-    Ok(bytes)
-}
-
-fn reconstruct_identity_from_hex(
-    x1_hex: &str,
-    y1_hex: &str,
-    x2_hex: &str,
-    y2_hex: &str,
-) -> Result<String, String> {
-    use nimbus_core::*;
-
-    let mut x1_bytes = decode_hex_padded(x1_hex).map_err(|e| format!("Invalid x1 hex: {}", e))?;
-    let mut y1_bytes = decode_hex_padded(y1_hex).map_err(|e| format!("Invalid y1 hex: {}", e))?;
-    let mut x2_bytes = decode_hex_padded(x2_hex).map_err(|e| format!("Invalid x2 hex: {}", e))?;
-    let mut y2_bytes = decode_hex_padded(y2_hex).map_err(|e| format!("Invalid y2 hex: {}", e))?;
-
-    // Reverse big-endian to little-endian for Arkworks
-    x1_bytes.reverse();
-    y1_bytes.reverse();
-    x2_bytes.reverse();
-    y2_bytes.reverse();
-
-    let x1: Fr = deserialize_from_bytes(&x1_bytes)
-        .ok_or_else(|| "Failed to deserialize x1".to_string())?;
-    let y1: Fr = deserialize_from_bytes(&y1_bytes)
-        .ok_or_else(|| "Failed to deserialize y1".to_string())?;
-    let x2: Fr = deserialize_from_bytes(&x2_bytes)
-        .ok_or_else(|| "Failed to deserialize x2".to_string())?;
-    let y2: Fr = deserialize_from_bytes(&y2_bytes)
-        .ok_or_else(|| "Failed to deserialize y2".to_string())?;
-
-    let proof1 = OfflineSpendProof { x: x1, y: y1 };
-    let proof2 = OfflineSpendProof { x: x2, y: y2 };
-
-    let identity = reconstruct_identity(&proof1, &proof2)
-        .ok_or_else(|| "Challenges are identical, cannot reconstruct".to_string())?;
-
-    let mut identity_bytes = serialize_to_bytes(&identity);
-    identity_bytes.reverse();
-    Ok(hex::encode(identity_bytes))
-}
 
 
 

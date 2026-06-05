@@ -105,24 +105,7 @@ if (isValidFinal) {
     console.log("Token signature verified successfully!");
 }
 
-// 5. Membuat parameter transaksi offline & respon belanja
-const identityHex = client_generate_random_scalar(); // Identitas rahasia pembeli (I)
-const slopeHex = client_generate_random_scalar();    // Parameter kemiringan acak (a)
-const challengeHex = "1a2b3c4d5e...";                 // Nilai tantangan dari merchant (x)
 
-const responseHex = client_generate_offline_response(
-    slopeHex,
-    challengeHex,
-    identityHex
-);
-console.log("Offline Response (y):", responseHex);
-
-// 6. Rekonstruksi identitas (jika terjadi double spend offline)
-const reconstructedIdHex = client_reconstruct_identity(
-    challenge1Hex, response1Hex,
-    challenge2Hex, response2Hex
-);
-console.log("Reconstructed Double-Spender ID:", reconstructedIdHex);
 
 // 7. Konversi ke format EVM Big-Endian (128/256 bytes) untuk kontrak Stylus
 const alphaNegEvmHex = client_get_alpha_neg_evm(finalSignatureHex);

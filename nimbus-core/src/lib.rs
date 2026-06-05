@@ -128,35 +128,7 @@ pub fn verify_unmasked(
     lhs == rhs
 }
 
-/// Represents an offline spend proof containing the challenge x and response y
-#[derive(Clone, Debug, CanonicalSerialize, CanonicalDeserialize)]
-pub struct OfflineSpendProof {
-    pub x: Fr,
-    pub y: Fr,
-}
 
-/// Client: Generates the offline response y = a * x + I (mod p)
-pub fn generate_offline_response(a: Fr, x: Fr, identity: Fr) -> Fr {
-    (a * x) + identity
-}
-
-/// Smart Contract: Reconstructs the identity I from two different offline spend proofs
-pub fn reconstruct_identity(proof1: &OfflineSpendProof, proof2: &OfflineSpendProof) -> Option<Fr> {
-    if proof1.x == proof2.x {
-        return None; // Cannot reconstruct from the same challenge
-    }
-    
-    // a = (y2 - y1) / (x2 - x1)
-    let y_diff = proof2.y - proof1.y;
-    let x_diff = proof2.x - proof1.x;
-    
-    let x_diff_inv = x_diff.inverse()?;
-    let a = y_diff * x_diff_inv;
-    
-    // I = y1 - a * x1
-    let identity = proof1.y - (a * proof1.x);
-    Some(identity)
-}
 
 use ark_ec::CurveGroup;
 use ark_bls12_381::{G1Affine, G2Affine};
@@ -314,34 +286,7 @@ mod tests {
         assert!(verify_final, "Final unmasked signature verification failed!");
     }
 
-    #[test]
-    fn test_offline_double_spend_detection() {
-        let mut rng = thread_rng();
 
-        // 1. Setup identity (I) and random slope (a)
-        let identity = Fr::rand(&mut rng);
-        let a = Fr::rand(&mut rng);
-
-        // 2. First spend (Merchant A challenges with x1)
-        let x1 = Fr::rand(&mut rng);
-        let y1 = generate_offline_response(a, x1, identity);
-        let proof1 = OfflineSpendProof { x: x1, y: y1 };
-
-        // 3. Second spend (Merchant B challenges with x2)
-        // Make sure x2 != x1
-        let mut x2 = Fr::rand(&mut rng);
-        while x2 == x1 {
-            x2 = Fr::rand(&mut rng);
-        }
-        let y2 = generate_offline_response(a, x2, identity);
-        let proof2 = OfflineSpendProof { x: x2, y: y2 };
-
-        // 4. Smart contract reconstructs the identity
-        let reconstructed_identity = reconstruct_identity(&proof1, &proof2)
-            .expect("Failed to reconstruct identity");
-        
-        assert_eq!(reconstructed_identity, identity, "Reconstructed identity does not match original!");
-    }
 
     #[test]
     fn test_threshold_bdhke_flow() {

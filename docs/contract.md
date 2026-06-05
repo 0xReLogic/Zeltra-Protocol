@@ -160,18 +160,12 @@ sequenceDiagram
 *   `getFailedIntentRefund(nullifier: FixedBytes<32>) -> Result<U256, Vec<u8>>`: Membaca jumlah dana refund (USDC) yang tersedia untuk diclaim akibat kegagalan intent di target chain (Rust internal: `get_failed_intent_refund`).
 *   `claimFailedIntentRefund(nullifier: FixedBytes<32>, recipient: Address) -> Result<bool, Vec<u8>>`: Memungkinkan penarikan dana refund (USDC) ke alamat target penerima (`recipient`). Fungsi ini menerapkan pembersihan status mapping sebelum transfer untuk mencegah serangan *reentrancy* (Rust internal: `claim_failed_intent_refund`).
 
-### G. `slash_double_spender(x1_bytes: Vec<u8>, y1_bytes: Vec<u8>, x2_bytes: Vec<u8>, y2_bytes: Vec<u8>) -> Result<Vec<u8>, Vec<u8>>`
-*   Menerima dua bukti transaksi offline ($x_1, y_1$) dan ($x_2, y_2$) yang menggunakan token yang sama.
-*   Menggunakan interpolasi linier di atas kurva BLS12-381 scalar field (Fr) untuk mengungkap identitas rahasia pembeli $I$:
-    $$I = y_1 - \left( \frac{y_2 - y_1}{x_2 - x_1} \right) \cdot x_1$$
-
-### H. ZK-Compliance & Proof of Innocence (Fase A)
+### G. ZK-Compliance & Proof of Innocence (Fase A)
 *   `register_clean_root(root: FixedBytes<32>)`: Mendaftarkan Merkle root dari set asosiasi bersih. Hanya bisa dipanggil oleh owner/oracle.
-*   `verify_merkle_proof(leaf: FixedBytes<32>, proof_bytes: Vec<u8>, root: FixedBytes<32>)`: Fungsi internal pembantu untuk memverifikasi keanggotaan Merkle jika diperlukan secara plaintext.
 *   `verify_groth16_proof(...)`: Memverifikasi ZK-proof Groth16 secara on-chain menggunakan precompile `BLS12_PAIRING_CHECK` (`0x0f`) dengan 4 pasang pairing (1536-byte payload).
 *   `verify_compliance(root: FixedBytes<32>, nullifier: FixedBytes<32>, recipient: Address, amount: U256, proof_a_neg: Vec<u8>, proof_b: Vec<u8>, proof_c: Vec<u8>)`: Melakukan pemeriksaan kepatuhan penuh yang aman secara privasi. Fungsi ini menghapus parameter plaintext `leaf` dan `proof_bytes` dari on-chain (pengecekan Merkle proof dipindahkan ke dalam sirkuit ZK). Untuk mengikat data transaksi dengan bukti, kontrak menghitung kombinasi linear public inputs secara on-chain menggunakan precompile `0x0c` (G1 MSM) dan `0x0b` (G1 ADD) sebelum memanggil verifikator Groth16.
 
-### I. CCIP Receiver Lintas Rantai (Fase B)
+### H. CCIP Receiver Lintas Rantai (Fase B)
 *   `ccip_receive(message_id: FixedBytes<32>, source_chain_selector: u64, sender: Vec<u8>, payload: Vec<u8>) -> Result<(), Vec<u8>>`
     *   Menerima pesan 648-byte dari router Chainlink CCIP.
     *   Mendekode payload ke parameter spend dan parameter pembelian Polymarket, lalu mengeksekusi `spend_and_buy_shares` secara atomik di rantai tujuan.
