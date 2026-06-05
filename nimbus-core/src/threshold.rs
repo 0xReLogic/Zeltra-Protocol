@@ -1,6 +1,6 @@
 use crate::types::{BlindedMessage, IssuerSecretKey, MaskedBlindSignature, PartialBlindSignature};
 use ark_bls12_381::{Fr, G1Projective};
-use ark_ec::Group;
+use ark_ec::PrimeGroup;
 use ark_ff::{Field, UniformRand};
 use rand::Rng;
 

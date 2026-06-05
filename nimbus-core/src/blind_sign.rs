@@ -5,7 +5,7 @@ use crate::types::{
 };
 use ark_bls12_381::{Bls12_381, Fr, G2Projective};
 use ark_ec::pairing::Pairing;
-use ark_ec::Group;
+use ark_ec::PrimeGroup;
 use ark_ff::{Field, UniformRand};
 use rand::Rng;
 

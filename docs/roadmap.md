@@ -157,3 +157,187 @@ Dokumen ini memetakan seluruh tugas pengembangan, integrasi, dan pengujian yang 
     *   Implementasikan logic distribusi reward secara proporsional dalam bentuk USDC (50% dari yield DeFi/RWA yang dikumpulkan) kepada para staker di Safety Module.
     *   *Catatan Relasi*: Logic ini **tidak relate** untuk dikerjakan sekarang karena token $NIMB ditunda peluncurannya. Tanpa token $NIMB, tidak ada mekanisme staking Safety Module yang aktif. Seluruh yield DeFi/RWA untuk sementara akan dialokasikan penuh ke kas protokol (Treasury/Admin contract) untuk membiayai operasional dan audit, sebelum didistribusikan ke modul staking di masa mendatang.
 
+---
+
+## MAINNET READINESS CHECKLIST
+
+### Critical Items (MUST HAVE before mainnet)
+
+#### 12. Real Transaction Broadcasting
+*   **Target Modul**: [nimbus-node/src/handlers/x402.rs](file:///home/azureuser/crypto/nimbus-node/src/handlers/x402.rs), [spend.rs](file:///home/azureuser/crypto/nimbus-node/src/handlers/spend.rs)
+*   **Status**: TODO (Pending)
+*   **Priority**: CRITICAL
+*   **Estimated Time**: 2-3 days
+*   **File yang Perlu Diedit**:
+    *   Handler: [nimbus-node/src/handlers/x402.rs:84](file:///home/azureuser/crypto/nimbus-node/src/handlers/x402.rs) (mock tx hash)
+    *   Handler: [nimbus-node/src/handlers/spend.rs](file:///home/azureuser/crypto/nimbus-node/src/handlers/spend.rs) (batch processing)
+    *   Dependencies: Add `ethers` or `alloy` crate
+*   **Deskripsi Pekerjaan**:
+    *   Replace mock transaction hashes dengan real EVM RPC calls
+    *   Integrate dengan Arbitrum/Base RPC provider
+    *   Implement transaction signing menggunakan relayer private key
+    *   Handle transaction failures dan retry logic
+    *   Broadcast batch transactions ke blockchain
+    *   Return real transaction hash ke user
+*   **Current Mock Code**:
+    ```rust
+    // WARNING: Mock tx hash
+    let mock_tx_hash = format!("0x{}", hex::encode(rand::random::<[u8; 32]>()));
+    ```
+*   **Target Implementation**:
+    ```rust
+    // Real tx broadcast via ethers-rs
+    let tx = contract.spend(nullifier, recipient, amount).send().await?;
+    let receipt = tx.await?;
+    let real_tx_hash = format!("0x{:x}", receipt.transaction_hash);
+    ```
+
+#### 13. Real CCIP Integration
+*   **Target Modul**: [nimbus-node/src/handlers/spend.rs:142](file:///home/azureuser/crypto/nimbus-node/src/handlers/spend.rs)
+*   **Status**: TODO (Pending)
+*   **Priority**: CRITICAL
+*   **Estimated Time**: 2-3 days
+*   **File yang Perlu Diedit**:
+    *   Handler: [nimbus-node/src/handlers/spend.rs:142](file:///home/azureuser/crypto/nimbus-node/src/handlers/spend.rs) (mock CCIP message ID)
+    *   Dependencies: Chainlink CCIP Router ABI
+*   **Deskripsi Pekerjaan**:
+    *   Replace mock CCIP message ID dengan real Chainlink CCIP router call
+    *   Integrate dengan CCIP Router contract address
+    *   Construct proper CCIP message format
+    *   Pay CCIP fee dari relayer wallet
+    *   Get real message ID dari CCIP router
+    *   Track cross-chain message status
+*   **Current Mock Code**:
+    ```rust
+    // WARNING: Mock CCIP message ID
+    println!("Message ID (Mock): 0x{}", hex::encode(rand::random::<[u8; 32]>()));
+    ```
+*   **Target Implementation**:
+    ```rust
+    // Real CCIP router call
+    let message = CCIPMessage { ... };
+    let message_id = ccip_router.ccipSend(destination_chain, message).await?;
+    println!("Message ID (Real): 0x{:x}", message_id);
+    ```
+
+#### 14. Secure Key Management (Production KMS)
+*   **Target Modul**: [nimbus-node/src/kms.rs:66](file:///home/azureuser/crypto/nimbus-node/src/kms.rs)
+*   **Status**: TODO (Pending)
+*   **Priority**: CRITICAL
+*   **Estimated Time**: 1-2 days
+*   **File yang Perlu Diedit**:
+    *   KMS Module: [nimbus-node/src/kms.rs:66](file:///home/azureuser/crypto/nimbus-node/src/kms.rs)
+    *   Dependencies: Add `reqwest` for HTTP client
+*   **Deskripsi Pekerjaan**:
+    *   Replace plain text env var `NIMBUS_SHARE_KEY` dengan OpenBao/Vault API
+    *   Implement HTTP client untuk fetch key dari KMS
+    *   Add authentication (token-based atau TLS cert)
+    *   Handle KMS connection failures dengan retry
+    *   Log warning jika fallback ke env var (dev mode only)
+    *   Zero-copy key handling (tidak pernah log/print key)
+*   **Current Code**:
+    ```rust
+    // Plain text env var (INSECURE for production)
+    let share_key = std::env::var("NIMBUS_SHARE_KEY")?;
+    ```
+*   **Target Implementation**:
+    ```rust
+    // Fetch from OpenBao/Vault
+    let kms_url = std::env::var("KMS_URL")?;
+    let token = std::env::var("KMS_TOKEN")?;
+    let response = reqwest::get(format!("{}/v1/secret/data/nimbus/share", kms_url))
+        .header("X-Vault-Token", token)
+        .send().await?;
+    let key_data = response.json::<VaultResponse>().await?.data.key;
+    ```
+
+#### 15. End-to-End Testing & Security Review
+*   **Target Modul**: Full System
+*   **Status**: TODO (Pending)
+*   **Priority**: CRITICAL
+*   **Estimated Time**: 3-5 days
+*   **Deskripsi Pekerjaan**:
+    *   Test complete flow on testnet dengan real transactions
+    *   Test scenarios:
+        - Deposit → Reveal → Spend (happy path)
+        - Double-spend attempts (must reject)
+        - Concurrent requests (race conditions)
+        - Database restart (persistence check)
+        - CCIP cross-chain flow
+        - Failed transaction handling
+        - Gas estimation accuracy
+    *   Basic security review:
+        - Input validation
+        - Nullifier uniqueness enforcement
+        - Transaction signing security
+        - Key management audit
+        - DoS attack vectors
+    *   Load testing (simulate 100+ concurrent users)
+    *   Monitor gas costs dan optimize jika perlu
+
+### Optional Items (Nice to have, can defer to v2)
+
+#### 16. RWA KYC Integration
+*   **Status**: OPTIONAL (Can skip for v1)
+*   **Target**: [nimbus-contracts/src/vault.rs:148](file:///home/azureuser/crypto/nimbus-contracts/src/vault.rs)
+*   **Note**: Phase 1 launch dapat skip KYC requirement
+
+#### 17. Chainlink Price Feeds Integration
+*   **Status**: OPTIONAL (Can skip for v1)
+*   **Target**: [nimbus-contracts/src/vault.rs:200](file:///home/azureuser/crypto/nimbus-contracts/src/vault.rs)
+*   **Note**: Dapat menggunakan fixed price atau oracle eksternal sementara
+
+#### 18. Fast-Path Phase Management
+*   **Status**: OPTIONAL (Can skip for v1)
+*   **Target**: [nimbus-contracts/src/lib.rs:70](file:///home/azureuser/crypto/nimbus-contracts/src/lib.rs)
+*   **Note**: Phase 1 (CCIP only) sudah aman untuk launch
+
+---
+
+## TIMELINE ESTIMATE TO MAINNET
+
+**Critical Path** (4 items):
+1. Real Transaction Broadcasting: 2-3 days
+2. Real CCIP Integration: 2-3 days
+3. Secure Key Management: 1-2 days
+4. E2E Testing & Review: 3-5 days
+
+**Total: 8-13 days** (best case 8 days, worst case 13 days)
+
+**Dependency Order**:
+- Start with #12 (Transaction Broadcasting) - blocks everything
+- Parallel: #13 (CCIP) + #14 (KMS)
+- Final: #15 (Testing) after all critical items done
+
+**Risk Factors**:
+- RPC provider issues (mitigation: use multiple providers)
+- CCIP testnet downtime (mitigation: test locally first)
+- KMS setup complexity (mitigation: use simple HTTP API)
+- Unexpected security issues (mitigation: budget extra 2-3 days)
+
+**Soft Launch Strategy**:
+- Launch dengan TVL cap $10K-$50K first month
+- Monitor closely for bugs
+- Gradually increase cap jika stable
+- Defer formal audit sampai TVL >$500K
+
+---
+
+## DEPLOYMENT CHECKLIST
+
+Sebelum mainnet deploy, pastikan:
+
+- [ ] Database persistence tested (restart scenarios)
+- [ ] Real transaction broadcasting working
+- [ ] Real CCIP integration working
+- [ ] KMS integrated (no plain text keys)
+- [ ] All tests passing (unit + integration)
+- [ ] Testnet end-to-end flow tested
+- [ ] Gas estimation accurate
+- [ ] TVL cap configured on contract
+- [ ] Monitoring/alerting setup
+- [ ] Backup/recovery procedures documented
+- [ ] Incident response plan ready
+- [ ] Team contact list updated
+
+---

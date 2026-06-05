@@ -1,6 +1,6 @@
 use crate::types::{IssuerPublicKey, IssuerSecretKey};
 use ark_bls12_381::{Fr, G1Projective, G2Projective};
-use ark_ec::Group;
+use ark_ec::PrimeGroup;
 use ark_ff::{PrimeField, UniformRand};
 use rand::Rng;
 use sha2::{Digest, Sha256};

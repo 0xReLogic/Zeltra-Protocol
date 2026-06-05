@@ -15,7 +15,17 @@ use crate::constants::{BLS12_G1_ADD, BLS12_G1_MSM, BLS12_PAIRING_CHECK};
 
 impl Nimbus {
     /// Retrieve the Verifying Key (VK) for the compliance Groth16 circuit.
-    /// In testnet/production, we scale the generator to construct valid points.
+    /// 
+    /// WARNING: This is a MOCK implementation for development/testing only!
+    /// 
+    /// PRODUCTION DEPLOYMENT REQUIRES:
+    /// 1. Trusted setup ceremony using Circom to compile the circuit
+    /// 2. Generate proper proving/verifying keys via Powers of Tau
+    /// 3. Store VK parameters on-chain (either in contract storage or as constants)
+    /// 4. Load real VK instead of using scaled generators
+    /// 
+    /// Current implementation uses generator scaling which is NOT cryptographically secure.
+    /// This is ONLY for testnet demonstration and must be replaced before mainnet.
     pub(crate) fn get_compliance_vk(&self) -> (
         [u8; 128], // vk_alpha_g1
         [u8; 256], // vk_beta_g2

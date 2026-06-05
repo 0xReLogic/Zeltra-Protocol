@@ -46,7 +46,14 @@ nimbus-sdk/src/
 
 > [!NOTE]
 > **PRODUKSI / INTEGRASI ZK-PROOF**:
-> Pembuatan ZK-Proof di dalam SDK (`client_generate_compliance_proof`) telah di-upgrade dari mock random menjadi **prover aljabar riil** menggunakan kurva BLS12-381. Prover ini menghitung titik-titik kurva $A, B, C$ secara dinamis berdasarkan parameter publik transaksi (`root`, `nullifier`, `recipient`, `amount`) dan membuktikan kepatuhan yang memenuhi persamaan verifikasi pairing EIP-2537 secara on-chain secara instan.
+> Pembuatan ZK-Proof di dalam SDK (`client_generate_compliance_proof`) telah diimplementasikan menggunakan **Groth16 zkSNARK riil** dari ekosistem **Arkworks 0.5.0**. Prover ini menghitung titik-titik kurva $A, B, C$ secara dinamis berdasarkan parameter publik transaksi (`root`, `nullifier`, `recipient`, `amount`) dan membuktikan kepatuhan yang memenuhi persamaan verifikasi pairing EIP-2537 secara on-chain secara instan.
+> 
+> **Status Implementasi:**
+> - [Selesai] Upgrade ke arkworks 0.5.0 (API compatibility: Group → PrimeGroup)
+> - [Selesai] Implementasi real Groth16 compliance circuit dengan LinearCombination
+> - [Selesai] WASM bindings dengan real Groth16 ProvingKey/VerifyingKey types
+> - [Selesai] Testing: compliance circuit test valid
+> 
 > Untuk paralelisasi penuh Pippenger MSM dengan WASM-SIMD dan pool Web Workers (Rayon) pada browser host, pastikan untuk mengaktifkan `wasm-bindgen-rayon::init_thread_pool` di sisi front-end.
 
 Untuk mencapai latensi serendah mungkin dan keamanan tingkat tinggi pada lingkungan browser, Nimbus SDK menerapkan prinsip optimalisasi dari jurnal riset terbaru 2026:

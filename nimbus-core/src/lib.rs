@@ -4,10 +4,11 @@ mod crypto;
 mod evm;
 mod blind_sign;
 mod threshold;
+mod compliance_circuit;
 
 pub use ark_bls12_381::{Bls12_381, Fr, G1Projective, G2Projective};
 pub use ark_ec::pairing::Pairing;
-pub use ark_ec::Group;
+pub use ark_ec::PrimeGroup;
 pub use ark_ff::{Field, PrimeField, UniformRand};
 
 // Re-export types for backward compatibility
@@ -33,6 +34,9 @@ pub use blind_sign::{
 
 // Re-export threshold cryptography
 pub use threshold::{aggregate_shares, compute_lagrange_coefficient, sign_share, split_secret_key};
+
+// Re-export compliance circuit
+pub use compliance_circuit::{generate_compliance_keys, generate_compliance_proof, verify_compliance_proof, ComplianceKeys};
 
 #[cfg(test)]
 mod tests {
