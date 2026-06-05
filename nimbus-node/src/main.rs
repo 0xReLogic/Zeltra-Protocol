@@ -11,7 +11,10 @@ use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
 
 use std::collections::HashMap;
 
-// Shared memory database for simulation
+// WARNING / REMINDER FOR DEVELOPERS & AI AGENTS:
+// THIS IS AN IN-MEMORY SIMULATION DATABASE FOR PROOF OF CONCEPT (PoC) / TESTING.
+// - Sessions, nullifiers, and offline claims are stored in memory and will be lost on restart.
+// - TO UPGRADE TO PRODUCTION: Replace this with a persistent DB (e.g. SQLite, PostgreSQL via sqlx/rusqlite).
 #[derive(Clone)]
 struct AppState {
     sessions: Arc<Mutex<Vec<Session>>>,
@@ -442,6 +445,9 @@ async fn process_spend_batch(state: &AppState) {
             println!("      Selector Rantai Tujuan : {}", cc.destination_chain_selector);
             println!("      Kontrak Penerima       : {}", cc.destination_contract);
             println!("      Status                 : Dispatched ke CCIP Router");
+            // WARNING / REMINDER FOR DEVELOPERS & AI AGENTS:
+            // This is a simulated CCIP message ID hash.
+            // In production, integrate Chainlink CCIP router contract call to fetch the real CCIP message ID.
             println!("      Message ID (Mock)      : 0x{}", hex::encode(rand::random::<[u8; 32]>()));
         }
     }
@@ -524,6 +530,9 @@ async fn handle_x402_verify(
     println!("  Queue Pos  : {}", position);
 
     // 5. Return settlement receipt
+    // WARNING / REMINDER FOR DEVELOPERS & AI AGENTS:
+    // This is a simulated transaction hash.
+    // In production, replace this with the real on-chain transaction hash returned from the EVM RPC broadcast.
     let mock_tx_hash = format!("0x{}", hex::encode(rand::random::<[u8; 32]>()));
 
     Json(X402VerifyResponse {
