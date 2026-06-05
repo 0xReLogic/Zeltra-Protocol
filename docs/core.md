@@ -128,7 +128,73 @@ Di dalam `nimbus-core`, kami menambahkan fungsi pembantu berikut:
 
 ---
 
-## 6. Rencana Kerja Selanjutnya (Status Milestones)
+## 6. Struktur Kode Modular
+
+Untuk meningkatkan maintainability dan readability, `nimbus-core` telah direfactor menjadi modul-modul terpisah:
+
+### A. Struktur File
+
+```
+nimbus-core/src/
+├── lib.rs              — Module declarations & integration tests
+├── types.rs            — Core cryptographic types (9 structs)
+│   ├── IssuerSecretKey, IssuerPublicKey
+│   ├── BlindedMessage, BlindingFactor
+│   ├── MaskedBlindSignature, MaskingKey, MaskingKeyCommitment
+│   ├── UnmaskedSignature, PartialBlindSignature
+│
+├── serialization.rs    — Serde helpers untuk arkworks types
+│   ├── serialize_to_bytes<T>
+│   └── deserialize_from_bytes<T>
+│
+├── crypto.rs           — Primitif kriptografi dasar
+│   ├── hash_to_g1() — Hash message ke G1Projective
+│   ├── IssuerSecretKey::generate() — Generate random secret key
+│   └── IssuerSecretKey::public_key() — Derive public key
+│
+├── evm.rs              — Konversi format EVM (EIP-2537 compatible)
+│   ├── to_evm_g1(), to_evm_g2()
+│   ├── get_alpha_neg_evm()
+│   ├── get_hm_evm()
+│   └── get_pk_iss_evm()
+│
+├── blind_sign.rs       — Protokol BAT core (single issuer)
+│   ├── client_blind() — Client blinding
+│   ├── issuer_sign_blinded() — Issuer masked signing
+│   ├── client_verify_masked() — Off-chain verification
+│   ├── client_unmask() — Unmasking dengan revealed k
+│   └── verify_unmasked() — Final signature verification
+│
+└── threshold.rs        — Threshold BDHKE (multi-party)
+    ├── split_secret_key() — Shamir secret sharing
+    ├── compute_lagrange_coefficient() — Lagrange interpolation
+    ├── sign_share() — Partial signature dari Guardian
+    └── aggregate_shares() — Agregasi tanda tangan parsial
+```
+
+### B. Public API (Backward Compatible)
+
+Semua fungsi dan tipe yang sebelumnya diexport dari `lib.rs` tetap tersedia melalui `pub use` re-exports, sehingga kode eksternal yang menggunakan `nimbus_core` tidak perlu diubah:
+
+```rust
+// External code tetap bisa pakai seperti biasa
+use nimbus_core::{
+    IssuerSecretKey, client_blind, verify_unmasked,
+    split_secret_key, aggregate_shares, // dst...
+};
+```
+
+### C. Keuntungan Modularisasi
+
+1. **Separation of Concerns:** Setiap modul memiliki tanggung jawab yang jelas
+2. **Easier Testing:** Test dapat difokuskan per modul
+3. **Better Documentation:** Dokumentasi terstruktur per domain
+4. **Reduced Compilation Time:** Incremental compilation lebih efisien
+5. **Team Collaboration:** Developer bisa bekerja di modul berbeda tanpa konflik
+
+---
+
+## 7. Rencana Kerja Selanjutnya (Status Milestones)
 
 *   [x] **Milestone 1: nimbus-contracts (Arbitrum Stylus)**
     *   Implementasi logika verifikasi $k \cdot pk_{iss} == com_k$ menggunakan precompile EIP-2537.
