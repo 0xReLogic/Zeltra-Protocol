@@ -42,16 +42,27 @@ pub async fn handle_x402_verify(
         });
     }
 
-    // 3. Check nullifier for double-spend
-    let nulls = state.nullifiers.lock().await;
-    if nulls.contains(&sig.payment.nullifier) {
-        return Json(X402VerifyResponse {
-            success: false,
-            tx_hash: None,
-            message: "Double-spending detected: nullifier already exists".to_string(),
-        });
+    // 3. Check nullifier for double-spend using persistent database
+    match state.db.is_nullifier_spent(&sig.payment.nullifier).await {
+        Ok(true) => {
+            return Json(X402VerifyResponse {
+                success: false,
+                tx_hash: None,
+                message: "Double-spending detected: nullifier already exists".to_string(),
+            });
+        }
+        Ok(false) => {
+            // Nullifier not spent, proceed
+        }
+        Err(e) => {
+            eprintln!("X402 ERROR: Database nullifier check failed: {}", e);
+            return Json(X402VerifyResponse {
+                success: false,
+                tx_hash: None,
+                message: "Database error".to_string(),
+            });
+        }
     }
-    drop(nulls);
 
     // 4. Queue the anonymous spend internally
     let spend_req = SpendRequest {

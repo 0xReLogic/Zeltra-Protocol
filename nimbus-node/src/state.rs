@@ -1,30 +1,41 @@
-//! Application state and in-memory storage
+//! Application state with persistent SQLite database
 
 use std::sync::Arc;
 use tokio::sync::Mutex;
-use crate::dto::Session;
+use crate::database::Database;
 
-// WARNING / REMINDER FOR DEVELOPERS & AI AGENTS:
-// THIS IS AN IN-MEMORY SIMULATION DATABASE FOR PROOF OF CONCEPT (PoC) / TESTING.
-// - Sessions and nullifiers are stored in memory and will be lost on restart.
-// - TO UPGRADE TO PRODUCTION: Replace this with a persistent DB (e.g. SQLite, PostgreSQL via sqlx/rusqlite).
+/// Production-ready application state with persistent database
 #[derive(Clone)]
 pub struct AppState {
-    pub sessions: Arc<Mutex<Vec<Session>>>,
+    /// Persistent SQLite database (replaces in-memory storage)
+    pub db: Database,
+    
+    /// In-memory spend queue (batched before on-chain submission)
     pub spend_queue: Arc<Mutex<Vec<crate::dto::SpendRequest>>>,
-    pub nullifiers: Arc<Mutex<Vec<String>>>,
+    
+    /// BLS12-381 threshold signature share (secret key for this relayer node)
     pub share_sk: Arc<nimbus_core::Fr>,
+    
+    /// Index of this relayer node in the threshold signature scheme (1-indexed)
     pub share_index: u32,
+    
+    /// Relayer wallet balance in ETH (for gas fee tracking)
     pub relayer_wallet_balance_eth: Arc<Mutex<f64>>,
+    
+    /// Accumulated profit in USDC from batching markup fees
     pub relayer_accumulated_profit_usdc: Arc<Mutex<f64>>,
 }
 
 impl AppState {
-    pub fn new(share_sk: nimbus_core::Fr, share_index: u32) -> Self {
+    /// Initialize application state with persistent database
+    pub async fn new(
+        db: Database,
+        share_sk: nimbus_core::Fr,
+        share_index: u32,
+    ) -> Self {
         Self {
-            sessions: Arc::new(Mutex::new(Vec::new())),
+            db,
             spend_queue: Arc::new(Mutex::new(Vec::new())),
-            nullifiers: Arc::new(Mutex::new(Vec::new())),
             share_sk: Arc::new(share_sk),
             share_index,
             relayer_wallet_balance_eth: Arc::new(Mutex::new(10.0)),

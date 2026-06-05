@@ -7,19 +7,30 @@ pub async fn handle_spend(
     axum::extract::State(state): axum::extract::State<AppState>,
     Json(payload): Json<SpendRequest>,
 ) -> Json<SpendResponse> {
-    let mut queue = state.spend_queue.lock().await;
-    
-    // Check if nullifier has already been processed (on-chain check)
-    let nulls = state.nullifiers.lock().await;
-    if nulls.contains(&payload.nullifier) {
-        return Json(SpendResponse {
-            status: "REJECTED".to_string(),
-            message: "Double-spending detected. Nullifier already exists.".to_string(),
-            queue_position: 0,
-        });
+    // Check if nullifier has already been spent (double-spend prevention)
+    match state.db.is_nullifier_spent(&payload.nullifier).await {
+        Ok(true) => {
+            return Json(SpendResponse {
+                status: "REJECTED".to_string(),
+                message: "Double-spending detected. Nullifier already exists.".to_string(),
+                queue_position: 0,
+            });
+        }
+        Ok(false) => {
+            // Nullifier not spent, proceed
+        }
+        Err(e) => {
+            eprintln!("RELAYER ERROR: Database nullifier check failed: {}", e);
+            return Json(SpendResponse {
+                status: "ERROR".to_string(),
+                message: "Database error".to_string(),
+                queue_position: 0,
+            });
+        }
     }
 
     // Push request to batch queue
+    let mut queue = state.spend_queue.lock().await;
     let position = queue.len() + 1;
     queue.push(payload.clone());
 
@@ -103,13 +114,24 @@ pub async fn process_spend_batch(state: &AppState) {
         queue.shuffle(&mut rng);
         println!("  Anonymization: Shuffled batch to break timing correlation.");
     }
-
-    let mut nulls = state.nullifiers.lock().await;
     
     // Simulate transaction submission on-chain
     for request in queue.iter() {
-        // Register nullifiers to prevent double spend
-        nulls.push(request.nullifier.clone());
+        // Register nullifier in persistent database to prevent double-spend
+        match state.db.check_and_insert_nullifier(&request.nullifier, None).await {
+            Ok(true) => {
+                // Nullifier successfully registered (first time spend)
+            }
+            Ok(false) => {
+                // This should never happen as we check in handle_spend, but log it
+                eprintln!("WARNING: Nullifier {} already exists during batch processing!", &request.nullifier[0..12]);
+                continue;
+            }
+            Err(e) => {
+                eprintln!("ERROR: Failed to register nullifier {}: {}", &request.nullifier[0..12], e);
+                continue;
+            }
+        }
 
         // Deduct gas cost + markup from user's spend amount (converted to USDC base units: USD * 1_000_000)
         let charge_usdc_units = (total_charge_per_tx_usd * 1_000_000.0) as u64;

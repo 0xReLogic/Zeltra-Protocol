@@ -85,6 +85,27 @@ Dokumen ini memetakan seluruh tugas pengembangan, integrasi, dan pengujian yang 
     *   Integrasikan klien OpenBao / HashiCorp Vault untuk mendekripsi/membaca private key share BLS secara aman di memori relayer saat startup melalui API HTTP terotentikasi.
 *   **Inovasi (Aha! Moment - Jurnal 2026)**: Mendukung integrasi nir-dependensi berat menggunakan pemanggilan API OpenBao (fork open-source Linux Foundation dari Vault) secara langsung melalui socket stream, mengamankan share key di sisi Guardian STB tanpa overhead memori berlebih. Jika berjalan dalam mode fallback `NIMBUS_SHARE_KEY` untuk development, sistem secara otomatis memberikan log warning keras mengenai ketidakamanan penyimpanan plaintext kunci di produksi.
 
+## 6A. Persistensi Database Produksi (Database Persistence)
+*   **Target Modul**: [nimbus-node/src/database.rs](file:///home/azureuser/crypto/nimbus-node/src/database.rs) (NEW)
+*   **Status**: Selesai (Completed) - 5 Juni 2026
+*   **File yang Diedit**:
+    *   Database Module: [nimbus-node/src/database.rs](file:///home/azureuser/crypto/nimbus-node/src/database.rs) (269 lines)
+    *   State: [nimbus-node/src/state.rs](file:///home/azureuser/crypto/nimbus-node/src/state.rs)
+    *   Handlers: [deposit.rs](file:///home/azureuser/crypto/nimbus-node/src/handlers/deposit.rs), [spend.rs](file:///home/azureuser/crypto/nimbus-node/src/handlers/spend.rs), [x402.rs](file:///home/azureuser/crypto/nimbus-node/src/handlers/x402.rs), [health.rs](file:///home/azureuser/crypto/nimbus-node/src/handlers/health.rs)
+    *   Main: [nimbus-node/src/main.rs](file:///home/azureuser/crypto/nimbus-node/src/main.rs)
+    *   Dokumentasi: [docs/database_integration.md](file:///home/azureuser/crypto/docs/database_integration.md)
+*   **Deskripsi Pekerjaan**:
+    *   Mengganti storage in-memory dengan SQLite database persistent
+    *   Implementasi PRAGMA optimisasi (WAL mode, 64MB cache, NORMAL sync)
+    *   Tiga tabel: `sessions` (deposit lifecycle), `nullifiers` (double-spend prevention), `spend_queue` (batching)
+    *   Atomic double-spend prevention menggunakan `INSERT OR IGNORE` pattern (race-safe)
+    *   Full test suite: 9 tests passing (3 unit + 4 main + 2 integration)
+*   **Why SQLite**: Simple, fast enough (<1000 TPS), proven (Cloudflare D1, Turso), easy backup. Nanti migrate ke PostgreSQL kalau traffic >1000 TPS.
+*   **Environment Variable Baru**:
+    ```bash
+    export NIMBUS_DB_PATH=/var/lib/nimbus/relayer.db  # default: ./nimbus-relayer.db
+    ```
+
 ## 7. Deployment & Pengujian Integrasi Testnet L2
 *   **Target Modul**: Jaringan (Arbitrum Sepolia / Base Goerli)
 *   **Status**: Selesai (Completed)

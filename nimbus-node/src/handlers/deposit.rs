@@ -7,50 +7,73 @@ pub async fn handle_deposit(
     axum::extract::State(state): axum::extract::State<AppState>,
     Json(payload): Json<DepositRequest>,
 ) -> Json<DepositResponse> {
-    let mut sessions = state.sessions.lock().await;
+    // Store session in persistent database
+    let com_k_hex = hex::encode(&payload.com_k);
+    let client_address = format!("0x{:040x}", rand::random::<u128>()); // Mock client address
     
-    // Store session
-    sessions.push(Session {
-        session_id: payload.session_id.clone(),
-        com_k: payload.com_k,
-        amount: payload.amount,
-        resolved: false,
-        masking_key: None,
-    });
-
-    println!("RELAYER: Escrow deposit registered for Session ID: {}", payload.session_id);
-
-    Json(DepositResponse {
-        status: "SUCCESS".to_string(),
-        message: format!("Escrow registered for session {}", payload.session_id),
-    })
+    match state.db.insert_session(
+        &payload.session_id,
+        &com_k_hex,
+        payload.amount,
+        &client_address,
+    ).await {
+        Ok(true) => {
+            println!("RELAYER: Escrow deposit registered for Session ID: {}", payload.session_id);
+            Json(DepositResponse {
+                status: "SUCCESS".to_string(),
+                message: format!("Escrow registered for session {}", payload.session_id),
+            })
+        }
+        Ok(false) => {
+            println!("RELAYER: Duplicate session ID attempted: {}", payload.session_id);
+            Json(DepositResponse {
+                status: "ERROR".to_string(),
+                message: "Session ID already exists".to_string(),
+            })
+        }
+        Err(e) => {
+            eprintln!("RELAYER ERROR: Database insert failed: {}", e);
+            Json(DepositResponse {
+                status: "ERROR".to_string(),
+                message: "Database error".to_string(),
+            })
+        }
+    }
 }
 
 pub async fn handle_reveal(
     axum::extract::State(state): axum::extract::State<AppState>,
     Json(payload): Json<RevealRequest>,
 ) -> Json<RevealResponse> {
-    let mut sessions = state.sessions.lock().await;
+    let masking_key_hex = hex::encode(&payload.masking_key_k);
     
-    if let Some(session) = sessions.iter_mut().find(|s| s.session_id == payload.session_id) {
-        // In production, we would perform BLS12-381 G2 MSM: k * pk_iss == com_k
-        // For simulation, we log the verification success
-        session.resolved = true;
-        session.masking_key = Some(payload.masking_key_k.clone());
-        
-        println!("RELAYER: Masking key revealed for Session ID: {}", payload.session_id);
-        println!("  Verifying k * pk_iss == com_k ... VALID");
+    match state.db.resolve_session(&payload.session_id, &masking_key_hex).await {
+        Ok(true) => {
+            // In production, we would perform BLS12-381 G2 MSM: k * pk_iss == com_k
+            // For simulation, we log the verification success
+            println!("RELAYER: Masking key revealed for Session ID: {}", payload.session_id);
+            println!("  Verifying k * pk_iss == com_k ... VALID");
 
-        return Json(RevealResponse {
-            status: "SUCCESS".to_string(),
-            valid: true,
-            message: "Masking key verified and published on-chain. Escrow released.".to_string(),
-        });
+            Json(RevealResponse {
+                status: "SUCCESS".to_string(),
+                valid: true,
+                message: "Masking key verified and published on-chain. Escrow released.".to_string(),
+            })
+        }
+        Ok(false) => {
+            Json(RevealResponse {
+                status: "ERROR".to_string(),
+                valid: false,
+                message: "Session ID not found or already resolved".to_string(),
+            })
+        }
+        Err(e) => {
+            eprintln!("RELAYER ERROR: Database resolve failed: {}", e);
+            Json(RevealResponse {
+                status: "ERROR".to_string(),
+                valid: false,
+                message: "Database error".to_string(),
+            })
+        }
     }
-
-    Json(RevealResponse {
-        status: "ERROR".to_string(),
-        valid: false,
-        message: "Session ID not found".to_string(),
-    })
 }
