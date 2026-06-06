@@ -26,29 +26,48 @@ impl Nimbus {
         recipient: Address,
         amount: U256,
     ) -> Result<bool, Vec<u8>> {
+        // 1. CHECKS
         self.check_not_paused()?;
-        // 1. Check double spend (Nullifier)
+        
+        // Enforce minimum transaction size of 1 USDC/stablecoin (1,000,000 units)
+        let min_amount = U256::from(1_000_000);
+        if amount < min_amount {
+            return Err(b"AMOUNT_TOO_SMALL".to_vec());
+        }
+        
+        // Check double spend (Nullifier)
         if self.nullifiers.get(nullifier) {
             return Ok(false);
         }
 
-        // Calculate standard redemption/withdrawal fee of 0.15% (amount * 15 / 10000)
-        let base_fee = amount * U256::from(15) / U256::from(10000);
+        // Calculate standard redemption/withdrawal fee of 0.15% (amount * 15 / 10000, round up)
+        let base_fee = (amount.checked_mul(U256::from(15))
+            .ok_or_else(|| b"BASE_FEE_MUL_OVERFLOW".to_vec())? + U256::from(9999)) / U256::from(10000);
         
         // Calculate dynamic premium if Fase 2 or 3 is active
         let premium = self.calculate_fast_path_premium(amount)?;
         
         // fee_recipient gets base_fee + 20% of premium
-        let protocol_share = base_fee + (premium * U256::from(20) / U256::from(100));
-        let payout = amount - protocol_share;
+        let premium_share = (premium.checked_mul(U256::from(20))
+            .ok_or_else(|| b"PREMIUM_SHARE_MUL_OVERFLOW".to_vec())? + U256::from(99)) / U256::from(100);
+            
+        let protocol_share = base_fee.checked_add(premium_share)
+            .ok_or_else(|| b"PROTOCOL_SHARE_OVERFLOW".to_vec())?;
+            
+        if amount < protocol_share {
+            return Err(b"AMOUNT_LESS_THAN_FEES".to_vec());
+        }
+        let payout = amount.checked_sub(protocol_share)
+            .ok_or_else(|| b"PAYOUT_UNDERFLOW".to_vec())?;
 
         #[cfg(test)]
         {
+            // 2. EFFECTS
             let principal = self.total_deposited_principal.get();
-            if principal >= amount {
-                self.total_deposited_principal.set(principal - amount);
-            }
+            let new_principal = principal.checked_sub(amount).unwrap_or(U256::ZERO);
+            self.total_deposited_principal.set(new_principal);
             self.nullifiers.insert(nullifier, true);
+            
             // Track epoch volume for dynamic rebalancing
             self.update_epoch_and_rebalance_ratio(amount)?;
             Ok(true)
@@ -56,11 +75,12 @@ impl Nimbus {
 
         #[cfg(not(test))]
         {
-            // 2. Fetch G2 Generator for pairing base point
+            // 2. CHECKS (Signature verification)
+            // Fetch G2 Generator for pairing base point
             let g2_gen = G2Affine::generator();
             let g2_gen_evm = to_evm_g2(&g2_gen);
 
-            // 3. Construct input payload for bls12_pairing_check (address 0x0f)
+            // Construct input payload for bls12_pairing_check (address 0x0f)
             // Format: [ (G1_point_1, G2_point_1), (G1_point_2, G2_point_2) ]
             // G1_point: 128 bytes, G2_point: 256 bytes. Total = 768 bytes
             let mut input = Vec::with_capacity(768);
@@ -75,18 +95,19 @@ impl Nimbus {
                     .call(BLS12_PAIRING_CHECK, &input)
             }.map_err(|_| b"PAIRING_PRECOMPILE_CALL_FAILED".to_vec())?;
 
-            // 4. Verify output (true if last byte is 1)
+            // Verify output (true if last byte is 1)
             if output.len() == 32 && output[31] == 1 {
+                // 3. EFFECTS
                 self.nullifiers.insert(nullifier, true);
                 
                 let principal = self.total_deposited_principal.get();
-                if principal >= amount {
-                    self.total_deposited_principal.set(principal - amount);
-                }
+                let new_principal = principal.checked_sub(amount).unwrap_or(U256::ZERO);
+                self.total_deposited_principal.set(new_principal);
                 
                 // Track epoch volume for dynamic rebalancing
                 self.update_epoch_and_rebalance_ratio(amount)?;
                 
+                // 4. INTERACTIONS
                 self.ensure_liquidity(amount)?;
                 
                 let stablecoin_address = self.stablecoin.get();
@@ -138,11 +159,16 @@ impl Nimbus {
             return Ok(false);
         }
 
-        // Calculate payout (net after fees)
-        let base_fee = amount * U256::from(15) / U256::from(10000);
+        // Calculate payout (net after fees) using the same safe round-up math as spend()
+        let base_fee = (amount.checked_mul(U256::from(15))
+            .ok_or_else(|| b"BASE_FEE_MUL_OVERFLOW".to_vec())? + U256::from(9999)) / U256::from(10000);
         let premium = self.calculate_fast_path_premium(amount)?;
-        let protocol_share = base_fee + (premium * U256::from(20) / U256::from(100));
-        let payout = amount - protocol_share;
+        let premium_share = (premium.checked_mul(U256::from(20))
+            .ok_or_else(|| b"PREMIUM_SHARE_MUL_OVERFLOW".to_vec())? + U256::from(99)) / U256::from(100);
+        let protocol_share = base_fee.checked_add(premium_share)
+            .ok_or_else(|| b"PROTOCOL_SHARE_OVERFLOW".to_vec())?;
+        let payout = amount.checked_sub(protocol_share)
+            .ok_or_else(|| b"PAYOUT_UNDERFLOW".to_vec())?;
 
         #[cfg(test)]
         {

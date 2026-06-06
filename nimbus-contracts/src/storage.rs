@@ -53,6 +53,18 @@ sol_storage! {
 
         // --- Polymarket CTF Fallback (Roadmap Item 3) ---
         mapping(bytes32 => uint256) failed_intent_refunds;
+
+        // --- Two-Step Governance & Timelocked Parameter Changes (Issue 10) ---
+        address pending_owner;
+        address proposed_fee_recipient;
+        uint256 fee_recipient_eta;
+        uint256 proposed_fast_path_phase;
+        uint256 fast_path_phase_eta;
+        address proposed_aave_pool;
+        address proposed_a_token;
+        uint256 aave_params_eta;
+        address proposed_rwa_token;
+        uint256 rwa_token_eta;
     }
 }
 

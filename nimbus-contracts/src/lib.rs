@@ -28,11 +28,14 @@ pub use constants::*;
 #[public]
 impl Nimbus {
     /// Initialize the contract and set the owner, stablecoin, and fee recipient addresses.
-    pub fn init(&mut self, stablecoin_addr: Address, fee_recipient_addr: Address) -> Result<(), Vec<u8>> {
+    pub fn init(&mut self, owner: Address, stablecoin_addr: Address, fee_recipient_addr: Address) -> Result<(), Vec<u8>> {
         if self.owner.get() != Address::ZERO {
             return Err(b"ALREADY_INITIALIZED".to_vec());
         }
-        self.owner.set(self.msg_sender());
+        if owner == Address::ZERO {
+            return Err(b"INVALID_OWNER".to_vec());
+        }
+        self.owner.set(owner);
         self.paused.set(false);
         self.stablecoin.set(stablecoin_addr);
         self.fee_recipient.set(fee_recipient_addr);
@@ -52,9 +55,52 @@ impl Nimbus {
         Ok(self.fee_recipient.get())
     }
 
-    pub fn set_fee_recipient(&mut self, recipient: Address) -> Result<(), Vec<u8>> {
+    // --- Two-Step Governance (Issue 10) ---
+
+    pub fn propose_owner(&mut self, new_owner: Address) -> Result<(), Vec<u8>> {
         self.check_owner()?;
+        if new_owner == Address::ZERO {
+            return Err(b"INVALID_NEW_OWNER".to_vec());
+        }
+        self.pending_owner.set(new_owner);
+        Ok(())
+    }
+
+    pub fn claim_ownership(&mut self) -> Result<(), Vec<u8>> {
+        let pending = self.pending_owner.get();
+        if pending != self.msg_sender() {
+            return Err(b"NOT_PENDING_OWNER".to_vec());
+        }
+        self.owner.set(pending);
+        self.pending_owner.set(Address::ZERO);
+        Ok(())
+    }
+
+    // --- Timelocked Admin Parameter Changes (Issue 10) ---
+
+    pub fn propose_fee_recipient(&mut self, recipient: Address) -> Result<(), Vec<u8>> {
+        self.check_owner()?;
+        if recipient == Address::ZERO {
+            return Err(b"INVALID_RECIPIENT".to_vec());
+        }
+        self.proposed_fee_recipient.set(recipient);
+        self.fee_recipient_eta.set(U256::from(self.block_timestamp() + 86400));
+        Ok(())
+    }
+
+    pub fn execute_fee_recipient(&mut self) -> Result<(), Vec<u8>> {
+        self.check_owner()?;
+        let eta = self.fee_recipient_eta.get();
+        if eta == U256::ZERO {
+            return Err(b"NO_PROPOSAL_ACTIVE".to_vec());
+        }
+        let current_time = U256::from(self.block_timestamp());
+        if current_time < eta {
+            return Err(b"TIMELOCK_NOT_EXPIRED".to_vec());
+        }
+        let recipient = self.proposed_fee_recipient.get();
         self.fee_recipient.set(recipient);
+        self.fee_recipient_eta.set(U256::ZERO);
         Ok(())
     }
 
@@ -62,13 +108,29 @@ impl Nimbus {
         Ok(self.fast_path_phase.get())
     }
 
-    pub fn set_fast_path_phase(&mut self, phase: U256) -> Result<(), Vec<u8>> {
+    pub fn propose_fast_path_phase(&mut self, phase: U256) -> Result<(), Vec<u8>> {
         self.check_owner()?;
         if phase < U256::from(1) || phase > U256::from(3) {
             return Err(b"INVALID_PHASE".to_vec());
         }
-        // REMINDER AI / DEVELOPERS: Only change phase from 1 to 2/3 when Treasury is funded or LP pool cap logic is ready to deploy.
+        self.proposed_fast_path_phase.set(phase);
+        self.fast_path_phase_eta.set(U256::from(self.block_timestamp() + 86400));
+        Ok(())
+    }
+
+    pub fn execute_fast_path_phase(&mut self) -> Result<(), Vec<u8>> {
+        self.check_owner()?;
+        let eta = self.fast_path_phase_eta.get();
+        if eta == U256::ZERO {
+            return Err(b"NO_PROPOSAL_ACTIVE".to_vec());
+        }
+        let current_time = U256::from(self.block_timestamp());
+        if current_time < eta {
+            return Err(b"TIMELOCK_NOT_EXPIRED".to_vec());
+        }
+        let phase = self.proposed_fast_path_phase.get();
         self.fast_path_phase.set(phase);
+        self.fast_path_phase_eta.set(U256::ZERO);
         Ok(())
     }
 
@@ -90,16 +152,52 @@ impl Nimbus {
         Ok(())
     }
 
-    pub fn set_aave_params(&mut self, pool: Address, a_token: Address) -> Result<(), Vec<u8>> {
+    pub fn propose_aave_params(&mut self, pool: Address, a_token: Address) -> Result<(), Vec<u8>> {
         self.check_owner()?;
-        self.aave_pool.set(pool);
-        self.a_token.set(a_token);
+        self.proposed_aave_pool.set(pool);
+        self.proposed_a_token.set(a_token);
+        self.aave_params_eta.set(U256::from(self.block_timestamp() + 86400));
         Ok(())
     }
 
-    pub fn set_rwa_token(&mut self, rwa: Address) -> Result<(), Vec<u8>> {
+    pub fn execute_aave_params(&mut self) -> Result<(), Vec<u8>> {
         self.check_owner()?;
+        let eta = self.aave_params_eta.get();
+        if eta == U256::ZERO {
+            return Err(b"NO_PROPOSAL_ACTIVE".to_vec());
+        }
+        let current_time = U256::from(self.block_timestamp());
+        if current_time < eta {
+            return Err(b"TIMELOCK_NOT_EXPIRED".to_vec());
+        }
+        let pool = self.proposed_aave_pool.get();
+        let a_token = self.proposed_a_token.get();
+        self.aave_pool.set(pool);
+        self.a_token.set(a_token);
+        self.aave_params_eta.set(U256::ZERO);
+        Ok(())
+    }
+
+    pub fn propose_rwa_token(&mut self, rwa: Address) -> Result<(), Vec<u8>> {
+        self.check_owner()?;
+        self.proposed_rwa_token.set(rwa);
+        self.rwa_token_eta.set(U256::from(self.block_timestamp() + 86400));
+        Ok(())
+    }
+
+    pub fn execute_rwa_token(&mut self) -> Result<(), Vec<u8>> {
+        self.check_owner()?;
+        let eta = self.rwa_token_eta.get();
+        if eta == U256::ZERO {
+            return Err(b"NO_PROPOSAL_ACTIVE".to_vec());
+        }
+        let current_time = U256::from(self.block_timestamp());
+        if current_time < eta {
+            return Err(b"TIMELOCK_NOT_EXPIRED".to_vec());
+        }
+        let rwa = self.proposed_rwa_token.get();
         self.rwa_token.set(rwa);
+        self.rwa_token_eta.set(U256::ZERO);
         Ok(())
     }
 
@@ -391,7 +489,7 @@ mod tests {
     #[test]
     fn test_ccip_receive_decoding_and_execution() {
         let mut payload = vec![0u8; 648];
-        let amount = U256::from(1000);
+        let amount = U256::from(1_000_000);
         payload[616..648].copy_from_slice(&amount.to_be_bytes::<32>());
         
         let mut nimbus_contract = Nimbus::default();
@@ -416,11 +514,14 @@ mod tests {
         set_msg_sender(owner);
         
         let mut contract = Nimbus::default();
+        // Init with ZERO owner should fail
+        assert_eq!(contract.init(Address::ZERO, Address::ZERO, Address::ZERO), Err(b"INVALID_OWNER".to_vec()));
+
         // First init should succeed
-        assert!(contract.init(Address::ZERO, Address::ZERO).is_ok());
+        assert!(contract.init(owner, Address::ZERO, Address::ZERO).is_ok());
         
         // Second init should fail
-        assert_eq!(contract.init(Address::ZERO, Address::ZERO), Err(b"ALREADY_INITIALIZED".to_vec()));
+        assert_eq!(contract.init(owner, Address::ZERO, Address::ZERO), Err(b"ALREADY_INITIALIZED".to_vec()));
     }
 
     #[test]
@@ -431,7 +532,7 @@ mod tests {
         
         set_msg_sender(owner);
         let mut contract = Nimbus::default();
-        contract.init(Address::ZERO, Address::ZERO).unwrap();
+        contract.init(owner, Address::ZERO, Address::ZERO).unwrap();
         
         // Non-owner pausing should fail
         set_msg_sender(non_owner);
@@ -459,13 +560,13 @@ mod tests {
         set_msg_sender(owner);
         
         let mut contract = Nimbus::default();
-        contract.init(Address::ZERO, Address::ZERO).unwrap();
+        contract.init(owner, Address::ZERO, Address::ZERO).unwrap();
         contract.pause().unwrap();
         
         // Try guarded operations
         let sid = FixedBytes::ZERO;
         assert_eq!(
-            contract.deposit(sid, vec![], U256::from(100)),
+            contract.deposit(sid, vec![], U256::from(1_000_000)),
             Err(b"CONTRACT_PAUSED".to_vec())
         );
         assert_eq!(
@@ -500,14 +601,14 @@ mod tests {
         
         set_msg_sender(owner);
         let mut contract = Nimbus::default();
-        contract.init(Address::ZERO, Address::ZERO).unwrap();
+        contract.init(owner, Address::ZERO, Address::ZERO).unwrap();
         
         let sid = FixedBytes::repeat_byte(0xab);
         
-        // Deposit
+        // Deposit (must be >= 1_000_000)
         set_msg_sender(client);
         set_block_timestamp(1000);
-        contract.deposit(sid, vec![], U256::from(500)).unwrap();
+        contract.deposit(sid, vec![], U256::from(1_000_000)).unwrap();
         
         // Claim refund from other address should fail
         set_msg_sender(other);
@@ -534,7 +635,7 @@ mod tests {
         
         set_msg_sender(owner);
         let mut contract = Nimbus::default();
-        contract.init(Address::ZERO, Address::ZERO).unwrap();
+        contract.init(owner, Address::ZERO, Address::ZERO).unwrap();
         
         // Non-owner should not be able to register clean root
         set_msg_sender(non_owner);
@@ -552,23 +653,27 @@ mod tests {
         set_msg_sender(owner);
         
         let mut contract = Nimbus::default();
-        contract.init(Address::ZERO, Address::ZERO).unwrap();
+        contract.init(owner, Address::ZERO, Address::ZERO).unwrap();
         
         // Default phase should be 1
         assert_eq!(contract.fast_path_phase().unwrap(), U256::from(1));
         
         // Fase 1: Premium is always 0
-        let amount = U256::from(1000000); // 1,000,000 (e.g. 1 USDC)
+        let amount = U256::from(1_000_000); // 1,000,000 (e.g. 1 USDC)
         assert_eq!(contract.calculate_fast_path_premium(amount).unwrap(), U256::ZERO);
         
-        // Change to Fase 2
-        contract.set_fast_path_phase(U256::from(2)).unwrap();
+        // Change to Fase 2 via propose & execute
+        contract.propose_fast_path_phase(U256::from(2)).unwrap();
+        set_block_timestamp(86401);
+        contract.execute_fast_path_phase().unwrap();
         assert_eq!(contract.fast_path_phase().unwrap(), U256::from(2));
         // Fase 2: 0.05% flat premium => 1,000,000 * 5 / 10,000 = 500
         assert_eq!(contract.calculate_fast_path_premium(amount).unwrap(), U256::from(500));
         
-        // Change to Fase 3
-        contract.set_fast_path_phase(U256::from(3)).unwrap();
+        // Change to Fase 3 via propose & execute
+        contract.propose_fast_path_phase(U256::from(3)).unwrap();
+        set_block_timestamp(86401 * 2);
+        contract.execute_fast_path_phase().unwrap();
         assert_eq!(contract.fast_path_phase().unwrap(), U256::from(3));
         
         // Fase 3 with zero liquidity should fail
@@ -601,7 +706,7 @@ mod tests {
         set_msg_sender(owner);
         
         let mut contract = Nimbus::default();
-        contract.init(Address::ZERO, Address::ZERO).unwrap();
+        contract.init(owner, Address::ZERO, Address::ZERO).unwrap();
         
         // Assert initial addresses
         assert_eq!(contract.aave_pool().unwrap(), Address::ZERO);
@@ -609,24 +714,28 @@ mod tests {
         assert_eq!(contract.rwa_token().unwrap(), Address::ZERO);
         assert_eq!(contract.total_deposited_principal().unwrap(), U256::ZERO);
         
-        // Test set params
+        // Test propose & execute params
         let pool = address!("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
         let a_token = address!("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb");
         let rwa = address!("cccccccccccccccccccccccccccccccccccccccc");
         
-        contract.set_aave_params(pool, a_token).unwrap();
-        contract.set_rwa_token(rwa).unwrap();
+        contract.propose_aave_params(pool, a_token).unwrap();
+        contract.propose_rwa_token(rwa).unwrap();
+        set_block_timestamp(86401);
+        contract.execute_aave_params().unwrap();
+        contract.execute_rwa_token().unwrap();
         
         assert_eq!(contract.aave_pool().unwrap(), pool);
         assert_eq!(contract.a_token().unwrap(), a_token);
         assert_eq!(contract.rwa_token().unwrap(), rwa);
         
-        // Test deposit increases principal
+        // Test deposit increases principal (must be >= 1_000_000)
         let sid = FixedBytes::repeat_byte(0xde);
-        contract.deposit(sid, vec![], U256::from(1000)).unwrap();
+        contract.deposit(sid, vec![], U256::from(2_000_000)).unwrap();
         
-        // 1000 - 0.1% (1) = 999 net
-        assert_eq!(contract.total_deposited_principal().unwrap(), U256::from(999));
+        // fee = (2,000,000 + 999) / 1000 = 2000
+        // net_amount = 2,000,000 - 2,000 = 1,998,000 net
+        assert_eq!(contract.total_deposited_principal().unwrap(), U256::from(1_998_000));
         
         // Test spend decreases principal
         let nullifier = FixedBytes::repeat_byte(0xef);
@@ -636,11 +745,11 @@ mod tests {
             vec![],
             vec![],
             Address::ZERO,
-            U256::from(100),
+            U256::from(1_000_000),
         ).unwrap();
         
         assert!(is_valid);
-        assert_eq!(contract.total_deposited_principal().unwrap(), U256::from(899));
+        assert_eq!(contract.total_deposited_principal().unwrap(), U256::from(998_000));
         
         // Test yield claim under test (where total assets = principal, so yield is 0)
         assert_eq!(contract.claim_accumulated_yield().unwrap(), U256::ZERO);
@@ -653,12 +762,12 @@ mod tests {
         set_msg_sender(owner);
         
         let mut contract = Nimbus::default();
-        contract.init(Address::ZERO, Address::ZERO).unwrap();
+        contract.init(owner, Address::ZERO, Address::ZERO).unwrap();
         
         let nullifier = FixedBytes::repeat_byte(0xd1);
         
         // Set principal
-        contract.deposit(FixedBytes::repeat_byte(0x99), vec![], U256::from(2000)).unwrap();
+        contract.deposit(FixedBytes::repeat_byte(0x99), vec![], U256::from(2_000_000)).unwrap();
         
         // Call spend_and_buy_shares with polymarket_ctf = Address::ZERO (which triggers mock fallback in tests)
         let success = contract.spend_and_buy_shares(
@@ -669,15 +778,15 @@ mod tests {
             Address::ZERO, // triggers fallback simulation in test block
             Address::ZERO,
             FixedBytes::ZERO,
-            U256::from(1000),
+            U256::from(1_000_000),
         ).unwrap();
         
         // Under our mock try-catch, it should return true (gracefully handled)
         assert!(success);
         
         // The net payout should be calculated:
-        // 1000 - 0.15% (1) = 999
-        let expected_payout = U256::from(999);
+        // 1,000,000 - base_fee = 1,000,000 - 1500 = 998,500
+        let expected_payout = U256::from(998_500);
         assert_eq!(contract.get_failed_intent_refund(nullifier).unwrap(), expected_payout);
         
         // Claim the refund to a recipient
@@ -698,13 +807,14 @@ mod tests {
     #[test]
     fn test_verify_compliance_flow() {
         reset_test_state();
+        let owner = address!("1111111111111111111111111111111111111111");
         let mut contract = Nimbus::default();
-        contract.init(Address::ZERO, Address::ZERO).unwrap();
+        contract.init(owner, Address::ZERO, Address::ZERO).unwrap();
 
         let root = FixedBytes::repeat_byte(0x11);
         let nullifier = FixedBytes::repeat_byte(0x22);
         let recipient = address!("3333333333333333333333333333333333333333");
-        let amount = U256::from(1000);
+        let amount = U256::from(1_000_000);
 
         // When root is not registered, verify_compliance should return Ok(false)
         let is_valid_unregistered = contract.verify_compliance(

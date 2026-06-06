@@ -13,7 +13,9 @@ impl Nimbus {
     /// Update the current epoch volume and recalculate the dynamic cash reserve ratio using a 7-epoch moving average.
     pub(crate) fn update_epoch_and_rebalance_ratio(&mut self, amount: U256) -> Result<(), Vec<u8>> {
         let current_vol = self.current_epoch_volume.get();
-        self.current_epoch_volume.set(current_vol + amount);
+        let new_vol = current_vol.checked_add(amount)
+            .ok_or_else(|| b"VOLUME_OVERFLOW".to_vec())?;
+        self.current_epoch_volume.set(new_vol);
 
         let current_time = U256::from(self.block_timestamp());
         let epoch_start = self.epoch_start_timestamp.get();
@@ -37,9 +39,12 @@ impl Nimbus {
             let mut count = U256::ZERO;
             let mut idx = start_idx;
             while idx <= epoch_id {
-                sum_vol += self.historical_epoch_volumes.get(idx);
-                count += U256::from(1);
-                idx += U256::from(1);
+                sum_vol = sum_vol.checked_add(self.historical_epoch_volumes.get(idx))
+                    .ok_or_else(|| b"SUM_VOLUME_OVERFLOW".to_vec())?;
+                count = count.checked_add(U256::from(1))
+                    .ok_or_else(|| b"COUNT_OVERFLOW".to_vec())?;
+                idx = idx.checked_add(U256::from(1))
+                    .ok_or_else(|| b"INDEX_OVERFLOW".to_vec())?;
             }
             
             let moving_average_volume = if count > U256::ZERO {
@@ -63,7 +68,9 @@ impl Nimbus {
 
             // Reset epoch parameters
             self.epoch_start_timestamp.set(current_time);
-            self.current_epoch_id.set(epoch_id + U256::from(1));
+            let next_epoch_id = epoch_id.checked_add(U256::from(1))
+                .ok_or_else(|| b"EPOCH_ID_OVERFLOW".to_vec())?;
+            self.current_epoch_id.set(next_epoch_id);
             self.current_epoch_volume.set(U256::ZERO);
         }
 
@@ -79,8 +86,10 @@ impl Nimbus {
             // Fase 1: Disabled (CCIP slow path only, zero premium)
             return Ok(U256::ZERO);
         } else if phase == U256::from(2) {
-            // Fase 2: Enabled via internal Treasury capital, flat 0.05% premium
-            let premium = amount * U256::from(5) / U256::from(10000);
+            // Fase 2: Enabled via internal Treasury capital, flat 0.05% premium (round up)
+            let premium = amount.checked_mul(U256::from(5))
+                .map(|v| (v + U256::from(9999)) / U256::from(10000))
+                .ok_or_else(|| b"PREMIUM_OVERFLOW".to_vec())?;
             return Ok(premium);
         } else if phase == U256::from(3) {
             // Fase 3: Public LP with Dynamic Cap and Congestion-based Pricing
@@ -89,20 +98,30 @@ impl Nimbus {
             if total == U256::ZERO {
                 return Err(b"ZERO_POOL_LIQUIDITY".to_vec());
             }
-            let new_utilized = utilized + amount;
+            let new_utilized = utilized.checked_add(amount)
+                .ok_or_else(|| b"UTILIZED_OVERFLOW".to_vec())?;
             // Enforce Dynamic Pool Cap: reject if it exceeds total liquidity (prevents exhaustion attacks)
             if new_utilized > total {
                 return Err(b"LP_POOL_EXHAUSTED_DYNAMIC_CAP".to_vec());
             }
             
             // Calculate utilization rate: U = (utilized * 10000) / total (in basis points)
-            let u_bps = (new_utilized * U256::from(10000)) / total;
+            let u_bps = new_utilized.checked_mul(U256::from(10000))
+                .map(|v| v / total)
+                .ok_or_else(|| b"UTILIZATION_RATE_OVERFLOW".to_vec())?;
             
             // Dynamic premium rate: base 5 bps (0.05%) up to max 15 bps (0.15%)
             // rate_bps = 5 + (10 * u_bps / 10000)
-            let rate_bps = U256::from(5) + (U256::from(10) * u_bps / U256::from(10000));
+            let rate_bps = U256::from(5).checked_add(
+                u_bps.checked_mul(U256::from(10))
+                    .map(|v| v / U256::from(10000))
+                    .ok_or_else(|| b"RATE_BPS_OVERFLOW".to_vec())?
+            ).ok_or_else(|| b"RATE_BPS_ADD_OVERFLOW".to_vec())?;
             
-            let premium = amount * rate_bps / U256::from(10000);
+            // Calculate premium (round up)
+            let premium = amount.checked_mul(rate_bps)
+                .map(|v| (v + U256::from(9999)) / U256::from(10000))
+                .ok_or_else(|| b"PREMIUM_EXCESSIVE".to_vec())?;
             return Ok(premium);
         }
         
@@ -121,14 +140,19 @@ impl Nimbus {
             
             // Read dynamic cash percentage (default 30, range 15-45)
             let cash_pct = self.target_cash_pct.get();
-            let non_cash_pct = U256::from(100) - cash_pct;
+            let non_cash_pct = U256::from(100).checked_sub(cash_pct)
+                .ok_or_else(|| b"CASH_PERCENTAGE_UNDERFLOW".to_vec())?;
             
             // Split non-cash portion 5:2 between Aave and RWA (≈71.4% / 28.6%)
-            // When cash=30 → Aave=50%, RWA=20% (original ratio preserved)
-            // When cash=45 → Aave=39.3%, RWA=15.7%
-            // When cash=15 → Aave=60.7%, RWA=24.3%
-            let aave_share = amount * non_cash_pct * U256::from(5) / (U256::from(100) * U256::from(7));
-            let rwa_share = amount * non_cash_pct * U256::from(2) / (U256::from(100) * U256::from(7));
+            let aave_share = amount.checked_mul(non_cash_pct)
+                .and_then(|v| v.checked_mul(U256::from(5)))
+                .map(|v| v / U256::from(700))
+                .ok_or_else(|| b"AAVE_SHARE_OVERFLOW".to_vec())?;
+                
+            let rwa_share = amount.checked_mul(non_cash_pct)
+                .and_then(|v| v.checked_mul(U256::from(2)))
+                .map(|v| v / U256::from(700))
+                .ok_or_else(|| b"RWA_SHARE_OVERFLOW".to_vec())?;
             
             // 1. Supply to Aave Pool V3
             let aave_pool_addr = self.aave_pool.get();
@@ -138,20 +162,19 @@ impl Nimbus {
                     .map_err(|e| e)?;
                 if success {
                     aave.supply(&mut *self, stablecoin_address, aave_share, this_address, 0)
-                        .unwrap_or(());
+                        .map_err(|e| e)?;
                 }
             }
             
             // 2. Supply to Ondo USDY / BlackRock BUIDL
             let rwa_token_addr = self.rwa_token.get();
             if rwa_token_addr != Address::ZERO && rwa_share > U256::ZERO {
-                // TODO: In mainnet deployment, add KYC allowlist verification/checking for RWA tokens (Ondo/BlackRock)
                 let rwa = IRwaToken::new(rwa_token_addr);
                 let success = erc20.approve(&mut *self, rwa_token_addr, rwa_share)
                     .map_err(|e| e)?;
                 if success {
                     rwa.deposit(&mut *self, rwa_share)
-                        .unwrap_or(U256::ZERO);
+                        .map_err(|e| e)?;
                 }
             }
         }
@@ -177,30 +200,31 @@ impl Nimbus {
                 return Ok(());
             }
             
-            let mut shortfall = required_amount - cash_balance;
+            let mut shortfall = required_amount.checked_sub(cash_balance)
+                .ok_or_else(|| b"SHORTFALL_UNDERFLOW".to_vec())?;
             
             // Tier 2: Withdraw from Aave Pool V3
             let aave_pool_addr = self.aave_pool.get();
             if aave_pool_addr != Address::ZERO {
                 let aave = IAavePool::new(aave_pool_addr);
-                let withdrawn = aave.withdraw(&mut *self, stablecoin_address, shortfall, this_address)
-                    .unwrap_or(U256::ZERO);
+                let _withdrawn = aave.withdraw(&mut *self, stablecoin_address, shortfall, this_address)
+                    .map_err(|e| e)?;
                 
                 cash_balance = erc20.balance_of(&mut *self, this_address)
                     .map_err(|e| e)?;
                 if cash_balance >= required_amount {
                     return Ok(());
                 }
-                shortfall = required_amount - cash_balance;
+                shortfall = required_amount.checked_sub(cash_balance)
+                    .ok_or_else(|| b"SHORTFALL_UNDERFLOW".to_vec())?;
             }
             
             // Tier 3: Redeem from RWA T-Bills (Ondo USDY / BlackRock BUIDL)
             let rwa_token_addr = self.rwa_token.get();
             if rwa_token_addr != Address::ZERO && shortfall > U256::ZERO {
-                // TODO: In mainnet deployment, integrate Chainlink oracle price feeds for Ondo USDY / BUIDL NAV calculation
                 let rwa = IRwaToken::new(rwa_token_addr);
                 let _redeemed = rwa.redeem(&mut *self, shortfall, shortfall)
-                    .unwrap_or(U256::ZERO);
+                    .map_err(|e| e)?;
                 
                 cash_balance = erc20.balance_of(&mut *self, this_address)
                     .map_err(|e| e)?;

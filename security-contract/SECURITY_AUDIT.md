@@ -50,7 +50,7 @@ The following vulnerabilities were identified based on latest security research 
 
 ## Critical Vulnerabilities Found
 
-### 1. CRITICAL: Uninitialized State in `init()` Function
+### 1. CRITICAL: Uninitialized State in `init()` Function [REMEDIATED]
 
 **Severity:** CRITICAL  
 **Location:** `nimbus-contracts/src/lib.rs:31-45`  
@@ -90,7 +90,7 @@ pub fn init(&mut self, stablecoin_addr: Address, fee_recipient_addr: Address) ->
 
 ---
 
-### 2. CRITICAL: State Consistency Violation in `deposit()`
+### 2. CRITICAL: State Consistency Violation in `deposit()` [REMEDIATED]
 
 **Severity:** CRITICAL  
 **Location:** `nimbus-contracts/src/deposit.rs:61-110`  
@@ -168,7 +168,7 @@ pub fn deposit(&mut self, sid: FixedBytes<32>, _com_k_bytes: Vec<u8>, amount: U2
 
 ---
 
-### 3. CRITICAL: State Consistency Violation in `reveal_mask_key()`
+### 3. CRITICAL: State Consistency Violation in `reveal_mask_key()` [REMEDIATED]
 
 **Severity:** CRITICAL  
 **Location:** `nimbus-contracts/src/deposit.rs:114-169`  
@@ -249,7 +249,7 @@ pub fn reveal_mask_key(
 
 ---
 
-### 4. CRITICAL: State Consistency Violation in `spend()`
+### 4. CRITICAL: State Consistency Violation in `spend()` [REMEDIATED]
 
 **Severity:** CRITICAL  
 **Location:** `nimbus-contracts/src/spend.rs:20-119`  
@@ -374,7 +374,7 @@ pub fn spend(
 
 ---
 
-### 5. HIGH: Integer Overflow in Epoch Tracking
+### 5. HIGH: Integer Overflow in Epoch Tracking [REMEDIATED]
 
 **Severity:** HIGH  
 **Location:** `nimbus-contracts/src/vault.rs:66`  
@@ -403,7 +403,7 @@ self.current_epoch_volume.set(U256::ZERO);
 
 ---
 
-### 6. HIGH: Precision Loss in Premium Calculation
+### 6. HIGH: Precision Loss in Premium Calculation [REMEDIATED]
 
 **Severity:** HIGH  
 **Location:** `nimbus-contracts/src/vault.rs:83, 105`  
@@ -467,7 +467,7 @@ This could be exploited for fee avoidance and potential liquidity exhaustion att
 
 ---
 
-### 7. HIGH: Precision Loss in Fee Calculations
+### 7. HIGH: Precision Loss in Fee Calculations [REMEDIATED]
 
 **Severity:** HIGH  
 **Location:** `nimbus-contracts/src/deposit.rs:67`, `nimbus-contracts/src/spend.rs:36`  
@@ -500,7 +500,7 @@ let base_fee = amount * U256::from(15) / U256::from(10000);  // TRUNCATION
 
 ---
 
-### 8. MEDIUM: Unsafe `unwrap()` in Type Conversions
+### 8. MEDIUM: Unsafe `unwrap()` in Type Conversions [REMEDIATED]
 
 **Severity:** MEDIUM  
 **Location:** `nimbus-contracts/src/types.rs:13, 29, 48`  
@@ -552,7 +552,7 @@ pub fn to_evm_scalar(scalar: &Fr) -> [u8; 32] {
 
 ---
 
-### 9. MEDIUM: Silent Failures in External Calls
+### 9. MEDIUM: Silent Failures in External Calls [REMEDIATED]
 
 **Severity:** MEDIUM  
 **Location:** `nimbus-contracts/src/vault.rs:140-142, 153-155`  
@@ -601,7 +601,7 @@ if rwa_token_addr != Address::ZERO && rwa_share > U256::ZERO {
 
 ---
 
-### 10. MEDIUM: Weak Access Control on Critical Functions
+### 10. MEDIUM: Weak Access Control on Critical Functions [REMEDIATED]
 
 **Severity:** MEDIUM  
 **Location:** `nimbus-contracts/src/lib.rs:55-73, 83-104`  
@@ -668,13 +668,13 @@ pub fn set_rwa_token(&mut self, rwa: Address) -> Result<(), Vec<u8>> {
 
 ## Summary of Findings
 
-| Severity | Count | Issues |
-|----------|-------|--------|
-| CRITICAL | 4 | Uninitialized state, State consistency violations (3) |
-| HIGH | 3 | Integer overflow, Precision loss (2) |
-| MEDIUM | 3 | Unsafe unwrap, Silent failures, Weak access control |
+| Severity | Count | Issues | Status |
+|----------|-------|--------|--------|
+| CRITICAL | 4 | Uninitialized state, State consistency violations (3) | **REMEDIATED** |
+| HIGH | 3 | Integer overflow, Precision loss (2) | **REMEDIATED** |
+| MEDIUM | 3 | Unsafe unwrap, Silent failures, Weak access control | **REMEDIATED** |
 
-**Total:** 10 vulnerabilities found
+**Total:** 10 vulnerabilities resolved
 
 ---
 

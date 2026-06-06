@@ -59,20 +59,42 @@ impl Nimbus {
 
     /// Deposit funds for atomic token issuance.
     pub fn deposit(&mut self, sid: FixedBytes<32>, _com_k_bytes: Vec<u8>, amount: U256) -> Result<(), Vec<u8>> {
+        // 1. CHECKS
         self.check_not_paused()?;
         
         let client = self.msg_sender();
         
-        // 1. Calculate deposit/minting fee of 0.1% (amount / 1000)
-        let fee = amount / U256::from(1000);
-        let net_amount = amount - fee;
+        // Enforce minimum transaction size of 1 USDC/stablecoin (1,000,000 units)
+        let min_amount = U256::from(1_000_000);
+        if amount < min_amount {
+            return Err(b"AMOUNT_TOO_SMALL".to_vec());
+        }
         
+        // Calculate deposit/minting fee of 0.1% (amount / 1000, round up)
+        let fee = (amount + U256::from(999)) / U256::from(1000);
+        let net_amount = amount.checked_sub(fee)
+            .ok_or_else(|| b"NET_AMOUNT_UNDERFLOW".to_vec())?;
+        
+        // 2. EFFECTS
+        self.session_client.insert(sid, client);
+        self.session_amount.insert(sid, net_amount);
+        self.session_resolved.insert(sid, false);
+        self.session_timestamp.insert(sid, U256::from(self.block_timestamp()));
+
+        let principal = self.total_deposited_principal.get();
+        let new_principal = principal.checked_add(net_amount)
+            .ok_or_else(|| b"PRINCIPAL_OVERFLOW".to_vec())?;
+        self.total_deposited_principal.set(new_principal);
+
+        // Track epoch volume for dynamic rebalancing (7-epoch moving average)
+        self.update_epoch_and_rebalance_ratio(net_amount)?;
+
+        // 3. INTERACTIONS
         #[cfg(not(test))]
         {
-            // 2. Transfer full amount from client to this contract
+            // Transfer full amount from client to this contract
             let stablecoin_address = self.stablecoin.get();
             let erc20 = IErc20::new(stablecoin_address);
-            
             let this_address = stylus_sdk::contract::address();
             
             // Call transferFrom to transfer the collateral from user to this contract
@@ -82,7 +104,7 @@ impl Nimbus {
                 return Err(b"TRANSFER_FROM_FAILED".to_vec());
             }
             
-            // 3. Send 0.1% fee to fee_recipient
+            // Send 0.1% fee to fee_recipient
             if fee > U256::ZERO {
                 let recipient = self.fee_recipient.get();
                 let fee_success = erc20.transfer(&mut *self, recipient, fee)
@@ -93,18 +115,7 @@ impl Nimbus {
             }
         }
         
-        self.session_client.insert(sid, client);
-        self.session_amount.insert(sid, net_amount);
-        self.session_resolved.insert(sid, false);
-        self.session_timestamp.insert(sid, U256::from(self.block_timestamp()));
-
-        let principal = self.total_deposited_principal.get();
-        self.total_deposited_principal.set(principal + net_amount);
-
         self.allocate_reserves(net_amount)?;
-
-        // Track epoch volume for dynamic rebalancing (7-epoch moving average)
-        self.update_epoch_and_rebalance_ratio(net_amount)?;
 
         Ok(())
     }
@@ -137,16 +148,17 @@ impl Nimbus {
 
         // Check if output equals com_k_bytes
         if result == com_k_bytes {
+            // 1. EFFECTS
             self.session_resolved.insert(sid, true);
             
             let amount = self.session_amount.get(sid);
             let recipient = self.msg_sender();
             
             let principal = self.total_deposited_principal.get();
-            if principal >= amount {
-                self.total_deposited_principal.set(principal - amount);
-            }
+            let new_principal = principal.checked_sub(amount).unwrap_or(U256::ZERO);
+            self.total_deposited_principal.set(new_principal);
             
+            // 2. INTERACTIONS
             if amount > U256::ZERO {
                 self.ensure_liquidity(amount)?;
                 
