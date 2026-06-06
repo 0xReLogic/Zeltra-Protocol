@@ -88,6 +88,7 @@
 ## 1. CRITICAL: Insecure Default Key Fallback
 
 **Severity:** CRITICAL  
+**Status:** **REMEDIATED (6 Juni 2026)**
 **Location:** `nimbus-node/src/kms.rs:79-81`  
 **Category:** Secrets Management / Private Key Handling  
 **Source:** JumpServer Secrets Management Best Practices 2026
@@ -188,6 +189,7 @@ let app = Router::new()
 ## 4. HIGH: In-Memory Nullifier Storage (Lost on Restart)
 
 **Severity:** HIGH  
+**Status:** **REMEDIATED (6 Juni 2026)**
 **Location:** `nimbus-node/src/state.rs:13-15`  
 **Category:** State Persistence / Replay Attack Prevention  
 **Source:** Hacken Blockchain Security Vulnerabilities
@@ -262,6 +264,7 @@ for request in queue.iter() {
 ## 6. HIGH: No RPC Provider Fallback or Retry Logic
 
 **Severity:** HIGH  
+**Status:** **REMEDIATED (6 Juni 2026)**
 **Location:** `nimbus-node/src/http.rs:5-39, 41-86`  
 **Category:** RPC Failure Handling / Resilience  
 **Source:** Beltsys Labs: What Is RPC in Blockchain 2026
@@ -352,6 +355,7 @@ pub async fn handle_deposit(
 ## 8. MEDIUM: Hardcoded Gas Prices (Economic Manipulation Risk)
 
 **Severity:** MEDIUM  
+**Status:** **REMEDIATED (6 Juni 2026)**
 **Location:** `nimbus-node/src/handlers/spend.rs:54-59`  
 **Category:** Economic Exploitation / Oracle Manipulation  
 **Source:** Cube Exchange: Oracle Manipulation
@@ -468,6 +472,7 @@ let net_payout = if request.amount >= charge_usdc_units {
 ## 11. MEDIUM: No Transaction Deduplication Across Restarts
 
 **Severity:** MEDIUM  
+**Status:** **REMEDIATED (6 Juni 2026)**
 **Location:** `nimbus-node/src/handlers/spend.rs:10-20`  
 **Category:** State Consistency / Replay Attack  
 **Source:** Hacken: Flash Loan Attacks

@@ -17,33 +17,58 @@ pub struct EvmClient {
 
 impl EvmClient {
     pub async fn new(rpc_url: &str, private_key: &str, contract_address: &str) -> Result<Self> {
-        let ws = WsConnect::new(rpc_url);
-        
         let signer = PrivateKeySigner::from_str(private_key)
             .context("Private key invalid")?;
         
         let signer_address = signer.address();
         let wallet = EthereumWallet::from(signer.clone());
         
-        let provider = ProviderBuilder::new()
-            .wallet(wallet)
-            .connect_ws(ws)
-            .await
-            .context("Gagal connect ke RPC primary")?;
+        // Dynamically choose between WebSocket and HTTP based on URL scheme
+        let provider = if rpc_url.starts_with("ws://") || rpc_url.starts_with("wss://") {
+            let ws = WsConnect::new(rpc_url);
+            let p = ProviderBuilder::new()
+                .wallet(wallet.clone())
+                .connect_ws(ws)
+                .await
+                .context("Gagal connect ke RPC primary via WebSocket")?;
+            DynProvider::new(p)
+        } else {
+            let url = rpc_url.parse::<alloy::transports::http::reqwest::Url>()
+                .context("Invalid HTTP RPC URL")?;
+            let p = ProviderBuilder::new()
+                .wallet(wallet.clone())
+                .connect_http(url);
+            DynProvider::new(p)
+        };
 
         // Fallback provider (opsional, dari env var NIMBUS_RPC_FALLBACK_URL)
         let fallback_provider = if let Ok(fallback_url) = std::env::var("NIMBUS_RPC_FALLBACK_URL") {
-            let fallback_ws = WsConnect::new(&fallback_url);
             let fallback_wallet = EthereumWallet::from(signer);
             
-            match ProviderBuilder::new()
-                .wallet(fallback_wallet)
-                .connect_ws(fallback_ws)
-                .await
-            {
+            let p_res = if fallback_url.starts_with("ws://") || fallback_url.starts_with("wss://") {
+                let fallback_ws = WsConnect::new(&fallback_url);
+                ProviderBuilder::new()
+                    .wallet(fallback_wallet)
+                    .connect_ws(fallback_ws)
+                    .await
+                    .map(DynProvider::new)
+                    .map_err(|e| anyhow::anyhow!("Fallback WS failed: {}", e))
+            } else {
+                match fallback_url.parse::<alloy::transports::http::reqwest::Url>() {
+                    Ok(url) => {
+                        let p = ProviderBuilder::new()
+                            .wallet(fallback_wallet)
+                            .connect_http(url);
+                        Ok(DynProvider::new(p))
+                    }
+                    Err(e) => Err(anyhow::anyhow!("Invalid fallback HTTP URL: {}", e))
+                }
+            };
+
+            match p_res {
                 Ok(p) => {
                     println!("  Fallback RPC: {}", fallback_url);
-                    Some(DynProvider::new(p))
+                    Some(p)
                 }
                 Err(e) => {
                     eprintln!("WARNING: Fallback RPC gagal connect: {}", e);
@@ -58,7 +83,7 @@ impl EvmClient {
             .context("Contract address invalid")?;
 
         Ok(Self {
-            provider: DynProvider::new(provider),
+            provider,
             fallback_provider,
             signer_address,
             contract_address: contract_addr,
@@ -133,7 +158,7 @@ impl EvmClient {
         amount: u64,
     ) -> Result<String> {
         println!("RELAYER: Broadcasting spend transaction");
-        println!("  Nullifier   : {}...", &nullifier[..core::cmp::min(12, nullifier.len())]);
+        println!("  Nullifier   : {}...", &nullifier[..core::cmp::min(8, nullifier.len())]);
         println!("  Recipient   : {}", recipient);
         println!("  Amount      : {} USDC", amount as f64 / 1_000_000.0);
 
@@ -233,7 +258,7 @@ impl EvmClient {
         println!("RELAYER: Broadcasting CCIP transaction");
         println!("  Destination Chain    : {}", destination_chain_selector);
         println!("  Destination Contract : {}", destination_contract);
-        println!("  Nullifier            : {}...", &nullifier[..core::cmp::min(12, nullifier.len())]);
+        println!("  Nullifier            : {}...", &nullifier[..core::cmp::min(8, nullifier.len())]);
 
         let tx = TransactionRequest::default()
             .with_to(self.contract_address)

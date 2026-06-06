@@ -12,10 +12,10 @@ echo ""
 CONTRACT_ADDR="0x7cdc38331f302be1c2fe6c882495ad81ff0d8228"
 
 # Primary RPC (Chainstack)
-PRIMARY_RPC="wss://arbitrum-sepolia.core.chainstack.com/d18e11a2327c1a17c030975e3e0c8e24"
+PRIMARY_RPC="https://arbitrum-sepolia.core.chainstack.com/d18e11a2327c1a17c030975e3e0c8e24"
 
 # Fallback RPC (Infura)
-FALLBACK_RPC="wss://arbitrum-sepolia.infura.io/ws/v3/e0442523234742288f49543cb9e16da9"
+FALLBACK_RPC="https://arbitrum-sepolia.infura.io/v3/e0442523234742288f49543cb9e16da9"
 
 echo "Contract Address: $CONTRACT_ADDR"
 echo "Primary RPC     : $PRIMARY_RPC"

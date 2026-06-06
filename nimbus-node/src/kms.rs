@@ -76,6 +76,14 @@ pub async fn load_share_key() -> (nimbus_core::Fr, u32) {
         }
     }
 
-    println!("WARNING: No share key found via Vault or environment variables. Using default insecure key.");
-    (nimbus_core::Fr::from(12345u64), env_index)
+    // 3. Fallback only allowed in test mode
+    if cfg!(test) || std::env::var("NIMBUS_ENV").unwrap_or_default() == "test" {
+        println!("WARNING: No share key found. Using test default insecure key.");
+        return (nimbus_core::Fr::from(12345u64), env_index);
+    }
+
+    println!("ERROR: No share key found via Vault or environment variables.");
+    println!("CRITICAL: Cannot start without valid BLS share key.");
+    println!("Please configure NIMBUS_VAULT_TOKEN or NIMBUS_SHARE_KEY environment variable.");
+    std::process::exit(1);
 }

@@ -4,7 +4,7 @@ use crate::wasm_types::ZkComplianceProof;
 use wasm_bindgen::prelude::*;
 use nimbus_core::*;
 use rand::rngs::OsRng;
-use std::sync::Once;
+
 
 #[cfg(target_arch = "wasm32")]
 #[wasm_bindgen]
@@ -13,10 +13,11 @@ extern "C" {
     fn log(s: &str);
 }
 
+use std::sync::OnceLock;
+
 // Global proving key cache (initialized once)
-static mut PROVING_KEY: Option<ark_groth16::ProvingKey<Bls12_381>> = None;
-static mut VERIFYING_KEY: Option<ark_groth16::VerifyingKey<Bls12_381>> = None;
-static INIT: Once = Once::new();
+static PROVING_KEY: OnceLock<ark_groth16::ProvingKey<Bls12_381>> = OnceLock::new();
+static VERIFYING_KEY: OnceLock<ark_groth16::VerifyingKey<Bls12_381>> = OnceLock::new();
 
 /// Initialize the compliance circuit keys (proving key and verifying key)
 ///
@@ -24,26 +25,22 @@ static INIT: Once = Once::new();
 /// to avoid regenerating them for each proof generation.
 #[wasm_bindgen]
 pub fn init_compliance_keys() -> Result<(), JsValue> {
-    INIT.call_once(|| {
-        #[cfg(target_arch = "wasm32")]
-        log("ZK Prover: Initializing compliance circuit keys...");
-        
-        // Generate keys (in production, these would be loaded from a trusted setup)
-        match generate_compliance_keys() {
-            Ok(keys) => {
-                unsafe {
-                    PROVING_KEY = Some(keys.proving_key);
-                    VERIFYING_KEY = Some(keys.verifying_key);
-                }
-                #[cfg(target_arch = "wasm32")]
-                log("ZK Prover: Compliance circuit keys initialized successfully");
-            }
-            Err(_) => {
-                #[cfg(target_arch = "wasm32")]
-                log("ZK Prover: Failed to initialize keys");
-            }
+    #[cfg(target_arch = "wasm32")]
+    log("ZK Prover: Initializing compliance circuit keys...");
+    
+    // Generate keys (in production, these would be loaded from a trusted setup)
+    match generate_compliance_keys() {
+        Ok(keys) => {
+            let _ = PROVING_KEY.set(keys.proving_key);
+            let _ = VERIFYING_KEY.set(keys.verifying_key);
+            #[cfg(target_arch = "wasm32")]
+            log("ZK Prover: Compliance circuit keys initialized successfully");
         }
-    });
+        Err(_) => {
+            #[cfg(target_arch = "wasm32")]
+            log("ZK Prover: Failed to initialize keys");
+        }
+    }
     
     Ok(())
 }
@@ -110,10 +107,8 @@ pub fn client_generate_compliance_proof(
     let mut randomness = nullifier_fr - secret;
 
     // Get the proving key
-    let pk = unsafe {
-        PROVING_KEY.as_ref()
-            .ok_or_else(|| JsValue::from_str("Proving key not initialized"))?
-    };
+    let pk = PROVING_KEY.get()
+        .ok_or_else(|| JsValue::from_str("Proving key not initialized"))?;
 
     // Generate the compliance proof
     // Generate the compliance proof

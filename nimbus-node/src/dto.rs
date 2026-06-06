@@ -2,6 +2,7 @@
 
 use serde::{Deserialize, Serialize};
 
+#[allow(dead_code)]
 #[derive(Clone, Serialize, Deserialize)]
 pub struct Session {
     pub session_id: String,
