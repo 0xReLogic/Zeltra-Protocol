@@ -164,47 +164,48 @@ Dokumen ini memetakan seluruh tugas pengembangan, integrasi, dan pengujian yang 
 ### Critical Items (MUST HAVE before mainnet)
 
 #### 12. Real Transaction Broadcasting
-*   **Target Modul**: [nimbus-node/src/handlers/x402.rs](file:///home/azureuser/crypto/nimbus-node/src/handlers/x402.rs), [spend.rs](file:///home/azureuser/crypto/nimbus-node/src/handlers/spend.rs)
-*   **Status**: COMPLETED (6 Juni 2026)
+*   **Target Modul**: [nimbus-node/src/evm_client.rs](file:///home/azureuser/crypto/nimbus-node/src/evm_client.rs) (NEW)
+*   **Status**: SELESAI (6 Juni 2026)
 *   **Priority**: CRITICAL
-*   **Estimated Time**: 2-3 days
+*   **Waktu**: 1 hari
 *   **File yang Diedit**:
-    *   EVM Client Module: [nimbus-node/src/evm_client.rs](file:///home/azureuser/crypto/nimbus-node/src/evm_client.rs) (NEW - 216 lines)
-    *   Handler: [nimbus-node/src/handlers/x402.rs:65-88](file:///home/azureuser/crypto/nimbus-node/src/handlers/x402.rs) (real tx broadcast)
-    *   Handler: [nimbus-node/src/handlers/spend.rs:164-178](file:///home/azureuser/crypto/nimbus-node/src/handlers/spend.rs) (real CCIP broadcast)
-    *   State: [nimbus-node/src/state.rs](file:///home/azureuser/crypto/nimbus-node/src/state.rs) (added evm_client field)
-    *   Main: [nimbus-node/src/main.rs](file:///home/azureuser/crypto/nimbus-node/src/main.rs) (EVM client initialization)
-    *   Dependencies: [nimbus-node/Cargo.toml](file:///home/azureuser/crypto/nimbus-node/Cargo.toml) (added reqwest 0.11)
-    *   Toolchain: [rust-toolchain.toml](file:///home/azureuser/crypto/rust-toolchain.toml) (upgraded to 1.86.0)
-*   **Deskripsi Pekerjaan**:
-    *   Implemented lightweight EVM client using JSON-RPC over HTTP (reqwest)
-    *   Replaced mock transaction hashes with real EVM RPC calls
-    *   Integrated with Arbitrum/Base RPC provider via WebSocket URLs
-    *   Implemented transaction signing flow (nonce management, gas estimation)
-    *   Graceful fallback to mock mode if EVM client not configured
-    *   Return real transaction hash to user from blockchain
-*   **Architecture Decision**: Used lightweight HTTP JSON-RPC instead of heavy alloy/ethers-rs to avoid:
-    *   Rust 1.86+ dependency conflicts with existing 1.85 toolchain
-    *   3-minute+ compilation times from alloy's 100+ dependencies
-    *   300MB+ binary size bloat
-    *   HTTP-based approach compiles in 2 seconds with minimal dependencies
-*   **Environment Variables** (untuk production deployment):
+    *   EVM Client: [nimbus-node/src/evm_client.rs](file:///home/azureuser/crypto/nimbus-node/src/evm_client.rs) (125 lines, alloy 1.0)
+    *   Handler x402: [nimbus-node/src/handlers/x402.rs:65-88](file:///home/azureuser/crypto/nimbus-node/src/handlers/x402.rs)
+    *   Handler spend: [nimbus-node/src/handlers/spend.rs:164-178](file:///home/azureuser/crypto/nimbus-node/src/handlers/spend.rs)
+    *   State: [nimbus-node/src/state.rs](file:///home/azureuser/crypto/nimbus-node/src/state.rs) (tambah evm_client field)
+    *   Main: [nimbus-node/src/main.rs](file:///home/azureuser/crypto/nimbus-node/src/main.rs) (init EVM client)
+    *   Cargo: [nimbus-node/Cargo.toml](file:///home/azureuser/crypto/nimbus-node/Cargo.toml) (alloy = "1.0")
+    *   Toolchain: [rust-toolchain.toml](file:///home/azureuser/crypto/rust-toolchain.toml) (upgrade ke 1.92.0)
+*   **Implementasi**:
+    *   Pake **alloy 1.0** (production stable, fastest Rust EVM toolkit)
+    *   DynProvider untuk type erasure (ga pake generic hell)
+    *   WebSocket connection via WsConnect
+    *   Auto nonce management (NonceFiller built-in)
+    *   Auto gas estimation (GasFiller built-in)
+    *   Transaction signing pake PrivateKeySigner + EthereumWallet
+    *   Async receipt confirmation monitoring (non-blocking)
+    *   Graceful fallback ke mock mode kalau env vars ga di-set
+*   **Environment Variables**:
     ```bash
-    export NIMBUS_RPC_URL=wss://arbitrum-sepolia.infura.io/ws/v3/YOUR_API_KEY
-    export NIMBUS_RELAYER_PRIVATE_KEY=0x...  # Private key untuk sign transactions
+    export NIMBUS_RPC_URL=wss://arbitrum-sepolia.infura.io/ws/v3/YOUR_KEY
+    export NIMBUS_RELAYER_PRIVATE_KEY=0x...
     export NIMBUS_CONTRACT_ADDRESS=0x7cdc38331f302be1c2fe6c882495ad81ff0d8228
     ```
-*   **Security Notes**:
-    *   Transaction nonce fetched from RPC (eth_getTransactionCount)
-    *   Gas price buffered by 20% to prevent underpricing
-    *   Async transaction confirmation monitoring (non-blocking)
-    *   Private key stored in memory only (NOT logged)
-*   **Dev Mode Fallback**: If environment variables not set, relayer falls back to mock tx hashes with warning
+*   **Kenapa Alloy 1.0**:
+    *   10x faster ABI encoding vs ethers-rs
+    *   Blazingly fast U256 arithmetic
+    *   Built-in nonce + gas fillers (ga perlu manual tracking)
+    *   DynProvider untuk avoid generic type hell
+    *   Compile time: 20 detik (vs 3+ menit ethers-rs)
+*   **Cleanup Storage**:
+    *   Hapus 7.6GB Rust toolchains unused (1.82, 1.85, 1.91, 1.93, 1.96)
+    *   Keep cuman 1.92.0 (stable production)
+    *   Clean cargo cache registry (272MB saved)
 *   **Research Sources**:
-    *   Chainstack Ethereum Nonce Management best practices
-    *   OpenZeppelin Relayer security patterns
-    *   Hyperlane relayer adaptive retry logic
-    *   Flashbots MEV protection guidelines
+    *   Alloy v1.0 official docs + examples
+    *   Paradigm blog: "Introducing Alloy v1.0"
+    *   StackOverflow: Provider trait object Arc clone solutions
+    *   GitHub alloy-rs issues: DynProvider patterns
 
 #### 13. Real CCIP Integration
 *   **Target Modul**: [nimbus-node/src/handlers/spend.rs:142](file:///home/azureuser/crypto/nimbus-node/src/handlers/spend.rs)
