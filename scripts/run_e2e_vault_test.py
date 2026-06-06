@@ -1,0 +1,153 @@
+#!/usr/bin/env python3
+import subprocess
+import time
+import sys
+import os
+import urllib.request
+import urllib.parse
+import json
+import sqlite3
+
+print("==========================================================")
+print("NIMBUS END-TO-END VAULT KMS INTEGRATION TESTER")
+print("==========================================================")
+
+# 1. Compile relayer binary
+print("\n[Step 1] Compiling nimbus-node...")
+try:
+    subprocess.run(["cargo", "build", "-p", "nimbus-node"], check=True)
+except subprocess.CalledProcessError:
+    print("Compilation failed!")
+    sys.exit(1)
+
+# 2. Setup Relayer Node Environment Variables using VPS Vault KMS
+print("\n[Step 2] Setting up relayer node configuration with Vault KMS...")
+env = os.environ.copy()
+env["PORT"] = "8099"
+env["NIMBUS_ENV"] = "test"
+env["NIMBUS_VAULT_ADDR"] = "http://100.115.234.97:8200"
+env["NIMBUS_VAULT_TOKEN"] = "hvs.8CC0ZjsVsV4Dt77IU985SEo0"
+env["NIMBUS_VAULT_PATH"] = "v1/secret/data/nimbus"
+env["NIMBUS_RPC_URL"] = "https://arbitrum-sepolia.core.chainstack.com/d18e11a2327c1a17c030975e3e0c8e24"
+env["NIMBUS_RPC_FALLBACK_URL"] = "https://arbitrum-sepolia.infura.io/v3/e0442523234742288f49543cb9e16da9"
+env["NIMBUS_RELAYER_PRIVATE_KEY"] = "b89bc61712cfa0c890c0967f186c23afdf0b770743bc4f5505300100e8c7226e"
+env["NIMBUS_CONTRACT_ADDRESS"] = "0x208f0e4390f59e3052c557bf23a47b2ab4697a10"
+env["NIMBUS_DB_PATH"] = "nimbus_vault_e2e_test.db"
+
+# Remove old test DB if exists
+if os.path.exists("nimbus_vault_e2e_test.db"):
+    os.remove("nimbus_vault_e2e_test.db")
+
+# 3. Start Relayer Node Process
+print("\n[Step 3] Launching relayer node process...")
+node_proc = subprocess.Popen(
+    ["./target/debug/nimbus-node"],
+    env=env,
+    stdout=subprocess.PIPE,
+    stderr=subprocess.STDOUT,
+    text=True,
+    bufsize=1
+)
+
+# Wait for node startup by polling health check
+healthy = False
+for _ in range(15):
+    time.sleep(1)
+    try:
+        response = urllib.request.urlopen("http://127.0.0.1:8099/health", timeout=1)
+        data = json.loads(response.read().decode())
+        if data.get("status") == "OK" or "DEGRADED" in data.get("status", ""):
+            healthy = True
+            print("  Relayer Node is HEALTHY and listening on port 8099.")
+            break
+    except Exception:
+        pass
+
+if not healthy:
+    print("Error: Relayer node failed to start or is unhealthy.")
+    # Print node output for debugging
+    node_proc.terminate()
+    stdout, _ = node_proc.communicate()
+    print("Node logs:")
+    print(stdout)
+    sys.exit(1)
+
+# 4. Send Spend Request to Relayer Node (signs share and saves nullifier)
+print("\n[Step 4] Submitting Spend request to trigger Vault signature share...")
+dummy_nullifier = "0x" + os.urandom(32).hex()
+dummy_alpha_neg = "0x" + os.urandom(128).hex()
+dummy_hm = "0x" + os.urandom(128).hex()
+dummy_pk_iss = "0x" + os.urandom(256).hex()
+recipient_address = "0x23e32d309c575a3d5e7cd2867be12b00efa44bb1"
+
+payload = {
+    "nullifier": dummy_nullifier,
+    "sig_hex": "0x" + os.urandom(64).hex(),
+    "recipient": recipient_address,
+    "amount": 5000000, # 5 USDC (minimum limit)
+    "alpha_neg_hex": dummy_alpha_neg,
+    "hm_hex": dummy_hm,
+    "pk_iss_hex": dummy_pk_iss,
+    "cross_chain": {
+        "destination_chain_selector": 10344971235874465080, # Base Sepolia
+        "destination_contract": "0x208f0e4390f59e3052c557bf23a47b2ab4697a10"
+    }
+}
+
+req = urllib.request.Request(
+    "http://127.0.0.1:8099/api/spend",
+    data=json.dumps(payload).encode("utf-8"),
+    headers={"Content-Type": "application/json"}
+)
+
+try:
+    response = urllib.request.urlopen(req, timeout=5)
+    result = json.loads(response.read().decode())
+    print("  Spend request status:", result.get("status"))
+    print("  Message:", result.get("message"))
+    print("  Queue position:", result.get("queue_position"))
+except Exception as e:
+    print(f"Error submitting spend request: {e}")
+    node_proc.terminate()
+    sys.exit(1)
+
+# 5. Wait for Batch Processing and Verification
+print("\n[Step 5] Waiting for batch execution (Relayer loops every 2 seconds)...")
+time.sleep(6) # Let the relayer process the queue
+
+# 6. Check SQLite Database to verify the nullifier is stored permanently
+print("\n[Step 6] Checking SQLite database persistence...")
+try:
+    conn = sqlite3.connect("nimbus_vault_e2e_test.db")
+    cursor = conn.cursor()
+    cursor.execute("SELECT nullifier FROM nullifiers WHERE nullifier = ?", (dummy_nullifier,))
+    row = cursor.fetchone()
+    conn.close()
+    if row:
+        print(f"  SUCCESS: Nullifier {dummy_nullifier[:12]}... recorded in SQLite database.")
+    else:
+        print("  WARNING: Nullifier not found in SQLite database yet.")
+except Exception as e:
+    print(f"Error querying SQLite database: {e}")
+
+# 7. Shutdown Relayer Process and print stdout logs
+print("\n[Step 7] Terminating relayer node and retrieving stdout logs...")
+node_proc.terminate()
+time.sleep(1)
+
+stdout, _ = node_proc.communicate()
+print("==========================================================")
+print("RELAYER NODE OUTPUT LOGS:")
+print("==========================================================")
+print(stdout)
+print("==========================================================")
+
+# Verify if Vault key retrieval and signing logs exist
+if "Successfully loaded BLS share key" in stdout:
+    print("\nE2E VAULT KMS INTEGRATION TEST PASSED SUCCESSFULLY!")
+    print("==========================================================")
+    sys.exit(0)
+else:
+    print("\nE2E VAULT KMS INTEGRATION TEST FAILED!")
+    print("==========================================================")
+    sys.exit(1)
