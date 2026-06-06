@@ -135,6 +135,13 @@ Fix the "FAILED" status of spend transactions on Arbitrum Sepolia testnet by cor
 
 ## Testing
 
+### Start Relayer Node
+```bash
+cd nimbus-node
+source .env.test
+cargo run
+```
+
 ### Generate BLS Test Data
 ```bash
 cargo run --package nimbus-core --example generate_bls_test_data
