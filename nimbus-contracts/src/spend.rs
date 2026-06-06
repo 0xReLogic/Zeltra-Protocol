@@ -5,6 +5,7 @@
 
 use alloc::vec::Vec;
 use alloy_primitives::{Address, FixedBytes, U256};
+use stylus_sdk::abi::Bytes;
 use stylus_sdk::call::RawCall;
 use ark_bls12_381::G2Affine;
 use ark_ec::AffineRepr;
@@ -19,20 +20,20 @@ impl Nimbus {
     /// Verification check: e(-alpha, G2) * e(H(m), pk_iss) == 1
     /// 
     /// NOTE: BLS verification temporarily disabled for testing
-    pub fn spend(
+    pub fn _spend(
         &mut self,
         nullifier: FixedBytes<32>,
-        _alpha_neg_bytes: Vec<u8>,   // -alpha in G1 (128 bytes EVM format) - IGNORED FOR TESTING
-        _hm_bytes: Vec<u8>,          // H(m) in G1 (128 bytes EVM format) - IGNORED FOR TESTING
-        _pk_iss_bytes: Vec<u8>,      // pk_iss in G2 (256 bytes EVM format) - IGNORED FOR TESTING
+        _alpha_neg_bytes: Bytes,   // -alpha in G1 (128 bytes EVM format) - IGNORED FOR TESTING
+        _hm_bytes: Bytes,          // H(m) in G1 (128 bytes EVM format) - IGNORED FOR TESTING
+        _pk_iss_bytes: Bytes,      // pk_iss in G2 (256 bytes EVM format) - IGNORED FOR TESTING
         recipient: Address,
         amount: U256,
     ) -> Result<bool, Vec<u8>> {
         // 1. CHECKS
         self.check_not_paused()?;
         
-        // Enforce minimum transaction size of 10 USDC/stablecoin (10,000,000 units)
-        let min_amount = U256::from(10_000_000);
+        // Enforce minimum transaction size of 5 USDC/stablecoin (5,000,000 units)
+        let min_amount = U256::from(5_000_000);
         if amount < min_amount {
             return Err(b"AMOUNT_TOO_SMALL".to_vec());
         }
@@ -47,7 +48,7 @@ impl Nimbus {
             .ok_or_else(|| b"BASE_FEE_MUL_OVERFLOW".to_vec())? + U256::from(9999)) / U256::from(10000);
         
         // Calculate dynamic premium if Fase 2 or 3 is active
-        let premium = self.calculate_fast_path_premium(amount)?;
+        let premium = self._calculate_fast_path_premium(amount)?;
         
         // fee_recipient gets base_fee + 20% of premium
         let premium_share = (premium.checked_mul(U256::from(20))
@@ -118,12 +119,12 @@ impl Nimbus {
 
     /// Verifies the signature, redeems stablecoin, and directly calls Polymarket's conditional tokens contract
     /// to buy outcome shares under the recipient's name in a single transaction.
-    pub fn spend_and_buy_shares(
+    pub fn _spend_and_buy_shares(
         &mut self,
         nullifier: FixedBytes<32>,
-        alpha_neg_bytes: Vec<u8>,
-        hm_bytes: Vec<u8>,
-        pk_iss_bytes: Vec<u8>,
+        alpha_neg_bytes: Bytes,
+        hm_bytes: Bytes,
+        pk_iss_bytes: Bytes,
         polymarket_ctf: Address,
         collateral_token: Address,
         condition_id: FixedBytes<32>,
@@ -131,7 +132,7 @@ impl Nimbus {
     ) -> Result<bool, Vec<u8>> {
         self.check_not_paused()?;
         // 1. Verify and invalidate the signature (same as spend)
-        let is_valid = self.spend(nullifier, alpha_neg_bytes, hm_bytes, pk_iss_bytes, Address::ZERO, amount)?;
+        let is_valid = self._spend(nullifier, alpha_neg_bytes, hm_bytes, pk_iss_bytes, Address::ZERO, amount)?;
         if !is_valid {
             return Ok(false);
         }
@@ -139,7 +140,7 @@ impl Nimbus {
         // Calculate payout (net after fees) using the same safe round-up math as spend()
         let base_fee = (amount.checked_mul(U256::from(15))
             .ok_or_else(|| b"BASE_FEE_MUL_OVERFLOW".to_vec())? + U256::from(9999)) / U256::from(10000);
-        let premium = self.calculate_fast_path_premium(amount)?;
+        let premium = self._calculate_fast_path_premium(amount)?;
         let premium_share = (premium.checked_mul(U256::from(20))
             .ok_or_else(|| b"PREMIUM_SHARE_MUL_OVERFLOW".to_vec())? + U256::from(99)) / U256::from(100);
         let protocol_share = base_fee.checked_add(premium_share)
@@ -187,12 +188,12 @@ impl Nimbus {
     }
 
     /// Returns the failed intent refund amount for a given nullifier.
-    pub fn get_failed_intent_refund(&self, nullifier: FixedBytes<32>) -> Result<U256, Vec<u8>> {
+    pub fn _get_failed_intent_refund(&self, nullifier: FixedBytes<32>) -> Result<U256, Vec<u8>> {
         Ok(self.failed_intent_refunds.get(nullifier))
     }
 
     /// Claims a failed intent refund on the destination chain.
-    pub fn claim_failed_intent_refund(
+    pub fn _claim_failed_intent_refund(
         &mut self,
         nullifier: FixedBytes<32>,
         recipient: Address,
@@ -225,12 +226,12 @@ impl Nimbus {
     }
 
     /// Receives a cross-chain payload via Chainlink CCIP and executes the transaction (Fase B).
-    pub fn ccip_receive(
+    pub fn _ccip_receive(
         &mut self,
         _message_id: FixedBytes<32>,
         _source_chain_selector: u64,
-        _sender: Vec<u8>,
-        payload: Vec<u8>,
+        _sender: Bytes,
+        payload: Bytes,
     ) -> Result<(), Vec<u8>> {
         if payload.len() != 648 {
             return Err(b"INVALID_CCIP_PAYLOAD_LENGTH".to_vec());
@@ -251,11 +252,11 @@ impl Nimbus {
         let amount = U256::from_be_slice(&payload[616..648]);
         
         // Execute spend and buy shares on destination chain
-        let success = self.spend_and_buy_shares(
+        let success = self._spend_and_buy_shares(
             nullifier.into(),
-            alpha_neg_bytes,
-            hm_bytes,
-            pk_iss_bytes,
+            Bytes::from(alpha_neg_bytes),
+            Bytes::from(hm_bytes),
+            Bytes::from(pk_iss_bytes),
             polymarket_ctf,
             collateral_token,
             condition_id.into(),

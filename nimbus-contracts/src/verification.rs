@@ -5,8 +5,8 @@
 use alloc::vec::Vec;
 use ark_bls12_381::{Fr, G1Affine, G2Affine};
 use ark_ec::{AffineRepr, CurveGroup};
-use ark_ff::Field;
 use alloy_primitives::{Address, FixedBytes, U256};
+use stylus_sdk::abi::Bytes;
 use stylus_sdk::call::RawCall;
 
 use crate::storage::Nimbus;
@@ -121,16 +121,16 @@ impl Nimbus {
 
     /// Verifies the Groth16 ZK-Proof on-chain using the EIP-2537 pairing check precompile.
     /// Formula: e(-A, B) * e(IC, gamma) * e(C, delta) * e(alpha, beta) == 1
-    pub fn verify_groth16_proof(
+    pub fn _verify_groth16_proof(
         &self,
-        proof_a_neg_bytes: Vec<u8>, // -A (128 bytes EVM format)
-        proof_b_bytes: Vec<u8>,     // B (256 bytes EVM format)
-        proof_c_bytes: Vec<u8>,     // C (128 bytes EVM format)
-        public_inputs_g1_bytes: Vec<u8>, // IC linear combination (128 bytes EVM format)
-        vk_alpha_bytes: Vec<u8>,    // alpha (128 bytes EVM format)
-        vk_beta_bytes: Vec<u8>,     // beta (256 bytes EVM format)
-        vk_gamma_bytes: Vec<u8>,    // gamma (256 bytes EVM format)
-        vk_delta_bytes: Vec<u8>,    // delta (256 bytes EVM format)
+        proof_a_neg_bytes: Bytes, // -A (128 bytes EVM format)
+        proof_b_bytes: Bytes,     // B (256 bytes EVM format)
+        proof_c_bytes: Bytes,     // C (128 bytes EVM format)
+        public_inputs_g1_bytes: Bytes, // IC linear combination (128 bytes EVM format)
+        vk_alpha_bytes: Bytes,    // alpha (128 bytes EVM format)
+        vk_beta_bytes: Bytes,     // beta (256 bytes EVM format)
+        vk_gamma_bytes: Bytes,    // gamma (256 bytes EVM format)
+        vk_delta_bytes: Bytes,    // delta (256 bytes EVM format)
     ) -> Result<bool, Vec<u8>> {
         if proof_a_neg_bytes.len() != 128
             || proof_b_bytes.len() != 256
@@ -188,15 +188,15 @@ impl Nimbus {
     /// To support stealth-identity-based AI Agents (Roadmap Section 10) and thwart Address Clustering Attacks,
     /// future upgrades will verify that the spent nullifier and ephemeral public key are derived via Blind 
     /// Signature Derivation from a valid master identity, while keeping the master identity hidden on-chain.
-    pub fn verify_compliance(
+    pub fn _verify_compliance(
         &self,
         root: FixedBytes<32>,
         nullifier: FixedBytes<32>,
         recipient: Address,
         amount: U256,
-        proof_a_neg_bytes: Vec<u8>,
-        proof_b_bytes: Vec<u8>,
-        proof_c_bytes: Vec<u8>,
+        proof_a_neg_bytes: Bytes,
+        proof_b_bytes: Bytes,
+        proof_c_bytes: Bytes,
     ) -> Result<bool, Vec<u8>> {
         // 1. Verify clean root is registered on-chain
         if !self.clean_association_roots.get(root) {
@@ -210,15 +210,15 @@ impl Nimbus {
         let public_inputs_g1_bytes = self.compute_public_inputs_g1(&vk_ic, root, nullifier, recipient, amount)?.to_vec();
 
         // 4. Verify ZK Proof (Groth16) using EIP-2537 pairing precompile
-        let is_zk_valid = self.verify_groth16_proof(
+        let is_zk_valid = self._verify_groth16_proof(
             proof_a_neg_bytes,
             proof_b_bytes,
             proof_c_bytes,
-            public_inputs_g1_bytes,
-            vk_alpha.to_vec(),
-            vk_beta.to_vec(),
-            vk_gamma.to_vec(),
-            vk_delta.to_vec(),
+            Bytes::from(public_inputs_g1_bytes),
+            Bytes::from(vk_alpha.to_vec()),
+            Bytes::from(vk_beta.to_vec()),
+            Bytes::from(vk_gamma.to_vec()),
+            Bytes::from(vk_delta.to_vec()),
         )?;
 
         Ok(is_zk_valid)

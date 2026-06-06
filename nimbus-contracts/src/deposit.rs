@@ -4,6 +4,7 @@
 
 use alloc::vec::Vec;
 use alloy_primitives::{FixedBytes, U256};
+use stylus_sdk::abi::Bytes;
 use stylus_sdk::call::RawCall;
 
 use crate::storage::Nimbus;
@@ -12,7 +13,7 @@ use crate::constants::BLS12_G2_MSM;
 
 impl Nimbus {
     /// Claim refund for a deposit if the timelock (24 hours) has expired.
-    pub fn claim_refund(&mut self, sid: FixedBytes<32>) -> Result<(), Vec<u8>> {
+    pub fn _claim_refund(&mut self, sid: FixedBytes<32>) -> Result<(), Vec<u8>> {
         self.check_not_paused()?;
         if self.session_resolved.get(sid) {
             return Err(b"SESSION_ALREADY_RESOLVED".to_vec());
@@ -58,7 +59,7 @@ impl Nimbus {
     }
 
     /// Deposit funds for atomic token issuance.
-    pub fn deposit(&mut self, sid: FixedBytes<32>, _com_k_bytes: Vec<u8>, amount: U256) -> Result<(), Vec<u8>> {
+    pub fn _deposit(&mut self, sid: FixedBytes<32>, _com_k_bytes: Bytes, amount: U256) -> Result<(), Vec<u8>> {
         // 1. CHECKS
         self.check_not_paused()?;
         
@@ -122,12 +123,12 @@ impl Nimbus {
 
     /// Verifies the masking key k on-chain using G2 MSM precompile (EIP-2537: 0x0e).
     /// Verification check: k * pk_iss == com_k
-    pub fn reveal_mask_key(
+    pub fn _reveal_mask_key(
         &mut self,
         sid: FixedBytes<32>,
-        k_bytes: Vec<u8>,
-        pk_iss_bytes: Vec<u8>,
-        com_k_bytes: Vec<u8>,
+        k_bytes: Bytes,
+        pk_iss_bytes: Bytes,
+        com_k_bytes: Bytes,
     ) -> Result<bool, Vec<u8>> {
         self.check_not_paused()?;
         if self.session_resolved.get(sid) {
@@ -147,7 +148,7 @@ impl Nimbus {
         }.map_err(|_| b"MSM_PRECOMPILE_CALL_FAILED".to_vec())?;
 
         // Check if output equals com_k_bytes
-        if result == com_k_bytes {
+        if result == *com_k_bytes {
             // 1. EFFECTS
             self.session_resolved.insert(sid, true);
             

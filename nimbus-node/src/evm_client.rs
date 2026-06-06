@@ -1,12 +1,25 @@
 use alloy::{
     network::{EthereumWallet, TransactionBuilder},
-    primitives::{Address, U256, Bytes, utils::keccak256},
+    primitives::{Address, U256, Bytes},
     providers::{Provider, ProviderBuilder, WsConnect, DynProvider},
     rpc::types::eth::TransactionRequest,
     signers::local::PrivateKeySigner,
+    sol,
+    sol_types::SolCall,
 };
 use anyhow::{Context, Result};
 use std::str::FromStr;
+
+sol! {
+    function spend(
+        bytes32 nullifier,
+        bytes calldata alpha_neg_bytes,
+        bytes calldata hm_bytes,
+        bytes calldata pk_iss_bytes,
+        address recipient,
+        uint256 amount
+    ) external returns (bool);
+}
 
 pub struct EvmClient {
     provider: DynProvider,
@@ -189,55 +202,25 @@ impl EvmClient {
 
         let amount_u256 = U256::from(amount);
 
-        // Calculate function selector: spend(bytes32,bytes,bytes,bytes,address,uint256)
-        let function_signature = "spend(bytes32,bytes,bytes,bytes,address,uint256)";
-        let hash = keccak256(function_signature.as_bytes());
-        let function_selector = [hash[0], hash[1], hash[2], hash[3]];
-        
-        // Encode function call data
-        let mut call_data = Vec::new();
-        
-        // Add function selector (4 bytes)
-        call_data.extend_from_slice(&function_selector);
-        
-        // Add nullifier (32 bytes)
-        call_data.extend_from_slice(&nullifier_fixed);
-        
-        // Add alpha_neg_bytes (dynamic - offset + length + data)
-        let offset: u32 = 32 + 32 + 32 + 32 + 20; // nullifier + offsets for 3 dynamic params + recipient
-        call_data.extend_from_slice(&offset.to_be_bytes());
-        
-        // Add hm_bytes offset
-        let offset_hm: u32 = offset + 32 + alpha_neg_bytes.len() as u32;
-        call_data.extend_from_slice(&offset_hm.to_be_bytes());
-        
-        // Add pk_iss_bytes offset
-        let offset_pk: u32 = offset_hm + 32 + hm_bytes.len() as u32;
-        call_data.extend_from_slice(&offset_pk.to_be_bytes());
-        
-        // Add recipient (20 bytes, padded to 32)
-        call_data.extend_from_slice(recipient_addr.as_slice());
-        call_data.extend_from_slice(&[0u8; 12]);
-        
-        // Add amount (32 bytes)
-        call_data.extend_from_slice(&amount_u256.to_be_bytes::<32>());
-        
-        // Add alpha_neg_bytes data
-        call_data.extend_from_slice(&(alpha_neg_bytes.len() as u32).to_be_bytes());
-        call_data.extend_from_slice(&alpha_neg_bytes);
-        
-        // Add hm_bytes data
-        call_data.extend_from_slice(&(hm_bytes.len() as u32).to_be_bytes());
-        call_data.extend_from_slice(&hm_bytes);
-        
-        // Add pk_iss_bytes data
-        call_data.extend_from_slice(&(pk_iss_bytes.len() as u32).to_be_bytes());
-        call_data.extend_from_slice(&pk_iss_bytes);
+        // Encode calldata using alloy's sol! macro type-safely
+        let call_data = spendCall {
+            nullifier: nullifier_fixed.into(),
+            alpha_neg_bytes: alpha_neg_bytes.into(),
+            hm_bytes: hm_bytes.into(),
+            pk_iss_bytes: pk_iss_bytes.into(),
+            recipient: recipient_addr,
+            amount: amount_u256,
+        }.abi_encode();
+
+        let gas_price = self.get_gas_price().await.unwrap_or(20_000_000);
+        let max_fee = gas_price * 125 / 100;
 
         let tx = TransactionRequest::default()
             .with_to(self.contract_address)
             .with_value(U256::ZERO)
             .with_gas_limit(1_000_000)
+            .with_max_fee_per_gas(max_fee)
+            .with_max_priority_fee_per_gas(1_000_000)
             .with_input(Bytes::from(call_data));
 
         let tx_hash = self.send_tx_with_fallback(tx).await?;
@@ -260,10 +243,15 @@ impl EvmClient {
         println!("  Destination Contract : {}", destination_contract);
         println!("  Nullifier            : {}...", &nullifier[..core::cmp::min(8, nullifier.len())]);
 
+        let gas_price = self.get_gas_price().await.unwrap_or(20_000_000);
+        let max_fee = gas_price * 125 / 100;
+
         let tx = TransactionRequest::default()
             .with_to(self.contract_address)
             .with_value(U256::ZERO)
-            .with_gas_limit(800_000);
+            .with_gas_limit(800_000)
+            .with_max_fee_per_gas(max_fee)
+            .with_max_priority_fee_per_gas(1_000_000);
 
         let tx_hash = self.send_tx_with_fallback(tx).await?;
         

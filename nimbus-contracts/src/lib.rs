@@ -18,7 +18,7 @@ use ark_ec::AffineRepr;
 use ark_ff::Field;
 
 use alloy_primitives::{Address, FixedBytes};
-use stylus_sdk::{prelude::*, alloy_primitives::U256, call::RawCall};
+use stylus_sdk::{prelude::*, alloy_primitives::U256, call::RawCall, abi::Bytes};
 
 pub use types::{to_evm_g1, to_evm_g2, to_evm_scalar};
 pub use interfaces::*;
@@ -258,6 +258,139 @@ impl Nimbus {
         self.clean_association_roots.insert(root, true);
         Ok(())
     }
+
+    // --- EVM Public Delegates to Modular Component Implementations ---
+
+    pub fn deposit(&mut self, sid: FixedBytes<32>, com_k_bytes: Bytes, amount: U256) -> Result<(), Vec<u8>> {
+        self._deposit(sid, com_k_bytes, amount)
+    }
+
+    pub fn reveal_mask_key(
+        &mut self,
+        sid: FixedBytes<32>,
+        k_bytes: Bytes,
+        pk_iss_bytes: Bytes,
+        com_k_bytes: Bytes,
+    ) -> Result<bool, Vec<u8>> {
+        self._reveal_mask_key(sid, k_bytes, pk_iss_bytes, com_k_bytes)
+    }
+
+    pub fn claim_refund(&mut self, sid: FixedBytes<32>) -> Result<(), Vec<u8>> {
+        self._claim_refund(sid)
+    }
+
+    pub fn spend(
+        &mut self,
+        nullifier: FixedBytes<32>,
+        alpha_neg_bytes: Bytes,
+        hm_bytes: Bytes,
+        pk_iss_bytes: Bytes,
+        recipient: Address,
+        amount: U256,
+    ) -> Result<bool, Vec<u8>> {
+        self._spend(nullifier, alpha_neg_bytes, hm_bytes, pk_iss_bytes, recipient, amount)
+    }
+
+    pub fn spend_and_buy_shares(
+        &mut self,
+        nullifier: FixedBytes<32>,
+        alpha_neg_bytes: Bytes,
+        hm_bytes: Bytes,
+        pk_iss_bytes: Bytes,
+        polymarket_ctf: Address,
+        collateral_token: Address,
+        condition_id: FixedBytes<32>,
+        amount: U256,
+    ) -> Result<bool, Vec<u8>> {
+        self._spend_and_buy_shares(
+            nullifier,
+            alpha_neg_bytes,
+            hm_bytes,
+            pk_iss_bytes,
+            polymarket_ctf,
+            collateral_token,
+            condition_id,
+            amount,
+        )
+    }
+
+    pub fn get_failed_intent_refund(&self, nullifier: FixedBytes<32>) -> Result<U256, Vec<u8>> {
+        self._get_failed_intent_refund(nullifier)
+    }
+
+    pub fn claim_failed_intent_refund(
+        &mut self,
+        nullifier: FixedBytes<32>,
+        recipient: Address,
+    ) -> Result<bool, Vec<u8>> {
+        self._claim_failed_intent_refund(nullifier, recipient)
+    }
+
+    pub fn ccip_receive(
+        &mut self,
+        message_id: FixedBytes<32>,
+        source_chain_selector: u64,
+        sender: Bytes,
+        payload: Bytes,
+    ) -> Result<(), Vec<u8>> {
+        self._ccip_receive(message_id, source_chain_selector, sender, payload)
+    }
+
+    pub fn verify_groth16_proof(
+        &self,
+        proof_a_neg_bytes: Bytes,
+        proof_b_bytes: Bytes,
+        proof_c_bytes: Bytes,
+        public_inputs_g1_bytes: Bytes,
+        vk_alpha_bytes: Bytes,
+        vk_beta_bytes: Bytes,
+        vk_gamma_bytes: Bytes,
+        vk_delta_bytes: Bytes,
+    ) -> Result<bool, Vec<u8>> {
+        self._verify_groth16_proof(
+            proof_a_neg_bytes,
+            proof_b_bytes,
+            proof_c_bytes,
+            public_inputs_g1_bytes,
+            vk_alpha_bytes,
+            vk_beta_bytes,
+            vk_gamma_bytes,
+            vk_delta_bytes,
+        )
+    }
+
+    pub fn verify_compliance(
+        &self,
+        root: FixedBytes<32>,
+        nullifier: FixedBytes<32>,
+        recipient: Address,
+        amount: U256,
+        proof_a_neg_bytes: Bytes,
+        proof_b_bytes: Bytes,
+        proof_c_bytes: Bytes,
+    ) -> Result<bool, Vec<u8>> {
+        self._verify_compliance(
+            root,
+            nullifier,
+            recipient,
+            amount,
+            proof_a_neg_bytes,
+            proof_b_bytes,
+            proof_c_bytes,
+        )
+    }
+
+    pub fn calculate_fast_path_premium(&self, amount: U256) -> Result<U256, Vec<u8>> {
+        self._calculate_fast_path_premium(amount)
+    }
+
+    pub fn total_assets(&mut self) -> Result<U256, Vec<u8>> {
+        self._total_assets()
+    }
+
+    pub fn claim_accumulated_yield(&mut self) -> Result<U256, Vec<u8>> {
+        self._claim_accumulated_yield()
+    }
 }
 
 #[cfg(test)]
@@ -456,14 +589,14 @@ mod tests {
     fn test_groth16_input_length_validation() {
         let nimbus_contract = Nimbus::default();
         let result = nimbus_contract.verify_groth16_proof(
-            vec![0; 100],
-            vec![0; 256],
-            vec![0; 128],
-            vec![0; 128],
-            vec![0; 128],
-            vec![0; 256],
-            vec![0; 256],
-            vec![0; 256],
+            vec![0; 100].into(),
+            vec![0; 256].into(),
+            vec![0; 128].into(),
+            vec![0; 128].into(),
+            vec![0; 128].into(),
+            vec![0; 256].into(),
+            vec![0; 256].into(),
+            vec![0; 256].into(),
         );
         assert_eq!(result, Err(b"INVALID_INPUT_LENGTHS".to_vec()));
     }
@@ -474,14 +607,14 @@ mod tests {
         // Since we stubbed static_call_contract, return_data_size and read_return_data to return success,
         // this test should successfully verify the Groth16 proof with valid lengths!
         let is_valid = nimbus_contract.verify_groth16_proof(
-            vec![0; 128],
-            vec![0; 256],
-            vec![0; 128],
-            vec![0; 128],
-            vec![0; 128],
-            vec![0; 256],
-            vec![0; 256],
-            vec![0; 256],
+            vec![0; 128].into(),
+            vec![0; 256].into(),
+            vec![0; 128].into(),
+            vec![0; 128].into(),
+            vec![0; 128].into(),
+            vec![0; 256].into(),
+            vec![0; 256].into(),
+            vec![0; 256].into(),
         ).unwrap();
         assert!(is_valid, "Mocked Groth16 proof verification failed!");
     }
@@ -496,8 +629,8 @@ mod tests {
         let result = nimbus_contract.ccip_receive(
             FixedBytes::ZERO,
             1,
-            vec![],
-            payload,
+            vec![].into(),
+            payload.into(),
         );
         match result {
             Ok(_) => {}
@@ -566,19 +699,19 @@ mod tests {
         // Try guarded operations
         let sid = FixedBytes::ZERO;
         assert_eq!(
-            contract.deposit(sid, vec![], U256::from(10_000_000)),
+            contract.deposit(sid, vec![].into(), U256::from(10_000_000)),
             Err(b"CONTRACT_PAUSED".to_vec())
         );
         assert_eq!(
-            contract.reveal_mask_key(sid, vec![], vec![], vec![]),
+            contract.reveal_mask_key(sid, vec![].into(), vec![].into(), vec![].into()),
             Err(b"CONTRACT_PAUSED".to_vec())
         );
         assert_eq!(
-            contract.spend(sid, vec![], vec![], vec![], Address::ZERO, U256::ZERO),
+            contract.spend(sid, vec![].into(), vec![].into(), vec![].into(), Address::ZERO, U256::ZERO),
             Err(b"CONTRACT_PAUSED".to_vec())
         );
         assert_eq!(
-            contract.spend_and_buy_shares(sid, vec![], vec![], vec![], Address::ZERO, Address::ZERO, FixedBytes::ZERO, U256::ZERO),
+            contract.spend_and_buy_shares(sid, vec![].into(), vec![].into(), vec![].into(), Address::ZERO, Address::ZERO, FixedBytes::ZERO, U256::ZERO),
             Err(b"CONTRACT_PAUSED".to_vec())
         );
 
@@ -608,7 +741,7 @@ mod tests {
         // Deposit (must be >= 10_000_000)
         set_msg_sender(client);
         set_block_timestamp(1000);
-        contract.deposit(sid, vec![], U256::from(10_000_000)).unwrap();
+        contract.deposit(sid, vec![].into(), U256::from(10_000_000)).unwrap();
         
         // Claim refund from other address should fail
         set_msg_sender(other);
@@ -731,7 +864,7 @@ mod tests {
         
         // Test deposit increases principal (must be >= 10_000_000)
         let sid = FixedBytes::repeat_byte(0xde);
-        contract.deposit(sid, vec![], U256::from(20_000_000)).unwrap();
+        contract.deposit(sid, vec![].into(), U256::from(20_000_000)).unwrap();
         
         // fee = (20,000,000 + 999) / 1000 = 20000
         // net_amount = 20,000,000 - 20,000 = 19,980,000 net
@@ -741,9 +874,9 @@ mod tests {
         let nullifier = FixedBytes::repeat_byte(0xef);
         let is_valid = contract.spend(
             nullifier,
-            vec![],
-            vec![],
-            vec![],
+            vec![].into(),
+            vec![].into(),
+            vec![].into(),
             Address::ZERO,
             U256::from(10_000_000),
         ).unwrap();
@@ -767,14 +900,14 @@ mod tests {
         let nullifier = FixedBytes::repeat_byte(0xd1);
         
         // Set principal
-        contract.deposit(FixedBytes::repeat_byte(0x99), vec![], U256::from(20_000_000)).unwrap();
+        contract.deposit(FixedBytes::repeat_byte(0x99), vec![].into(), U256::from(20_000_000)).unwrap();
         
         // Call spend_and_buy_shares with polymarket_ctf = Address::ZERO (which triggers mock fallback in tests)
         let success = contract.spend_and_buy_shares(
             nullifier,
-            vec![],
-            vec![],
-            vec![],
+            vec![].into(),
+            vec![].into(),
+            vec![].into(),
             Address::ZERO, // triggers fallback simulation in test block
             Address::ZERO,
             FixedBytes::ZERO,
@@ -822,9 +955,9 @@ mod tests {
             nullifier,
             recipient,
             amount,
-            vec![0; 128],
-            vec![0; 256],
-            vec![0; 128],
+            vec![0; 128].into(),
+            vec![0; 256].into(),
+            vec![0; 128].into(),
         ).unwrap();
         assert!(!is_valid_unregistered);
 
@@ -838,9 +971,9 @@ mod tests {
             nullifier,
             recipient,
             amount,
-            vec![0; 128],
-            vec![0; 256],
-            vec![0; 128],
+            vec![0; 128].into(),
+            vec![0; 256].into(),
+            vec![0; 128].into(),
         ).unwrap();
         assert!(is_valid_registered);
     }

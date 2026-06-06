@@ -80,7 +80,7 @@ impl Nimbus {
     /// Calculate the Fast-Path Liquidity Premium dynamically (Roadmap Fase 1-3).
     /// Inspired by the 2026 academic paper "Exploiting Liquidity Exhaustion Attacks in Intent-Based Cross-Chain Bridges"
     /// we implement dynamic congestion-based pricing to prevent liquidity exhaustion attacks.
-    pub fn calculate_fast_path_premium(&self, amount: U256) -> Result<U256, Vec<u8>> {
+    pub fn _calculate_fast_path_premium(&self, amount: U256) -> Result<U256, Vec<u8>> {
         let phase = self.fast_path_phase.get();
         if phase == U256::from(1) {
             // Fase 1: Disabled (CCIP slow path only, zero premium)
@@ -238,7 +238,7 @@ impl Nimbus {
         Ok(())
     }
 
-    pub fn total_assets(&mut self) -> Result<U256, Vec<u8>> {
+    pub fn _total_assets(&mut self) -> Result<U256, Vec<u8>> {
         #[cfg(test)]
         {
             Ok(self.total_deposited_principal.get())
@@ -270,9 +270,9 @@ impl Nimbus {
         }
     }
 
-    pub fn claim_accumulated_yield(&mut self) -> Result<U256, Vec<u8>> {
+    pub fn _claim_accumulated_yield(&mut self) -> Result<U256, Vec<u8>> {
         self.check_owner()?;
-        let total = self.total_assets()?;
+        let total = self._total_assets()?;
         let principal = self.total_deposited_principal.get();
         if total <= principal {
             return Ok(U256::ZERO);

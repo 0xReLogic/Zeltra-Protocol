@@ -117,9 +117,9 @@ Dokumen ini memetakan seluruh tugas pengembangan, integrasi, dan pengujian yang 
     *   Deploy kontrak `Nimbus` hasil integrasi ERC-20 di Arbitrum Sepolia testnet.
     *   Konfigurasikan cluster relayer node minimal $t=3$ dan $n=5$ menggunakan VM pengujian yang terdistribusi.
     *   Jalankan skrip integrasi end-to-end untuk mensimulasikan alur transaksi testnet: Deposit -> Reveal -> Spend -> CCIP buy shares -> Refund.
-*   **Alamat Kontrak Terdeploy**: `0x7cdc38331f302be1c2fe6c882495ad81ff0d8228` (Arbitrum Sepolia L2)
-*   **Tx Hash Deployment**: `0x505e870dd433254e28f8d447811ad6eb450081fe1d88d0b71cf118aeb57ef170`
-*   **Tx Hash Aktivasi Stylus**: `0xaad10175474de97ceb1f83e5cc6548ce16a77a9809bd84a91badfa4b5d4bc48b`
+*   **Alamat Kontrak Terdeploy**: `0x208f0e4390f59e3052c557bf23a47b2ab4697a10` (Arbitrum Sepolia L2)
+*   **Tx Hash Deployment**: `0x8c8261d48c87a50095398f464558d2ebb36edafab1b5781798a2b5261523eea7`
+*   **Tx Hash Aktivasi Stylus**: `0xc59b972b3e9344d83aa5a51be46a9dc30a70a1139617e2033c526afbf4eac26c`
 *   **Inovasi (Aha! Moment - Jurnal 2026)**: Kami merancang key loader dinamis yang dapat membedakan data share format `(usize, Fr)` 40-byte dan scalar `Fr` 32-byte untuk memastikan identitas dan share index dari validator (Leader & Guardians) terasosiasi secara otomatis tanpa konfigurasi manual yang rawan kesalahan. Hal ini mempermudah orkestrasi cluster dan mengurangi kegagalan verifikasi aggregate signature.
 
 ## 8. Migrasi Sirkuit ZK Utama & Verifikator On-Chain
@@ -189,7 +189,7 @@ Dokumen ini memetakan seluruh tugas pengembangan, integrasi, dan pengujian yang 
     ```bash
     export NIMBUS_RPC_URL=wss://arbitrum-sepolia.infura.io/ws/v3/YOUR_KEY
     export NIMBUS_RELAYER_PRIVATE_KEY=0x...
-    export NIMBUS_CONTRACT_ADDRESS=0x7cdc38331f302be1c2fe6c882495ad81ff0d8228
+    export NIMBUS_CONTRACT_ADDRESS=0x208f0e4390f59e3052c557bf23a47b2ab4697a10
     ```
 *   **Kenapa Alloy 1.0**:
     *   10x faster ABI encoding vs ethers-rs

@@ -6,5 +6,6 @@ pub extern "C" fn main() {}
 
 #[cfg(feature = "export-abi")]
 fn main() {
-    nimbus_contracts::print_abi("UNLICENSED", "pragma solidity ^0.8.21;");
+    use stylus_sdk::abi::export::print_abi;
+    print_abi::<nimbus_contracts::Nimbus>("UNLICENSED", "pragma solidity ^0.8.21;");
 }

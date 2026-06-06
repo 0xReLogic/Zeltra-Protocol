@@ -181,12 +181,12 @@ sequenceDiagram
 *   Dapat dipanggil oleh klien pembuat sesi deposit jika waktu saat ini (`block_timestamp`) sudah melewati **24 jam (86.400 detik)** sejak deposit dilakukan.
 *   Setelah berhasil diverifikasi, kontrak menandai sesi sebagai selesai (`session_resolved = true`) dan mengembalikan dana bersih ke klien.
 
-### D. `revealMaskKey(sid: FixedBytes<32>, k_bytes: Vec<u8>, pk_iss_bytes: Vec<u8>, com_k_bytes: Vec<u8>) -> Result<bool, Vec<u8>>`
+### D. `revealMaskKey(sid: FixedBytes<32>, k_bytes: Bytes, pk_iss_bytes: Bytes, com_k_bytes: Bytes) -> Result<bool, Vec<u8>>`
 *   Penerbit (Issuer) menyerahkan kunci masking $k$ bersama kunci publik mereka $pk_{iss}$ dan komitmen $com_k$ (Rust internal: `reveal_mask_key`).
 *   Kontrak memanggil precompile **`BLS12_G2_MSM` (address `0x0e`)** dengan payload 288-byte (kombinasi $pk_{iss}$ dan $k$) untuk menghitung $k \cdot pk_{iss}$.
 *   Jika hasil perhitungan cocok dengan $com_k$, kontrak menandai sesi sebagai selesai (`session_resolved = true`) dan mencairkan escrow dana ke dompet Penerbit.
 
-### E. `spend(nullifier: FixedBytes<32>, alpha_neg_bytes: Vec<u8>, hm_bytes: Vec<u8>, pk_iss_bytes: Vec<u8>, recipient: Address, amount: U256) -> Result<bool, Vec<u8>>`
+### E. `spend(nullifier: FixedBytes<32>, alpha_neg_bytes: Bytes, hm_bytes: Bytes, pk_iss_bytes: Bytes, recipient: Address, amount: U256) -> Result<bool, Vec<u8>>`
 *   Untuk mencairkan dana secara anonim, penerima mengirimkan tanda tangan BLS yang telah di-unblind.
 *   Batas pembelanjaan/penarikan minimum adalah **5 USDC** (`5_000_000` unit). Penarikan di bawah nilai ini ditolak seketika (`AMOUNT_TOO_SMALL`).
 *   Kontrak memverifikasi:
@@ -194,7 +194,7 @@ sequenceDiagram
 2.  Keabsahan tanda tangan BLS menggunakan precompile **`BLS12_PAIRING_CHECK` (address `0x0f`)** dengan payload 768-byte (atau dilewati dalam mode testing internal).
 *   Jika valid, kontrak mencatat nullifier untuk mencegah double-spend, menghitung biaya dasar penarikan **0.15%** (dihitung menggunakan pembulatan ke atas / round-up), menghitung biaya premi Fast-Path (jika Fase 2 atau Fase 3 aktif, dibulatkan ke atas), lalu mengirimkan sisa dana bersih ke `recipient` dan total biaya ke `fee_recipient`.
 
-### F. `spendAndBuyShares(nullifier: FixedBytes<32>, alpha_neg_bytes: Vec<u8>, hm_bytes: Vec<u8>, pk_iss_bytes: Vec<u8>, polymarket_ctf: Address, collateral_token: Address, condition_id: FixedBytes<32>, amount: U256) -> Result<bool, Vec<u8>>`
+### F. `spendAndBuyShares(nullifier: FixedBytes<32>, alpha_neg_bytes: Bytes, hm_bytes: Bytes, pk_iss_bytes: Bytes, polymarket_ctf: Address, collateral_token: Address, condition_id: FixedBytes<32>, amount: U256) -> Result<bool, Vec<u8>>`
 *   Melakukan verifikasi tanda tangan BLS (`spend`), menghitung sisa dana bersih (`payout`), menyetujui (`approve`) token USDC/stablecoin untuk didebit oleh Polymarket CTF, lalu secara atomik memicu fungsi `splitPosition` di kontrak target Polymarket (Conditional Tokens Contract) untuk mencetak shares opsi taruhan (Rust internal: `spend_and_buy_shares`).
 *   **Mekanisme Try-Catch Fallback (Aha! Moment - Jurnal 2026)**: Jika panggilan eksternal ke `splitPosition` gagal/revert (misalnya karena pasar opsi di-pause, di-resolve, atau slippage terlalu tinggi), transaksi **tidak di-revert** agar status nullifier tetap dicatat dan dana tidak tersangkut di CCIP. Kontrak secara otomatis mencatat nominal refund di storage `failed_intent_refunds` untuk ditarik pengguna secara asinkron lewat `claimFailedIntentRefund`.
 
@@ -205,10 +205,10 @@ sequenceDiagram
 ### G. ZK-Compliance & Proof of Innocence (Fase A)
 *   `register_clean_root(root: FixedBytes<32>)`: Mendaftarkan Merkle root dari set asosiasi bersih. Hanya bisa dipanggil oleh owner/oracle.
 *   `verify_groth16_proof(...)`: Memverifikasi ZK-proof Groth16 secara on-chain menggunakan precompile `BLS12_PAIRING_CHECK` (`0x0f`) dengan 4 pasang pairing (1536-byte payload).
-*   `verify_compliance(root: FixedBytes<32>, nullifier: FixedBytes<32>, recipient: Address, amount: U256, proof_a_neg: Vec<u8>, proof_b: Vec<u8>, proof_c: Vec<u8>)`: Melakukan pemeriksaan kepatuhan penuh yang aman secara privasi. Fungsi ini menghapus parameter plaintext `leaf` dan `proof_bytes` dari on-chain (pengecekan Merkle proof dipindahkan ke dalam sirkuit ZK). Untuk mengikat data transaksi dengan bukti, kontrak menghitung kombinasi linear public inputs secara on-chain menggunakan precompile `0x0c` (G1 MSM) dan `0x0b` (G1 ADD) sebelum memanggil verifikator Groth16.
+*   `verify_compliance(root: FixedBytes<32>, nullifier: FixedBytes<32>, recipient: Address, amount: U256, proof_a_neg: Bytes, proof_b: Bytes, proof_c: Bytes)`: Melakukan pemeriksaan kepatuhan penuh yang aman secara privasi. Fungsi ini menghapus parameter plaintext `leaf` dan `proof_bytes` dari on-chain (pengecekan Merkle proof dipindahkan ke dalam sirkuit ZK). Untuk mengikat data transaksi dengan bukti, kontrak menghitung kombinasi linear public inputs secara on-chain menggunakan precompile `0x0c` (G1 MSM) dan `0x0b` (G1 ADD) sebelum memanggil verifikator Groth16.
 
 ### H. CCIP Receiver Lintas Rantai (Fase B)
-*   `ccip_receive(message_id: FixedBytes<32>, source_chain_selector: u64, sender: Vec<u8>, payload: Vec<u8>) -> Result<(), Vec<u8>>`
+*   `ccip_receive(message_id: FixedBytes<32>, source_chain_selector: u64, sender: Bytes, payload: Bytes) -> Result<(), Vec<u8>>`
     *   Menerima pesan 648-byte dari router Chainlink CCIP.
     *   Mendekode payload ke parameter spend dan parameter pembelian Polymarket, lalu mengeksekusi `spend_and_buy_shares` secara atomik di rantai tujuan.
 

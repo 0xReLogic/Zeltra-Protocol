@@ -6,7 +6,7 @@ from eth_account import Account
 
 # Arbitrum Sepolia network settings
 RPC_URL = "https://sepolia-rollup.arbitrum.io/rpc"
-CONTRACT_ADDRESS = "0x7cdc38331f302be1c2fe6c882495ad81ff0d8228"
+CONTRACT_ADDRESS = "0x208f0e4390f59e3052c557bf23a47b2ab4697a10"
 PRIVATE_KEY = "b89bc61712cfa0c890c0967f186c23afdf0b770743bc4f5505300100e8c7226e"
 USDC_ADDRESS = "0x75faf114eafb1bdbe2f0316df893fd58ce46aa4d"
 
