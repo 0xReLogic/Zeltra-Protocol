@@ -83,7 +83,7 @@ pub async fn handle_x402_verify(
     println!("X402 FACILITATOR: Verified anonymous payment");
     println!("  Scheme     : {}", sig.scheme);
     println!("  Network    : {}", sig.network);
-    println!("  Nullifier  : {}...", &sig.payment.nullifier[..core::cmp::min(16, sig.payment.nullifier.len())]);
+    println!("  Nullifier  : {}...", &sig.payment.nullifier[..core::cmp::min(8, sig.payment.nullifier.len())]);
     println!("  Resource   : {}", resource_info);
     println!("  Queue Pos  : {}", position);
 

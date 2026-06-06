@@ -124,11 +124,11 @@ pub async fn process_spend_batch(state: &AppState) {
             }
             Ok(false) => {
                 // This should never happen as we check in handle_spend, but log it
-                eprintln!("WARNING: Nullifier {} already exists during batch processing!", &request.nullifier[0..12]);
+                eprintln!("WARNING: Nullifier {}... already exists during batch processing!", &request.nullifier[..8.min(request.nullifier.len())]);
                 continue;
             }
             Err(e) => {
-                eprintln!("ERROR: Failed to register nullifier {}: {}", &request.nullifier[0..12], e);
+                eprintln!("ERROR: Failed to register nullifier {}...: {}", &request.nullifier[..8.min(request.nullifier.len())], e);
                 continue;
             }
         }
@@ -141,11 +141,11 @@ pub async fn process_spend_batch(state: &AppState) {
             0
         };
 
-        println!("  - Spent to: {}, Original: {:.2} USDC, Net Payout: {:.2} USDC, Nullifier: {}", 
+        println!("  - Spent to: {}, Original: {:.2} USDC, Net Payout: {:.2} USDC, Nullifier: {}...", 
             request.recipient, 
             request.amount as f64 / 1_000_000.0,
             net_payout as f64 / 1_000_000.0,
-            &request.nullifier[0..12]
+            &request.nullifier[..8.min(request.nullifier.len())]
         );
         
         if let Some(auth) = &request.eip7702_auth {
@@ -160,9 +160,8 @@ pub async fn process_spend_batch(state: &AppState) {
             
             // Real CCIP transaction broadcasting (or fallback to mock)
             let ccip_message_id = if let Some(ref evm_client) = state.evm_client {
-                let chain_selector_str = cc.destination_chain_selector.to_string();
                 match evm_client.broadcast_ccip_transaction(
-                    &chain_selector_str,
+                    cc.destination_chain_selector,
                     &cc.destination_contract,
                     &request.nullifier,
                     request.amount,

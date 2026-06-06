@@ -9,6 +9,7 @@ use rusqlite::{Connection, OptionalExtension, params};
 use std::path::Path;
 use tokio::task;
 use anyhow::{Result, Context};
+use std::os::unix::fs::PermissionsExt;
 
 /// Production SQLite database with optimized PRAGMAs
 #[derive(Clone)]
@@ -22,9 +23,19 @@ impl Database {
         let path_str = path.as_ref().to_string_lossy().to_string();
         let path_clone = path_str.clone();
         
+        // Get encryption key from environment variable
+        // TODO: In production, integrate with KMS (OpenBao/Vault) instead of environment variables
+        // See kms.rs for KMS integration pattern
+        let db_key = std::env::var("NIMBUS_DB_KEY")
+            .unwrap_or_else(|_| "default-change-in-production".to_string());
+        let db_key_clone = db_key.clone();
+        
         // Initialize schema and PRAGMAs in blocking context
         task::spawn_blocking(move || -> Result<()> {
             let conn = Connection::open(&path_clone)?;
+            
+            // CRITICAL: Set encryption key (SQLCipher)
+            conn.pragma_update(None, "key", &db_key_clone)?;
             
             // CRITICAL: Production PRAGMAs (2026 best practices)
             conn.execute_batch("
@@ -45,6 +56,9 @@ impl Database {
                 
                 -- 5 second busy timeout for concurrent access
                 PRAGMA busy_timeout = 5000;
+                
+                -- Secure delete for sensitive data
+                PRAGMA secure_delete = ON;
             ")?;
             
             // Create tables
@@ -91,6 +105,29 @@ impl Database {
         .await
         .context("Database initialization failed")??;
         
+        // Set file permissions to 600 (owner-only read/write)
+        let path_ref = path.as_ref();
+        if path_ref.exists() {
+            let mut perms = std::fs::metadata(path_ref)?.permissions();
+            perms.set_mode(0o600);
+            std::fs::set_permissions(path_ref, perms)?;
+            
+            // Also protect WAL and SHM files if they exist
+            let wal_path = path_ref.with_extension("db-wal");
+            if wal_path.exists() {
+                let mut perms = std::fs::metadata(&wal_path)?.permissions();
+                perms.set_mode(0o600);
+                std::fs::set_permissions(&wal_path, perms)?;
+            }
+            
+            let shm_path = path_ref.with_extension("db-shm");
+            if shm_path.exists() {
+                let mut perms = std::fs::metadata(&shm_path)?.permissions();
+                perms.set_mode(0o600);
+                std::fs::set_permissions(&shm_path, perms)?;
+            }
+        }
+        
         Ok(Self { path: path_str })
     }
     
@@ -108,8 +145,13 @@ impl Database {
         let com_k_hex = com_k_hex.to_string();
         let client_address = client_address.to_string();
         
+        // Get encryption key - TODO: Integrate with KMS (OpenBao/Vault) for production
+        let db_key = std::env::var("NIMBUS_DB_KEY")
+            .unwrap_or_else(|_| "default-change-in-production".to_string());
+        
         task::spawn_blocking(move || -> Result<bool> {
             let conn = Connection::open(&path)?;
+            conn.pragma_update(None, "key", &db_key)?;
             let now = std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)?
                 .as_secs() as i64;
@@ -138,8 +180,13 @@ impl Database {
         let session_id = session_id.to_string();
         let masking_key_hex = masking_key_hex.to_string();
         
+        // Get encryption key - TODO: Integrate with KMS (OpenBao/Vault) for production
+        let db_key = std::env::var("NIMBUS_DB_KEY")
+            .unwrap_or_else(|_| "default-change-in-production".to_string());
+        
         task::spawn_blocking(move || -> Result<bool> {
             let conn = Connection::open(&path)?;
+            conn.pragma_update(None, "key", &db_key)?;
             let now = std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)?
                 .as_secs() as i64;
@@ -175,8 +222,13 @@ impl Database {
         let nullifier = nullifier.to_string();
         let tx_hash = tx_hash.map(|s| s.to_string());
         
+        // Get encryption key - TODO: Integrate with KMS (OpenBao/Vault) for production
+        let db_key = std::env::var("NIMBUS_DB_KEY")
+            .unwrap_or_else(|_| "default-change-in-production".to_string());
+        
         task::spawn_blocking(move || -> Result<bool> {
             let conn = Connection::open(&path)?;
+            conn.pragma_update(None, "key", &db_key)?;
             let now = std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)?
                 .as_secs() as i64;
@@ -200,8 +252,13 @@ impl Database {
         let path = self.path.clone();
         let nullifier = nullifier.to_string();
         
+        // Get encryption key - TODO: Integrate with KMS (OpenBao/Vault) for production
+        let db_key = std::env::var("NIMBUS_DB_KEY")
+            .unwrap_or_else(|_| "default-change-in-production".to_string());
+        
         task::spawn_blocking(move || -> Result<bool> {
             let conn = Connection::open(&path)?;
+            conn.pragma_update(None, "key", &db_key)?;
             let exists: Option<i64> = conn
                 .query_row(
                     "SELECT 1 FROM nullifiers WHERE nullifier = ?",
@@ -219,8 +276,13 @@ impl Database {
     pub async fn get_stats(&self) -> Result<DbStats> {
         let path = self.path.clone();
         
+        // Get encryption key - TODO: Integrate with KMS (OpenBao/Vault) for production
+        let db_key = std::env::var("NIMBUS_DB_KEY")
+            .unwrap_or_else(|_| "default-change-in-production".to_string());
+        
         task::spawn_blocking(move || -> Result<DbStats> {
             let conn = Connection::open(&path)?;
+            conn.pragma_update(None, "key", &db_key)?;
             
             let total_sessions: i64 = conn.query_row(
                 "SELECT COUNT(*) FROM sessions",
@@ -261,8 +323,13 @@ impl Database {
     pub async fn cleanup_old_sessions(&self, days_old: u32) -> Result<usize> {
         let path = self.path.clone();
         
+        // Get encryption key - TODO: Integrate with KMS (OpenBao/Vault) for production
+        let db_key = std::env::var("NIMBUS_DB_KEY")
+            .unwrap_or_else(|_| "default-change-in-production".to_string());
+        
         task::spawn_blocking(move || -> Result<usize> {
             let conn = Connection::open(&path)?;
+            conn.pragma_update(None, "key", &db_key)?;
             let cutoff_timestamp = std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)?
                 .as_secs() as i64 - (days_old as i64 * 86400);
@@ -292,8 +359,13 @@ impl Database {
     pub async fn vacuum(&self) -> Result<()> {
         let path = self.path.clone();
         
+        // Get encryption key - TODO: Integrate with KMS (OpenBao/Vault) for production
+        let db_key = std::env::var("NIMBUS_DB_KEY")
+            .unwrap_or_else(|_| "default-change-in-production".to_string());
+        
         task::spawn_blocking(move || -> Result<()> {
             let conn = Connection::open(&path)?;
+            conn.pragma_update(None, "key", &db_key)?;
             conn.execute_batch("VACUUM;")?;
             Ok(())
         })
@@ -317,6 +389,8 @@ mod tests {
     
     #[tokio::test]
     async fn test_nullifier_double_spend_prevention() {
+        // Set encryption key for tests
+        std::env::set_var("NIMBUS_DB_KEY", "test-encryption-key");
         let tmp = TempDir::new().unwrap();
         let db_path = tmp.path().join("test.db");
         let db = Database::new(&db_path).await.unwrap();
@@ -338,6 +412,8 @@ mod tests {
     
     #[tokio::test]
     async fn test_session_lifecycle() {
+        // Set encryption key for tests
+        std::env::set_var("NIMBUS_DB_KEY", "test-encryption-key");
         let tmp = TempDir::new().unwrap();
         let db_path = tmp.path().join("test.db");
         let db = Database::new(&db_path).await.unwrap();
@@ -365,6 +441,8 @@ mod tests {
     
     #[tokio::test]
     async fn test_concurrent_nullifier_inserts() {
+        // Set encryption key for tests
+        std::env::set_var("NIMBUS_DB_KEY", "test-encryption-key");
         let tmp = TempDir::new().unwrap();
         let db_path = tmp.path().join("test.db");
         let db = Database::new(&db_path).await.unwrap();
@@ -389,6 +467,8 @@ mod tests {
     
     #[tokio::test]
     async fn test_cleanup_old_sessions() {
+        // Set encryption key for tests
+        std::env::set_var("NIMBUS_DB_KEY", "test-encryption-key");
         let tmp = TempDir::new().unwrap();
         let db_path = tmp.path().join("test.db");
         let db = Database::new(&db_path).await.unwrap();

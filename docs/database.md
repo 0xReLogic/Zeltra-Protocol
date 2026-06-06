@@ -1,11 +1,24 @@
 # Database Integration
 
 **Status**: COMPLETE  
-**Date**: June 5, 2026  
+**Date**: June 5, 2026
+**Security Update**: June 6, 2026 - Added SQLCipher encryption, file permissions, and log redaction  
 
 ## Overview
 
 Replaced in-memory storage with SQLite database for persistent session and nullifier tracking.
+
+### Security Improvements (June 6, 2026)
+
+Based on security audit findings, the following improvements were implemented:
+
+1. **Database Encryption**: Added SQLCipher with AES-256 encryption
+2. **File Permissions**: Set chmod 600 on database, WAL, and SHM files
+3. **Secure Delete**: Enabled PRAGMA secure_delete = ON
+4. **Log Redaction**: Redacted sensitive data (nullifiers, keys) to 8 characters
+5. **Key Management**: Added NIMBUS_DB_KEY environment variable for encryption key
+
+See `/security-node/SQLITE_DATABASE_SECURITY_AUDIT.md` for full audit details.
 
 ## Implementation
 
@@ -64,10 +77,12 @@ pub struct AppState {
 ### 5. Dependencies
 
 ```toml
-rusqlite = { version = "0.32", features = ["bundled"] }
+rusqlite = { version = "0.32", features = ["bundled-sqlcipher"] }
 anyhow = "1.0"
 tempfile = "3.0"  # for tests
 ```
+
+**Security Note**: `bundled-sqlcipher` feature enables AES-256 encryption for the database with bundled SQLCipher library.
 
 ## Why SQLite
 
@@ -76,6 +91,7 @@ SQLite dipilih karena:
 2. Fast enough - handles <1000 TPS (cukup untuk MVP)
 3. Proven - Cloudflare D1, Turso use it in production
 4. Easy backup - just copy the .db file
+5. **Secure with SQLCipher** - AES-256 encryption for sensitive data
 
 Nanti kalau traffic >1000 TPS baru migrate ke PostgreSQL. Sekarang SQLite cukup.
 
@@ -96,9 +112,22 @@ test result: ok. 9 passed; 0 failed
 # Set database path (optional, default: ./nimbus-relayer.db)
 export NIMBUS_DB_PATH=/var/lib/nimbus/relayer.db
 
+# Set database encryption key (REQUIRED for production)
+export NIMBUS_DB_KEY="your-secure-encryption-key-here"
+
 # Run node
 cargo run --package nimbus-node
 ```
+
+### Security Deployment Checklist
+
+- [ ] Set strong `NIMBUS_DB_KEY` environment variable
+- [ ] Store encryption key in KMS (OpenBao/Vault) for production
+- [ ] Run application as dedicated non-root user
+- [ ] Verify database files have chmod 600 permissions
+- [ ] Enable log rotation for secure log management
+- [ ] Set up automated encrypted backups
+- [ ] Test database recovery procedure
 
 ## Database Schema
 
@@ -141,10 +170,32 @@ CREATE TABLE spend_queue (
 
 ## Security
 
-- Double-spend prevention: Atomic `INSERT OR IGNORE` (race-safe)
-- Session uniqueness: Primary key constraint
-- Data persistence: WAL mode survives crashes
-- Concurrent access: 5s busy timeout
+### Encryption at Rest
+- **SQLCipher**: Database encrypted with AES-256 using SQLCipher
+- **Key Management**: Encryption key from `NIMBUS_DB_KEY` environment variable
+- **Default Key**: Falls back to "default-change-in-production" (MUST be changed in production)
+- **Recommendation**: Use KMS (OpenBao/Vault) for production key management
+
+### File Permissions
+- **Database Files**: chmod 600 (owner-only read/write)
+- **WAL Files**: chmod 600 on .db-wal files
+- **SHM Files**: chmod 600 on .db-shm files
+- **Recommendation**: Run application as dedicated non-root user
+
+### Data Protection
+- **Secure Delete**: `PRAGMA secure_delete = ON` overwrites deleted data
+- **Log Redaction**: Sensitive data (nullifiers, keys) redacted to 8 characters in logs
+- **Double-spend prevention**: Atomic `INSERT OR IGNORE` (race-safe)
+- **Session uniqueness**: Primary key constraint
+- **Data persistence**: WAL mode survives crashes
+- **Concurrent access**: 5s busy timeout
+
+### Operational Security
+- Database is operational cache, not source of truth
+- If database is lost/corrupted:
+  - User funds: SAFE (on blockchain)
+  - Nullifiers: Rebuild from blockchain events
+  - Pending batches: Lost (users resubmit)
 
 ## Performance
 

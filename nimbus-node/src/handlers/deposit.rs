@@ -18,14 +18,14 @@ pub async fn handle_deposit(
         &client_address,
     ).await {
         Ok(true) => {
-            println!("RELAYER: Escrow deposit registered for Session ID: {}", payload.session_id);
+            println!("RELAYER: Escrow deposit registered for Session ID: {}...", &payload.session_id[..8.min(payload.session_id.len())]);
             Json(DepositResponse {
                 status: "SUCCESS".to_string(),
                 message: format!("Escrow registered for session {}", payload.session_id),
             })
         }
         Ok(false) => {
-            println!("RELAYER: Duplicate session ID attempted: {}", payload.session_id);
+            println!("RELAYER: Duplicate session ID attempted: {}...", &payload.session_id[..8.min(payload.session_id.len())]);
             Json(DepositResponse {
                 status: "ERROR".to_string(),
                 message: "Session ID already exists".to_string(),
@@ -51,7 +51,7 @@ pub async fn handle_reveal(
         Ok(true) => {
             // In production, we would perform BLS12-381 G2 MSM: k * pk_iss == com_k
             // For simulation, we log the verification success
-            println!("RELAYER: Masking key revealed for Session ID: {}", payload.session_id);
+            println!("RELAYER: Masking key revealed for Session ID: {}...", &payload.session_id[..8.min(payload.session_id.len())]);
             println!("  Verifying k * pk_iss == com_k ... VALID");
 
             Json(RevealResponse {
