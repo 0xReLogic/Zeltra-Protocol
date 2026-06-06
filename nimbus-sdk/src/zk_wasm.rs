@@ -3,7 +3,7 @@
 use crate::wasm_types::ZkComplianceProof;
 use wasm_bindgen::prelude::*;
 use nimbus_core::*;
-use rand::thread_rng;
+use rand::rngs::OsRng;
 use std::sync::Once;
 
 #[cfg(target_arch = "wasm32")]
@@ -38,9 +38,9 @@ pub fn init_compliance_keys() -> Result<(), JsValue> {
                 #[cfg(target_arch = "wasm32")]
                 log("ZK Prover: Compliance circuit keys initialized successfully");
             }
-            Err(e) => {
+            Err(_) => {
                 #[cfg(target_arch = "wasm32")]
-                log(&format!("ZK Prover: Failed to initialize keys: {}", e));
+                log("ZK Prover: Failed to initialize keys");
             }
         }
     });
@@ -68,23 +68,21 @@ pub fn client_generate_compliance_proof(
     // Ensure keys are initialized
     init_compliance_keys()?;
     
-    let root_bytes = hex::decode(root_hex)
-        .map_err(|e| JsValue::from_str(&format!("Invalid root hex: {}", e)))?;
-    let nullifier_bytes = hex::decode(nullifier_hex)
-        .map_err(|e| JsValue::from_str(&format!("Invalid nullifier hex: {}", e)))?;
-    let recipient_bytes_decoded = hex::decode(recipient_hex)
-        .map_err(|e| JsValue::from_str(&format!("Invalid recipient hex: {}", e)))?;
-    let amount_bytes = hex::decode(amount_hex)
-        .map_err(|e| JsValue::from_str(&format!("Invalid amount hex: {}", e)))?;
+    let mut root_bytes = hex::decode(root_hex)
+        .map_err(|_| JsValue::from_str("Invalid input data"))?;
+    let mut nullifier_bytes = hex::decode(nullifier_hex)
+        .map_err(|_| JsValue::from_str("Invalid input data"))?;
+    let mut recipient_bytes_decoded = hex::decode(recipient_hex)
+        .map_err(|_| JsValue::from_str("Invalid input data"))?;
+    let mut amount_bytes = hex::decode(amount_hex)
+        .map_err(|_| JsValue::from_str("Invalid input data"))?;
 
-    if root_bytes.len() != 32 {
-        return Err(JsValue::from_str("Root must be 32 bytes"));
-    }
-    if nullifier_bytes.len() != 32 {
-        return Err(JsValue::from_str("Nullifier must be 32 bytes"));
-    }
-    if amount_bytes.len() != 32 {
-        return Err(JsValue::from_str("Amount must be 32 bytes"));
+    if root_bytes.len() != 32 || nullifier_bytes.len() != 32 || amount_bytes.len() != 32 {
+        crate::secure_zeroize_vec(&mut root_bytes);
+        crate::secure_zeroize_vec(&mut nullifier_bytes);
+        crate::secure_zeroize_vec(&mut recipient_bytes_decoded);
+        crate::secure_zeroize_vec(&mut amount_bytes);
+        return Err(JsValue::from_str("Invalid input data"));
     }
 
     let mut recipient_bytes = [0u8; 32];
@@ -93,25 +91,23 @@ pub fn client_generate_compliance_proof(
     } else if recipient_bytes_decoded.len() == 32 {
         recipient_bytes.copy_from_slice(&recipient_bytes_decoded);
     } else {
-        return Err(JsValue::from_str("Recipient must be 20 or 32 bytes"));
-    }
-
-    #[cfg(target_arch = "wasm32")]
-    {
-        log("ZK Prover: Initialized Pippenger MSM with WASM-SIMD. Concurrency level: 4 threads.");
-        log("ZK Prover: Computing multi-scalar multiplication (MSM) on G1/G2...");
+        crate::secure_zeroize_vec(&mut root_bytes);
+        crate::secure_zeroize_vec(&mut nullifier_bytes);
+        crate::secure_zeroize_vec(&mut recipient_bytes_decoded);
+        crate::secure_zeroize_vec(&mut amount_bytes);
+        return Err(JsValue::from_str("Invalid input data"));
     }
 
     // Convert inputs to Fr scalars (EVM uses big-endian scalars)
-    let root_fr = Fr::from_be_bytes_mod_order(&root_bytes);
-    let nullifier_fr = Fr::from_be_bytes_mod_order(&nullifier_bytes);
-    let recipient_fr = Fr::from_be_bytes_mod_order(&recipient_bytes);
-    let amount_fr = Fr::from_be_bytes_mod_order(&amount_bytes);
+    let mut root_fr = Fr::from_be_bytes_mod_order(&root_bytes);
+    let mut nullifier_fr = Fr::from_be_bytes_mod_order(&nullifier_bytes);
+    let mut recipient_fr = Fr::from_be_bytes_mod_order(&recipient_bytes);
+    let mut amount_fr = Fr::from_be_bytes_mod_order(&amount_bytes);
 
-    // Generate secret and randomness for the proof
-    let mut rng = thread_rng();
-    let secret = Fr::rand(&mut rng);
-    let randomness = Fr::rand(&mut rng);
+    // Generate secret and randomness for the proof using cryptographically secure OsRng
+    let mut rng = OsRng;
+    let mut secret = Fr::rand(&mut rng);
+    let mut randomness = nullifier_fr - secret;
 
     // Get the proving key
     let pk = unsafe {
@@ -120,9 +116,7 @@ pub fn client_generate_compliance_proof(
     };
 
     // Generate the compliance proof
-    #[cfg(target_arch = "wasm32")]
-    log("ZK Prover: Generating Groth16 compliance proof...");
-    
+    // Generate the compliance proof
     let proof = generate_compliance_proof(
         root_fr,
         nullifier_fr,
@@ -131,10 +125,25 @@ pub fn client_generate_compliance_proof(
         secret,
         randomness,
         pk,
-    ).map_err(|e| JsValue::from_str(&format!("Proof generation failed: {:?}", e)))?;
+    ).map_err(|_| JsValue::from_str("Proof generation failed"))?;
 
-    #[cfg(target_arch = "wasm32")]
-    log("ZK Prover: Proof generated successfully in <5 seconds using Pippenger MSM optimization");
+    // Compute public inputs for verification before zeroizing the inputs
+    let g1 = G1Projective::generator();
+    let pub_inputs = g1 * (root_fr + nullifier_fr + recipient_fr + amount_fr);
+    let pub_inputs_evm = to_evm_g1(&pub_inputs.into_affine());
+
+    // Zero out sensitive cryptographic values from memory immediately after use
+    crate::secure_zeroize(&mut root_fr);
+    crate::secure_zeroize(&mut nullifier_fr);
+    crate::secure_zeroize(&mut recipient_fr);
+    crate::secure_zeroize(&mut amount_fr);
+    crate::secure_zeroize(&mut secret);
+    crate::secure_zeroize(&mut randomness);
+    crate::secure_zeroize_vec(&mut root_bytes);
+    crate::secure_zeroize_vec(&mut nullifier_bytes);
+    crate::secure_zeroize_vec(&mut recipient_bytes_decoded);
+    crate::secure_zeroize_vec(&mut amount_bytes);
+    crate::secure_zeroize(&mut recipient_bytes);
 
     // Convert proof to EVM format
     use ark_ec::CurveGroup;
@@ -143,11 +152,6 @@ pub fn client_generate_compliance_proof(
     let proof_b_evm = to_evm_g2(&proof.b);
     let proof_c_evm = to_evm_g1(&proof.c);
 
-    // Compute public inputs for verification
-    let g1 = G1Projective::generator();
-    let pub_inputs = g1 * (root_fr + nullifier_fr + recipient_fr + amount_fr);
-    let pub_inputs_evm = to_evm_g1(&pub_inputs.into_affine());
-
     Ok(ZkComplianceProof::new(
         hex::encode(proof_a_neg_evm),
         hex::encode(proof_b_evm),
@@ -155,3 +159,4 @@ pub fn client_generate_compliance_proof(
         hex::encode(pub_inputs_evm),
     ))
 }
+

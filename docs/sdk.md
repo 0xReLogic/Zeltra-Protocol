@@ -266,8 +266,9 @@ sequenceDiagram
 ```rust
 use nimbus_sdk::x402::*;
 
-// 1. Decode header PAYMENT-REQUIRED dari server
-let payment_req = decode_payment_required(&payment_required_header_b64).unwrap();
+// 1. Decode header & verifikasi integritas PAYMENT-REQUIRED secara aman menggunakan HMAC
+let secret_key = b"my_secure_shared_hmac_secret_key";
+let payment_req = decode_payment_required_secure(&payment_required_header_b64, &expected_hmac_hex, secret_key).unwrap();
 let option = &payment_req.accepts[0];
 println!("Server requires {} {} on {}", option.price.amount, option.scheme, option.network);
 
@@ -277,6 +278,7 @@ let sig = build_nimbus_payment_signature(
     "0xalpha_neg_bytes...",
     "0xhm_bytes...",
     "0xpk_iss_bytes...",
+    option.price.amount.parse::<u64>().unwrap_or(1000),
     &option.scheme,      // "exact"
     &option.network,     // "eip155:42161"
 );
@@ -285,8 +287,8 @@ let sig = build_nimbus_payment_signature(
 let header_value = encode_payment_signature(&sig).unwrap();
 // Attach ke request: PAYMENT-SIGNATURE: {header_value}
 
-// 4. Decode receipt dari server
-let receipt = decode_payment_response(&payment_response_header_b64).unwrap();
+// 4. Decode & verifikasi receipt secara aman menggunakan HMAC
+let receipt = decode_payment_response_secure(&payment_response_header_b64, &expected_response_hmac_hex, secret_key).unwrap();
 assert!(receipt.success);
 ```
 
@@ -306,7 +308,8 @@ const sessionId = pool.prepare_blind_token(1000000, "my_secret_token_id_1");
 const blindedMsg = pool.get_blinded_message(sessionId);
 
 // 3. Daftarkan masked signature hasil tanda tangan Relayer
-const isValid = pool.register_signing_result(sessionId, maskedSigHex, commitmentHex);
+//    (opsional: masukkan tanda tangan issuer dan public key untuk memverifikasi keabsahan k secara instan)
+const isValid = pool.register_signing_result(sessionId, maskedSigHex, commitmentHex, issuerSignatureHex, issuerPublicKeyHex);
 if (isValid) {
     console.log("Blinded signature is valid off-chain!");
 }

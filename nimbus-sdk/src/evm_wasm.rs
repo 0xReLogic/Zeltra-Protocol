@@ -2,14 +2,21 @@
 
 use wasm_bindgen::prelude::*;
 use nimbus_core::*;
+use ark_ff::Zero;
 
 /// Helper: Converts unmasked signature to EVM-compatible negated signature (-alpha) hex string (128 bytes).
 #[wasm_bindgen]
 pub fn client_get_alpha_neg_evm(sig_hex: &str) -> Result<String, JsValue> {
     let sig_bytes = hex::decode(sig_hex)
-        .map_err(|e| JsValue::from_str(&format!("Invalid signature hex: {}", e)))?;
+        .map_err(|_| JsValue::from_str("Invalid input data"))?;
     let signature: UnmaskedSignature = deserialize_from_bytes(&sig_bytes)
-        .ok_or_else(|| JsValue::from_str("Failed to deserialize signature"))?;
+        .ok_or_else(|| JsValue::from_str("Invalid input data"))?;
+        
+    // Structure validation: check for zero/identity elements
+    if signature.0.is_zero() {
+        return Err(JsValue::from_str("Invalid input data"));
+    }
+        
     let alpha_neg = get_alpha_neg_evm(&signature);
     Ok(hex::encode(alpha_neg))
 }
@@ -25,9 +32,15 @@ pub fn client_get_hm_evm(message: &str) -> String {
 #[wasm_bindgen]
 pub fn client_get_pk_iss_evm(pk_hex: &str) -> Result<String, JsValue> {
     let pk_bytes = hex::decode(pk_hex)
-        .map_err(|e| JsValue::from_str(&format!("Invalid public key hex: {}", e)))?;
+        .map_err(|_| JsValue::from_str("Invalid input data"))?;
     let pk_iss: IssuerPublicKey = deserialize_from_bytes(&pk_bytes)
-        .ok_or_else(|| JsValue::from_str("Failed to deserialize public key"))?;
+        .ok_or_else(|| JsValue::from_str("Invalid input data"))?;
+        
+    // Structure validation: check for zero/identity elements
+    if pk_iss.0.is_zero() {
+        return Err(JsValue::from_str("Invalid input data"));
+    }
+        
     let pk_iss_evm = get_pk_iss_evm(&pk_iss);
     Ok(hex::encode(pk_iss_evm))
 }

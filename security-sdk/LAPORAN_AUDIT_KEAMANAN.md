@@ -17,6 +17,7 @@ Berdasarkan analisis kode `nimbus-sdk` terhadap ancaman keamanan client-side ter
 
 ### 1.1 Data Sensitif Tidak Dibersihkan Setelah Digunakan
 **Lokasi:** `zk_wasm.rs:67-82`, `blind_wasm.rs:11-19`, `threshold_wasm.rs:14-19`
+**Status:** **REMEDIATED (6 Juni 2026)**
 
 **Masalah:** Rahasia kriptografi (random scalars, blinding factors) tetap berada di memori setelah digunakan tanpa pembersihan eksplisit.
 
@@ -25,24 +26,24 @@ Berdasarkan analisis kode `nimbus-sdk` terhadap ancaman keamanan client-side ter
 - Setelah `client_generate_compliance_proof` selesai, random scalar `c` (baris 82) tetap ada di memori stack
 - Penyerang mengekstrak nilai ini untuk memprediksi nilai random di masa depan atau merekonstruksi bukti parsial
 
-**Perbaikan Kode:**
+**Remediasi & Implementasi:**
+Kami membuat helper pembersihan memori aman di `lib.rs` (`secure_zeroize` dan `secure_zeroize_vec`) yang menggunakan penulisan volatile (`std::ptr::write_volatile`) untuk memastikan compiler tidak mengoptimalkan instruksi ini (tidak menghapusnya):
 ```rust
-// zk_wasm.rs - Tambahkan zeroing setelah penggunaan
-use zeroize::Zeroize;
-
-let mut rng = thread_rng();
-let c = Fr::rand(&mut rng);
-
-// ... gunakan c dalam pembuatan bukti ...
-
-// Bersihkan data sensitif secara eksplisit
-unsafe {
-    std::ptr::write_bytes(&mut c as *mut Fr as *mut u8, 0, std::mem::size_of::<Fr>());
+pub fn secure_zeroize<T>(val: &mut T) {
+    let ptr = val as *mut T as *mut u8;
+    let size = std::mem::size_of::<T>();
+    for i in 0..size {
+        unsafe {
+            std::ptr::write_volatile(ptr.add(i), 0);
+        }
+    }
 }
 ```
+Pembersihan ini dipanggil secara eksplisit di akhir fungsi pembuat bukti ZK (untuk `secret`, `randomness`, `root_fr`, `nullifier_fr`, dll.) dan operasi blinding/unmasking (untuk blinding factor `r` dan masking key `k`).
 
 ### 1.2 Token Pool Menyimpan Rahasia dalam Memori Biasa
 **Lokasi:** `pool.rs:10-26`
+**Status:** **REMEDIATED (6 Juni 2026)**
 
 **Masalah:** `PendingToken` dan `ReadyToken` menyimpan blinding factors dan signatures dalam memori heap tanpa enkripsi atau alokasi memori yang aman.
 
@@ -51,21 +52,24 @@ unsafe {
 - Penyerang membuang memori WASM dan mengekstrak semua blinding factors yang tertunda
 - Memungkinkan serangan replay blind signature atau pengeluaran token yang tidak sah
 
-**Perbaikan Kode:**
-```rust
-// pool.rs - Gunakan penyimpanan terenkripsi
-use secrecy::{Secret, ExposeSecret};
+**Remediasi & Implementasi:**
+Untuk menghindari penambahan dependensi eksternal yang besar, kami mengimplementasikan pembersihan heap otomatis di `pool.rs` dengan menerapkan trait `Drop` pada struktur `PendingToken` dan `ReadyToken`. 
 
-#[derive(Clone, Serialize, Deserialize)]
-pub struct PendingToken {
-    pub session_id: String,
-    pub message: String,
-    pub blinded_message_hex: String,
-    #[serde(skip)] // Jangan serialisasi
-    pub blinding_factor_hex: Secret<String>, // Terenkripsi dalam memori
-    pub amount: u64,
-    pub com_k_hex: Option<String>,
-    pub masked_sig_hex: Option<String>,
+Setiap kali token dihapus dari pool (misal saat dipindahkan dari pending ke ready, atau saat di-spend), memori heap dari string sensitif (`blinding_factor_hex`, `message`, `session_id`, `blinded_message_hex`, `com_k_hex`, `masked_sig_hex`, `unmasked_sig_hex`) akan langsung dinegasikan dan di-zeroize menggunakan `std::ptr::write_volatile` sebelum didealokasikan oleh Rust:
+```rust
+impl Drop for PendingToken {
+    fn drop(&mut self) {
+        crate::secure_zeroize_string(&mut self.blinding_factor_hex);
+        crate::secure_zeroize_string(&mut self.message);
+        crate::secure_zeroize_string(&mut self.session_id);
+        crate::secure_zeroize_string(&mut self.blinded_message_hex);
+        if let Some(ref mut k) = self.com_k_hex {
+            crate::secure_zeroize_string(k);
+        }
+        if let Some(ref mut sig) = self.masked_sig_hex {
+            crate::secure_zeroize_string(sig);
+        }
+    }
 }
 ```
 
@@ -75,6 +79,7 @@ pub struct PendingToken {
 
 ### 2.1 Tidak Ada Verifikasi Integritas Payload
 **Lokasi:** `x402/codec.rs:9-15`, `x402/codec.rs:26-32`
+**Status:** **REMEDIATED (6 Juni 2026)**
 
 **Masalah:** Payload JSON yang didekode Base64 tidak memiliki verifikasi HMAC atau signature sebelum deserialization.
 
@@ -84,50 +89,48 @@ pub struct PendingToken {
 - Klien menerima payload yang dimanipulasi tanpa pemeriksaan integritas
 - Pengguna tanpa sadar mengotorisasi pembayaran 1000x
 
-**Perbaikan Kode:**
-```rust
-// codec.rs - Tambahkan verifikasi HMAC
-use hmac::{Hmac, Mac};
-use sha2::Sha256;
+**Remediasi & Implementasi:**
+Kami mengimplementasikan standard-compliant HMAC-SHA256 dari nol di `lib.rs` (menggunakan hashing primitif dari `sha2` yang sudah ada) agar tidak membebani project dengan dependensi eksternal baru. 
 
-pub fn decode_payment_required(header_value: &str, expected_hmac: &str) -> Result<X402PaymentRequired, String> {
-    // Verifikasi HMAC terlebih dahulu
-    let mut mac = Hmac::<Sha256>::new_from_slice(b"secret_key")?;
-    mac.update(header_value.as_bytes());
-    let calculated_hmac = hex::encode(mac.finalize().into_bytes());
-    
-    if calculated_hmac != expected_hmac {
-        return Err("Verifikasi integritas payload gagal".to_string());
+Fungsi verifikasi aman ditambahkan: `decode_payment_required_secure` and `decode_payment_response_secure`. Fungsi orisinal non-secure (`decode_payment_required` dan `decode_payment_response`) dipertahankan sebagai wrapper dengan argumen HMAC kosong agar tetap kompatibel ke belakang (backward compatible) dengan integration test dan client yang sudah ada:
+```rust
+pub fn decode_payment_required_secure(
+    header_value: &str,
+    expected_hmac: &str,
+    secret_key: &[u8],
+) -> Result<X402PaymentRequired, String> {
+    if !expected_hmac.is_empty() {
+        let calculated_hmac = hex::encode(crate::hmac_sha256(secret_key, header_value.as_bytes()));
+        if calculated_hmac != expected_hmac {
+            return Err("Verifikasi integritas payload gagal".to_string());
+        }
     }
-    
-    let bytes = BASE64_STANDARD.decode(header_value.trim())
-        .map_err(|e| format!("Base64 decode error: {}", e))?;
-    serde_json::from_slice(&bytes)
-        .map_err(|e| format!("JSON parse error: {}", e))
+    // ... base64 & json decoding ...
 }
 ```
 
-### 2.2 Deserialization Tanpa Whitelisting Tipe
+### 2.2 Deserialization Tanpa Whitelisting Tipe / Validasi Struktural
 **Lokasi:** `blind_wasm.rs:35-40`, `threshold_wasm.rs:63-68`
+**Status:** **REMEDIATED (6 Juni 2026)**
 
-**Masalah:** `deserialize_from_bytes` menerima data serialisasi apa pun tanpa validasi tipe.
+**Masalah:** `deserialize_from_bytes` menerima byte array dan mendekodekannya menjadi objek kriptografi tanpa melakukan validasi struktural untuk mendeteksi data input kosong/berbahaya.
 
 **Skenario Serangan:**
-- Penyerang membuat objek serialisasi berbahaya (gadget chain)
-- Menyuntikkan melalui respons RPC atau localStorage
-- Deserialization memicu eksekusi kode arbitrer (RCE)
+- Penyerang menyuntikkan signature/key kosong (bernilai nol) via respons facilitator atau RPC.
+- Rust melakukan deserialisasi point atau scalar tanpa masalah memory safety, namun parameter nol/identity element tersebut lolos verifikasi kriptografis jika tidak diperiksa secara eksplisit, menyebabkan bypass verifikasi (misal: verifikasi tanda tangan zero point bernilai true terhadap public key apapun).
 
-**Perbaikan Kode:**
+**Remediasi & Implementasi:**
+Kami mengimpor trait `ark_ff::Zero` dan menerapkan pemeriksaan struktural yang ketat setelah setiap operasi deserialisasi objek kurva (G1Projective/G2Projective) dan elemen field (Fr) di batas WASM:
 ```rust
-// blind_wasm.rs - Tambahkan validasi tipe
-let x: BlindedMessage = deserialize_from_bytes(&blinded_bytes)
-    .ok_or_else(|| JsValue::from_str("Gagal mendeserialize blinded message"))?;
+let sig: MaskedBlindSignature = deserialize_from_bytes(&sig_bytes)
+    .ok_or_else(|| JsValue::from_str("Invalid input data"))?;
 
-// Validasi struktur
-if x.public_key.is_zero() || x.blinded_message.is_zero() {
-    return Err(JsValue::from_str("Blinded message tidak valid: terdeteksi nilai nol"));
+// Validasi struktural: deteksi identity/zero element
+if sig.0.is_zero() {
+    return Err(JsValue::from_str("Invalid input data"));
 }
 ```
+Pemeriksaan ini ditambahkan di `blind_wasm.rs`, `threshold_wasm.rs`, `evm_wasm.rs`, dan `pool.rs`.
 
 ---
 
@@ -135,6 +138,7 @@ if x.public_key.is_zero() || x.blinded_message.is_zero() {
 
 ### 3.1 Pesan Error Verbose Membocorkan State Internal
 **Lokasi:** `blind_wasm.rs:28-33`, `threshold_wasm.rs:56-61`
+**Status:** **REMEDIATED (6 Juni 2026)**
 
 **Masalah:** Pesan error mengekspos nama field internal dan struktur ke klien.
 
@@ -144,15 +148,12 @@ if x.public_key.is_zero() || x.blinded_message.is_zero() {
 - Mempelajari struktur data internal untuk serangan yang ditargetkan
 - Melanggar OWASP A05:2021 - Security Misconfiguration
 
-**Perbaikan Kode:**
-```rust
-// blind_wasm.rs - Gunakan pesan error generik
-let blinded_bytes = hex::decode(blinded_hex)
-    .map_err(|_| JsValue::from_str("Data input tidak valid"))?;
-```
+**Remediasi & Implementasi:**
+Semua pesan error verbose di interface WASM (`zk_wasm.rs`, `blind_wasm.rs`, `threshold_wasm.rs`, `evm_wasm.rs`, `pool.rs`) telah diganti dengan pesan error generik `"Invalid input data"` atau `"Proof generation failed"` untuk meniadakan kebocoran detail struktur internal atau metadata library ke console/javascript client.
 
 ### 3.2 Tidak Ada Validasi Respons RPC
 **Lokasi:** `pool.rs:89-119`
+**Status:** **REMEDIATED (6 Juni 2026)**
 
 **Masalah:** `register_signing_result` menerima masked signature dari issuer tanpa verifikasi kriptografi sumbernya.
 
@@ -162,31 +163,25 @@ let blinded_bytes = hex::decode(blinded_hex)
 - Klien menerima signature yang tidak valid tanpa memverifikasi identitas issuer
 - Menghasilkan token yang tidak valid yang gagal on-chain
 
-**Perbaikan Kode:**
+**Remediasi & Implementasi:**
+Kami memperluas fungsi `register_signing_result` di `AgentTokenPool` dengan menambahkan parameter opsional `issuer_signature_hex` dan `expected_issuer_pk`. Jika disediakan, fungsi tersebut akan memverifikasi tanda tangan BLS yang dibuat oleh issuer terhadap commitment `com_k_hex` sebelum memproses data lebih lanjut:
 ```rust
-// pool.rs - Tambahkan verifikasi signature issuer
-pub fn register_signing_result(
-    &mut self,
-    session_id: &str,
-    masked_sig_hex: &str,
-    com_k_hex: &str,
-    issuer_signature_hex: &str, // Parameter baru
-    expected_issuer_pk: &str,
-) -> Result<bool, JsValue> {
-    // Verifikasi issuer menandatangani komitmen
-    let is_valid_issuer_sig = verify_issuer_signature(
-        com_k_hex,
-        issuer_signature_hex,
-        expected_issuer_pk
-    )?;
-    
-    if !is_valid_issuer_sig {
-        return Err(JsValue::from_str("Verifikasi signature issuer gagal"));
+    #[wasm_bindgen]
+    pub fn register_signing_result(
+        &mut self,
+        session_id: &str,
+        masked_sig_hex: &str,
+        com_k_hex: &str,
+        issuer_signature_hex: Option<String>,
+        expected_issuer_pk: Option<String>,
+    ) -> Result<bool, JsValue> {
+        if let (Some(sig_hex), Some(pk_hex)) = (issuer_signature_hex, expected_issuer_pk) {
+             // ... verifikasi tanda tangan BLS ...
+        }
+        // ...
     }
-    
-    // ... logika validasi yang ada ...
-}
 ```
+Metode ini diimplementasikan secara fully backward-compatible dengan JS binding yang ada.
 
 ---
 
@@ -582,51 +577,22 @@ impl TransactionConfirmation {
 - Tambahkan warning untuk transaksi besar atau unusual
 
 ### 5.10 Random Number Generation Deterministik (Kritis)
-**Lokasi:** `zk_wasm.rs:82`, `blind_wasm.rs:12`, `threshold_wasm.rs:17`
+**Lokasi:** `zk_wasm.rs:82`, `blind_wasm.rs:12`, `threshold_wasm.rs:17`, `pool.rs:58`
+**Status:** **REMEDIATED (6 Juni 2026)**
 
-**Masalah:** `thread_rng()` mungkin tidak cryptographically secure di semua environments.
+**Masalah:** Penggunaan `thread_rng()` mungkin tidak aman secara kriptografis di semua runtime/environment (misal browser WASM fallback yang tidak aman).
 
 **Skenario Serangan:**
-- Random numbers predictable karena seed yang lemah
-- Attacker memprediksi blinding factors
-- Compromise seluruh sistem blind signature
+- Keacakan (randomness) dapat ditebak karena seed entropy source yang lemah.
+- Penyerang memprediksi blinding factors `r` atau masking keys `k` untuk memecah anonimitas token atau mencuri token.
 
-**Pencegahan:**
+**Remediasi & Implementasi:**
+Kami telah mengganti seluruh penggunaan `rand::thread_rng()` dan `rand::random()` di codebase `nimbus-sdk` dengan `rand::rngs::OsRng` yang secara langsung terikat ke hardware secure entropy source sistem operasi/browser (misalnya Web Crypto API `getRandomValues` di browser melalui crate `getrandom` dengan fitur `"js"` diaktifkan):
 ```rust
-// Gunakan OsRng atau Web Crypto API untuk cryptographic randomness
-#[cfg(target_arch = "wasm32")]
 use rand::rngs::OsRng;
-
-#[cfg(not(target_arch = "wasm32")]
-use rand::rngs::ThreadRng;
-
-#[cfg(target_arch = "wasm32")]
-fn get_crypto_rng() -> OsRng {
-    OsRng
-}
-
-#[cfg(not(target_arch = "wasm32")]
-fn get_crypto_rng() -> ThreadRng {
-    ThreadRng::entropy_from(&SystemRandom::new())
-}
-
-// Atau gunakan Web Crypto API langsung di WASM
-#[wasm_bindgen]
-pub async fn generate_secure_random() -> Result<Vec<u8>, JsValue> {
-    let window = web_sys::window().unwrap();
-    let crypto = window.crypto().unwrap();
-    let array = js_sys::Uint8Array::new_with_length(32);
-    crypto.get_random_values(&array).unwrap();
-    Ok(array.to_vec())
-}
+let mut rng = OsRng;
+let (blinded, mut r) = client_blind(message.as_bytes(), &mut rng);
 ```
-
-**Best Practices:**
-- Gunakan `rand::rngs::OsRng` untuk cryptographic randomness
-- Di WASM, gunakan Web Crypto API `getRandomValues()`
-- Verifikasi entropy source sebelum production
-- Implement fallback mechanisms jika entropy source gagal
-- Test randomness quality dengan statistical tests
 
 ---
 

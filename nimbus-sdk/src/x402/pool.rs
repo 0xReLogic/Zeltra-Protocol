@@ -2,9 +2,10 @@
 
 use super::codec::{build_nimbus_payment_signature, encode_payment_signature};
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use wasm_bindgen::prelude::*;
 use nimbus_core::*;
+use ark_ff::Zero;
 use sha2::Digest;
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -18,11 +19,33 @@ pub struct PendingToken {
     pub masked_sig_hex: Option<String>,
 }
 
+impl Drop for PendingToken {
+    fn drop(&mut self) {
+        crate::secure_zeroize_string(&mut self.blinding_factor_hex);
+        crate::secure_zeroize_string(&mut self.message);
+        crate::secure_zeroize_string(&mut self.session_id);
+        crate::secure_zeroize_string(&mut self.blinded_message_hex);
+        if let Some(ref mut k) = self.com_k_hex {
+            crate::secure_zeroize_string(k);
+        }
+        if let Some(ref mut sig) = self.masked_sig_hex {
+            crate::secure_zeroize_string(sig);
+        }
+    }
+}
+
 #[derive(Clone, Serialize, Deserialize)]
 pub struct ReadyToken {
     pub message: String,
     pub unmasked_sig_hex: String,
     pub amount: u64,
+}
+
+impl Drop for ReadyToken {
+    fn drop(&mut self) {
+        crate::secure_zeroize_string(&mut self.unmasked_sig_hex);
+        crate::secure_zeroize_string(&mut self.message);
+    }
 }
 
 #[wasm_bindgen]
@@ -32,6 +55,8 @@ pub struct AgentTokenPool {
     pub pending_tokens: HashMap<String, PendingToken>,
     #[wasm_bindgen(skip)]
     pub ready_tokens: Vec<ReadyToken>,
+    #[wasm_bindgen(skip)]
+    pub spent_nullifiers: HashSet<String>,
 }
 
 #[wasm_bindgen]
@@ -44,35 +69,44 @@ impl AgentTokenPool {
     #[wasm_bindgen]
     pub fn serialize_pool(&self) -> Result<String, JsValue> {
         serde_json::to_string(self)
-            .map_err(|e| JsValue::from_str(&format!("Serialize error: {}", e)))
+            .map_err(|_| JsValue::from_str("Invalid input data"))
     }
 
     #[wasm_bindgen]
     pub fn deserialize_pool(json_str: &str) -> Result<AgentTokenPool, JsValue> {
         serde_json::from_str(json_str)
-            .map_err(|e| JsValue::from_str(&format!("Deserialize error: {}", e)))
+            .map_err(|_| JsValue::from_str("Invalid input data"))
     }
 
     #[wasm_bindgen]
     pub fn prepare_blind_token(&mut self, amount: u64, message: &str) -> Result<String, JsValue> {
-        let mut rng = rand::thread_rng();
-        let (blinded, r) = client_blind(message.as_bytes(), &mut rng);
+        if message.len() > 1024 {
+            return Err(JsValue::from_str("Invalid input data"));
+        }
+        let mut rng = rand::rngs::OsRng;
+        let (blinded, mut r) = client_blind(message.as_bytes(), &mut rng);
         
         let blinded_hex = hex::encode(serialize_to_bytes(&blinded));
-        let r_hex = hex::encode(serialize_to_bytes(&r));
+        let mut r_hex = hex::encode(serialize_to_bytes(&r));
         
-        // Generate random session_id
-        let session_id = hex::encode(rand::random::<[u8; 16]>());
+        // Generate random session_id using cryptographically secure OsRng
+        let mut session_bytes = [0u8; 16];
+        rand::RngCore::fill_bytes(&mut rng, &mut session_bytes);
+        let session_id = hex::encode(session_bytes);
         
         let pending = PendingToken {
             session_id: session_id.clone(),
             message: message.to_string(),
             blinded_message_hex: blinded_hex,
-            blinding_factor_hex: r_hex,
+            blinding_factor_hex: r_hex.clone(),
             amount,
             com_k_hex: None,
             masked_sig_hex: None,
         };
+        
+        // Clean up temporary secrets
+        crate::secure_zeroize(&mut r);
+        crate::secure_zeroize_string(&mut r_hex);
         
         self.pending_tokens.insert(session_id.clone(), pending);
         Ok(session_id)
@@ -81,7 +115,7 @@ impl AgentTokenPool {
     #[wasm_bindgen]
     pub fn get_blinded_message(&self, session_id: &str) -> Result<String, JsValue> {
         let token = self.pending_tokens.get(session_id)
-            .ok_or_else(|| JsValue::from_str("Session ID not found"))?;
+            .ok_or_else(|| JsValue::from_str("Invalid input data"))?;
         Ok(token.blinded_message_hex.clone())
     }
 
@@ -91,23 +125,55 @@ impl AgentTokenPool {
         session_id: &str,
         masked_sig_hex: &str,
         com_k_hex: &str,
+        issuer_signature_hex: Option<String>,
+        expected_issuer_pk: Option<String>,
     ) -> Result<bool, JsValue> {
         let token = self.pending_tokens.get_mut(session_id)
-            .ok_or_else(|| JsValue::from_str("Session ID not found"))?;
+            .ok_or_else(|| JsValue::from_str("Invalid input data"))?;
             
+        // 1. Verify that the issuer signature on com_k is valid (if provided)
+        if let (Some(sig_hex), Some(pk_hex)) = (issuer_signature_hex, expected_issuer_pk) {
+            let com_k_bytes = hex::decode(com_k_hex)
+                .map_err(|_| JsValue::from_str("Invalid input data"))?;
+            let sig_bytes = hex::decode(&sig_hex)
+                .map_err(|_| JsValue::from_str("Invalid input data"))?;
+            let pk_bytes = hex::decode(&pk_hex)
+                .map_err(|_| JsValue::from_str("Invalid input data"))?;
+                
+            let signature: UnmaskedSignature = deserialize_from_bytes(&sig_bytes)
+                .ok_or_else(|| JsValue::from_str("Invalid input data"))?;
+            let pk_iss: IssuerPublicKey = deserialize_from_bytes(&pk_bytes)
+                .ok_or_else(|| JsValue::from_str("Invalid input data"))?;
+                
+            // Check structural validity (prevent identity elements)
+            if signature.0.is_zero() || pk_iss.0.is_zero() {
+                return Err(JsValue::from_str("Invalid input data"));
+            }
+                
+            let is_valid_issuer_sig = verify_unmasked(&com_k_bytes, &signature, &pk_iss);
+            if !is_valid_issuer_sig {
+                return Err(JsValue::from_str("Invalid input data"));
+            }
+        }
+
         let blinded_bytes = hex::decode(&token.blinded_message_hex)
-            .map_err(|e| JsValue::from_str(&format!("Invalid blinded hex: {}", e)))?;
+            .map_err(|_| JsValue::from_str("Invalid input data"))?;
         let com_k_bytes = hex::decode(com_k_hex)
-            .map_err(|e| JsValue::from_str(&format!("Invalid com_k hex: {}", e)))?;
+            .map_err(|_| JsValue::from_str("Invalid input data"))?;
         let masked_sig_bytes = hex::decode(masked_sig_hex)
-            .map_err(|e| JsValue::from_str(&format!("Invalid masked_sig hex: {}", e)))?;
+            .map_err(|_| JsValue::from_str("Invalid input data"))?;
             
         let x: BlindedMessage = deserialize_from_bytes(&blinded_bytes)
-            .ok_or_else(|| JsValue::from_str("Failed to deserialize blinded message"))?;
+            .ok_or_else(|| JsValue::from_str("Invalid input data"))?;
         let commitment: MaskingKeyCommitment = deserialize_from_bytes(&com_k_bytes)
-            .ok_or_else(|| JsValue::from_str("Failed to deserialize commitment"))?;
+            .ok_or_else(|| JsValue::from_str("Invalid input data"))?;
         let sig: MaskedBlindSignature = deserialize_from_bytes(&masked_sig_bytes)
-            .ok_or_else(|| JsValue::from_str("Failed to deserialize masked signature"))?;
+            .ok_or_else(|| JsValue::from_str("Invalid input data"))?;
+            
+        // Structure validation: check for zero/identity points
+        if x.0.is_zero() || commitment.0.is_zero() || sig.0.is_zero() {
+            return Err(JsValue::from_str("Invalid input data"));
+        }
             
         let is_valid = client_verify_masked(&x, &commitment, &sig);
         if is_valid {
@@ -121,27 +187,32 @@ impl AgentTokenPool {
     #[wasm_bindgen]
     pub fn unmask_token(&mut self, session_id: &str, masking_key_hex: &str) -> Result<bool, JsValue> {
         let token = self.pending_tokens.get(session_id)
-            .ok_or_else(|| JsValue::from_str("Session ID not found"))?;
+            .ok_or_else(|| JsValue::from_str("Invalid input data"))?;
             
         let masked_sig_hex = token.masked_sig_hex.as_ref()
-            .ok_or_else(|| JsValue::from_str("Token has not been signed or registered yet"))?;
+            .ok_or_else(|| JsValue::from_str("Invalid input data"))?;
             
         let sig_bytes = hex::decode(masked_sig_hex)
-            .map_err(|e| JsValue::from_str(&format!("Invalid masked_sig hex: {}", e)))?;
+            .map_err(|_| JsValue::from_str("Invalid input data"))?;
         let r_bytes = hex::decode(&token.blinding_factor_hex)
-            .map_err(|e| JsValue::from_str(&format!("Invalid r hex: {}", e)))?;
+            .map_err(|_| JsValue::from_str("Invalid input data"))?;
         let k_bytes = hex::decode(masking_key_hex)
-            .map_err(|e| JsValue::from_str(&format!("Invalid k hex: {}", e)))?;
+            .map_err(|_| JsValue::from_str("Invalid input data"))?;
             
         let sig: MaskedBlindSignature = deserialize_from_bytes(&sig_bytes)
-            .ok_or_else(|| JsValue::from_str("Failed to deserialize masked signature"))?;
+            .ok_or_else(|| JsValue::from_str("Invalid input data"))?;
         let r_factor: BlindingFactor = deserialize_from_bytes(&r_bytes)
-            .ok_or_else(|| JsValue::from_str("Failed to deserialize blinding factor"))?;
+            .ok_or_else(|| JsValue::from_str("Invalid input data"))?;
         let k_key: MaskingKey = deserialize_from_bytes(&k_bytes)
-            .ok_or_else(|| JsValue::from_str("Failed to deserialize masking key"))?;
+            .ok_or_else(|| JsValue::from_str("Invalid input data"))?;
+            
+        // Structure validation: check for zero/identity points and fields
+        if sig.0.is_zero() || r_factor.0.is_zero() || k_key.0.is_zero() {
+            return Err(JsValue::from_str("Invalid input data"));
+        }
             
         let unmasked = client_unmask(&sig, &r_factor, &k_key)
-            .ok_or_else(|| JsValue::from_str("Failed to compute unmask key inverse"))?;
+            .ok_or_else(|| JsValue::from_str("Invalid input data"))?;
             
         let unmasked_sig_hex = hex::encode(serialize_to_bytes(&unmasked));
         
@@ -178,7 +249,7 @@ impl AgentTokenPool {
     ) -> Result<String, JsValue> {
         // Find index of first token with matching amount
         let index = self.ready_tokens.iter().position(|t| t.amount == amount)
-            .ok_or_else(|| JsValue::from_str("No ready tokens with the requested amount available"))?;
+            .ok_or_else(|| JsValue::from_str("Invalid input data"))?;
             
         let token = self.ready_tokens.remove(index);
         
@@ -189,6 +260,12 @@ impl AgentTokenPool {
         
         // Use message hash as nullifier candidate
         let nullifier = hex::encode(sha2::Sha256::digest(token.message.as_bytes()));
+        
+        // Replay protection: check local spent nullifier cache
+        if self.spent_nullifiers.contains(&nullifier) {
+            return Err(JsValue::from_str("Token already spent"));
+        }
+        self.spent_nullifiers.insert(nullifier.clone());
         
         let sig = build_nimbus_payment_signature(
             &nullifier,

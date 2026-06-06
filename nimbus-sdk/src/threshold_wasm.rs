@@ -2,7 +2,8 @@
 
 use wasm_bindgen::prelude::*;
 use nimbus_core::*;
-use rand::thread_rng;
+use ark_ff::Zero;
+use rand::rngs::OsRng;
 
 #[derive(serde::Serialize)]
 struct KeyShare {
@@ -13,9 +14,11 @@ struct KeyShare {
 /// Client/Wallet: Generates a random scalar (e.g. for identity or slope).
 #[wasm_bindgen]
 pub fn client_generate_random_scalar() -> String {
-    let mut rng = thread_rng();
-    let scalar = Fr::rand(&mut rng);
-    hex::encode(serialize_to_bytes(&scalar))
+    let mut rng = OsRng;
+    let mut scalar = Fr::rand(&mut rng);
+    let hex_scalar = hex::encode(serialize_to_bytes(&scalar));
+    crate::secure_zeroize(&mut scalar);
+    hex_scalar
 }
 
 /// Client/Leader: Splits the main secret key into n shares with threshold t.
@@ -26,24 +29,40 @@ pub fn client_split_secret_key(
     t: u32,
     n: u32,
 ) -> Result<String, JsValue> {
-    let sk_bytes = hex::decode(secret_key_hex)
-        .map_err(|e| JsValue::from_str(&format!("Invalid secret key hex: {}", e)))?;
-    let sk: IssuerSecretKey = deserialize_from_bytes(&sk_bytes)
-        .ok_or_else(|| JsValue::from_str("Failed to deserialize secret key"))?;
+    let mut sk_bytes = hex::decode(secret_key_hex)
+        .map_err(|_| JsValue::from_str("Invalid input data"))?;
+    let mut sk: IssuerSecretKey = deserialize_from_bytes(&sk_bytes)
+        .ok_or_else(|| JsValue::from_str("Invalid input data"))?;
         
-    let mut rng = thread_rng();
-    let shares = split_secret_key(&sk, t as usize, n as usize, &mut rng);
+    // Structural validation
+    if sk.0.is_zero() {
+        crate::secure_zeroize_vec(&mut sk_bytes);
+        crate::secure_zeroize(&mut sk);
+        return Err(JsValue::from_str("Invalid input data"));
+    }
+        
+    let mut rng = OsRng;
+    let mut shares = split_secret_key(&sk, t as usize, n as usize, &mut rng);
     
     let key_shares: Vec<KeyShare> = shares
-        .into_iter()
+        .iter()
         .map(|(i, val)| KeyShare {
-            index: i as u32,
-            share: hex::encode(serialize_to_bytes(&val)),
+            index: *i as u32,
+            share: hex::encode(serialize_to_bytes(val)),
         })
         .collect();
         
-    serde_json::to_string(&key_shares)
-        .map_err(|e| JsValue::from_str(&format!("Failed to serialize key shares to JSON: {}", e)))
+    let json_result = serde_json::to_string(&key_shares)
+        .map_err(|_| JsValue::from_str("Invalid input data"));
+        
+    // Securely clear secret keys and shares from memory
+    crate::secure_zeroize_vec(&mut sk_bytes);
+    crate::secure_zeroize(&mut sk);
+    for (_, val) in shares.iter_mut() {
+        crate::secure_zeroize(val);
+    }
+        
+    json_result
 }
 
 /// Validator: signs a blinded message using their secret key share and a temporary masking key k.
@@ -53,22 +72,39 @@ pub fn client_sign_share(
     blinded_hex: &str,
     k_hex: &str,
 ) -> Result<String, JsValue> {
-    let share_sk_bytes = hex::decode(share_sk_hex)
-        .map_err(|e| JsValue::from_str(&format!("Invalid share_sk hex: {}", e)))?;
+    let mut share_sk_bytes = hex::decode(share_sk_hex)
+        .map_err(|_| JsValue::from_str("Invalid input data"))?;
     let blinded_bytes = hex::decode(blinded_hex)
-        .map_err(|e| JsValue::from_str(&format!("Invalid blinded hex: {}", e)))?;
-    let k_bytes = hex::decode(k_hex)
-        .map_err(|e| JsValue::from_str(&format!("Invalid k hex: {}", e)))?;
+        .map_err(|_| JsValue::from_str("Invalid input data"))?;
+    let mut k_bytes = hex::decode(k_hex)
+        .map_err(|_| JsValue::from_str("Invalid input data"))?;
         
-    let share_sk: Fr = deserialize_from_bytes(&share_sk_bytes)
-        .ok_or_else(|| JsValue::from_str("Failed to deserialize share_sk"))?;
+    let mut share_sk: Fr = deserialize_from_bytes(&share_sk_bytes)
+        .ok_or_else(|| JsValue::from_str("Invalid input data"))?;
     let x: BlindedMessage = deserialize_from_bytes(&blinded_bytes)
-        .ok_or_else(|| JsValue::from_str("Failed to deserialize blinded message"))?;
-    let k: Fr = deserialize_from_bytes(&k_bytes)
-        .ok_or_else(|| JsValue::from_str("Failed to deserialize k"))?;
+        .ok_or_else(|| JsValue::from_str("Invalid input data"))?;
+    let mut k: Fr = deserialize_from_bytes(&k_bytes)
+        .ok_or_else(|| JsValue::from_str("Invalid input data"))?;
+        
+    // Structural validation
+    if share_sk.is_zero() || x.0.is_zero() || k.is_zero() {
+        crate::secure_zeroize_vec(&mut share_sk_bytes);
+        crate::secure_zeroize_vec(&mut k_bytes);
+        crate::secure_zeroize(&mut share_sk);
+        crate::secure_zeroize(&mut k);
+        return Err(JsValue::from_str("Invalid input data"));
+    }
         
     let sig_share = sign_share(&share_sk, &x, &k);
-    Ok(hex::encode(serialize_to_bytes(&sig_share)))
+    let result = hex::encode(serialize_to_bytes(&sig_share));
+    
+    // Clear sensitive key components
+    crate::secure_zeroize_vec(&mut share_sk_bytes);
+    crate::secure_zeroize_vec(&mut k_bytes);
+    crate::secure_zeroize(&mut share_sk);
+    crate::secure_zeroize(&mut k);
+    
+    Ok(result)
 }
 
 /// Client: aggregates partial signatures from a subset of validators using Lagrange interpolation.
@@ -78,14 +114,20 @@ pub fn client_aggregate_signatures(
     signatures_hex: Vec<String>,
 ) -> Result<String, JsValue> {
     if indices.len() != signatures_hex.len() {
-        return Err(JsValue::from_str("Indices and signatures count mismatch"));
+        return Err(JsValue::from_str("Invalid input data"));
     }
     let mut partial_sigs = vec![];
     for i in 0..indices.len() {
         let sig_bytes = hex::decode(&signatures_hex[i])
-            .map_err(|e| JsValue::from_str(&format!("Invalid signature hex: {}", e)))?;
+            .map_err(|_| JsValue::from_str("Invalid input data"))?;
         let sig: PartialBlindSignature = deserialize_from_bytes(&sig_bytes)
-            .ok_or_else(|| JsValue::from_str("Failed to deserialize partial signature"))?;
+            .ok_or_else(|| JsValue::from_str("Invalid input data"))?;
+            
+        // Structural validation
+        if sig.0.is_zero() {
+            return Err(JsValue::from_str("Invalid input data"));
+        }
+            
         partial_sigs.push((indices[i] as usize, sig));
     }
     let aggregated = aggregate_shares(&partial_sigs);

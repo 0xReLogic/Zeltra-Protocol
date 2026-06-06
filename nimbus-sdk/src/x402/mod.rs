@@ -63,6 +63,40 @@ mod tests {
     }
 
     #[test]
+    fn test_decode_payment_required_secure_hmac() {
+        let original = X402PaymentRequired {
+            accepts: vec![X402PaymentOption {
+                scheme: "exact".to_string(),
+                network: "eip155:42161".to_string(),
+                price: X402Price {
+                    amount: "1000".to_string(),
+                    asset: "0xaf88d065e77c8cC2239327C5EDb3A432268e5831".to_string(),
+                    extra: None,
+                },
+                pay_to: "0xRecipientAddress".to_string(),
+            }],
+            description: Some("Secure API".to_string()),
+            mime_type: None,
+        };
+
+        let encoded = encode_payment_required(&original).unwrap();
+        
+        let secret = b"my_secure_shared_hmac_secret_key";
+        let hmac_bytes = crate::hmac_sha256(secret, encoded.as_bytes());
+        let hmac_hex = hex::encode(hmac_bytes);
+
+        // 1. Decodes successfully with correct HMAC
+        let decoded = decode_payment_required_secure(&encoded, &hmac_hex, secret).unwrap();
+        assert_eq!(decoded.description.unwrap(), "Secure API");
+
+        // 2. Fails to decode with incorrect HMAC
+        let failed_hmac = "0000000000000000000000000000000000000000000000000000000000000000";
+        let err = decode_payment_required_secure(&encoded, failed_hmac, secret);
+        assert!(err.is_err());
+        assert_eq!(err.err().unwrap(), "Verifikasi integritas payload gagal");
+    }
+
+    #[test]
     fn test_build_and_encode_payment_signature() {
         let sig = build_nimbus_payment_signature(
             "0xabc123nullifier",
@@ -128,7 +162,7 @@ mod tests {
         let pk_iss_hex = hex::encode(serialize_to_bytes(&pk_iss));
         
         // 3. Register signature result in pool
-        let is_valid = pool.register_signing_result(&session_id, &masked_sig_hex, &com_k_hex).unwrap();
+        let is_valid = pool.register_signing_result(&session_id, &masked_sig_hex, &com_k_hex, None, None).unwrap();
         assert!(is_valid);
         
         // 4. Unmask token (once masking key revealed)
