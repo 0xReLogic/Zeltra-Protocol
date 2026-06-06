@@ -11,8 +11,7 @@
 //! This implementation uses real Groth16 with multithreading support via rayon.
 
 use ark_bls12_381::{Bls12_381, Fr};
-use ark_ec::PrimeGroup;
-use ark_ff::{One, PrimeField, UniformRand};
+use ark_ff::{One, UniformRand};
 use ark_relations::r1cs::{ConstraintSynthesizer, ConstraintSystemRef, LinearCombination, SynthesisError};
 use ark_snark::SNARK;
 

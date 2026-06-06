@@ -3,6 +3,7 @@
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use crate::database::Database;
+use crate::evm_client::EvmClient;
 
 /// Production-ready application state with persistent database
 #[derive(Clone)]
@@ -24,6 +25,9 @@ pub struct AppState {
     
     /// Accumulated profit in USDC from batching markup fees
     pub relayer_accumulated_profit_usdc: Arc<Mutex<f64>>,
+    
+    /// EVM client for broadcasting real transactions (replaces mock tx hashes)
+    pub evm_client: Option<Arc<EvmClient>>,
 }
 
 impl AppState {
@@ -32,6 +36,7 @@ impl AppState {
         db: Database,
         share_sk: nimbus_core::Fr,
         share_index: u32,
+        evm_client: Option<Arc<EvmClient>>,
     ) -> Self {
         Self {
             db,
@@ -40,6 +45,7 @@ impl AppState {
             share_index,
             relayer_wallet_balance_eth: Arc::new(Mutex::new(10.0)),
             relayer_accumulated_profit_usdc: Arc::new(Mutex::new(0.0)),
+            evm_client,
         }
     }
 }

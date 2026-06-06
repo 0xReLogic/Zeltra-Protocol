@@ -88,14 +88,32 @@ pub async fn handle_x402_verify(
     println!("  Queue Pos  : {}", position);
 
     // 5. Return settlement receipt
-    // WARNING / REMINDER FOR DEVELOPERS & AI AGENTS:
-    // This is a simulated transaction hash.
-    // In production, replace this with the real on-chain transaction hash returned from the EVM RPC broadcast.
-    let mock_tx_hash = format!("0x{}", hex::encode(rand::random::<[u8; 32]>()));
+    let tx_hash = if let Some(ref evm_client) = state.evm_client {
+        // Real transaction broadcasting
+        match evm_client.broadcast_spend_transaction(
+            &sig.payment.nullifier,
+            "x402-facilitator-pool",
+            sig.payment.amount,
+        ).await {
+            Ok(hash) => hash,
+            Err(e) => {
+                eprintln!("X402 ERROR: Failed to broadcast transaction: {}", e);
+                return Json(X402VerifyResponse {
+                    success: false,
+                    tx_hash: None,
+                    message: format!("Transaction broadcast failed: {}", e),
+                });
+            }
+        }
+    } else {
+        // Fallback to mock tx hash for dev mode
+        println!("X402 WARNING: Using mock tx hash (dev mode - EVM client not configured)");
+        format!("0x{}", hex::encode(rand::random::<[u8; 32]>()))
+    };
 
     Json(X402VerifyResponse {
         success: true,
-        tx_hash: Some(mock_tx_hash),
+        tx_hash: Some(tx_hash),
         message: "Nimbus anonymous payment verified and queued for settlement".to_string(),
     })
 }

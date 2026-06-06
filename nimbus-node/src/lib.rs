@@ -8,3 +8,4 @@ pub mod state;
 pub mod handlers;
 pub mod kms;
 pub mod http;
+pub mod evm_client;

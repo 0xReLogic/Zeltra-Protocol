@@ -157,10 +157,28 @@ pub async fn process_spend_batch(state: &AppState) {
             println!("      Selector Rantai Tujuan : {}", cc.destination_chain_selector);
             println!("      Kontrak Penerima       : {}", cc.destination_contract);
             println!("      Status                 : Dispatched ke CCIP Router");
-            // WARNING / REMINDER FOR DEVELOPERS & AI AGENTS:
-            // This is a simulated CCIP message ID hash.
-            // In production, integrate Chainlink CCIP router contract call to fetch the real CCIP message ID.
-            println!("      Message ID (Mock)      : 0x{}", hex::encode(rand::random::<[u8; 32]>()));
+            
+            // Real CCIP transaction broadcasting (or fallback to mock)
+            let ccip_message_id = if let Some(ref evm_client) = state.evm_client {
+                let chain_selector_str = cc.destination_chain_selector.to_string();
+                match evm_client.broadcast_ccip_transaction(
+                    &chain_selector_str,
+                    &cc.destination_contract,
+                    &request.nullifier,
+                    request.amount,
+                ).await {
+                    Ok(message_id) => message_id,
+                    Err(e) => {
+                        eprintln!("CCIP ERROR: Failed to broadcast CCIP transaction: {}", e);
+                        format!("0x{} (FAILED)", hex::encode(rand::random::<[u8; 16]>()))
+                    }
+                }
+            } else {
+                println!("      WARNING: Using mock CCIP message ID (dev mode - EVM client not configured)");
+                format!("0x{}", hex::encode(rand::random::<[u8; 32]>()))
+            };
+            
+            println!("      Message ID             : {}", ccip_message_id);
         }
     }
 

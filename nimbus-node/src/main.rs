@@ -4,16 +4,19 @@ mod http;
 mod kms;
 mod handlers;
 mod database;
+mod evm_client;
 
 use axum::{
     routing::{post, get},
     Router,
 };
 use std::time::Duration;
+use std::sync::Arc;
 
 use state::AppState;
 use handlers::*;
 use database::Database;
+use evm_client::EvmClient;
 
 #[tokio::main]
 async fn main() {
@@ -28,8 +31,35 @@ async fn main() {
     // Load threshold signature share from KMS
     let (share_sk, share_index) = kms::load_share_key().await;
     
+    // Initialize EVM client for real transaction broadcasting (optional for dev mode)
+    let evm_client = if let (Ok(rpc_url), Ok(private_key), Ok(contract_addr)) = (
+        std::env::var("NIMBUS_RPC_URL"),
+        std::env::var("NIMBUS_RELAYER_PRIVATE_KEY"),
+        std::env::var("NIMBUS_CONTRACT_ADDRESS")
+    ) {
+        match EvmClient::new(&rpc_url, &private_key, &contract_addr).await {
+            Ok(client) => {
+                println!("✓ EVM client initialized");
+                println!("  RPC URL:    {}", rpc_url);
+                println!("  Contract:   {}", contract_addr);
+                println!("  Signer:     {}", client.signer_address());
+                Some(Arc::new(client))
+            }
+            Err(e) => {
+                eprintln!("WARNING: Failed to initialize EVM client: {}", e);
+                eprintln!("         Relayer will use MOCK transaction hashes (dev mode)");
+                None
+            }
+        }
+    } else {
+        println!("WARNING: EVM client not configured");
+        println!("         Set NIMBUS_RPC_URL, NIMBUS_RELAYER_PRIVATE_KEY, NIMBUS_CONTRACT_ADDRESS");
+        println!("         Relayer will use MOCK transaction hashes (dev mode)");
+        None
+    };
+    
     // Initialize application state with persistent database
-    let state = AppState::new(db, share_sk, share_index).await;
+    let state = AppState::new(db, share_sk, share_index, evm_client).await;
 
     // Spawn background worker to batch and process spends every 2 seconds
     let worker_state = state.clone();
