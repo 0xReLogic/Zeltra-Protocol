@@ -41,17 +41,19 @@ pub async fn handle_sign_share(
         }),
     };
 
-    let share_sk = if let Some(override_hex) = &payload.share_sk_hex {
+    let sig_share = if let Some(override_hex) = &payload.share_sk_hex {
         if let Ok(bytes) = hex::decode(override_hex) {
-            deserialize_from_bytes(&bytes).unwrap_or(*state.share_sk)
+            if let Some(override_sk) = deserialize_from_bytes::<Fr>(&bytes) {
+                sign_share(&override_sk, &blinded, &k)
+            } else {
+                state.sign_share_masked(&blinded, &k)
+            }
         } else {
-            *state.share_sk
+            state.sign_share_masked(&blinded, &k)
         }
     } else {
-        *state.share_sk
+        state.sign_share_masked(&blinded, &k)
     };
-
-    let sig_share = sign_share(&share_sk, &blinded, &k);
     let sig_share_hex = hex::encode(serialize_to_bytes(&sig_share));
 
     Json(SignShareResponse {
@@ -91,20 +93,17 @@ pub async fn handle_leader_sign(
     let pk_iss = if let Some(pk_hex) = &payload.pk_iss_hex {
         if let Ok(bytes) = hex::decode(pk_hex) {
             deserialize_from_bytes(&bytes).unwrap_or_else(|| {
-                let sk_iss = IssuerSecretKey(*state.share_sk);
-                sk_iss.public_key()
+                state.get_issuer_public_key()
             })
         } else {
-            let sk_iss = IssuerSecretKey(*state.share_sk);
-            sk_iss.public_key()
+            state.get_issuer_public_key()
         }
     } else {
-        let sk_iss = IssuerSecretKey(*state.share_sk);
-        sk_iss.public_key()
+        state.get_issuer_public_key()
     };
 
     let com_k = pk_iss.0 * k;
-    let leader_share_sig = sign_share(&state.share_sk, &blinded, &k);
+    let leader_share_sig = state.sign_share_masked(&blinded, &k);
 
     let mut partial_signatures = vec![
         PartialSignatureInfo {

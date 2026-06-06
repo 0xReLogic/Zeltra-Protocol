@@ -38,7 +38,7 @@ async fn main() {
     println!("✓ Database initialized with WAL mode and production PRAGMAs");
     
     // Load threshold signature share from KMS
-    let (share_sk, share_index) = kms::load_share_key().await;
+    let (mut share_sk, share_index) = kms::load_share_key().await;
     
     // Initialize EVM client for real transaction broadcasting (optional for dev mode)
     let evm_client = if let (Ok(rpc_url), Ok(private_key), Ok(contract_addr)) = (
@@ -69,6 +69,11 @@ async fn main() {
     
     // Initialize application state with persistent database
     let state = AppState::new(db, share_sk, share_index, evm_client).await;
+    
+    // Securely zero out the key in the main stack frame immediately
+    unsafe {
+        std::ptr::write_volatile(&mut share_sk, nimbus_core::Fr::from(0u64));
+    }
 
     // Spawn background worker to batch and process spends every 2 seconds
     let worker_state = state.clone();
