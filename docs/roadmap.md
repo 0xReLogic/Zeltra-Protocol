@@ -227,15 +227,16 @@ Dokumen ini memetakan seluruh tugas pengembangan, integrasi, dan pengujian yang 
 
 #### 14. Secure Key Management (Production KMS)
 *   **Target Modul**: [nimbus-node/src/kms.rs:66](file:///home/azureuser/crypto/nimbus-node/src/kms.rs)
-*   **Status**: TODO (Pending)
+*   **Status**: Selesai (Completed)
 *   **Priority**: CRITICAL
 *   **Estimated Time**: 1-2 days
 *   **File yang Perlu Diedit**:
-    *   KMS Module: [nimbus-node/src/kms.rs:66](file:///home/azureuser/crypto/nimbus-node/src/kms.rs)
-    *   Dependencies: Add `reqwest` for HTTP client
+    *   KMS Module: [nimbus-node/src/kms.rs](file:///home/azureuser/crypto/nimbus-node/src/kms.rs)
 *   **Deskripsi Pekerjaan**:
-    *   Replace plain text env var `NIMBUS_SHARE_KEY` dengan OpenBao/Vault API
-    *   Implement HTTP client untuk fetch key dari KMS
+    *   Mengganti penggunaan plain text env var `NIMBUS_SHARE_KEY` dengan integrasi OpenBao/Vault API.
+    *   Mengimplementasikan HTTP client di `kms.rs` untuk mengambil secret share key secara asinkron dari path vault.
+    *   Menambahkan fallback aman ke development env var jika token vault tidak disediakan (khusus dev mode).
+    *   Memastikan penanganan key di memori dibersihkan/dihapus segera setelah deserialisasi selesai (zero-copy/no-log policy).
     *   Add authentication (token-based atau TLS cert)
     *   Handle KMS connection failures dengan retry
     *   Log warning jika fallback ke env var (dev mode only)
