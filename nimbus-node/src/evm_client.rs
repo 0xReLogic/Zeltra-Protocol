@@ -210,18 +210,37 @@ impl EvmClient {
         // Parse nullifier to FixedBytes<32>
         let nullifier_bytes = hex::decode(nullifier.trim_start_matches("0x"))
             .context("Invalid nullifier hex")?;
-        let mut nullifier_fixed = [0u8; 32];
-        if nullifier_bytes.len() >= 32 {
-            nullifier_fixed.copy_from_slice(&nullifier_bytes[..32]);
+        if nullifier_bytes.len() != 32 {
+            anyhow::bail!(
+                "Invalid nullifier length: expected 32, got {}",
+                nullifier_bytes.len()
+            );
         }
+        let mut nullifier_fixed = [0u8; 32];
+        nullifier_fixed.copy_from_slice(&nullifier_bytes);
 
         // Parse BLS signature components
         let alpha_neg_bytes = hex::decode(alpha_neg_hex.trim_start_matches("0x"))
             .context("Invalid alpha_neg hex")?;
+        if alpha_neg_bytes.len() != 128 {
+            anyhow::bail!(
+                "Invalid alpha_neg length: expected 128, got {}",
+                alpha_neg_bytes.len()
+            );
+        }
         let hm_bytes = hex::decode(hm_hex.trim_start_matches("0x"))
             .context("Invalid hm hex")?;
+        if hm_bytes.len() != 128 {
+            anyhow::bail!("Invalid hm length: expected 128, got {}", hm_bytes.len());
+        }
         let pk_iss_bytes = hex::decode(pk_iss_hex.trim_start_matches("0x"))
             .context("Invalid pk_iss hex")?;
+        if pk_iss_bytes.len() != 256 {
+            anyhow::bail!(
+                "Invalid pk_iss length: expected 256, got {}",
+                pk_iss_bytes.len()
+            );
+        }
 
         // Parse recipient address
         let recipient_addr = Address::from_str(recipient)

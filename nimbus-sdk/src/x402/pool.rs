@@ -258,8 +258,11 @@ impl AgentTokenPool {
         let hm_bytes = crate::client_get_hm_evm(&token.message);
         let pk_iss_evm = crate::client_get_pk_iss_evm(pk_iss_hex)?;
         
-        // Use message hash as nullifier candidate
-        let nullifier = hex::encode(sha2::Sha256::digest(token.message.as_bytes()));
+        // The contract binds replay protection directly to the signed curve point.
+        let nullifier = hex::encode(sha3::Keccak256::digest(
+            hex::decode(&hm_bytes)
+                .map_err(|_| JsValue::from_str("Invalid H(m) encoding"))?,
+        ));
         
         // Replay protection: check local spent nullifier cache
         if self.spent_nullifiers.contains(&nullifier) {

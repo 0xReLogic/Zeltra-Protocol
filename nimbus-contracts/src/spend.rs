@@ -4,28 +4,68 @@
 //! and Chainlink CCIP cross-chain message handling.
 
 use alloc::vec::Vec;
-use alloy_primitives::{Address, FixedBytes, U256};
+use alloy_primitives::{keccak256, Address, FixedBytes, U256};
 use stylus_sdk::abi::Bytes;
 use stylus_sdk::call::RawCall;
 use ark_bls12_381::G2Affine;
 use ark_ec::AffineRepr;
 
-use crate::storage::Nimbus;
-use crate::interfaces::{IErc20, IConditionalTokens};
-use crate::types::to_evm_g2;
 use crate::constants::BLS12_PAIRING_CHECK;
+use crate::interfaces::{IConditionalTokens, IErc20};
+use crate::storage::Nimbus;
+use crate::types::to_evm_g2;
 
 impl Nimbus {
     /// Verifies the unmasked BLS signature on-chain using pairing precompile (EIP-2537: 0x0f).
     /// Verification check: e(-alpha, G2) * e(H(m), pk_iss) == 1
-    /// 
-    /// NOTE: BLS verification temporarily disabled for testing
+    fn verify_bls_spend(
+        &self,
+        alpha_neg_bytes: &Bytes,
+        hm_bytes: &Bytes,
+        pk_iss_bytes: &Bytes,
+    ) -> Result<bool, Vec<u8>> {
+        if alpha_neg_bytes.len() != 128 || hm_bytes.len() != 128 {
+            return Err(b"INVALID_G1_INPUT_LENGTH".to_vec());
+        }
+        if pk_iss_bytes.len() != 256 {
+            return Err(b"INVALID_PUBLIC_KEY_LENGTH".to_vec());
+        }
+        if alpha_neg_bytes.iter().all(|byte| *byte == 0)
+            || hm_bytes.iter().all(|byte| *byte == 0)
+            || pk_iss_bytes.iter().all(|byte| *byte == 0)
+        {
+            return Err(b"POINT_AT_INFINITY_NOT_ALLOWED".to_vec());
+        }
+        if !self.trusted_issuer_keys.get(keccak256(pk_iss_bytes)) {
+            return Err(b"UNTRUSTED_ISSUER_KEY".to_vec());
+        }
+
+        let generator = to_evm_g2(&G2Affine::generator());
+        let mut input = Vec::with_capacity(768);
+        input.extend_from_slice(alpha_neg_bytes);
+        input.extend_from_slice(&generator);
+        input.extend_from_slice(hm_bytes);
+        input.extend_from_slice(pk_iss_bytes);
+
+        let output = unsafe {
+            RawCall::new_static()
+                .limit_return_data(0, 32)
+                .call(BLS12_PAIRING_CHECK, &input)
+        }
+        .map_err(|_| b"BLS_PAIRING_PRECOMPILE_FAILED".to_vec())?;
+
+        if output.len() != 32 || output[..31].iter().any(|byte| *byte != 0) {
+            return Err(b"INVALID_PAIRING_OUTPUT".to_vec());
+        }
+        Ok(output[31] == 1)
+    }
+
     pub fn _spend(
         &mut self,
         nullifier: FixedBytes<32>,
-        _alpha_neg_bytes: Bytes,   // -alpha in G1 (128 bytes EVM format) - IGNORED FOR TESTING
-        _hm_bytes: Bytes,          // H(m) in G1 (128 bytes EVM format) - IGNORED FOR TESTING
-        _pk_iss_bytes: Bytes,      // pk_iss in G2 (256 bytes EVM format) - IGNORED FOR TESTING
+        alpha_neg_bytes: Bytes,
+        hm_bytes: Bytes,
+        pk_iss_bytes: Bytes,
         recipient: Address,
         amount: U256,
     ) -> Result<bool, Vec<u8>> {
@@ -40,6 +80,12 @@ impl Nimbus {
         
         // Check double spend (Nullifier)
         if self.nullifiers.get(nullifier) {
+            return Ok(false);
+        }
+        if nullifier != keccak256(&hm_bytes) {
+            return Err(b"NULLIFIER_MESSAGE_MISMATCH".to_vec());
+        }
+        if !self.verify_bls_spend(&alpha_neg_bytes, &hm_bytes, &pk_iss_bytes)? {
             return Ok(false);
         }
 
@@ -63,11 +109,13 @@ impl Nimbus {
         let payout = amount.checked_sub(protocol_share)
             .ok_or_else(|| b"PAYOUT_UNDERFLOW".to_vec())?;
 
+        let principal = self.total_deposited_principal.get();
+        let new_principal = principal.checked_sub(amount)
+            .ok_or_else(|| b"INSUFFICIENT_PRINCIPAL".to_vec())?;
+
         #[cfg(test)]
         {
             // 2. EFFECTS
-            let principal = self.total_deposited_principal.get();
-            let new_principal = principal.checked_sub(amount).unwrap_or(U256::ZERO);
             self.total_deposited_principal.set(new_principal);
             self.nullifiers.insert(nullifier, true);
             
@@ -78,11 +126,8 @@ impl Nimbus {
 
         #[cfg(not(test))]
         {
-            // 2. EFFECTS (BLS verification temporarily disabled for testing)
+            // 2. EFFECTS
             self.nullifiers.insert(nullifier, true);
-            
-            let principal = self.total_deposited_principal.get();
-            let new_principal = principal.checked_sub(amount).unwrap_or(U256::ZERO);
             self.total_deposited_principal.set(new_principal);
             
             // Track epoch volume for dynamic rebalancing

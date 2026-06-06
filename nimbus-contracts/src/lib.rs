@@ -17,7 +17,7 @@ use ark_bls12_381::{Fr, G1Affine, G2Affine};
 use ark_ec::AffineRepr;
 use ark_ff::Field;
 
-use alloy_primitives::{Address, FixedBytes};
+use alloy_primitives::{keccak256, Address, FixedBytes};
 use stylus_sdk::{prelude::*, alloy_primitives::U256, call::RawCall, abi::Bytes};
 
 pub use types::{to_evm_g1, to_evm_g2, to_evm_scalar};
@@ -271,6 +271,34 @@ impl Nimbus {
         Ok(())
     }
 
+    pub fn register_issuer_key(&mut self, pk_iss_bytes: Bytes) -> Result<(), Vec<u8>> {
+        self.check_owner()?;
+        if pk_iss_bytes.len() != 256 {
+            return Err(b"INVALID_PUBLIC_KEY_LENGTH".to_vec());
+        }
+        if pk_iss_bytes.iter().all(|byte| *byte == 0) {
+            return Err(b"POINT_AT_INFINITY_NOT_ALLOWED".to_vec());
+        }
+        self.trusted_issuer_keys.insert(keccak256(&pk_iss_bytes), true);
+        Ok(())
+    }
+
+    pub fn revoke_issuer_key(&mut self, pk_iss_bytes: Bytes) -> Result<(), Vec<u8>> {
+        self.check_owner()?;
+        if pk_iss_bytes.len() != 256 {
+            return Err(b"INVALID_PUBLIC_KEY_LENGTH".to_vec());
+        }
+        self.trusted_issuer_keys.insert(keccak256(&pk_iss_bytes), false);
+        Ok(())
+    }
+
+    pub fn is_issuer_key_trusted(&self, pk_iss_bytes: Bytes) -> Result<bool, Vec<u8>> {
+        if pk_iss_bytes.len() != 256 {
+            return Err(b"INVALID_PUBLIC_KEY_LENGTH".to_vec());
+        }
+        Ok(self.trusted_issuer_keys.get(keccak256(&pk_iss_bytes)))
+    }
+
     // --- EVM Public Delegates to Modular Component Implementations ---
 
     pub fn deposit(&mut self, sid: FixedBytes<32>, com_k_bytes: Bytes, amount: U256) -> Result<(), Vec<u8>> {
@@ -422,12 +450,14 @@ mod tests {
         pub(crate) static STORAGE: RefCell<HashMap<[u8; 32], [u8; 32]>> = RefCell::new(HashMap::new());
         pub(crate) static MSG_SENDER: RefCell<Address> = RefCell::new(Address::ZERO);
         pub(crate) static BLOCK_TIMESTAMP: RefCell<u64> = RefCell::new(0);
+        static PAIRING_RESULT: RefCell<u8> = RefCell::new(1);
     }
 
     fn reset_test_state() {
         STORAGE.with(|s| s.borrow_mut().clear());
         MSG_SENDER.with(|s| *s.borrow_mut() = Address::ZERO);
         BLOCK_TIMESTAMP.with(|t| *t.borrow_mut() = 0);
+        PAIRING_RESULT.with(|result| *result.borrow_mut() = 1);
     }
 
     fn set_msg_sender(sender: Address) {
@@ -436,6 +466,23 @@ mod tests {
 
     fn set_block_timestamp(ts: u64) {
         BLOCK_TIMESTAMP.with(|t| *t.borrow_mut() = ts);
+    }
+
+    fn set_pairing_result(result: bool) {
+        PAIRING_RESULT.with(|value| *value.borrow_mut() = u8::from(result));
+    }
+
+    fn register_mock_issuer(
+        contract: &mut Nimbus,
+        owner: Address,
+    ) -> (Vec<u8>, Vec<u8>, Vec<u8>, FixedBytes<32>) {
+        let alpha_neg = vec![0x11; 128];
+        let hm = vec![0x22; 128];
+        let pk_iss = vec![0x33; 256];
+        set_msg_sender(owner);
+        contract.register_issuer_key(pk_iss.clone().into()).unwrap();
+        let nullifier = keccak256(&hm);
+        (alpha_neg, hm, pk_iss, nullifier)
     }
 
     #[no_mangle]
@@ -547,14 +594,19 @@ mod tests {
     }
 
     #[no_mangle]
-    pub unsafe extern "C" fn read_return_data(_offset: usize, size: usize, dest: *mut u8) {
+    pub unsafe extern "C" fn read_return_data(
+        dest: *mut u8,
+        _offset: usize,
+        size: usize,
+    ) -> usize {
         let dest_slice = std::slice::from_raw_parts_mut(dest, size);
         for byte in dest_slice.iter_mut() {
             *byte = 0;
         }
         if size == 32 {
-            dest_slice[31] = 1; // Simulate verification success (last byte is 1)
+            PAIRING_RESULT.with(|result| dest_slice[31] = *result.borrow());
         }
+        size
     }
 
     #[test]
@@ -633,11 +685,31 @@ mod tests {
 
     #[test]
     fn test_ccip_receive_decoding_and_execution() {
+        reset_test_state();
+        let owner = address!("1111111111111111111111111111111111111111");
+        set_msg_sender(owner);
+        let mut nimbus_contract = Nimbus::default();
+        nimbus_contract
+            .init(owner, Address::ZERO, Address::ZERO)
+            .unwrap();
+        nimbus_contract
+            .deposit(
+                FixedBytes::repeat_byte(0x66),
+                vec![0x42; 256].into(),
+                U256::from(20_000_000),
+            )
+            .unwrap();
+        let (alpha_neg, hm, pk_iss, nullifier) =
+            register_mock_issuer(&mut nimbus_contract, owner);
+
         let mut payload = vec![0u8; 648];
         let amount = U256::from(10_000_000);
+        payload[0..32].copy_from_slice(nullifier.as_slice());
+        payload[32..160].copy_from_slice(&alpha_neg);
+        payload[160..288].copy_from_slice(&hm);
+        payload[288..544].copy_from_slice(&pk_iss);
         payload[616..648].copy_from_slice(&amount.to_be_bytes::<32>());
-        
-        let mut nimbus_contract = Nimbus::default();
+
         let result = nimbus_contract.ccip_receive(
             FixedBytes::ZERO,
             1,
@@ -879,6 +951,180 @@ mod tests {
     }
 
     #[test]
+    fn test_issuer_key_registration_authorization_and_revocation() {
+        reset_test_state();
+        let owner = address!("1111111111111111111111111111111111111111");
+        let other = address!("2222222222222222222222222222222222222222");
+        let pk_iss = vec![0x33; 256];
+
+        set_msg_sender(owner);
+        let mut contract = Nimbus::default();
+        contract.init(owner, Address::ZERO, Address::ZERO).unwrap();
+
+        set_msg_sender(other);
+        assert_eq!(
+            contract.register_issuer_key(pk_iss.clone().into()),
+            Err(b"NOT_OWNER".to_vec())
+        );
+
+        set_msg_sender(owner);
+        assert_eq!(
+            contract.register_issuer_key(vec![0x33; 255].into()),
+            Err(b"INVALID_PUBLIC_KEY_LENGTH".to_vec())
+        );
+        assert_eq!(
+            contract.register_issuer_key(vec![0; 256].into()),
+            Err(b"POINT_AT_INFINITY_NOT_ALLOWED".to_vec())
+        );
+        contract.register_issuer_key(pk_iss.clone().into()).unwrap();
+        assert!(contract.is_issuer_key_trusted(pk_iss.clone().into()).unwrap());
+        contract.revoke_issuer_key(pk_iss.clone().into()).unwrap();
+        assert!(!contract.is_issuer_key_trusted(pk_iss.into()).unwrap());
+    }
+
+    #[test]
+    fn test_spend_rejects_untrusted_key_and_message_replay() {
+        reset_test_state();
+        let owner = address!("1111111111111111111111111111111111111111");
+        set_msg_sender(owner);
+        let mut contract = Nimbus::default();
+        contract.init(owner, Address::ZERO, Address::ZERO).unwrap();
+
+        let alpha_neg = vec![0x11; 128];
+        let hm = vec![0x22; 128];
+        let pk_iss = vec![0x33; 256];
+        let nullifier = keccak256(&hm);
+
+        assert_eq!(
+            contract.spend(
+                nullifier,
+                alpha_neg.clone().into(),
+                hm.clone().into(),
+                pk_iss.clone().into(),
+                Address::ZERO,
+                U256::from(5_000_000),
+            ),
+            Err(b"UNTRUSTED_ISSUER_KEY".to_vec())
+        );
+
+        contract.register_issuer_key(pk_iss.clone().into()).unwrap();
+        assert_eq!(
+            contract.spend(
+                FixedBytes::repeat_byte(0x99),
+                alpha_neg.into(),
+                hm.into(),
+                pk_iss.into(),
+                Address::ZERO,
+                U256::from(5_000_000),
+            ),
+            Err(b"NULLIFIER_MESSAGE_MISMATCH".to_vec())
+        );
+        assert!(!contract.nullifiers.get(nullifier));
+    }
+
+    #[test]
+    fn test_spend_rejects_malformed_infinity_and_false_pairing() {
+        reset_test_state();
+        let owner = address!("1111111111111111111111111111111111111111");
+        set_msg_sender(owner);
+        let mut contract = Nimbus::default();
+        contract.init(owner, Address::ZERO, Address::ZERO).unwrap();
+        let (alpha_neg, hm, pk_iss, nullifier) = register_mock_issuer(&mut contract, owner);
+
+        assert_eq!(
+            contract.spend(
+                nullifier,
+                vec![0x11; 127].into(),
+                hm.clone().into(),
+                pk_iss.clone().into(),
+                Address::ZERO,
+                U256::from(5_000_000),
+            ),
+            Err(b"INVALID_G1_INPUT_LENGTH".to_vec())
+        );
+
+        let infinity_hm = vec![0; 128];
+        assert_eq!(
+            contract.spend(
+                keccak256(&infinity_hm),
+                alpha_neg.clone().into(),
+                infinity_hm.into(),
+                pk_iss.clone().into(),
+                Address::ZERO,
+                U256::from(5_000_000),
+            ),
+            Err(b"POINT_AT_INFINITY_NOT_ALLOWED".to_vec())
+        );
+
+        set_pairing_result(false);
+        assert!(!contract
+            .spend(
+                nullifier,
+                alpha_neg.into(),
+                hm.into(),
+                pk_iss.into(),
+                Address::ZERO,
+                U256::from(5_000_000),
+            )
+            .unwrap());
+        assert!(!contract.nullifiers.get(nullifier));
+        assert_eq!(contract.total_deposited_principal().unwrap(), U256::ZERO);
+    }
+
+    #[test]
+    fn test_spend_replay_and_insufficient_principal_preserve_state() {
+        reset_test_state();
+        let owner = address!("1111111111111111111111111111111111111111");
+        set_msg_sender(owner);
+        let mut contract = Nimbus::default();
+        contract.init(owner, Address::ZERO, Address::ZERO).unwrap();
+        let (alpha_neg, hm, pk_iss, nullifier) = register_mock_issuer(&mut contract, owner);
+
+        assert_eq!(
+            contract.spend(
+                nullifier,
+                alpha_neg.clone().into(),
+                hm.clone().into(),
+                pk_iss.clone().into(),
+                Address::ZERO,
+                U256::from(5_000_000),
+            ),
+            Err(b"INSUFFICIENT_PRINCIPAL".to_vec())
+        );
+        assert!(!contract.nullifiers.get(nullifier));
+
+        contract
+            .deposit(
+                FixedBytes::repeat_byte(0x77),
+                vec![0x42; 256].into(),
+                U256::from(10_000_000),
+            )
+            .unwrap();
+        assert!(contract
+            .spend(
+                nullifier,
+                alpha_neg.clone().into(),
+                hm.clone().into(),
+                pk_iss.clone().into(),
+                Address::ZERO,
+                U256::from(5_000_000),
+            )
+            .unwrap());
+        let principal = contract.total_deposited_principal().unwrap();
+        assert!(!contract
+            .spend(
+                nullifier,
+                alpha_neg.into(),
+                hm.into(),
+                pk_iss.into(),
+                Address::ZERO,
+                U256::from(5_000_000),
+            )
+            .unwrap());
+        assert_eq!(contract.total_deposited_principal().unwrap(), principal);
+    }
+
+    #[test]
     fn test_fast_path_liquidity_premium_phases() {
         reset_test_state();
         let owner = address!("1111111111111111111111111111111111111111");
@@ -972,12 +1218,12 @@ mod tests {
         assert_eq!(contract.total_deposited_principal().unwrap(), U256::from(19_980_000));
         
         // Test spend decreases principal
-        let nullifier = FixedBytes::repeat_byte(0xef);
+        let (alpha_neg, hm, pk_iss, nullifier) = register_mock_issuer(&mut contract, owner);
         let is_valid = contract.spend(
             nullifier,
-            vec![].into(),
-            vec![].into(),
-            vec![].into(),
+            alpha_neg.into(),
+            hm.into(),
+            pk_iss.into(),
             Address::ZERO,
             U256::from(10_000_000),
         ).unwrap();
@@ -998,21 +1244,20 @@ mod tests {
         let mut contract = Nimbus::default();
         contract.init(owner, Address::ZERO, Address::ZERO).unwrap();
         
-        let nullifier = FixedBytes::repeat_byte(0xd1);
-        
         // Set principal
         contract.deposit(
             FixedBytes::repeat_byte(0x99),
             vec![0x42; 256].into(),
             U256::from(20_000_000),
         ).unwrap();
+        let (alpha_neg, hm, pk_iss, nullifier) = register_mock_issuer(&mut contract, owner);
         
         // Call spend_and_buy_shares with polymarket_ctf = Address::ZERO (which triggers mock fallback in tests)
         let success = contract.spend_and_buy_shares(
             nullifier,
-            vec![].into(),
-            vec![].into(),
-            vec![].into(),
+            alpha_neg.into(),
+            hm.into(),
+            pk_iss.into(),
             Address::ZERO, // triggers fallback simulation in test block
             Address::ZERO,
             FixedBytes::ZERO,

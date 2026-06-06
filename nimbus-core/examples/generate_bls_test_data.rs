@@ -1,99 +1,40 @@
-use ark_bls12_381::{Fr, G1Projective, G2Projective};
-use ark_ec::{CurveGroup, PrimeGroup};
-use ark_ff::{PrimeField, UniformRand};
-use ark_serialize::CanonicalSerialize;
-use rand::Rng;
-use sha2::{Digest, Sha256};
-
-/// Helper to serialize a G1 point to EVM Big-Endian format (128 bytes)
-/// EVM G1 point: X (64 bytes, big-endian), Y (64 bytes, big-endian)
-/// Arkworks G1Affine uncompressed: X (48 bytes, little-endian), Y (48 bytes, little-endian)
-fn g1_to_evm_bytes(point: &G1Projective) -> Vec<u8> {
-    let affine = point.into_affine();
-    let mut buf = vec![];
-    affine.serialize_uncompressed(&mut buf).unwrap();
-    let mut evm_buf = vec![0u8; 128];
-    // Each coordinate has a 64-byte block in EVM, padded with 16 leading zeros
-    for i in 0..2 {
-        for j in 0..48 {
-            evm_buf[i * 64 + 16 + j] = buf[i * 48 + (47 - j)];
-        }
-    }
-    evm_buf
-}
-
-/// Helper to serialize a G2 point to EVM Big-Endian format (256 bytes)
-/// EVM G2 point: X1, X0, Y1, Y0 (each 64 bytes, big-endian)
-/// Arkworks G2Affine uncompressed: X0, X1, Y0, Y1 (each 48 bytes, little-endian)
-fn g2_to_evm_bytes(point: &G2Projective) -> Vec<u8> {
-    let affine = point.into_affine();
-    let mut buf = vec![];
-    affine.serialize_uncompressed(&mut buf).unwrap();
-    let mut evm_buf = vec![0u8; 256];
-    
-    // EVM blocks: block 0 is X1, block 1 is X0, block 2 is Y1, block 3 is Y0
-    // Arkworks order of elements: coeff 0 is X0, coeff 1 is X1, coeff 2 is Y0, coeff 3 is Y1
-    let src_indices = [1, 0, 3, 2];
-    for i in 0..4 {
-        let src_idx = src_indices[i];
-        for j in 0..48 {
-            evm_buf[i * 64 + 16 + j] = buf[src_idx * 48 + (47 - j)];
-        }
-    }
-    evm_buf
-}
+use nimbus_core::{
+    client_blind, client_unmask, get_alpha_neg_evm, get_hm_evm, get_pk_iss_evm,
+    issuer_sign_blinded, verify_unmasked, IssuerSecretKey,
+};
+use rand::{rngs::StdRng, SeedableRng};
+use sha3::{Digest, Keccak256};
 
 fn main() {
-    let mut rng = rand::thread_rng();
+    let invalid = std::env::args().any(|arg| arg == "--invalid");
+    let message = b"nimbus-bls-known-answer-vector-v1";
+    let amount = 5_000_000u64;
+    let mut rng = StdRng::from_seed([0x42; 32]);
 
-    // Generate a random message
-    let message: [u8; 32] = rng.gen();
-    
-    // Hash message to G1 (H(m))
-    let mut hasher = Sha256::new();
-    hasher.update(&message);
-    let hash = hasher.finalize();
-    let scalar = Fr::from_le_bytes_mod_order(&hash);
-    let hm = G1Projective::generator() * scalar;
+    let sk_iss = IssuerSecretKey::generate(&mut rng);
+    let pk_iss = sk_iss.public_key();
+    let (blinded, blinding_factor) = client_blind(message, &mut rng);
+    let (masked_sig, masking_key, _) =
+        issuer_sign_blinded(&sk_iss, &blinded, &mut rng);
+    let signature = client_unmask(&masked_sig, &blinding_factor, &masking_key)
+        .expect("deterministic masking factors must be invertible");
 
-    // Generate a random secret key
-    let sk = Fr::rand(&mut rng);
-    
-    // Derive public key (pk = sk * G2)
-    let pk = G2Projective::generator() * sk;
+    assert!(verify_unmasked(message, &signature, &pk_iss));
 
-    // Sign the message (alpha = sk * H(m))
-    let alpha = hm * sk;
+    let mut alpha_neg = get_alpha_neg_evm(&signature);
+    let hm = get_hm_evm(message);
+    let pk_iss_evm = get_pk_iss_evm(&pk_iss);
+    let nullifier = Keccak256::digest(&hm);
 
-    // Convert to EVM format
-    let hm_bytes = g1_to_evm_bytes(&hm);
-    let pk_bytes = g2_to_evm_bytes(&pk);
-    let alpha_bytes = g1_to_evm_bytes(&alpha);
+    if invalid {
+        alpha_neg[127] ^= 0x01;
+    }
 
-    // Calculate nullifier (hash of message)
-    let nullifier = hash;
-
-    println!("=== BLS Signature Test Data ===");
-    println!("\nNullifier (bytes32):");
+    println!("mode: {}", if invalid { "invalid-alpha" } else { "valid" });
+    println!("message_hex: 0x{}", hex::encode(message));
+    println!("amount: {}", amount);
     println!("nullifier_hex: 0x{}", hex::encode(nullifier));
-    
-    println!("\n-alpha (G1 point, 128 bytes):");
-    println!("alpha_neg_hex: 0x{}", hex::encode(&alpha_bytes));
-    
-    println!("\nH(m) (G1 point, 128 bytes):");
-    println!("hm_hex: 0x{}", hex::encode(&hm_bytes));
-    
-    println!("\npk_iss (G2 point, 256 bytes):");
-    println!("pk_iss_hex: 0x{}", hex::encode(&pk_bytes));
-    
-    println!("\n=== Curl Command ===");
-    println!("curl -X POST http://127.0.0.1:8080/api/spend -H \"Content-Type: application/json\" -d '{{");
-    println!("\"nullifier\":\"0x{}\",", hex::encode(nullifier));
-    println!("\"sig_hex\":\"0xtest\",");
-    println!("\"recipient\":\"0x742d35Cc6634C0532925a3b844Bc9e7595f0bEbb\",");
-    println!("\"amount\":1000000,");
-    println!("\"alpha_neg_hex\":\"0x{}\",", hex::encode(&alpha_bytes));
-    println!("\"hm_hex\":\"0x{}\",", hex::encode(&hm_bytes));
-    println!("\"pk_iss_hex\":\"0x{}\"", hex::encode(&pk_bytes));
-    println!("}}'");
+    println!("alpha_neg_hex: 0x{}", hex::encode(alpha_neg));
+    println!("hm_hex: 0x{}", hex::encode(hm));
+    println!("pk_iss_hex: 0x{}", hex::encode(pk_iss_evm));
 }

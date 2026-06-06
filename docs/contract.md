@@ -4,8 +4,9 @@ Dokumen ini menjelaskan desain, alur dana, state, API, dan status implementasi
 smart contract Nimbus. Targetnya adalah pembaca dapat memahami perilaku kontrak
 tanpa harus membaca source code.
 
-> **Status:** testnet/development. Kontrak belum layak mainnet karena verifikasi
-> BLS pada jalur `spend` masih dinonaktifkan dan verifying key ZK masih mock.
+> **Status:** testnet/development. Pairing BLS pada jalur `spend` sudah aktif,
+> tetapi canonical transaction binding belum selesai dan verifying key ZK masih
+> mock.
 
 ## 1. Gambaran Sistem
 
@@ -206,18 +207,27 @@ Desain verifikasi BLS:
 e(-alpha, G2) * e(H(m), pk_iss) == 1
 ```
 
-Input EVM yang direncanakan:
+Input EVM:
 
 - `alphaNegBytes`: G1, 128 byte;
 - `hmBytes`: G1, 128 byte;
 - `pkIssBytes`: G2, 256 byte;
 - pairing payload: 768 byte untuk dua pasangan.
 
-Validasi dan accounting lain yang sudah ada:
+Validasi:
 
 - kontrak tidak paused;
 - minimum spend 5 USDC;
 - nullifier belum digunakan;
+- nullifier sama dengan `keccak256(hmBytes)`;
+- issuer public key sudah didaftarkan owner;
+- panjang G1/G2 tepat dan bukan point at infinity;
+- output pairing tepat 32 byte dan canonical;
+- pairing menghasilkan `true`;
+- principal mencukupi.
+
+Setelah validasi:
+
 - fee dihitung dengan pembulatan ke atas;
 - principal dikurangi sebesar `amount`;
 - nullifier ditandai sudah digunakan;
@@ -235,10 +245,20 @@ protocol_share = base_fee + premium_share
 payout         = amount - protocol_share
 ```
 
-> **Critical blocker:** parameter BLS saat ini diabaikan pada production path.
-> Spend dapat lolos tanpa pairing verification. Nullifier, fee, dan transfer
-> sudah diimplementasikan, tetapi fungsi ini tidak boleh digunakan dengan dana
-> nyata sebelum verifikasi BLS aktif dan lulus hard test testnet.
+Issuer key dikelola melalui:
+
+- `registerIssuerKey(pkIssBytes)`;
+- `revokeIssuerKey(pkIssBytes)`;
+- `isIssuerKeyTrusted(pkIssBytes)`.
+
+Kontrak bersifat fail-closed: jika belum ada issuer key yang didaftarkan, semua
+spend ditolak.
+
+> **Critical blocker:** pairing valid belum membuktikan bahwa issuer menyetujui
+> `amount`, `recipient`, action, expiry, chain, dan contract tertentu karena
+> contract masih menerima `H(m)` dari caller. Canonical spend message dan
+> domain separation harus diselesaikan sebelum dana nyata. Lihat
+> [`DEC-002`](../research/decisions/DEC-002-bls-spend-verification-boundaries.md).
 
 ## 6. Polymarket Intent
 
@@ -449,6 +469,7 @@ API utama:
 - `proposeFastPathPhase()` dan `executeFastPathPhase()`;
 - `proposeAaveParams()` dan `executeAaveParams()`;
 - `proposeRwaToken()` dan `executeRwaToken()`;
+- `registerIssuerKey()`, `revokeIssuerKey()`, dan `isIssuerKeyTrusted()`;
 - `setCcipRouter()`;
 - `setLpLiquidity()`.
 
@@ -471,8 +492,9 @@ cargo stylus check
 ```
 
 Perubahan storage untuk commitment bersifat append-only, tetapi deployment lama
-tidak memiliki data `session_exists` dan `session_commitment_hash`. Gunakan
-deployment testnet baru atau migration plan yang eksplisit.
+tidak memiliki data `session_exists`, `session_commitment_hash`, dan
+`trusted_issuer_keys`. Gunakan deployment testnet baru atau migration plan yang
+eksplisit. Deployment baru harus mendaftarkan issuer key sebelum hard test spend.
 
 ## 14. Status Keamanan
 
@@ -486,13 +508,17 @@ deployment testnet baru atau migration plan yang eksplisit.
 - duplicate session protection;
 - refund timelock dan client authorization;
 - reveal tanpa payout;
-- nullifier storage;
+- pairing BLS EIP-2537 pada spend;
+- trusted issuer key allowlist dan revocation;
+- nullifier terikat ke `keccak256(H(m))`;
+- malformed input dan point-at-infinity rejection;
+- checked principal subtraction;
 - checks-effects-interactions pada beberapa transfer;
 - unit/regression test lifecycle deposit dan reveal.
 
 ### Blocker sebelum dana nyata
 
-1. Aktifkan dan uji pairing verification pada `spend`.
+1. Ikat credential ke amount, recipient/action, expiry, chain, dan contract.
 2. Ganti mock compliance VK dengan artifact circuit production.
 3. Hard test deposit, reveal, refund, dan spend pada Stylus testnet.
 4. Uji precompile EIP-2537 dengan test vector valid dan invalid.

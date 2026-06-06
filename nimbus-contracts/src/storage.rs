@@ -73,6 +73,9 @@ sol_storage! {
         // Appended to preserve the existing storage layout.
         mapping(bytes32 => bytes32) session_commitment_hash;
         mapping(bytes32 => bool) session_exists;
+
+        // --- Spend authorization (DEC-002) ---
+        mapping(bytes32 => bool) trusted_issuer_keys;
     }
 }
 

@@ -1104,26 +1104,52 @@ Final testnet gate:
 
 Lokasi: `nimbus-contracts/src/spend.rs`
 
-- [ ] Validasi panjang `alpha_neg_bytes` harus 128 byte.
-- [ ] Validasi panjang `hm_bytes` harus 128 byte.
-- [ ] Validasi panjang `pk_iss_bytes` harus 256 byte.
-- [ ] Bentuk input dua pairing untuk EIP-2537:
+- [x] Validasi panjang `alpha_neg_bytes` harus 128 byte.
+- [x] Validasi panjang `hm_bytes` harus 128 byte.
+- [x] Validasi panjang `pk_iss_bytes` harus 256 byte.
+- [x] Tolak point-at-infinity untuk signature, message point, dan issuer key.
+- [x] Bentuk input dua pairing untuk EIP-2537:
   `e(-alpha, G2_generator) * e(H(m), pk_iss) == 1`.
-- [ ] Panggil precompile `BLS12_PAIRING_CHECK`.
-- [ ] Tolak transaksi sebelum nullifier atau principal diubah jika signature
+- [x] Panggil precompile `BLS12_PAIRING_CHECK`.
+- [x] Tolak output precompile yang panjang/non-canonical.
+- [x] Tolak transaksi sebelum nullifier atau principal diubah jika signature
   tidak valid.
-- [ ] Tambahkan negative tests untuk signature, message, dan issuer key palsu.
+- [x] Tambahkan host negative tests untuk pairing false, malformed input,
+  infinity, issuer key tidak dipercaya, nullifier mismatch, dan replay.
 - [ ] Jalankan test pada Stylus-compatible environment atau testnet, bukan
   hanya host mock.
-- [ ] Perbaiki `nimbus-core/examples/generate_bls_test_data.rs` agar memakai
+- [x] Perbaiki `nimbus-core/examples/generate_bls_test_data.rs` agar memakai
   primitive yang sama dengan production:
   `hash_to_g1`, `IssuerSecretKey`, `UnmaskedSignature`,
   `get_alpha_neg_evm`, `get_hm_evm`, dan `get_pk_iss_evm`.
-- [ ] Pastikan `alpha_neg_hex` benar-benar merupakan `-alpha`.
-- [ ] Gunakan amount test minimal 5 USDC.
-- [ ] Tambahkan mode deterministic seed atau committed known-answer vector agar
-  hasil test dapat direproduksi.
-- [ ] Tambahkan opsi untuk menghasilkan vector invalid dengan satu byte diubah.
+- [x] Pastikan `alpha_neg_hex` benar-benar merupakan `-alpha`.
+- [x] Gunakan amount test minimal 5 USDC.
+- [x] Tambahkan deterministic seed agar hasil test dapat direproduksi.
+- [x] Tambahkan opsi `--invalid` untuk menghasilkan vector dengan satu byte
+  signature diubah.
+- [ ] Commit known-answer vector agar output lintas versi dapat dibandingkan.
+- [ ] Tambahkan testnet negative test yang mengubah satu byte signature,
+  `H(m)`, dan issuer key.
+
+### Ikat Credential ke Parameter Spend
+
+Decision: `research/decisions/DEC-002-bls-spend-verification-boundaries.md`
+
+Pairing valid hanya membuktikan signature terhadap `H(m)`. Saat ini contract
+belum dapat membuktikan bahwa `H(m)` mengandung parameter transaksi.
+
+- [x] Batasi spend ke issuer public key yang didaftarkan owner.
+- [x] Tambahkan revoke issuer key.
+- [x] Ikat nullifier ke `keccak256(hm_bytes)`.
+- [x] Tolak spend jika principal tidak cukup tanpa membakar nullifier.
+- [ ] Definisikan canonical `NIMBUS_SPEND_V1` message.
+- [ ] Ikat `chain_id` dan contract address sebagai domain separation.
+- [ ] Ikat action, amount, recipient/intent hash, expiry, dan credential nonce.
+- [ ] Tentukan cara contract merekonstruksi RFC 9380 `H(m)` dari canonical
+  message, bukan menerima `hm_bytes` tanpa pembuktian.
+- [ ] Update core, SDK, node, x402, CCIP payload, dan contract ABI secara
+  atomik.
+- [ ] Tambahkan cross-chain replay dan wrong-contract negative tests.
 
 Acceptance criteria:
 
