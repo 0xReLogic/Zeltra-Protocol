@@ -285,5 +285,58 @@ sequenceDiagram
    Jika mendeteksi aktivitas mencurigakan di salah satu Guardian VPS, Anda dapat langsung mengunci (*seal*) Vault di VPS tersebut secara instan. Ini akan membekukan proses penandatanganan sampai situasi aman.
 
 ### 6.4 Catatan Skala Produksi: n=5 vs n=3
-* **Setup n=3, t=3 (Setup Minimal Anda):** Membutuhkan ketiga server menyala dan merespons. Jika 1 server mati (misal VPS 3 restart), transaksi tidak dapat diproses sampai server tersebut menyala kembali.
 * **Setup n=5, t=3 (Standar Industri):** Jika Anda memiliki 5 VPS Guardian dan threshold 3, transaksi tetap dapat diproses selama ada **3 server** yang menyala. Jadi, meskipun 2 server mati/reboot bersamaan, sistem Nimbus Anda tetap berjalan lancar tanpa downtime.
+
+---
+
+## 7. Model Keamanan KMS: Gudang Kunci vs Mesin Tanda Tangan (Nir-Eksport)
+
+Dalam implementasi produksi tingkat tinggi, ada perbedaan kritis dalam cara kita memperlakukan **KMS (Vault)** demi melindungi pecahan kunci `share_key` dari pencurian:
+
+### 7.1 Perbandingan Dua Model Keamanan
+
+| Parameter | Model A: Gudang Kunci (Setup Saat Ini) | Model B: Mesin Tanda Tangan (In-KMS Signing) |
+| :--- | :--- | :--- |
+| **Konsep** | Vault hanya bertindak sebagai tempat penyimpanan aman. Relayer meminta/menarik `share_key` mentah ke RAM-nya saat booting. | Vault bertindak sebagai penyedia kriptografi. Kunci pecahan di-generate di dalam Vault dan **tidak bisa diekspor**. |
+| **Aliran Kunci** | Kunci mengalir dari Vault -> Relayer. | Kunci **tetap diam** di dalam Vault. Pesan dikirim ke Vault, ditandatangani di dalam, lalu dikembalikan. |
+| **Risiko Kebocoran** | **Ada.** Jika token Relayer dengan akses `READ` dicuri, peretas dapat mengunduh `share_key` dalam bentuk plaintext. | **Nol.** Token Relayer hanya memiliki akses `SIGN` (menandatangani), tidak memiliki akses untuk membaca kunci. |
+| **Kompleksitas** | Ringan dan mudah diimplementasikan. | Membutuhkan setup plugin kriptografi pada Vault. |
+
+---
+
+### 7.2 Cara Migrasi ke Model B (Mesin Tanda Tangan) di Mainnet
+
+Untuk memastikan kunci pecahan di 4 Guardian **tidak akan pernah bisa dicuri** meskipun Relayer diretas, kita menggunakan *Transit Secrets Engine* milik Vault untuk melakukan penandatanganan di dalam brankas secara langsung:
+
+```mermaid
+graph LR
+    A[Relayer Node] -->|1. Kirim Blinded Message| B(Vault KMS - Memori Terisolasi)
+    B -->|2. Tanda Tangani secara Internal| B
+    B -->|3. Kembalikan Partial Signature| A
+    Note over B: Share Key asli TIDAK PERNAH keluar ke disk/RAM Relayer
+```
+
+#### Langkah Konfigurasi:
+
+1. **Membuat Kunci Non-Exportable di Vault Guardian:**
+   Saat setup awal, kita membuat kunci transit khusus yang disetel agar **tidak bisa diekspor** keluar dari Vault:
+   ```bash
+   vault write -f transit/keys/nimbus-guardian-key exportable=false
+   ```
+2. **Ubah Kebijakan Akses Token Relayer:**
+   Kebijakan (*policy*) token Relayer diubah dari izin `read` (membaca) menjadi hanya izin `sign` (menandatangani):
+   ```hcl
+   # File: nimbus-sign-policy.hcl
+   path "transit/sign/nimbus-guardian-key" {
+     capabilities = ["update"]
+   }
+   ```
+3. **Proses Penandatanganan dari Sisi Relayer:**
+   Relayer tidak lagi memanggil `http::get` untuk membaca kunci, melainkan memanggil endpoint `/sign` dengan mengirimkan data transaksi yang ingin ditandatangani:
+   ```bash
+   curl -H "X-Vault-Token: <TOKEN>" \
+        -d '{"input": "<BASE64_BLINDED_MESSAGE>"}' \
+        http://127.0.0.1:8200/v1/transit/sign/nimbus-guardian-key
+   ```
+   Vault akan mengembalikan tanda tangan pecahan yang siap digabungkan oleh Leader. Kunci rahasia asli tetap 100% aman dan tidak tersentuh di dalam Vault.
+
