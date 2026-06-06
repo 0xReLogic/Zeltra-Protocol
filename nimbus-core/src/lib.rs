@@ -104,7 +104,7 @@ mod tests {
             (3, sig_share3),
             (5, sig_share5),
         ];
-        let aggregated_masked_sig = aggregate_shares(&gathered);
+        let aggregated_masked_sig = aggregate_shares(&gathered).unwrap();
 
         // 6. Client verifies aggregated masked signature against com_k
         let verify_masked = client_verify_masked(&x, &com_k, &aggregated_masked_sig);

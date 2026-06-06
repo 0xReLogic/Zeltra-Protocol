@@ -8,6 +8,7 @@ use ark_ec::pairing::Pairing;
 use ark_ec::PrimeGroup;
 use ark_ff::{Field, UniformRand};
 use rand::Rng;
+use ark_std::Zero;
 
 /// Client: blinds a message (ephemeral public key) using a random blinding factor.
 /// X = r * H(m)
@@ -57,6 +58,9 @@ pub fn client_unmask(
     r: &BlindingFactor,
     k: &MaskingKey,
 ) -> Option<UnmaskedSignature> {
+    if r.0.is_zero() || k.0.is_zero() {
+        return None;
+    }
     let r_k = r.0 * k.0;
     r_k.inverse().map(|inv| UnmaskedSignature(masked_sig.0 * inv))
 }

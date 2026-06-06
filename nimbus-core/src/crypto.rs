@@ -1,17 +1,27 @@
 use crate::types::{IssuerPublicKey, IssuerSecretKey};
 use ark_bls12_381::{Fr, G1Projective, G2Projective};
-use ark_ec::PrimeGroup;
-use ark_ff::{PrimeField, UniformRand};
+use ark_ec::{PrimeGroup, AffineRepr};
+use ark_ff::UniformRand;
 use rand::Rng;
-use sha2::{Digest, Sha256};
+use sha2::Sha256;
 
-/// Hash a message to G1Projective. For this prototype, we hash to a scalar and multiply by the generator.
+use ark_bls12_381::g1::Config as G1Config;
+use ark_ec::hashing::curve_maps::wb::WBMap;
+use ark_ec::hashing::map_to_curve_hasher::MapToCurveBasedHasher;
+use ark_ff::fields::field_hashers::DefaultFieldHasher;
+use ark_ec::hashing::HashToCurve;
+
+/// Hash a message to G1Projective per RFC 9380 compliant hash-to-curve.
 pub fn hash_to_g1(message: &[u8]) -> G1Projective {
-    let mut hasher = Sha256::new();
-    hasher.update(message);
-    let result = hasher.finalize();
-    let scalar = Fr::from_le_bytes_mod_order(&result);
-    G1Projective::generator() * scalar
+    let hasher = MapToCurveBasedHasher::<
+        G1Projective,
+        DefaultFieldHasher<Sha256, 128>,
+        WBMap<G1Config>,
+    >::new(b"BLS_SIG_BLS12381G1_XMD:SHA-256_SSWU_RO_NUL_")
+    .unwrap();
+    
+    let affine = hasher.hash(message).unwrap();
+    affine.into_group()
 }
 
 impl IssuerSecretKey {

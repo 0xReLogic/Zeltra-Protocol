@@ -22,7 +22,7 @@ pub fn aggregate(indices: String, signatures: String) {
         partial_sigs.push((idx_list[i], sig));
     }
     
-    let aggregated = aggregate_shares(&partial_sigs);
+    let aggregated = aggregate_shares(&partial_sigs).expect("Failed to aggregate signatures");
     let aggregated_hex = hex::encode(serialize_to_bytes(&aggregated));
     
     println!("AGGREGATED MASKED SIGNATURE");

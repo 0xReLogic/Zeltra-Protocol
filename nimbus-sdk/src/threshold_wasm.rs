@@ -130,6 +130,7 @@ pub fn client_aggregate_signatures(
             
         partial_sigs.push((indices[i] as usize, sig));
     }
-    let aggregated = aggregate_shares(&partial_sigs);
+    let aggregated = aggregate_shares(&partial_sigs)
+        .map_err(|e| JsValue::from_str(&e))?;
     Ok(hex::encode(serialize_to_bytes(&aggregated)))
 }

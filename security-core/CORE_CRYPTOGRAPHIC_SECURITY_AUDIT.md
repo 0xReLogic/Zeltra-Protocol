@@ -128,7 +128,11 @@
 **Severity:** CRITICAL  
 **Location:** `nimbus-core/src/threshold.rs:38-52`  
 **Category:** Mathematical Parameter Manipulation / Division by Zero  
-**Source:** OWASP 2026 Flash Loan Standard Attack Vector
+**Source:** OWASP 2026 Flash Loan Standard Attack Vector  
+**Status:** **REMEDIATED (June 6, 2026)**  
+
+**Remediation:**  
+Added unique validator indices checking, target index existence check, and zero denominator checks to prevent panicking in Lagrange coefficient calculations, returning a `Result<Fr, String>`.
 
 **Vulnerable Code:**
 ```rust
@@ -172,7 +176,11 @@ pub fn compute_lagrange_coefficient(i: usize, s: &[usize]) -> Fr {
 **Severity:** CRITICAL  
 **Location:** `nimbus-core/src/crypto.rs:9-15`  
 **Category:** Cryptographic Implementation / Hash-to-Curve Standards  
-**Source:** NIST Crypto Club: Hashing to Curves RFC 9380
+**Source:** NIST Crypto Club: Hashing to Curves RFC 9380  
+**Status:** **REMEDIATED (June 6, 2026)**  
+
+**Remediation:**  
+Refactored the function `hash_to_g1` to use a compliant `MapToCurveBasedHasher` with `WBMap` (Wahby-Boneh Map) and `DefaultFieldHasher<Sha256, 128>` under the standard DST `BLS_SIG_BLS12381G1_XMD:SHA-256_SSWU_RO_NUL_` mapping onto G1 projective points.
 
 **Vulnerable Code:**
 ```rust
@@ -210,7 +218,11 @@ pub fn hash_to_g1(message: &[u8]) -> G1Projective {
 **Severity:** HIGH  
 **Location:** `nimbus-core/src/blind_sign.rs:55-62`  
 **Category:** Mathematical Parameter Manipulation / Inverse Failure  
-**Source:** Trail of Bits: Google's ZK Proof of Quantum Cryptanalysis
+**Source:** Trail of Bits: Google's ZK Proof of Quantum Cryptanalysis  
+**Status:** **REMEDIATED (June 6, 2026)**  
+
+**Remediation:**  
+Implemented zero checks for the blinding factor `r` and masking key `k` in `client_unmask` before starting the multiplication and inverse operation to prevent inverse failure, returning `None` if either is zero.
 
 **Vulnerable Code:**
 ```rust
@@ -248,7 +260,11 @@ pub fn client_unmask(
 **Severity:** HIGH  
 **Location:** `nimbus-core/src/serialization.rs:3-7`  
 **Category:** Error Handling / Panic Safety  
-**Source:** Hacken: Zero-Knowledge Proof Complex Vulnerabilities
+**Source:** Hacken: Zero-Knowledge Proof Complex Vulnerabilities  
+**Status:** **REMEDIATED (June 6, 2026)**  
+
+**Remediation:**  
+Updated `serialize_to_bytes` to safely handle errors returned by `serialize_compressed()` instead of calling `.unwrap()`, returning an empty `Vec<u8>` on serialization failure.
 
 **Vulnerable Code:**
 ```rust
@@ -285,7 +301,11 @@ pub fn serialize_to_bytes<T: CanonicalSerialize>(val: &T) -> Vec<u8> {
 **Severity:** HIGH  
 **Location:** `nimbus-core/src/evm.rs:8-18, 20-33`  
 **Category:** Error Handling / Panic Safety  
-**Source:** Hacken: Zero-Knowledge Proof Complex Vulnerabilities
+**Source:** Hacken: Zero-Knowledge Proof Complex Vulnerabilities  
+**Status:** **REMEDIATED (June 6, 2026)**  
+
+**Remediation:**  
+Added safety checks in `to_evm_g1` and `to_evm_g2` to return zeroed byte arrays on serialization errors or when coordinate buffer sizes deviate from the expected standard lengths (96 bytes for G1, 192 bytes for G2) before performing index manipulation.
 
 **Vulnerable Code:**
 ```rust
@@ -323,7 +343,11 @@ pub fn to_evm_g1(point: &G1Affine) -> Vec<u8> {
 **Severity:** MEDIUM  
 **Location:** `nimbus-core/src/threshold.rs:8-35`  
 **Category:** Input Validation / Parameter Safety  
-**Source:** OWASP 2026 Flash Loan Standard Attack Vector
+**Source:** OWASP 2026 Flash Loan Standard Attack Vector  
+**Status:** **REMEDIATED (June 6, 2026)**  
+
+**Remediation:**  
+Added assertions in `split_secret_key` validating that the validator set size does not exceed 1000 (`n <= 1000`) and verifying that the secret key is non-zero.
 
 **Vulnerable Code:**
 ```rust
@@ -368,7 +392,11 @@ pub fn split_secret_key<R: Rng>(
 **Severity:** MEDIUM  
 **Location:** `nimbus-core/src/threshold.rs:64-75`  
 **Category:** Input Validation / Duplicate Detection  
-**Source:** Wikipedia: Zero-Knowledge Proof Security Vulnerabilities
+**Source:** Wikipedia: Zero-Knowledge Proof Security Vulnerabilities  
+**Status:** **REMEDIATED (June 6, 2026)**  
+
+**Remediation:**  
+Added unique indices checking and minimum signature count validations in `aggregate_shares` and refactored the signature to return `Result<MaskedBlindSignature, String>` to safely propagate errors.
 
 **Vulnerable Code:**
 ```rust

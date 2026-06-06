@@ -7,7 +7,12 @@ use ark_serialize::CanonicalSerialize;
 /// Helper to serialize a G1 point to EVM Big-Endian format (128 bytes)
 pub fn to_evm_g1(point: &G1Affine) -> Vec<u8> {
     let mut buf = vec![];
-    point.serialize_uncompressed(&mut buf).unwrap();
+    if point.serialize_uncompressed(&mut buf).is_err() {
+        return vec![0u8; 128];
+    }
+    if buf.len() != 96 {
+        return vec![0u8; 128];
+    }
     let mut evm_buf = vec![0u8; 128];
     for i in 0..2 {
         for j in 0..48 {
@@ -20,7 +25,12 @@ pub fn to_evm_g1(point: &G1Affine) -> Vec<u8> {
 /// Helper to serialize a G2 point to EVM Big-Endian format (256 bytes)
 pub fn to_evm_g2(point: &G2Affine) -> Vec<u8> {
     let mut buf = vec![];
-    point.serialize_uncompressed(&mut buf).unwrap();
+    if point.serialize_uncompressed(&mut buf).is_err() {
+        return vec![0u8; 256];
+    }
+    if buf.len() != 192 {
+        return vec![0u8; 256];
+    }
     let mut evm_buf = vec![0u8; 256];
     let src_indices = [1, 0, 3, 2];
     for i in 0..4 {
