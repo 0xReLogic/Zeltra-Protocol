@@ -237,6 +237,18 @@ impl Nimbus {
         Ok(self.historical_epoch_volumes.get(epoch_id))
     }
 
+    /// Returns the CCIP Router address configured for the contract.
+    pub fn ccip_router(&self) -> Result<Address, Vec<u8>> {
+        Ok(self.ccip_router.get())
+    }
+
+    /// Sets the CCIP Router address (Admin only).
+    pub fn set_ccip_router(&mut self, router: Address) -> Result<(), Vec<u8>> {
+        self.check_owner()?;
+        self.ccip_router.set(router);
+        Ok(())
+    }
+
     /// Pause the contract.
     pub fn pause(&mut self) -> Result<(), Vec<u8>> {
         self.check_owner()?;

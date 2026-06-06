@@ -5,7 +5,7 @@ use alloy::{
     rpc::types::eth::TransactionRequest,
     signers::local::PrivateKeySigner,
     sol,
-    sol_types::SolCall,
+    sol_types::{SolCall, SolValue},
 };
 use anyhow::{Context, Result};
 use std::str::FromStr;
@@ -19,6 +19,29 @@ sol! {
         address recipient,
         uint256 amount
     ) external returns (bool);
+
+    struct EVMTokenAmount {
+        address token;
+        uint256 amount;
+    }
+
+    struct EVMExtraArgsV2 {
+        uint256 gasLimit;
+        bool allowOutOfOrderExecution;
+    }
+
+    struct EVM2AnyMessage {
+        bytes receiver;
+        bytes data;
+        EVMTokenAmount[] tokenAmounts;
+        address feeToken;
+        bytes extraArgs;
+    }
+
+    interface IRouterClient {
+        function ccipSend(uint64 destinationChainSelector, EVM2AnyMessage calldata message) external payable returns (bytes32);
+        function getFee(uint64 destinationChainSelector, EVM2AnyMessage calldata message) external view returns (uint256);
+    }
 }
 
 pub struct EvmClient {
@@ -26,6 +49,7 @@ pub struct EvmClient {
     fallback_provider: Option<DynProvider>,
     signer_address: Address,
     contract_address: Address,
+    ccip_router_address: Address,
 }
 
 impl EvmClient {
@@ -95,11 +119,19 @@ impl EvmClient {
         let contract_addr = Address::from_str(contract_address)
             .context("Contract address invalid")?;
 
+        let ccip_router_address = if let Ok(router_str) = std::env::var("NIMBUS_CCIP_ROUTER") {
+            Address::from_str(&router_str).context("NIMBUS_CCIP_ROUTER invalid address format")?
+        } else {
+            // Default to Arbitrum Sepolia CCIP Router: 0x2a9C5afB0d0e4BAb2BCdaE109EC4b0c4Be15a165
+            Address::from_str("0x2a9C5afB0d0e4BAb2BCdaE109EC4b0c4Be15a165").unwrap()
+        };
+
         Ok(Self {
             provider,
             fallback_provider,
             signer_address,
             contract_address: contract_addr,
+            ccip_router_address,
         })
     }
 
@@ -235,27 +267,137 @@ impl EvmClient {
         &self,
         destination_chain_selector: u64,
         destination_contract: &str,
-        nullifier: &str,
-        _amount: u64,
+        nullifier_hex: &str,
+        alpha_neg_hex: &str,
+        hm_hex: &str,
+        pk_iss_hex: &str,
+        recipient_hex: &str,
+        collateral_token_hex: &str,
+        condition_id_hex: Option<&str>,
+        amount: u64,
     ) -> Result<String> {
-        println!("RELAYER: Broadcasting CCIP transaction");
+        println!("RELAYER: Preparing CCIP Transaction");
         println!("  Destination Chain    : {}", destination_chain_selector);
         println!("  Destination Contract : {}", destination_contract);
-        println!("  Nullifier            : {}...", &nullifier[..core::cmp::min(8, nullifier.len())]);
+        println!("  Nullifier            : {}...", &nullifier_hex[..core::cmp::min(8, nullifier_hex.len())]);
+
+        // 1. Construct the 648-byte payload
+        let mut payload = vec![0u8; 648];
+        
+        let nullifier_bytes = hex::decode(nullifier_hex.trim_start_matches("0x"))
+            .context("Invalid nullifier hex")?;
+        if nullifier_bytes.len() != 32 {
+            anyhow::bail!("Invalid nullifier length");
+        }
+        payload[0..32].copy_from_slice(&nullifier_bytes);
+
+        let alpha_neg_bytes = hex::decode(alpha_neg_hex.trim_start_matches("0x"))
+            .context("Invalid alpha_neg hex")?;
+        if alpha_neg_bytes.len() != 128 {
+            anyhow::bail!("Invalid alpha_neg length: expected 128, got {}", alpha_neg_bytes.len());
+        }
+        payload[32..160].copy_from_slice(&alpha_neg_bytes);
+
+        let hm_bytes = hex::decode(hm_hex.trim_start_matches("0x"))
+            .context("Invalid hm hex")?;
+        if hm_bytes.len() != 128 {
+            anyhow::bail!("Invalid hm length: expected 128, got {}", hm_bytes.len());
+        }
+        payload[160..288].copy_from_slice(&hm_bytes);
+
+        let pk_iss_bytes = hex::decode(pk_iss_hex.trim_start_matches("0x"))
+            .context("Invalid pk_iss hex")?;
+        if pk_iss_bytes.len() != 256 {
+            anyhow::bail!("Invalid pk_iss length: expected 256, got {}", pk_iss_bytes.len());
+        }
+        payload[288..544].copy_from_slice(&pk_iss_bytes);
+
+        let recipient_addr = Address::from_str(recipient_hex)
+            .map_err(|e| anyhow::anyhow!("Invalid recipient address '{}': {}", recipient_hex, e))?;
+        payload[544..564].copy_from_slice(recipient_addr.as_slice());
+
+        let collateral_addr = Address::from_str(collateral_token_hex)
+            .map_err(|e| anyhow::anyhow!("Invalid collateral token address '{}': {}", collateral_token_hex, e))?;
+        payload[564..584].copy_from_slice(collateral_addr.as_slice());
+
+        if let Some(cond_hex) = condition_id_hex {
+            let cond_bytes = hex::decode(cond_hex.trim_start_matches("0x"))
+                .context("Invalid condition_id hex")?;
+            if cond_bytes.len() != 32 {
+                anyhow::bail!("Invalid condition_id length");
+            }
+            payload[584..616].copy_from_slice(&cond_bytes);
+        }
+
+        let amount_u256 = U256::from(amount);
+        let amount_bytes = amount_u256.to_be_bytes::<32>();
+        payload[616..648].copy_from_slice(&amount_bytes);
+
+        // 2. Encode EVMExtraArgsV2 with allowOutOfOrderExecution = true (Aha! Moment - Cyfrin/Chainlink 2026 Audit)
+        // Tag bytes: 0x181dcf10
+        let extra_args_struct = EVMExtraArgsV2 {
+            gasLimit: U256::from(750_000), // safe margin for BLS + Polymarket execution on dest chain
+            allowOutOfOrderExecution: true,
+        };
+        let mut extra_args = vec![0x18, 0x1d, 0xcf, 0x10];
+        extra_args.extend_from_slice(&extra_args_struct.abi_encode());
+
+        // 3. Construct the receiver bytes (abi.encode(address))
+        let dest_addr = Address::from_str(destination_contract)
+            .map_err(|e| anyhow::anyhow!("Invalid destination contract '{}': {}", destination_contract, e))?;
+        let mut receiver_bytes = vec![0u8; 32];
+        receiver_bytes[12..32].copy_from_slice(dest_addr.as_slice());
+
+        // 4. Construct EVM2AnyMessage
+        let message = EVM2AnyMessage {
+            receiver: receiver_bytes.into(),
+            data: payload.into(),
+            tokenAmounts: vec![],
+            feeToken: Address::ZERO, // Pay in native gas token (ETH)
+            extraArgs: extra_args.into(),
+        };
+
+        // 5. Query CCIP Fee from the Router Contract
+        println!("RELAYER: Querying CCIP fee from Router at {}...", self.ccip_router_address);
+        let get_fee_call = IRouterClient::getFeeCall {
+            destinationChainSelector: destination_chain_selector,
+            message: message.clone(),
+        }.abi_encode();
+
+        let fee_tx = TransactionRequest::default()
+            .with_to(self.ccip_router_address)
+            .with_input(Bytes::from(get_fee_call));
+
+        let fee_hex = self.provider.call(fee_tx).await
+            .context("Failed to call getFee on CCIP Router")?;
+        
+        let ccip_fee = if fee_hex.len() >= 32 {
+            U256::from_be_slice(&fee_hex[..32])
+        } else {
+            U256::ZERO
+        };
+        println!("  CCIP Fee (Native): {} wei ({:.6} ETH)", ccip_fee, ccip_fee.to::<u128>() as f64 * 1e-18);
+
+        // 6. Build and broadcast the ccipSend call transaction
+        let ccip_send_call = IRouterClient::ccipSendCall {
+            destinationChainSelector: destination_chain_selector,
+            message,
+        }.abi_encode();
 
         let gas_price = self.get_gas_price().await.unwrap_or(20_000_000);
         let max_fee = gas_price * 125 / 100;
 
         let tx = TransactionRequest::default()
-            .with_to(self.contract_address)
-            .with_value(U256::ZERO)
-            .with_gas_limit(800_000)
+            .with_to(self.ccip_router_address)
+            .with_value(ccip_fee)
+            .with_gas_limit(1_200_000) // CCIP router calls require substantial gas on source chain
             .with_max_fee_per_gas(max_fee)
-            .with_max_priority_fee_per_gas(1_000_000);
+            .with_max_priority_fee_per_gas(1_000_000)
+            .with_input(Bytes::from(ccip_send_call));
 
         let tx_hash = self.send_tx_with_fallback(tx).await?;
         
-        println!("RELAYER: CCIP transaction broadcasted");
+        println!("RELAYER: Real CCIP transaction broadcasted successfully");
         println!("  Tx Hash              : {}", tx_hash);
         println!("  CCIP Message ID      : {} (derived from tx hash)", tx_hash);
 

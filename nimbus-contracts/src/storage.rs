@@ -65,6 +65,9 @@ sol_storage! {
         uint256 aave_params_eta;
         address proposed_rwa_token;
         uint256 rwa_token_eta;
+        
+        // --- CCIP Router Address Configuration (Production Security Best Practice) ---
+        address ccip_router;
     }
 }
 

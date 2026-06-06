@@ -285,10 +285,18 @@ pub async fn process_spend_batch(state: &AppState) {
             
             // Real CCIP transaction broadcasting (or fallback to mock)
             let ccip_message_id = if let Some(ref evm_client) = state.evm_client {
+                let stablecoin_addr = std::env::var("NIMBUS_STABLECOIN_ADDRESS")
+                    .unwrap_or_else(|_| "0x75faf114eafb1bdbe2f0316df893fd58ce46aa4d".to_string());
                 match evm_client.broadcast_ccip_transaction(
                     cc.destination_chain_selector,
                     &cc.destination_contract,
                     &request.nullifier,
+                    &request.alpha_neg_hex,
+                    &request.hm_hex,
+                    &request.pk_iss_hex,
+                    &request.recipient,
+                    &stablecoin_addr,
+                    None, // Default to standard cross-chain spend (no condition_id)
                     request.amount,
                 ).await {
                     Ok(message_id) => message_id,

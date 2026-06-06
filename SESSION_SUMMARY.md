@@ -1,7 +1,7 @@
-# Session Summary - BLS Signature Fix & Gas Cost Optimization
+# Session Summary - BLS Signature Fix, Gas Optimization, & Real CCIP Integration
 
 ## Objective
-Fix the "FAILED" status of spend transactions on Arbitrum Sepolia testnet by correctly passing BLS signature parameters, resolving parameter encoding mismatch (`bytes` vs `uint8[]`), type-safe calldata encoding, and funding the contract.
+Fix the "FAILED" status of spend transactions on Arbitrum Sepolia testnet by correctly passing BLS signature parameters, resolving parameter encoding mismatches, type-safe calldata encoding, optimizing gas costs, and implementing real Chainlink CCIP cross-chain transaction broadcasting and verification.
 
 ## Completed Tasks ✅
 
@@ -33,6 +33,18 @@ Fix the "FAILED" status of spend transactions on Arbitrum Sepolia testnet by cor
 ### 5. Dynamic Gas Pricing
 - **Solution**: Added dynamic fee estimation with RPC fallback in `EvmClient`.
 
+### 6. Real Chainlink CCIP Integration (New) 🌟
+- **Smart Contract Caller Validation**: Added `ccip_router` storage field, `set_ccip_router(Address)` owner admin method, and enforced in `_ccip_receive` that the caller must be the configured router. This prevents malicious bypass.
+- **Direct CCIP Transfer Support**: Updated `_spend_and_buy_shares` so that if `condition_id == FixedBytes::ZERO` (standard cross-chain spend), it bypasses Polymarket split approvals/calls and transfers tokens directly to the recipient.
+- **Out-of-Order Execution**: Relayer now uses the `EVMExtraArgsV2` tag `0x181dcf10` and sets `allowOutOfOrderExecution = true` (2026 Chainlink standard). This prevents transaction queue blockage on-chain if a single transaction fails on destination.
+- **Real message sending**: Constructed 648-byte packed cross-chain payloads and connected the Relayer to the CCIP Router contract using `ccipSend`. We query dynamic native gas fee using `getFee()` on-chain before dispatching.
+- **Files**:
+  - `nimbus-contracts/src/storage.rs`
+  - `nimbus-contracts/src/lib.rs`
+  - `nimbus-contracts/src/spend.rs`
+  - `nimbus-node/src/evm_client.rs`
+  - `nimbus-node/src/handlers/spend.rs`
+
 ---
 
 ## Current Status
@@ -45,6 +57,7 @@ Fix the "FAILED" status of spend transactions on Arbitrum Sepolia testnet by cor
   - **Block**: `274474648`
   - **Gas Used**: `166,487`
   - **Status**: **SUCCESS**
+- ✅ **All tests passing!** (15 contract unit tests and 10 relayer tests passed successfully)
 
 ---
 
@@ -54,9 +67,11 @@ Fix the "FAILED" status of spend transactions on Arbitrum Sepolia testnet by cor
 - **Nimbus Contract**: `0x208f0e4390f59e3052c557bf23a47b2ab4697a10`
 - **USDC Token (Arbitrum Sepolia)**: `0x75faf114eafb1bdbe2f0316df893fd58ce46aa4d`
 - **Deployer/Relayer Signer**: `0x23e32d309c575a3d5e7cd2867be12b00efa44bb1`
+- **Arbitrum Sepolia CCIP Router**: `0x2a9C5afB0d0e4BAb2BCdaE109EC4b0c4Be15a165`
 
 ### Function Selector
 - Signatures now match `spend(bytes32,bytes,bytes,bytes,address,uint256)` using the type-safe `sol!` macro.
+- CCIP Router calls use `ccipSend(uint64,EVM2AnyMessage)` structure.
 
 ## Verification
 To run the integration verification manually:

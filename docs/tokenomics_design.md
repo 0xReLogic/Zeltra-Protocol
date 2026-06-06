@@ -81,6 +81,75 @@ Untuk memaksimalkan efisiensi gas dan mengoptimalkan perolehan hasil yield secar
     *   Pada rasio kas rendah (Kas 15%), pembagian menjadi: 15% Kas, 60.7% Aave, dan 24.3% RWA.
 3.  **Hysteresis & Batch Rebalancing**: Sistem ini diatur untuk meminimalisir transaksi interaksi eksternal on-chain dari pengguna demi menghemat pengeluaran gas operasional platform secara keseluruhan hingga **90%-99%**.
 
+### G. Circuit-Breaker Mechanism (Security Hardening 2026)
+Sebagai antisipasi terhadap volatilitas ekstrem dan serangan manipulasi pasar, Nimbus menerapkan **Circuit-Breaker Mechanism** dengan kontrol adaptif:
+1.  **Mint Cap per Epoch**: Batas maksimum token yang bisa dicetak per epoch (24 jam) untuk mencegah minting berlebihan saat anomali.
+    *   **Default**: 0.5% dari total supply per epoch
+    *   **Dynamic Adjustment**: Menurun saat high demand, naik saat low demand
+    *   **Circuit-Breaker**: Halt minting jika volatilitas harga > 50% dalam 1 epoch
+2.  **Burn Circuit-Breaker**: Halt burn mechanism jika:
+    *   Harga token drop > 30% dalam 24 jam
+    *   Liquidity pool depth < minimum threshold
+    *   Oracle manipulation terdeteksi
+3.  **Emergency Pause**: Governance dapat pause seluruh minting/burning dalam 1 block jika terdeteksi exploit critical
+4.  **Reference**: Mengikuti pendekatan Akash Network untuk BME dengan circuit-breaker dan collateral controls
+
+### H. Oracle Security & Price Feed Protection
+Untuk mencegah oracle manipulation attacks (CertiK Oracle Wars 2026):
+1.  **Multi-Source Oracles**: Menggunakan minimal 3 oracle sources berbeda:
+    *   Chainlink Price Feeds
+    *   Band Protocol
+    *   Pyth Network
+2.  **Time-Weighted Average Price (TWAP)**: Menggunakan TWAP 1 jam untuk price stabilization
+3.  **Deviation Threshold**: Reject oracle updates jika deviasi > 5% dari rata-rata sources
+4.  **Oracle Rotation**: Automatic rotation jika oracle source gagal memberikan update
+5.  **On-Chain Verification**: Smart contract verify signature dari oracle providers
+
+### I. MEV Protection Mechanisms
+Untuk mencegah MEV extraction sekitar epoch minting:
+1.  **Randomized Epoch Timing**: Epoch boundaries tidak predictable (± 15 menit random)
+2.  **Commit-Reveal Scheme**: Minting menggunakan 2-step commit-reveal untuk mencegah front-running
+3.  **Batch Processing**: Process minting dalam batch untuk mencegah sandwich attacks
+4.  **Private Mempool**: Menggunakan private mempool untuk critical transactions
+5.  **MEV-Resistant Design**: Calldata encoding yang tidak expose sensitive parameters
+
+### J. Parameter Optimization Ranges (2026 Best Practices)
+Berdasarkan simulation dan empirical data dari protocols sukses:
+1.  **Burn Fraction (β)**: 0.15 - 0.25 (NodeOps suggests start at 0.20)
+2.  **Mint Cap per Epoch**: 0.3% - 0.7% dari total supply
+3.  **Target Stake Percentage**: 25% - 35% dari total supply (Polygon targets ~30%)
+4.  **Smoothing Window**: 3 - 7 epochs untuk net emissions
+5.  **Volatility Threshold**: 40% - 60% untuk circuit-breaker trigger
+6.  **Cash Buffer Range**: 15% - 45% dari TVL (dynamic adjustment)
+7.  **Rebalancing Band**: ±5% dari target allocation
+
+### K. Simulation Framework & Testing Strategy (2026 Standard)
+Untuk memvalidasi dan mengoptimalkan parameter tokenomics sebelum mainnet launch:
+1.  **Simulation Tools**:
+    *   **cadCAD**: Monte-Carlo dan agent-based simulation untuk scenario testing
+    *   **Cenit Finance**: Tokenomics simulator dengan template BME
+    *   **Token Terminal**: On-chain metrics untuk calibration
+    *   **Bitquery**: Blockchain API untuk historical data
+2.  **Sensitivity Analysis**:
+    *   **Sobol Decomposition**: Variance-based analysis untuk atribusi output variance ke inputs
+    *   **Parameters to test**: Burn fraction β, mint cap, staking reward g, target stake fraction
+3.  **Experiment Matrix**:
+    *   **Demand Scenarios**: Low/Medium/High growth (γ)
+    *   **Burn Fractions**: Conservative (0.15), Baseline (0.20), Aggressive (0.25)
+    *   **Mint Cap Policies**: Fixed, Smoothing, Circuit-breaker
+    *   **Runs**: 10,000 Monte-Carlo runs per scenario
+4.  **KPIs to Monitor**:
+    *   Net issuance rate (mint - burn) per epoch
+    *   APR to stakers vs effective inflation rate
+    *   Runway (time until treasury depleted)
+    *   TVL sensitivity to reward rate changes
+    *   Revenue capture ratio: on-chain revenue / total compensation
+5.  **Validation Targets**:
+    *   Net deflationary saat high demand (burn > mint)
+    *   Sustainable APR untuk stakers (5-15% target)
+    *   Minimum 12 months runway di low demand scenario
+    *   Revenue capture ratio > 50%
+
 
 ---
 ## 3. Distribusi Cap Table & Rencana Penguncian (Vesting)

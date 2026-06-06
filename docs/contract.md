@@ -168,6 +168,7 @@ sequenceDiagram
 *   `setLpLiquidity(total: uint256, utilized: uint256)`: Menyetel parameter likuiditas pool LP untuk simulasi utilitas Fase 3 secara instan.
 *   `proposeAaveParams(pool: Address, a_token: Address)` / `executeAaveParams()`: Usulan dan eksekusi parameter Aave V3 dengan timelock 24 jam.
 *   `proposeRwaToken(rwa: Address)` / `executeRwaToken()`: Usulan dan eksekusi parameter alamat token RWA dengan timelock 24 jam.
+*   `ccipRouter()` / `setCcipRouter(router: Address)`: Getter dan setter alamat CCIP Router on-chain. Setter hanya bisa dipanggil oleh owner.
 
 ### B. `deposit(sid: FixedBytes<32>, _com_k_bytes: Vec<u8>, amount: U256)`
 *   Klien menyetorkan dana stablecoin ke kontrak dengan ID sesi tertentu (`sid`). Kontrak menarik stablecoin dari dompet klien menggunakan `transferFrom`.
@@ -210,7 +211,9 @@ sequenceDiagram
 ### H. CCIP Receiver Lintas Rantai (Fase B)
 *   `ccip_receive(message_id: FixedBytes<32>, source_chain_selector: u64, sender: Bytes, payload: Bytes) -> Result<(), Vec<u8>>`
     *   Menerima pesan 648-byte dari router Chainlink CCIP.
-    *   Mendekode payload ke parameter spend dan parameter pembelian Polymarket, lalu mengeksekusi `spend_and_buy_shares` secara atomik di rantai tujuan.
+    *   **Verifikasi Pengirim (CCIP Router Check)**: Kontrak memverifikasi bahwa pengirim transaksi (`msg::sender()`) adalah alamat `ccip_router` yang valid (jika dikonfigurasi). Hal ini mencegah penyerang memanggil fungsi receive secara bypass tanpa melalui CCIP Router.
+    *   Mendekode payload ke parameter spend dan parameter pembelian Polymarket/transfer direct.
+    *   **Dukungan Transfer Standar (Direct Transfer)**: Jika `condition_id == ZERO`, contract akan melewati eksekusi pembelian shares Polymarket dan langsung mentransfer stablecoin ke penerima (`polymarket_ctf` berperan sebagai target wallet address).
 
 ---
 

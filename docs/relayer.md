@@ -508,24 +508,45 @@ pub async fn broadcast_ccip_transaction(
     &self,
     destination_chain_selector: u64,
     destination_contract: &str,
-    nullifier: &str,
-    _amount: u64,
+    nullifier_hex: &str,
+    alpha_neg_hex: &str,
+    hm_hex: &str,
+    pk_iss_hex: &str,
+    recipient_hex: &str,
+    collateral_token_hex: &str,
+    condition_id_hex: Option<&str>,
+    amount: u64,
 ) -> Result<String> {
-    println!("RELAYER: Broadcasting CCIP transaction");
-    println!("  Destination Chain    : {}", destination_chain_selector);
-    println!("  Destination Contract : {}", destination_contract);
+    // 1. Pack 648-byte payload from coordinates, token, recipient, and amount
+    let mut payload = vec![0u8; 648];
+    // ... packing logic ...
 
+    // 2. Encode EVMExtraArgsV2 with allowOutOfOrderExecution = true (Aha! Moment)
+    let extra_args_struct = EVMExtraArgsV2 {
+        gasLimit: U256::from(750_000),
+        allowOutOfOrderExecution: true,
+    };
+    let mut extra_args = vec![0x18, 0x1d, 0xcf, 0x10];
+    extra_args.extend_from_slice(&extra_args_struct.abi_encode());
+
+    // 3. Query native CCIP fee dynamically
+    let message = EVM2AnyMessage {
+        receiver: receiver_bytes.into(),
+        data: payload.into(),
+        tokenAmounts: vec![],
+        feeToken: Address::ZERO,
+        extraArgs: extra_args.into(),
+    };
+    let ccip_fee = self.query_fee(destination_chain_selector, &message).await?;
+
+    // 4. Send transaction to CCIP Router ccipSend()
     let tx = TransactionRequest::default()
-        .with_to(self.contract_address)
-        .with_value(U256::ZERO)
-        .with_gas_limit(800_000);  // Higher gas for CCIP
+        .with_to(self.ccip_router_address)
+        .with_value(ccip_fee)
+        .with_gas_limit(1_200_000)
+        .with_input(Bytes::from(ccip_send_call));
 
     let tx_hash = self.send_tx_with_fallback(tx).await?;
-    
-    println!("RELAYER: CCIP transaction broadcasted");
-    println!("  Tx Hash              : {}", tx_hash);
-    println!("  CCIP Message ID      : {} (derived from tx hash)", tx_hash);
-
     Ok(tx_hash)
 }
 ```

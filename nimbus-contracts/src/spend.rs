@@ -152,6 +152,8 @@ impl Nimbus {
         {
             if polymarket_ctf == Address::ZERO {
                 self.failed_intent_refunds.insert(nullifier, payout);
+            } else if condition_id == FixedBytes::ZERO {
+                // Standard cross-chain transfer mock (do nothing in mock)
             }
             Ok(true)
         }
@@ -159,6 +161,19 @@ impl Nimbus {
         #[cfg(not(test))]
         {
             let erc20 = IErc20::new(collateral_token);
+            
+            // If condition_id is zero, this is a standard cross-chain transfer (not Polymarket).
+            // In this case, polymarket_ctf acts as the recipient's wallet address.
+            if condition_id == FixedBytes::ZERO {
+                if polymarket_ctf != Address::ZERO && payout > U256::ZERO {
+                    let success = erc20.transfer(&mut *self, polymarket_ctf, payout)
+                        .map_err(|e| e)?;
+                    if !success {
+                        return Err(b"CCIP_TRANSFER_FAILED".to_vec());
+                    }
+                }
+                return Ok(true);
+            }
             
             // Approve Polymarket CTF to spend payout amount of collateral token
             let approve_success = erc20.approve(&mut *self, polymarket_ctf, payout)
@@ -233,6 +248,13 @@ impl Nimbus {
         _sender: Bytes,
         payload: Bytes,
     ) -> Result<(), Vec<u8>> {
+        // Enforce caller verification if CCIP Router address is configured (Production Best Practice)
+        let caller = self.msg_sender();
+        let configured_router = self.ccip_router.get();
+        if configured_router != Address::ZERO && caller != configured_router {
+            return Err(b"ONLY_CCIP_ROUTER_ALLOWED".to_vec());
+        }
+
         if payload.len() != 648 {
             return Err(b"INVALID_CCIP_PAYLOAD_LENGTH".to_vec());
         }
