@@ -117,6 +117,7 @@ println!("WARNING: No share key found via Vault or environment variables. Using 
 ## 2. CRITICAL: In-Memory Secret Storage Without Encryption
 
 **Severity:** CRITICAL  
+**Status:** **REMEDIATED (6 Juni 2026)**
 **Location:** `nimbus-node/src/state.rs:16-17`  
 **Category:** Secrets Management / Memory Security  
 **Source:** Cycode Secrets Management Tools 2026
