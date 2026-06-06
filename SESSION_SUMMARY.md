@@ -57,17 +57,25 @@ Fix the "FAILED" status of spend transactions on Arbitrum Sepolia testnet by cor
   - **Block**: `274474648`
   - **Gas Used**: `166,487`
   - **Status**: **SUCCESS**
+- ✅ **E2E CCIP broadcast transaction succeeded!**
+  - **Tx Hash**: `0x96687f14e6ee169a9211b4890cbd513a6e85b80bf1bc7b134c266049d81d42b8`
+  - **Confirm Block**: `274520525`
+  - **Gas Used**: `171,463`
+  - **Status**: **SUCCESS**
 - ✅ **All tests passing!** (15 contract unit tests and 10 relayer tests passed successfully)
 
 ---
 
 ## Technical Details
 
-### Deployed Addresses
+### Deployed Addresses & Chain Config
 - **Nimbus Contract**: `0x208f0e4390f59e3052c557bf23a47b2ab4697a10`
 - **USDC Token (Arbitrum Sepolia)**: `0x75faf114eafb1bdbe2f0316df893fd58ce46aa4d`
 - **Deployer/Relayer Signer**: `0x23e32d309c575a3d5e7cd2867be12b00efa44bb1`
 - **Arbitrum Sepolia CCIP Router**: `0x2a9C5afB0d0e4BAb2BCdaE109EC4b0c4Be15a165`
+- **Destination Chain Selector**: `10344971235874465080` (Base Sepolia)
+- **Destination Contract**: `0x208f0e4390f59e3052c557bf23a47b2ab4697a10`
+- **Verified CCIP Tx Hash**: `0x96687f14e6ee169a9211b4890cbd513a6e85b80bf1bc7b134c266049d81d42b8`
 
 ### Function Selector
 - Signatures now match `spend(bytes32,bytes,bytes,bytes,address,uint256)` using the type-safe `sol!` macro.
