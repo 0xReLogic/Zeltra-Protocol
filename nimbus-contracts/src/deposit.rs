@@ -64,8 +64,8 @@ impl Nimbus {
         
         let client = self.msg_sender();
         
-        // Enforce minimum transaction size of 1 USDC/stablecoin (1,000,000 units)
-        let min_amount = U256::from(1_000_000);
+        // Enforce minimum transaction size of 10 USDC/stablecoin (10,000,000 units)
+        let min_amount = U256::from(10_000_000);
         if amount < min_amount {
             return Err(b"AMOUNT_TOO_SMALL".to_vec());
         }

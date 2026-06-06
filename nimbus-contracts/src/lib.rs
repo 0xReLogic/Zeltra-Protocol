@@ -489,7 +489,7 @@ mod tests {
     #[test]
     fn test_ccip_receive_decoding_and_execution() {
         let mut payload = vec![0u8; 648];
-        let amount = U256::from(1_000_000);
+        let amount = U256::from(10_000_000);
         payload[616..648].copy_from_slice(&amount.to_be_bytes::<32>());
         
         let mut nimbus_contract = Nimbus::default();
@@ -566,7 +566,7 @@ mod tests {
         // Try guarded operations
         let sid = FixedBytes::ZERO;
         assert_eq!(
-            contract.deposit(sid, vec![], U256::from(1_000_000)),
+            contract.deposit(sid, vec![], U256::from(10_000_000)),
             Err(b"CONTRACT_PAUSED".to_vec())
         );
         assert_eq!(
@@ -605,10 +605,10 @@ mod tests {
         
         let sid = FixedBytes::repeat_byte(0xab);
         
-        // Deposit (must be >= 1_000_000)
+        // Deposit (must be >= 10_000_000)
         set_msg_sender(client);
         set_block_timestamp(1000);
-        contract.deposit(sid, vec![], U256::from(1_000_000)).unwrap();
+        contract.deposit(sid, vec![], U256::from(10_000_000)).unwrap();
         
         // Claim refund from other address should fail
         set_msg_sender(other);
@@ -659,7 +659,7 @@ mod tests {
         assert_eq!(contract.fast_path_phase().unwrap(), U256::from(1));
         
         // Fase 1: Premium is always 0
-        let amount = U256::from(1_000_000); // 1,000,000 (e.g. 1 USDC)
+        let amount = U256::from(10_000_000); // 10,000,000 (10 USDC)
         assert_eq!(contract.calculate_fast_path_premium(amount).unwrap(), U256::ZERO);
         
         // Change to Fase 2 via propose & execute
@@ -667,8 +667,8 @@ mod tests {
         set_block_timestamp(86401);
         contract.execute_fast_path_phase().unwrap();
         assert_eq!(contract.fast_path_phase().unwrap(), U256::from(2));
-        // Fase 2: 0.05% flat premium => 1,000,000 * 5 / 10,000 = 500
-        assert_eq!(contract.calculate_fast_path_premium(amount).unwrap(), U256::from(500));
+        // Fase 2: 0.05% flat premium => 10,000,000 * 5 / 10,000 = 5000
+        assert_eq!(contract.calculate_fast_path_premium(amount).unwrap(), U256::from(5000));
         
         // Change to Fase 3 via propose & execute
         contract.propose_fast_path_phase(U256::from(3)).unwrap();
@@ -679,22 +679,22 @@ mod tests {
         // Fase 3 with zero liquidity should fail
         assert!(contract.calculate_fast_path_premium(amount).is_err());
         
-        // Set LP liquidity: total = 10,000,000, utilized = 0
-        contract.set_lp_liquidity(U256::from(10000000), U256::from(0)).unwrap();
-        // New utilization after adding amount(1,000,000) is 1,000,000 / 10,000,000 = 10% (1,000 bps)
+        // Set LP liquidity: total = 100,000,000 (100 USDC), utilized = 0
+        contract.set_lp_liquidity(U256::from(100000000), U256::from(0)).unwrap();
+        // New utilization after adding amount(10,000,000) is 10,000,000 / 100,000,000 = 10% (1,000 bps)
         // Rate = 5 + 10 * 1,000 / 10,000 = 5 + 1 = 6 bps
-        // Premium = 1,000,000 * 6 / 10,000 = 600
-        assert_eq!(contract.calculate_fast_path_premium(amount).unwrap(), U256::from(600));
+        // Premium = 10,000,000 * 6 / 10,000 = 6000
+        assert_eq!(contract.calculate_fast_path_premium(amount).unwrap(), U256::from(6000));
         
-        // Set utilized to 8,000,000
-        contract.set_lp_liquidity(U256::from(10000000), U256::from(8000000)).unwrap();
-        // New utilization after adding amount(1,000,000) is 9,000,000 / 10,000,000 = 90% (9,000 bps)
+        // Set utilized to 80,000,000 (80 USDC)
+        contract.set_lp_liquidity(U256::from(100000000), U256::from(80000000)).unwrap();
+        // New utilization after adding amount(10,000,000) is 90,000,000 / 100,000,000 = 90% (9,000 bps)
         // Rate = 5 + 10 * 9,000 / 10,000 = 5 + 9 = 14 bps
-        // Premium = 1,000,000 * 14 / 10,000 = 1400
-        assert_eq!(contract.calculate_fast_path_premium(amount).unwrap(), U256::from(1400));
+        // Premium = 10,000,000 * 14 / 10,000 = 14000
+        assert_eq!(contract.calculate_fast_path_premium(amount).unwrap(), U256::from(14000));
         
-        // Request amount exceeding capacity (capacity is 2,000,000, we request 3,000,000)
-        let large_amount = U256::from(3000000);
+        // Request amount exceeding capacity (capacity is 20,000,000, we request 30,000,000)
+        let large_amount = U256::from(30000000);
         // Should trigger Dynamic Pool Cap limit and error
         assert!(contract.calculate_fast_path_premium(large_amount).is_err());
     }
@@ -729,13 +729,13 @@ mod tests {
         assert_eq!(contract.a_token().unwrap(), a_token);
         assert_eq!(contract.rwa_token().unwrap(), rwa);
         
-        // Test deposit increases principal (must be >= 1_000_000)
+        // Test deposit increases principal (must be >= 10_000_000)
         let sid = FixedBytes::repeat_byte(0xde);
-        contract.deposit(sid, vec![], U256::from(2_000_000)).unwrap();
+        contract.deposit(sid, vec![], U256::from(20_000_000)).unwrap();
         
-        // fee = (2,000,000 + 999) / 1000 = 2000
-        // net_amount = 2,000,000 - 2,000 = 1,998,000 net
-        assert_eq!(contract.total_deposited_principal().unwrap(), U256::from(1_998_000));
+        // fee = (20,000,000 + 999) / 1000 = 20000
+        // net_amount = 20,000,000 - 20,000 = 19,980,000 net
+        assert_eq!(contract.total_deposited_principal().unwrap(), U256::from(19_980_000));
         
         // Test spend decreases principal
         let nullifier = FixedBytes::repeat_byte(0xef);
@@ -745,11 +745,11 @@ mod tests {
             vec![],
             vec![],
             Address::ZERO,
-            U256::from(1_000_000),
+            U256::from(10_000_000),
         ).unwrap();
         
         assert!(is_valid);
-        assert_eq!(contract.total_deposited_principal().unwrap(), U256::from(998_000));
+        assert_eq!(contract.total_deposited_principal().unwrap(), U256::from(9_980_000));
         
         // Test yield claim under test (where total assets = principal, so yield is 0)
         assert_eq!(contract.claim_accumulated_yield().unwrap(), U256::ZERO);
@@ -767,7 +767,7 @@ mod tests {
         let nullifier = FixedBytes::repeat_byte(0xd1);
         
         // Set principal
-        contract.deposit(FixedBytes::repeat_byte(0x99), vec![], U256::from(2_000_000)).unwrap();
+        contract.deposit(FixedBytes::repeat_byte(0x99), vec![], U256::from(20_000_000)).unwrap();
         
         // Call spend_and_buy_shares with polymarket_ctf = Address::ZERO (which triggers mock fallback in tests)
         let success = contract.spend_and_buy_shares(
@@ -778,15 +778,15 @@ mod tests {
             Address::ZERO, // triggers fallback simulation in test block
             Address::ZERO,
             FixedBytes::ZERO,
-            U256::from(1_000_000),
+            U256::from(10_000_000),
         ).unwrap();
         
         // Under our mock try-catch, it should return true (gracefully handled)
         assert!(success);
         
         // The net payout should be calculated:
-        // 1,000,000 - base_fee = 1,000,000 - 1500 = 998,500
-        let expected_payout = U256::from(998_500);
+        // 10,000,000 - base_fee = 10,000,000 - 15000 = 9,985,000
+        let expected_payout = U256::from(9_985_000);
         assert_eq!(contract.get_failed_intent_refund(nullifier).unwrap(), expected_payout);
         
         // Claim the refund to a recipient
@@ -814,7 +814,7 @@ mod tests {
         let root = FixedBytes::repeat_byte(0x11);
         let nullifier = FixedBytes::repeat_byte(0x22);
         let recipient = address!("3333333333333333333333333333333333333333");
-        let amount = U256::from(1_000_000);
+        let amount = U256::from(10_000_000);
 
         // When root is not registered, verify_compliance should return Ok(false)
         let is_valid_unregistered = contract.verify_compliance(
