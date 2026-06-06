@@ -159,15 +159,20 @@ sequenceDiagram
 *Catatan Penting ABI: Stylus SDK secara otomatis mengonversi penamaan method snake_case milik Rust menjadi camelCase di Solidity ABI yang diekspor. Oleh karena itu, di level interaksi EVM/Web3, semua pemanggilan fungsi menggunakan nama camelCase.*
 
 #### A. Fitur Administrasi & Keamanan (Fase E: Security)
-*   `init(stablecoin_addr: Address, fee_recipient_addr: Address)`: Menginisialisasi owner kontrak dengan alamat pengirim transaksi pertama, menyetel alamat token stablecoin dan fee recipient (diekspos sebagai `feeRecipient()`), serta menetapkan fase awal Fast-Path ke `1`.
+*   `init(owner: Address, stablecoin_addr: Address, fee_recipient_addr: Address)`: Menginisialisasi owner kontrak dengan alamat yang dilewatkan secara eksplisit (mencegah uninitialized state), menyetel alamat token stablecoin dan fee recipient (diekspos sebagai `feeRecipient()`), serta menetapkan fase awal Fast-Path ke `1`.
 *   `pause()`: Mengaktifkan status jeda darurat (`paused = true`). Hanya bisa dipanggil oleh owner.
 *   `unpause()`: Menonaktifkan status jeda darurat (`paused = false`). Hanya bisa dipanggil oleh owner.
-*   `setFastPathPhase(phase: uint256)`: Menyetel fase Fast-Path (1, 2, atau 3). Hanya bisa dipanggil oleh owner (Rust internal: `set_fast_path_phase`).
-*   `setLpLiquidity(total: uint256, utilized: uint256)`: Menyetel parameter likuiditas pool LP untuk simulasi utilitas Fase 3. Hanya bisa dipanggil oleh owner (Rust internal: `set_lp_liquidity`).
+*   `proposeOwner(new_owner: Address)` / `claimOwnership()`: Proses pemindahan kepemilikan dua langkah (Two-Step Governance) untuk mencegah pengalihan owner ke alamat salah.
+*   `proposeFeeRecipient(recipient: Address)` / `executeFeeRecipient()`: Usulan dan eksekusi alamat penerima fee baru dengan timelock 24 jam.
+*   `proposeFastPathPhase(phase: uint256)` / `executeFastPathPhase()`: Usulan dan eksekusi fase Fast-Path (1, 2, atau 3) dengan timelock 24 jam.
+*   `setLpLiquidity(total: uint256, utilized: uint256)`: Menyetel parameter likuiditas pool LP untuk simulasi utilitas Fase 3 secara instan.
+*   `proposeAaveParams(pool: Address, a_token: Address)` / `executeAaveParams()`: Usulan dan eksekusi parameter Aave V3 dengan timelock 24 jam.
+*   `proposeRwaToken(rwa: Address)` / `executeRwaToken()`: Usulan dan eksekusi parameter alamat token RWA dengan timelock 24 jam.
 
 ### B. `deposit(sid: FixedBytes<32>, _com_k_bytes: Vec<u8>, amount: U256)`
 *   Klien menyetorkan dana stablecoin ke kontrak dengan ID sesi tertentu (`sid`). Kontrak menarik stablecoin dari dompet klien menggunakan `transferFrom`.
-*   Biaya minting/deposit sebesar **0.1%** dipotong secara on-chain dan langsung ditransfer ke `fee_recipient`.
+*   Batas setoran minimum adalah **10 USDC** (`10_000_000` unit). Setoran di bawah nilai ini ditolak seketika (`AMOUNT_TOO_SMALL`).
+*   Biaya minting/deposit sebesar **0.1%** dipotong secara on-chain (dihitung menggunakan pembulatan ke atas / round-up) dan langsung ditransfer ke `fee_recipient`.
 *   Kontrak mencatat alamat pengirim ke `session_client`, jumlah deposit bersih (`amount - fee`) ke `session_amount`, dan menginisialisasi `session_resolved` ke `false`.
 *   Kontrak juga mencatat waktu transaksi saat ini ke `session_timestamp` sebagai acuan waktu untuk sistem auto-refund timelock.
 
@@ -183,10 +188,11 @@ sequenceDiagram
 
 ### E. `spend(nullifier: FixedBytes<32>, alpha_neg_bytes: Vec<u8>, hm_bytes: Vec<u8>, pk_iss_bytes: Vec<u8>, recipient: Address, amount: U256) -> Result<bool, Vec<u8>>`
 *   Untuk mencairkan dana secara anonim, penerima mengirimkan tanda tangan BLS yang telah di-unblind.
+*   Batas pembelanjaan/penarikan minimum adalah **5 USDC** (`5_000_000` unit). Penarikan di bawah nilai ini ditolak seketika (`AMOUNT_TOO_SMALL`).
 *   Kontrak memverifikasi:
 1.  Nullifier belum pernah terdaftar (`!nullifiers[nullifier]`).
-2.  Keabsahan tanda tangan BLS menggunakan precompile **`BLS12_PAIRING_CHECK` (address `0x0f`)** dengan payload 768-byte.
-*   Jika valid, kontrak mencatat nullifier untuk mencegah double-spend, menghitung biaya dasar penarikan **0.15%**, menghitung biaya premi Fast-Path (jika Fase 2 atau Fase 3 aktif), lalu mengirimkan sisa dana bersih ke `recipient` dan total biaya ke `fee_recipient`.
+2.  Keabsahan tanda tangan BLS menggunakan precompile **`BLS12_PAIRING_CHECK` (address `0x0f`)** dengan payload 768-byte (atau dilewati dalam mode testing internal).
+*   Jika valid, kontrak mencatat nullifier untuk mencegah double-spend, menghitung biaya dasar penarikan **0.15%** (dihitung menggunakan pembulatan ke atas / round-up), menghitung biaya premi Fast-Path (jika Fase 2 atau Fase 3 aktif, dibulatkan ke atas), lalu mengirimkan sisa dana bersih ke `recipient` dan total biaya ke `fee_recipient`.
 
 ### F. `spendAndBuyShares(nullifier: FixedBytes<32>, alpha_neg_bytes: Vec<u8>, hm_bytes: Vec<u8>, pk_iss_bytes: Vec<u8>, polymarket_ctf: Address, collateral_token: Address, condition_id: FixedBytes<32>, amount: U256) -> Result<bool, Vec<u8>>`
 *   Melakukan verifikasi tanda tangan BLS (`spend`), menghitung sisa dana bersih (`payout`), menyetujui (`approve`) token USDC/stablecoin untuk didebit oleh Polymarket CTF, lalu secara atomik memicu fungsi `splitPosition` di kontrak target Polymarket (Conditional Tokens Contract) untuk mencetak shares opsi taruhan (Rust internal: `spend_and_buy_shares`).
