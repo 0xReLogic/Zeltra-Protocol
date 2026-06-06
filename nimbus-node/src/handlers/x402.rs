@@ -72,6 +72,9 @@ pub async fn handle_x402_verify(
         amount: sig.payment.amount,
         eip7702_auth: None,
         cross_chain: None,
+        alpha_neg_hex: sig.payment.alpha_neg_hex.clone(),
+        hm_hex: sig.payment.hm_hex.clone(),
+        pk_iss_hex: sig.payment.pk_iss_hex.clone(),
     };
 
     let mut queue = state.spend_queue.lock().await;
@@ -92,6 +95,9 @@ pub async fn handle_x402_verify(
         // Real transaction broadcasting
         match evm_client.broadcast_spend_transaction(
             &sig.payment.nullifier,
+            &sig.payment.alpha_neg_hex,
+            &sig.payment.hm_hex,
+            &sig.payment.pk_iss_hex,
             "x402-facilitator-pool",
             sig.payment.amount,
         ).await {

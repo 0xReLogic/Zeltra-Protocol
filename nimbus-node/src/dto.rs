@@ -26,6 +26,13 @@ pub struct SpendRequest {
     pub amount: u64,
     pub eip7702_auth: Option<Eip7702Auth>,
     pub cross_chain: Option<CrossChainParams>,
+    // BLS signature components for contract verification
+    #[serde(default)]
+    pub alpha_neg_hex: String,
+    #[serde(default)]
+    pub hm_hex: String,
+    #[serde(default)]
+    pub pk_iss_hex: String,
 }
 
 #[derive(Clone, Serialize, Deserialize, Debug)]

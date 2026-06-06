@@ -61,13 +61,29 @@ pub async fn process_spend_batch(state: &AppState) {
     println!("------------------------------------------------------------");
     println!("PROCESSING BATCH: Submitting {} transactions to L2...", batch_size);
 
-    // 1. L2 Gas Parameters & Economics (arXiv:2505.19556 - Batch-Calibrated)
+    // 1. Fetch dynamic gas price from blockchain
+    let l2_gas_price_wei = if let Some(ref evm_client) = state.evm_client {
+        match evm_client.get_gas_price().await {
+            Ok(price) => {
+                println!("  Dynamic gas price: {} wei ({} gwei)", price, price as f64 / 1e9);
+                price as f64
+            }
+            Err(e) => {
+                eprintln!("WARNING: Failed to fetch gas price, using fallback: {}", e);
+                0.2e9 // Fallback to 0.2 gwei
+            }
+        }
+    } else {
+        eprintln!("WARNING: No EVM client configured, using default gas price");
+        0.2e9 // Default fallback
+    };
+
+    // 2. L2 Gas Parameters & Economics (arXiv:2505.19556 - Batch-Calibrated)
     let eth_usd_price = 3500.0;
-    let l2_gas_price_gwei = 0.1;
-    let l2_gas_price_eth = l2_gas_price_gwei * 1e-9;
+    let l2_gas_price_eth = l2_gas_price_wei * 1e-18; // Convert wei to ETH
     let l2_exec_gas_per_tx = 120_000.0;
     let l1_calldata_gas_per_tx = 80_000.0;
-    let l1_base_batch_fee_eth = 0.005;
+    let l1_base_batch_fee_eth = 0.0001; // Lower for testnet (was 0.005 = $17.50)
 
     // Calculate individual vs batch cost to determine savings
     let ind_gas_cost_eth = (l2_exec_gas_per_tx + l1_calldata_gas_per_tx) * l2_gas_price_eth + l1_base_batch_fee_eth;
@@ -152,6 +168,7 @@ pub async fn process_spend_batch(state: &AppState) {
             println!("    [EIP-7702] Executed smart wallet call for EOA: {}", auth.eoa_address);
         }
 
+        // Broadcast transaction to L2 (regular spend or CCIP)
         if let Some(cc) = &request.cross_chain {
             println!("    [CCIP Lintas Rantai] Menginisiasi transaksi lintas rantai via Chainlink CCIP:");
             println!("      Selector Rantai Tujuan : {}", cc.destination_chain_selector);
@@ -178,6 +195,28 @@ pub async fn process_spend_batch(state: &AppState) {
             };
             
             println!("      Message ID             : {}", ccip_message_id);
+        } else {
+            // Regular spend transaction (non-CCIP)
+            if let Some(ref evm_client) = state.evm_client {
+                match evm_client.broadcast_spend_transaction(
+                    &request.nullifier,
+                    &request.alpha_neg_hex,
+                    &request.hm_hex,
+                    &request.pk_iss_hex,
+                    &request.recipient,
+                    net_payout,
+                ).await {
+                    Ok(tx_hash) => {
+                        println!("    [SPEND] Transaction broadcasted successfully");
+                        println!("      Tx Hash: {}", tx_hash);
+                    }
+                    Err(e) => {
+                        eprintln!("    [SPEND] ERROR: Failed to broadcast transaction: {}", e);
+                    }
+                }
+            } else {
+                println!("    [SPEND] WARNING: Using mock mode (dev mode - EVM client not configured)");
+            }
         }
     }
 
