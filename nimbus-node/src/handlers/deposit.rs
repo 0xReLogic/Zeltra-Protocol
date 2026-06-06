@@ -1,4 +1,4 @@
-//! Deposit and reveal handlers
+//! Deposit and reveal handlers with idempotency support (Finding #16)
 
 use axum::Json;
 use crate::{state::AppState, dto::*};
@@ -7,11 +7,27 @@ pub async fn handle_deposit(
     axum::extract::State(state): axum::extract::State<AppState>,
     Json(payload): Json<DepositRequest>,
 ) -> Json<DepositResponse> {
+    // --- Idempotency check (Finding #16) ---
+    if let Some(ref idem_key) = payload.idempotency_key {
+        match state.db.check_idempotency(idem_key, "deposit").await {
+            Ok(Some(cached_json)) => {
+                if let Ok(cached_resp) = serde_json::from_str::<DepositResponse>(&cached_json) {
+                    println!("IDEMPOTENCY: Returning cached deposit response for key {}...", &idem_key[..8.min(idem_key.len())]);
+                    return Json(cached_resp);
+                }
+            }
+            Ok(None) => { /* No cached response, proceed normally */ }
+            Err(e) => {
+                eprintln!("RELAYER WARNING: Idempotency check failed: {}", e);
+            }
+        }
+    }
+
     // Store session in persistent database
     let com_k_hex = hex::encode(&payload.com_k);
     let client_address = format!("0x{:040x}", rand::random::<u128>()); // Mock client address
     
-    match state.db.insert_session(
+    let response = match state.db.insert_session(
         &payload.session_id,
         &com_k_hex,
         payload.amount,
@@ -19,26 +35,35 @@ pub async fn handle_deposit(
     ).await {
         Ok(true) => {
             println!("RELAYER: Escrow deposit registered for Session ID: {}...", &payload.session_id[..8.min(payload.session_id.len())]);
-            Json(DepositResponse {
+            DepositResponse {
                 status: "SUCCESS".to_string(),
                 message: format!("Escrow registered for session {}", payload.session_id),
-            })
+            }
         }
         Ok(false) => {
             println!("RELAYER: Duplicate session ID attempted: {}...", &payload.session_id[..8.min(payload.session_id.len())]);
-            Json(DepositResponse {
+            DepositResponse {
                 status: "ERROR".to_string(),
                 message: "Session ID already exists".to_string(),
-            })
+            }
         }
         Err(e) => {
             eprintln!("RELAYER ERROR: Database insert failed: {}", e);
-            Json(DepositResponse {
+            DepositResponse {
                 status: "ERROR".to_string(),
                 message: "Database error".to_string(),
-            })
+            }
+        }
+    };
+
+    // Store idempotency response
+    if let Some(ref idem_key) = payload.idempotency_key {
+        if let Ok(json) = serde_json::to_string(&response) {
+            let _ = state.db.store_idempotency(idem_key, "deposit", &json).await;
         }
     }
+
+    Json(response)
 }
 
 pub async fn handle_reveal(

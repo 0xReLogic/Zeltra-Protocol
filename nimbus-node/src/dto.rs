@@ -34,6 +34,18 @@ pub struct SpendRequest {
     pub hm_hex: String,
     #[serde(default)]
     pub pk_iss_hex: String,
+    /// Slippage protection: minimum acceptable payout in USDC base units (6 decimals).
+    /// If net_payout < min_payout after gas deduction, the transaction is rejected.
+    #[serde(default)]
+    pub min_payout: Option<u64>,
+    /// Slippage protection: deadline as Unix timestamp (seconds).
+    /// Transaction is rejected if processing occurs after this timestamp.
+    #[serde(default)]
+    pub deadline: Option<u64>,
+    /// Client-supplied idempotency key (UUID recommended).
+    /// If provided, duplicate requests with the same key return the cached response.
+    #[serde(default)]
+    pub idempotency_key: Option<String>,
 }
 
 #[derive(Clone, Serialize, Deserialize, Debug)]
@@ -49,9 +61,12 @@ pub struct DepositRequest {
     pub session_id: String,
     pub com_k: String,
     pub amount: u64,
+    /// Client-supplied idempotency key (UUID recommended).
+    #[serde(default)]
+    pub idempotency_key: Option<String>,
 }
 
-#[derive(Serialize)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct DepositResponse {
     pub status: String,
     pub message: String,
@@ -70,11 +85,14 @@ pub struct RevealResponse {
     pub message: String,
 }
 
-#[derive(Serialize)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct SpendResponse {
     pub status: String,
     pub message: String,
     pub queue_position: usize,
+    /// Estimated gas charge in USDC (informational, for client-side slippage check)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub estimated_gas_usdc: Option<f64>,
 }
 
 #[derive(Serialize)]

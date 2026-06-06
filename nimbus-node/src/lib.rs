@@ -9,3 +9,5 @@ pub mod handlers;
 pub mod kms;
 pub mod http;
 pub mod evm_client;
+pub mod circuit_breaker;
+pub mod key_rotation;

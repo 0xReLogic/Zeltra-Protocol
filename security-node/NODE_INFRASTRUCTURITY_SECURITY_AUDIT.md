@@ -397,6 +397,7 @@ let l1_base_batch_fee_eth = 0.005;
 ## 9. MEDIUM: No Slippage Protection in Batch Processing
 
 **Severity:** MEDIUM  
+**Status:** **REMEDIATED (6 Juni 2026)**
 **Location:** `nimbus-node/src/handlers/spend.rs:114-120`  
 **Category:** Economic Exploitation / MEV  
 **Source:** Smart Contract Hacking: Frontrunning Attacks
@@ -435,6 +436,7 @@ let net_payout = if request.amount >= charge_usdc_units {
 ## 10. MEDIUM: No Minimum Balance Checks for Relayer Wallet
 
 **Severity:** MEDIUM  
+**Status:** **REMEDIATED (6 Juni 2026)**
 **Location:** `nimbus-node/src/handlers/spend.rs:82-97`  
 **Category:** Economic Exploitation / Insolvency Risk  
 **Source:** Quillaudits: Perp DEX Architecture & Security
@@ -523,6 +525,7 @@ pub async fn handle_spend(
 ## 12. MEDIUM: No Key Rotation Mechanism
 
 **Severity:** MEDIUM  
+**Status:** **REMEDIATED (6 Juni 2026)**
 **Location:** `nimbus-node/src/kms.rs:6-81`  
 **Category:** Secrets Management / Key Lifecycle  
 **Source:** Cycode: Secrets Management Best Practices
@@ -617,6 +620,7 @@ pub async fn health_check(
 ## 15. MEDIUM: No Circuit Breaker Pattern
 
 **Severity:** MEDIUM  
+**Status:** **REMEDIATED (6 Juni 2026)**
 **Category:** Resilience / Fault Tolerance
 
 **Issue:** No circuit breaker pattern for:
@@ -633,6 +637,7 @@ pub async fn health_check(
 ## 16. MEDIUM: No Request IDempotency
 
 **Severity:** MEDIUM  
+**Status:** **REMEDIATED (6 Juni 2026)**
 **Category:** API Design / Idempotency
 
 **Issue:** No idempotency keys:

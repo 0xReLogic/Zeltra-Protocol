@@ -1,4 +1,9 @@
 //! Spend handler and batch processing logic
+//!
+//! Security features:
+//! - Slippage protection (min_payout, deadline) -- Finding #9
+//! - Minimum balance checks before batch processing -- Finding #10
+//! - Idempotency key support for request deduplication -- Finding #16
 
 use axum::Json;
 use crate::{state::AppState, dto::*};
@@ -7,13 +12,57 @@ pub async fn handle_spend(
     axum::extract::State(state): axum::extract::State<AppState>,
     Json(payload): Json<SpendRequest>,
 ) -> Json<SpendResponse> {
-    // Check if nullifier has already been spent (double-spend prevention)
+    // --- Idempotency check (Finding #16) ---
+    if let Some(ref idem_key) = payload.idempotency_key {
+        match state.db.check_idempotency(idem_key, "spend").await {
+            Ok(Some(cached_json)) => {
+                if let Ok(cached_resp) = serde_json::from_str::<SpendResponse>(&cached_json) {
+                    println!("IDEMPOTENCY: Returning cached response for key {}...", &idem_key[..8.min(idem_key.len())]);
+                    return Json(cached_resp);
+                }
+            }
+            Ok(None) => { /* No cached response, proceed normally */ }
+            Err(e) => {
+                eprintln!("RELAYER WARNING: Idempotency check failed: {}", e);
+                // Proceed anyway -- idempotency is best-effort
+            }
+        }
+    }
+
+    // --- Deadline check (Finding #9 -- slippage protection) ---
+    if let Some(deadline) = payload.deadline {
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs();
+        if now > deadline {
+            let response = SpendResponse {
+                status: "REJECTED".to_string(),
+                message: format!(
+                    "Transaction deadline expired. Deadline: {}, Current: {}",
+                    deadline, now
+                ),
+                queue_position: 0,
+                estimated_gas_usdc: None,
+            };
+            // Cache rejection for idempotency
+            if let Some(ref idem_key) = payload.idempotency_key {
+                if let Ok(json) = serde_json::to_string(&response) {
+                    let _ = state.db.store_idempotency(idem_key, "spend", &json).await;
+                }
+            }
+            return Json(response);
+        }
+    }
+
+    // --- Double-spend check ---
     match state.db.is_nullifier_spent(&payload.nullifier).await {
         Ok(true) => {
             return Json(SpendResponse {
                 status: "REJECTED".to_string(),
                 message: "Double-spending detected. Nullifier already exists.".to_string(),
                 queue_position: 0,
+                estimated_gas_usdc: None,
             });
         }
         Ok(false) => {
@@ -25,6 +74,7 @@ pub async fn handle_spend(
                 status: "ERROR".to_string(),
                 message: "Database error".to_string(),
                 queue_position: 0,
+                estimated_gas_usdc: None,
             });
         }
     }
@@ -43,14 +93,24 @@ pub async fn handle_spend(
         println!("RELAYER: Received standard spend request (Queued)");
     }
 
-    Json(SpendResponse {
+    let response = SpendResponse {
         status: "QUEUED".to_string(),
         message: "Spend transaction accepted into batching queue".to_string(),
         queue_position: position,
-    })
+        estimated_gas_usdc: None,
+    };
+
+    // Store idempotency response
+    if let Some(ref idem_key) = payload.idempotency_key {
+        if let Ok(json) = serde_json::to_string(&response) {
+            let _ = state.db.store_idempotency(idem_key, "spend", &json).await;
+        }
+    }
+
+    Json(response)
 }
 
-// Simulated background batching logic (saves 40% gas fees)
+// Background batching logic with slippage protection and balance checks
 pub async fn process_spend_batch(state: &AppState) {
     let mut queue = state.spend_queue.lock().await;
     if queue.is_empty() {
@@ -61,15 +121,19 @@ pub async fn process_spend_batch(state: &AppState) {
     println!("------------------------------------------------------------");
     println!("PROCESSING BATCH: Submitting {} transactions to L2...", batch_size);
 
-    // 1. Fetch dynamic gas price from blockchain
+    // 1. Fetch dynamic gas price from blockchain (via circuit breaker)
     let l2_gas_price_wei = if let Some(ref evm_client) = state.evm_client {
-        match evm_client.get_gas_price().await {
+        let evm = evm_client.clone();
+        let cb = state.rpc_circuit_breaker.clone();
+        match cb.call(|| async move {
+            evm.get_gas_price().await.map_err(|e| format!("{}", e))
+        }).await {
             Ok(price) => {
                 println!("  Dynamic gas price: {} wei ({} gwei)", price, price as f64 / 1e9);
                 price as f64
             }
             Err(e) => {
-                eprintln!("WARNING: Failed to fetch gas price, using fallback: {}", e);
+                eprintln!("WARNING: Gas price fetch failed (circuit breaker: {}), using fallback", e);
                 0.2e9 // Fallback to 0.2 gwei
             }
         }
@@ -94,7 +158,6 @@ pub async fn process_spend_batch(state: &AppState) {
     let batch_gas_cost_per_tx_usd = batch_gas_cost_per_tx_eth * eth_usd_price;
 
     let savings_per_tx_eth = ind_gas_cost_eth - batch_gas_cost_per_tx_eth;
-    let savings_per_tx_usd = savings_per_tx_eth * eth_usd_price;
 
     // Relayer takes a 10% markup from the user's savings as operational profit
     let markup_fee_eth = savings_per_tx_eth * 0.10;
@@ -106,6 +169,18 @@ pub async fn process_spend_batch(state: &AppState) {
     let total_batch_cost_eth = batch_gas_cost_per_tx_eth * batch_size as f64;
     let total_batch_profit_usd = markup_fee_usd * batch_size as f64;
 
+    // --- Finding #10: Minimum balance check before processing ---
+    match state.check_balance_for_batch(total_batch_cost_eth).await {
+        Ok(_) => { /* Balance sufficient, proceed */ }
+        Err(e) => {
+            eprintln!("BATCH REJECTED: {}", e);
+            println!("  Action: Batch of {} transactions deferred until balance is replenished", batch_size);
+            println!("------------------------------------------------------------");
+            // Do NOT clear the queue -- keep transactions for retry when balance is replenished
+            return;
+        }
+    }
+
     // Update relayer wallet balance and profit
     {
         let mut relayer_bal = state.relayer_wallet_balance_eth.lock().await;
@@ -116,7 +191,7 @@ pub async fn process_spend_batch(state: &AppState) {
         println!("  L2 Gas Economics (arXiv:2505.19556 - Batch-Calibrated Gas):");
         println!("    - Individual Tx Cost Estimate : {:.5} ETH (${:.2})", ind_gas_cost_eth, ind_gas_cost_usd);
         println!("    - Actual Batched Cost per Tx  : {:.5} ETH (${:.2})", batch_gas_cost_per_tx_eth, batch_gas_cost_per_tx_usd);
-        println!("    - Gas Savings per User        : {:.5} ETH (${:.2})", savings_per_tx_eth, savings_per_tx_usd);
+        println!("    - Savings per User            : {:.5} ETH (${:.2})", savings_per_tx_eth, savings_per_tx_eth * eth_usd_price);
         println!("    - Relayer 10% Savings Markup  : {:.5} ETH (${:.2})", markup_fee_eth, markup_fee_usd);
         println!("    - Total Charge to User        : {:.5} ETH (${:.2})", total_charge_per_tx_eth, total_charge_per_tx_usd);
         println!("    - Relayer Signer Gas Balance  : {:.5} ETH", *relayer_bal);
@@ -131,8 +206,49 @@ pub async fn process_spend_batch(state: &AppState) {
         println!("  Anonymization: Shuffled batch to break timing correlation.");
     }
     
-    // Simulate transaction submission on-chain
-    for request in queue.iter() {
+    // Process each transaction with slippage protection
+    let mut rejected_indices: Vec<usize> = Vec::new();
+    
+    for (idx, request) in queue.iter().enumerate() {
+        // --- Finding #9: Deadline enforcement during batch processing ---
+        if let Some(deadline) = request.deadline {
+            let now = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_secs();
+            if now > deadline {
+                eprintln!(
+                    "  SLIPPAGE-REJECT: Transaction {}... deadline expired (deadline={}, now={})",
+                    &request.nullifier[..8.min(request.nullifier.len())],
+                    deadline,
+                    now
+                );
+                rejected_indices.push(idx);
+                continue;
+            }
+        }
+
+        // --- Finding #9: Minimum payout check ---
+        let charge_usdc_units = (total_charge_per_tx_usd * 1_000_000.0) as u64;
+        let net_payout = if request.amount >= charge_usdc_units {
+            request.amount - charge_usdc_units
+        } else {
+            0
+        };
+
+        if let Some(min_payout) = request.min_payout {
+            if net_payout < min_payout {
+                eprintln!(
+                    "  SLIPPAGE-REJECT: Transaction {}... net_payout ({:.2} USDC) < min_payout ({:.2} USDC)",
+                    &request.nullifier[..8.min(request.nullifier.len())],
+                    net_payout as f64 / 1_000_000.0,
+                    min_payout as f64 / 1_000_000.0
+                );
+                rejected_indices.push(idx);
+                continue;
+            }
+        }
+
         // Register nullifier in persistent database to prevent double-spend
         match state.db.check_and_insert_nullifier(&request.nullifier, None).await {
             Ok(true) => {
@@ -148,14 +264,6 @@ pub async fn process_spend_batch(state: &AppState) {
                 continue;
             }
         }
-
-        // Deduct gas cost + markup from user's spend amount (converted to USDC base units: USD * 1_000_000)
-        let charge_usdc_units = (total_charge_per_tx_usd * 1_000_000.0) as u64;
-        let net_payout = if request.amount >= charge_usdc_units {
-            request.amount - charge_usdc_units
-        } else {
-            0
-        };
 
         println!("  - Spent to: {}, Original: {:.2} USDC, Net Payout: {:.2} USDC, Nullifier: {}...", 
             request.recipient, 
@@ -218,6 +326,10 @@ pub async fn process_spend_batch(state: &AppState) {
                 println!("    [SPEND] WARNING: Using mock mode (dev mode - EVM client not configured)");
             }
         }
+    }
+
+    if !rejected_indices.is_empty() {
+        println!("  SLIPPAGE: {} transactions rejected due to slippage/deadline protection", rejected_indices.len());
     }
 
     // Clear queue

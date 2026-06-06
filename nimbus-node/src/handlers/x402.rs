@@ -75,6 +75,9 @@ pub async fn handle_x402_verify(
         alpha_neg_hex: sig.payment.alpha_neg_hex.clone(),
         hm_hex: sig.payment.hm_hex.clone(),
         pk_iss_hex: sig.payment.pk_iss_hex.clone(),
+        min_payout: None,
+        deadline: None,
+        idempotency_key: None,
     };
 
     let mut queue = state.spend_queue.lock().await;

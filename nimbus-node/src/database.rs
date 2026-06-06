@@ -98,6 +98,17 @@ impl Database {
                     tx_hash TEXT
                 );
                 CREATE INDEX IF NOT EXISTS idx_queue_processed ON spend_queue(processed);
+                
+                -- Idempotency cache (request deduplication)
+                -- Based on 2026 best practice: client-supplied idempotency keys
+                -- with TTL-based expiry (24h default)
+                CREATE TABLE IF NOT EXISTS idempotency_cache (
+                    idempotency_key TEXT PRIMARY KEY,
+                    endpoint TEXT NOT NULL,
+                    response_json TEXT NOT NULL,
+                    created_at INTEGER NOT NULL
+                );
+                CREATE INDEX IF NOT EXISTS idx_idempotency_created ON idempotency_cache(created_at);
             ")?;
             
             Ok(())
@@ -368,6 +379,92 @@ impl Database {
             conn.pragma_update(None, "key", &db_key)?;
             conn.execute_batch("VACUUM;")?;
             Ok(())
+        })
+        .await?
+    }
+    
+    /// Check if an idempotency key exists and return the cached response if so
+    pub async fn check_idempotency(&self, key: &str, endpoint: &str) -> Result<Option<String>> {
+        let path = self.path.clone();
+        let key = key.to_string();
+        let endpoint = endpoint.to_string();
+        
+        let db_key = std::env::var("NIMBUS_DB_KEY")
+            .unwrap_or_else(|_| "default-change-in-production".to_string());
+        
+        task::spawn_blocking(move || -> Result<Option<String>> {
+            let conn = Connection::open(&path)?;
+            conn.pragma_update(None, "key", &db_key)?;
+            
+            // Check with 24h TTL (86400 seconds)
+            let now = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)?
+                .as_secs() as i64;
+            let cutoff = now - 86400;
+            
+            let result: Option<String> = conn
+                .query_row(
+                    "SELECT response_json FROM idempotency_cache 
+                     WHERE idempotency_key = ? AND endpoint = ? AND created_at > ?",
+                    params![key, endpoint, cutoff],
+                    |row| row.get(0),
+                )
+                .optional()?;
+            
+            Ok(result)
+        })
+        .await?
+    }
+    
+    /// Store an idempotency key with its response for future deduplication
+    pub async fn store_idempotency(&self, key: &str, endpoint: &str, response_json: &str) -> Result<()> {
+        let path = self.path.clone();
+        let key = key.to_string();
+        let endpoint = endpoint.to_string();
+        let response_json = response_json.to_string();
+        
+        let db_key = std::env::var("NIMBUS_DB_KEY")
+            .unwrap_or_else(|_| "default-change-in-production".to_string());
+        
+        task::spawn_blocking(move || -> Result<()> {
+            let conn = Connection::open(&path)?;
+            conn.pragma_update(None, "key", &db_key)?;
+            let now = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)?
+                .as_secs() as i64;
+            
+            conn.execute(
+                "INSERT OR REPLACE INTO idempotency_cache 
+                 (idempotency_key, endpoint, response_json, created_at) 
+                 VALUES (?, ?, ?, ?)",
+                params![key, endpoint, response_json, now],
+            )?;
+            
+            Ok(())
+        })
+        .await?
+    }
+    
+    /// Cleanup expired idempotency keys (older than 24h)
+    pub async fn cleanup_idempotency_cache(&self) -> Result<usize> {
+        let path = self.path.clone();
+        
+        let db_key = std::env::var("NIMBUS_DB_KEY")
+            .unwrap_or_else(|_| "default-change-in-production".to_string());
+        
+        task::spawn_blocking(move || -> Result<usize> {
+            let conn = Connection::open(&path)?;
+            conn.pragma_update(None, "key", &db_key)?;
+            let cutoff = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)?
+                .as_secs() as i64 - 86400;
+            
+            let deleted = conn.execute(
+                "DELETE FROM idempotency_cache WHERE created_at < ?",
+                params![cutoff],
+            )?;
+            
+            Ok(deleted)
         })
         .await?
     }

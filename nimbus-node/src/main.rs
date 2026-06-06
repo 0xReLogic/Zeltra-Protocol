@@ -5,6 +5,8 @@ mod kms;
 mod handlers;
 mod database;
 mod evm_client;
+mod circuit_breaker;
+mod key_rotation;
 
 use axum::{
     routing::{post, get},
@@ -35,7 +37,7 @@ async fn main() {
     
     println!("Initializing database at: {}", db_path);
     let db = Database::new(&db_path).await.expect("Failed to initialize database");
-    println!("✓ Database initialized with WAL mode and production PRAGMAs");
+    println!("Database initialized with WAL mode and production PRAGMAs");
     
     // Load threshold signature share from KMS
     let (mut share_sk, share_index) = kms::load_share_key().await;
@@ -48,7 +50,7 @@ async fn main() {
     ) {
         match EvmClient::new(&rpc_url, &private_key, &contract_addr).await {
             Ok(client) => {
-                println!("✓ EVM client initialized");
+                println!("EVM client initialized");
                 println!("  RPC URL:    {}", rpc_url);
                 println!("  Contract:   {}", contract_addr);
                 println!("  Signer:     {}", client.signer_address());
@@ -75,11 +77,14 @@ async fn main() {
         std::ptr::write_volatile(&mut share_sk, nimbus_core::Fr::from(0u64));
     }
 
+    // Spawn key rotation background task (Finding #12)
+    let _rotation_handle = state.key_manager.clone().spawn_rotation_task();
+
     // Spawn background worker to batch and process spends every 2 seconds
     let worker_state = state.clone();
     tokio::spawn(async move {
         loop {
-            tokio::time::sleep(Duration::from_secs(2)).async_wait().await;
+            tokio::time::sleep(Duration::from_secs(2)).await;
             process_spend_batch(&worker_state).await;
         }
     });
@@ -113,6 +118,16 @@ async fn main() {
                 }
                 Err(e) => eprintln!("DATABASE CLEANUP failed: {}", e),
             }
+            
+            // Cleanup expired idempotency keys (Finding #16)
+            match cleanup_state.db.cleanup_idempotency_cache().await {
+                Ok(deleted) => {
+                    if deleted > 0 {
+                        println!("IDEMPOTENCY CLEANUP: Purged {} expired keys", deleted);
+                    }
+                }
+                Err(e) => eprintln!("IDEMPOTENCY CLEANUP failed: {}", e),
+            }
         }
     });
 
@@ -136,6 +151,11 @@ async fn main() {
     println!("Listening on: http://{}", listener.local_addr().unwrap());
     println!("Database:     {}", db_path);
     println!("Persistence:  ENABLED (SQLite WAL mode)");
+    println!("Circuit Breaker: guardian-rpc, vault-kms, blockchain-rpc");
+    println!("Key Rotation: {}", if std::env::var("NIMBUS_KEY_ROTATION").map(|v| v == "true").unwrap_or(false) { "ENABLED" } else { "DISABLED (re-mask only)" });
+    println!("Idempotency:  ENABLED (24h TTL)");
+    println!("Slippage:     ENABLED (min_payout + deadline)");
+    println!("Min Balance:  {:.2} ETH", state::MIN_RELAYER_BALANCE_ETH);
     println!("Gasless EIP-7702 delegation: ACTIVE");
     println!("x402 Facilitator endpoint:   ACTIVE");
     println!("Relayer batch queue interval: 2 seconds");
@@ -176,13 +196,6 @@ async fn rate_limit_middleware(
     
     drop(map); // drop lock before running handler
     Ok(next.run(request).await)
-}
-
-trait TokioSleepExt {
-    fn async_wait(self) -> Self;
-}
-impl<T> TokioSleepExt for T {
-    fn async_wait(self) -> Self { self }
 }
 
 #[cfg(test)]

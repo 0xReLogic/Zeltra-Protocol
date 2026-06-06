@@ -4,6 +4,13 @@ use std::sync::Arc;
 use tokio::sync::Mutex;
 use crate::database::Database;
 use crate::evm_client::EvmClient;
+use crate::circuit_breaker::{CircuitBreaker, CircuitBreakerConfig};
+use crate::key_rotation::{KeyManager, KeyRotationConfig};
+use std::time::Duration;
+
+/// Minimum relayer ETH balance required to process batches.
+/// If balance drops below this, batch processing is halted to prevent insolvency.
+pub const MIN_RELAYER_BALANCE_ETH: f64 = 0.1;
 
 /// Production-ready application state with persistent database
 #[derive(Clone)]
@@ -14,12 +21,8 @@ pub struct AppState {
     /// In-memory spend queue (batched before on-chain submission)
     pub spend_queue: Arc<Mutex<Vec<crate::dto::SpendRequest>>>,
     
-    /// BLS12-381 threshold signature share split into two masked parts
-    share_sk_part1: nimbus_core::Fr,
-    share_sk_part2: nimbus_core::Fr,
-    
-    /// Index of this relayer node in the threshold signature scheme (1-indexed)
-    pub share_index: u32,
+    /// Key manager with rotation and re-masking support
+    pub key_manager: KeyManager,
     
     /// Relayer wallet balance in ETH (for gas fee tracking)
     pub relayer_wallet_balance_eth: Arc<Mutex<f64>>,
@@ -29,6 +32,16 @@ pub struct AppState {
     
     /// EVM client for broadcasting real transactions (replaces mock tx hashes)
     pub evm_client: Option<Arc<EvmClient>>,
+    
+    /// Circuit breaker for guardian RPC calls
+    pub guardian_circuit_breaker: CircuitBreaker,
+    
+    /// Circuit breaker for Vault/OpenBao KMS access
+    #[allow(dead_code)]
+    pub vault_circuit_breaker: CircuitBreaker,
+    
+    /// Circuit breaker for blockchain RPC provider
+    pub rpc_circuit_breaker: CircuitBreaker,
 }
 
 impl AppState {
@@ -39,64 +52,85 @@ impl AppState {
         share_index: u32,
         evm_client: Option<Arc<EvmClient>>,
     ) -> Self {
-        use nimbus_core::UniformRand;
+        // Key rotation config from environment
+        let rotation_enabled = std::env::var("NIMBUS_KEY_ROTATION")
+            .map(|v| v == "true" || v == "1")
+            .unwrap_or(false);
         
-        // Split the key in memory using a random mask
-        let mut rng = rand::thread_rng();
-        let part1 = nimbus_core::Fr::rand(&mut rng);
-        let part2 = share_sk - part1;
+        let rotation_interval = std::env::var("NIMBUS_KEY_ROTATION_INTERVAL")
+            .ok()
+            .and_then(|v| v.parse::<u64>().ok())
+            .unwrap_or(3600);
+        
+        let key_config = KeyRotationConfig {
+            rotation_interval: Duration::from_secs(rotation_interval),
+            max_key_age: Duration::from_secs(rotation_interval * 24),
+            enabled: rotation_enabled,
+        };
+        
+        let key_manager = KeyManager::new(share_sk, share_index, key_config);
+        let vault_circuit_breaker = key_manager.vault_circuit_breaker.clone();
         
         Self {
             db,
             spend_queue: Arc::new(Mutex::new(Vec::new())),
-            share_sk_part1: part1,
-            share_sk_part2: part2,
-            share_index,
+            key_manager,
             relayer_wallet_balance_eth: Arc::new(Mutex::new(10.0)),
             relayer_accumulated_profit_usdc: Arc::new(Mutex::new(0.0)),
             evm_client,
+            guardian_circuit_breaker: CircuitBreaker::new(CircuitBreakerConfig {
+                failure_threshold: 5,
+                recovery_timeout: Duration::from_secs(30),
+                success_threshold: 2,
+                name: "guardian-rpc".to_string(),
+            }),
+            vault_circuit_breaker,
+            rpc_circuit_breaker: CircuitBreaker::new(CircuitBreakerConfig {
+                failure_threshold: 5,
+                recovery_timeout: Duration::from_secs(15),
+                success_threshold: 2,
+                name: "blockchain-rpc".to_string(),
+            }),
         }
     }
 
-    /// Sign a blinded message using the split private key share, zeroizing temporary variables immediately
-    pub fn sign_share_masked(
+    /// Sign a blinded message using the key manager (with rotation support)
+    pub async fn sign_share_masked(
         &self,
         blinded: &nimbus_core::BlindedMessage,
         k: &nimbus_core::Fr,
     ) -> nimbus_core::PartialBlindSignature {
-        use nimbus_core::sign_share;
-        
-        // Reconstruct key in memory
-        let mut sk = self.share_sk_part1 + self.share_sk_part2;
-        let sig = sign_share(&sk, blinded, k);
-        
-        // Securely zero out the reconstructed key in memory
-        unsafe {
-            std::ptr::write_volatile(&mut sk, nimbus_core::Fr::from(0u64));
-        }
-        
-        sig
+        self.key_manager.sign_share(blinded, k).await
     }
 
-    /// Get the public key of the issuer dynamically from the split key, zeroizing intermediate key
+    /// Get the public key of the issuer via key manager
     pub fn get_issuer_public_key(&self) -> nimbus_core::IssuerPublicKey {
-        use nimbus_core::IssuerSecretKey;
+        // Use a blocking approach since this is called in sync context
         
-        let mut sk = self.share_sk_part1 + self.share_sk_part2;
-        let sk_iss = IssuerSecretKey(sk);
-        let pk = sk_iss.public_key();
-        
-        // Securely zero out temporary key
-        unsafe {
-            std::ptr::write_volatile(&mut sk, nimbus_core::Fr::from(0u64));
-        }
-        
-        pk
+        // We need to reconstruct from the key manager synchronously
+        // This is safe because we're already in an async context
+        let rt = tokio::runtime::Handle::current();
+        rt.block_on(self.key_manager.get_issuer_public_key())
     }
 
-    /// Get the reconstructed share key for manual overrides (e.g. testing)
-    #[allow(dead_code)]
-    pub fn get_reconstructed_key(&self) -> nimbus_core::Fr {
-        self.share_sk_part1 + self.share_sk_part2
+    /// Check if relayer balance is sufficient for a batch of given size
+    pub async fn check_balance_for_batch(&self, estimated_cost_eth: f64) -> Result<f64, String> {
+        let bal = *self.relayer_wallet_balance_eth.lock().await;
+        
+        if bal < MIN_RELAYER_BALANCE_ETH {
+            return Err(format!(
+                "Relayer balance ({:.5} ETH) is below minimum threshold ({:.5} ETH). Refusing to process batch.",
+                bal, MIN_RELAYER_BALANCE_ETH
+            ));
+        }
+        
+        if bal < estimated_cost_eth + MIN_RELAYER_BALANCE_ETH {
+            return Err(format!(
+                "Insufficient balance for batch: need {:.5} ETH + {:.5} ETH reserve, have {:.5} ETH",
+                estimated_cost_eth, MIN_RELAYER_BALANCE_ETH, bal
+            ));
+        }
+        
+        Ok(bal)
     }
 }

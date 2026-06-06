@@ -1,4 +1,7 @@
 //! Threshold signature handlers for distributed signing
+//!
+//! Uses circuit breaker pattern (Finding #15) for guardian RPC calls
+//! to prevent cascading failures when guardians are unreachable.
 
 use axum::Json;
 use crate::{state::AppState, dto::*, http};
@@ -46,13 +49,13 @@ pub async fn handle_sign_share(
             if let Some(override_sk) = deserialize_from_bytes::<Fr>(&bytes) {
                 sign_share(&override_sk, &blinded, &k)
             } else {
-                state.sign_share_masked(&blinded, &k)
+                state.sign_share_masked(&blinded, &k).await
             }
         } else {
-            state.sign_share_masked(&blinded, &k)
+            state.sign_share_masked(&blinded, &k).await
         }
     } else {
-        state.sign_share_masked(&blinded, &k)
+        state.sign_share_masked(&blinded, &k).await
     };
     let sig_share_hex = hex::encode(serialize_to_bytes(&sig_share));
 
@@ -103,11 +106,12 @@ pub async fn handle_leader_sign(
     };
 
     let com_k = pk_iss.0 * k;
-    let leader_share_sig = state.sign_share_masked(&blinded, &k);
+    let leader_share_sig = state.sign_share_masked(&blinded, &k).await;
 
+    let share_index = state.key_manager.share_index().await;
     let mut partial_signatures = vec![
         PartialSignatureInfo {
-            index: state.share_index,
+            index: share_index,
             signature_hex: hex::encode(serialize_to_bytes(&leader_share_sig)),
         }
     ];
@@ -118,9 +122,16 @@ pub async fn handle_leader_sign(
         share_sk_hex: None,
     }).unwrap();
 
+    // Call guardians with circuit breaker (Finding #15)
     for (idx, url) in payload.guardian_urls.iter().enumerate() {
         let target_url = format!("{}/api/sign-share", url.trim_end_matches('/'));
-        match http::post_http(&target_url, &client_body).await {
+        let body = client_body.clone();
+        let url_clone = target_url.clone();
+        let cb = state.guardian_circuit_breaker.clone();
+        
+        match cb.call(|| async {
+            http::post_http(&url_clone, &body).await
+        }).await {
             Ok(response_body) => {
                 if let Ok(res) = serde_json::from_str::<SignShareResponse>(&response_body) {
                     if res.status == "SUCCESS" {
