@@ -9,9 +9,18 @@ mod evm_client;
 use axum::{
     routing::{post, get},
     Router,
+    body::Body,
+    http::{Request, StatusCode},
+    middleware::Next,
+    response::Response,
+    extract::DefaultBodyLimit,
 };
 use std::time::Duration;
 use std::sync::Arc;
+use std::collections::HashMap;
+use tokio::sync::Mutex;
+use std::time::Instant;
+use std::sync::OnceLock;
 
 use state::AppState;
 use handlers::*;
@@ -110,6 +119,8 @@ async fn main() {
         .route("/api/x402/verify", post(handle_x402_verify))
         .route("/api/sign-share", post(handle_sign_share))
         .route("/api/leader/sign", post(handle_leader_sign))
+        .layer(axum::middleware::from_fn(rate_limit_middleware))
+        .layer(DefaultBodyLimit::max(64 * 1024)) // 64KB request body size limit
         .with_state(state);
 
     let port = std::env::var("PORT").unwrap_or_else(|_| "8080".to_string());
@@ -126,6 +137,40 @@ async fn main() {
     println!("------------------------------------------------------------");
 
     axum::serve(listener, app).await.unwrap();
+}
+
+async fn rate_limit_middleware(
+    request: Request<Body>,
+    next: Next,
+) -> Result<Response, StatusCode> {
+    // Extract IP address from headers
+    let ip = request
+        .headers()
+        .get("x-forwarded-for")
+        .and_then(|val| val.to_str().ok())
+        .map(|s| s.split(',').next().unwrap_or(s).trim().to_string())
+        .unwrap_or_else(|| "127.0.0.1".to_string());
+
+    static LIMITER: OnceLock<Mutex<HashMap<String, (u32, Instant)>>> = OnceLock::new();
+    let limiter = LIMITER.get_or_init(|| Mutex::new(HashMap::new()));
+    
+    let mut map = limiter.lock().await;
+    let now = Instant::now();
+    
+    let (count, last_reset) = map.entry(ip).or_insert((0, now));
+    
+    if now.duration_since(*last_reset) > Duration::from_secs(1) {
+        *count = 1;
+        *last_reset = now;
+    } else {
+        *count += 1;
+        if *count > 10 { // Max 10 requests per second
+            return Err(StatusCode::TOO_MANY_REQUESTS);
+        }
+    }
+    
+    drop(map); // drop lock before running handler
+    Ok(next.run(request).await)
 }
 
 trait TokioSleepExt {

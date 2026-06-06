@@ -149,6 +149,7 @@ pub share_index: u32,
 ## 3. CRITICAL: No Rate Limiting on API Endpoints
 
 **Severity:** CRITICAL  
+**Status:** **REMEDIATED (6 Juni 2026)**
 **Location:** `nimbus-node/src/main.rs:30-38`  
 **Category:** Denial of Service / Rate Limiting  
 **Source:** Alchemy RPC Infrastructure Evaluation Guide
@@ -309,6 +310,7 @@ pub async fn post_http(url: &str, body: &str) -> Result<String, String> {
 ## 7. HIGH: No Request Validation or Size Limits
 
 **Severity:** HIGH  
+**Status:** **REMEDIATED (6 Juni 2026)**
 **Location:** `nimbus-node/src/handlers/*.rs`  
 **Category:** Input Validation / DoS Prevention  
 **Source:** Red Button: Why Rate Limits Fail in Distributed DDoS Attacks
@@ -575,6 +577,7 @@ pub async fn load_share_key() -> (nimbus_core::Fr, u32) {
 ## 14. LOW: No Health Check for External Dependencies
 
 **Severity:** LOW  
+**Status:** **REMEDIATED (6 Juni 2026)**
 **Location:** `nimbus-node/src/handlers/health.rs:6-20`  
 **Category:** Observability / Health Monitoring
 
