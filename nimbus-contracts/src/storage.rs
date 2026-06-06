@@ -68,6 +68,11 @@ sol_storage! {
         
         // --- CCIP Router Address Configuration (Production Security Best Practice) ---
         address ccip_router;
+
+        // --- Deposit commitment binding (DEC-001) ---
+        // Appended to preserve the existing storage layout.
+        mapping(bytes32 => bytes32) session_commitment_hash;
+        mapping(bytes32 => bool) session_exists;
     }
 }
 

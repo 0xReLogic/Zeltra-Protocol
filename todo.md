@@ -1,0 +1,1565 @@
+# Nimbus Protocol TODO
+
+Dokumen ini membandingkan klaim pada `SESSION_SUMMARY.md` dengan implementasi
+runtime saat ini. Tujuannya adalah memisahkan fitur yang sudah nyata dari mock,
+bypass, fallback development, dan pekerjaan yang masih diperlukan sebelum
+mainnet.
+
+## Research Gate untuk Perubahan Critical
+
+Sebelum mengubah financial logic, cryptographic protocol, smart contract,
+cross-chain settlement, custody, key management, atau accounting, lakukan riset
+terlebih dahulu. Riset untuk mencari teknologi terbaru dan memastikan desain
+memiliki dasar formal, mengikuti spesifikasi terkini, dan tidak mengulangi exploit
+yang sudah pernah terjadi.
+
+### Kapan Research Gate Wajib
+
+- Perubahan alur deposit, mint/issuance, spend, withdraw, reveal, atau refund.
+- Perubahan liability, fee, rounding, yield, liquidity, atau solvency.
+- Perubahan BLS, blind signature, threshold signature, hash-to-curve, atau ZK.
+- Perubahan nullifier, replay protection, domain separation, atau message
+  binding.
+- Perubahan CCIP, bridge, cross-chain intent, destination execution, atau
+  recovery.
+- Perubahan guardian, Vault/KMS, key rotation, signing API, atau quorum.
+- Perubahan storage layout, upgrade/migration, pause, governance, atau admin
+  capability.
+- Integrasi token, Aave, RWA, Polymarket, x402, relayer, atau external protocol.
+
+### Tool yang Digunakan
+
+#### Exa
+
+Gunakan untuk:
+
+- Mencari paper/jurnal akademik terbaru.
+- Mencari audit report, exploit post-mortem, dan security research.
+- Membandingkan implementasi open-source production.
+- Mencari desain threshold, privacy payment, bridge, dan intent protocol.
+
+#### Tavily
+
+Gunakan untuk:
+
+- Cross-check informasi terbaru dari beberapa sumber.
+- Mencari dokumentasi resmi, announcement upgrade, dan perubahan network.
+- Memverifikasi alamat, chain support, standard, dan behavior protocol terkini.
+- Mencari incident terbaru yang relevan dengan desain.
+
+#### Context7
+
+Gunakan untuk:
+
+- Dokumentasi API/library terbaru.
+- Contoh implementasi Rust, Alloy, Stylus SDK, Arkworks, Axum, dan dependency
+  lain.
+- Memastikan signature method, type, feature flag, dan versi library benar.
+
+Context7 bukan sumber utama untuk keputusan ekonomi atau pembuktian
+kriptografi.
+
+### Prioritas Sumber
+
+Urutan sumber:
+
+1. Spesifikasi dan dokumentasi resmi.
+2. Paper akademik peer-reviewed atau preprint dari penulis kredibel.
+3. Implementasi audited yang aktif digunakan.
+4. Audit report dan exploit post-mortem.
+5. Repository/reference implementation resmi.
+6. Artikel teknis sekunder untuk menemukan sumber primer.
+
+Hindari menjadikan blog SEO, jawaban forum tanpa referensi, atau kode contoh
+acak sebagai dasar perubahan critical.
+
+### Aturan Riset
+
+- [ ] Gunakan minimal dua sumber independen untuk klaim critical.
+- [ ] Setidaknya satu sumber harus primer/resmi.
+- [ ] Catat tanggal publikasi dan versi spesifikasi/library.
+- [ ] Bedakan standard aktif, draft, proposal, dan eksperimen.
+- [ ] Cari known attack dan failure mode, bukan hanya happy path.
+- [ ] Cari audit finding yang mirip dengan flow Nimbus.
+- [ ] Bandingkan minimal satu implementasi production/audited jika tersedia.
+- [ ] Jangan menganggap teknologi tahun 2026 otomatis lebih aman.
+- [ ] Jangan mengubah cryptographic construction hanya untuk optimasi tanpa
+  security argument yang jelas.
+- [ ] Jangan copy contract/library code tanpa memahami invariant dan lisensi.
+- [ ] Verifikasi hasil riset terhadap versi dependency yang benar-benar dipakai
+  repo.
+- [ ] Setelah riset, tetap wajib hard-test di testnet tanpa mock.
+
+### Research Note Wajib
+
+Untuk setiap perubahan critical, tambahkan catatan singkat:
+
+```text
+Decision ID:
+Masalah:
+Invariant bisnis/security:
+Pilihan yang dipertimbangkan:
+Keputusan:
+Alasan:
+Sumber primer:
+Sumber pembanding:
+Known risks:
+Versi/library/network:
+Rencana positive test:
+Rencana negative test:
+Rollback/recovery:
+```
+
+- [ ] Simpan research note di `research/decisions/`.
+- [ ] Gunakan satu file per keputusan.
+- [ ] Sertakan link sumber dan tanggal akses.
+- [ ] Tandai asumsi yang belum terbukti.
+- [ ] Hubungkan decision ID ke TODO, code change, dan hard-test report.
+
+### Research Gate Kelulusan
+
+Perubahan critical baru boleh diimplementasikan jika:
+
+- Invariant bisnisnya tertulis.
+- Threat model dan failure mode utamanya diketahui.
+- Sumber primer sudah dibaca.
+- Pilihan desain alternatif sudah dibandingkan.
+- Dampak accounting/storage/API dipahami.
+- Positive dan negative test direncanakan.
+- Recovery jika perubahan gagal sudah jelas.
+
+
+
+## Blueprint Bisnis Nimbus
+
+Bagian ini adalah sumber utama untuk mengingat alur bisnis. Implementasi,
+produk tambahan, dan hard test harus mengikuti blueprint ini. Jika kode berbeda
+dengan blueprint, perbedaan tersebut harus diputuskan secara eksplisit dan
+didokumentasikan sebelum deployment berikutnya.
+
+### Tujuan Core
+
+Nimbus menerima USDC publik dan menerbitkan credential pembayaran privat dengan
+nilai yang sama setelah fee. Credential tersebut dapat digunakan satu kali
+untuk membayar recipient atau dikembalikan melalui refund jika penerbitan gagal.
+
+Alur sederhananya:
+
+```text
+User/AI Agent
+    |
+    | deposit USDC
+    v
+Nimbus Contract
+    |
+    | issue private credential melalui leader + guardians
+    v
+User/AI Agent memegang credential privat
+    |
+    | spend satu kali
+    v
+Merchant/recipient menerima USDC
+```
+
+AI agent dan manusia menggunakan accounting core yang sama. Perbedaannya hanya:
+
+- Manusia memakai UI dan wallet.
+- AI agent memakai SDK/API dan wallet automation.
+
+Contract tidak perlu memiliki accounting khusus AI agent.
+
+### Aktor
+
+- **User/AI Agent**: pemilik dana dan private credential.
+- **Nimbus Contract**: escrow USDC dan source of truth liability/nullifier.
+- **Leader**: mengoordinasikan signing session dan settlement.
+- **Guardian**: memakai share lokal untuk menghasilkan partial signature.
+- **Relayer**: mengirim transaksi dan memonitor receipt.
+- **Recipient/Merchant**: menerima payout USDC.
+- **Fee Recipient/Treasury**: menerima fee yang dinyatakan eksplisit.
+
+### Keputusan Model Dana yang Wajib
+
+Model yang direkomendasikan untuk MVP:
+
+```text
+Deposit USDC
+    -> USDC tetap menjadi collateral di contract
+    -> client menerima private credential
+    -> credential di-spend
+    -> contract membayar recipient
+```
+
+`reveal(k)` hanya membuka kemampuan client untuk mendapatkan credential final.
+Reveal **tidak boleh sekaligus mengembalikan collateral** kepada caller.
+
+Alternatif lain adalah deposit hanya sebagai atomic escrow lalu dikembalikan
+saat reveal. Namun jika memilih model tersebut, credential tidak boleh lagi
+memiliki claim terhadap USDC contract. Mencampur kedua model menyebabkan
+double payout.
+
+Keputusan sebelum melanjutkan:
+
+- [x] Tetapkan model MVP sebagai **collateral-backed private payment**
+  (`DEC-001`).
+- [x] Dokumentasikan bahwa deposit net menjadi liability sampai spend/refund.
+- [x] Ubah reveal agar tidak membayar USDC.
+- [x] Pastikan hanya spend atau refund yang mengurangi liability.
+- [x] Hapus logic lama yang memperlakukan reveal sebagai payout.
+
+### P0 Bisnis: Potensi Double Payout Saat Reveal
+
+Kode saat ini:
+
+1. `deposit()` menarik USDC dari user.
+2. `reveal_mask_key()` mengirim amount USDC kepada caller.
+3. Client tetap memperoleh unmasked credential.
+4. Credential dapat digunakan pada `spend()` untuk meminta payout lagi.
+
+Jika alur ini berjalan penuh, satu deposit dapat menghasilkan:
+
+```text
+payout saat reveal + payout saat spend
+```
+
+Ini merupakan business-logic blocker paling kritis.
+
+- [ ] Buat hard test yang membuktikan satu deposit tidak dapat menghasilkan
+  dua payout.
+- [x] Hapus transfer USDC dari reveal untuk model collateral-backed.
+- [x] Reveal hanya mengubah signing-session state; distribusi `k` tetap tugas
+  leader/off-chain.
+- [x] Liability tidak turun saat reveal.
+- [ ] Liability turun tepat satu kali saat spend atau refund.
+- [ ] Tambahkan invariant global setelah setiap transaksi:
+  `contract_assets >= outstanding_liabilities`.
+
+Acceptance criteria:
+
+- Satu deposit net hanya dapat dibayarkan satu kali.
+- Total payout + refund dari sebuah session tidak pernah melebihi deposit net.
+- Reveal tidak mengubah saldo USDC contract/user/recipient kecuali gas.
+
+## Core Business State Machine
+
+Setiap session harus memiliki satu state canonical:
+
+```text
+CREATED
+  |
+  | quorum menghasilkan masked signature + com_k
+  v
+SIGNED_MASKED
+  |
+  | deposit confirmed on-chain
+  v
+FUNDED
+  |
+  | k dirilis
+  v
+CREDENTIAL_READY
+  |                    |
+  | spend confirmed    | timeout sebelum credential siap
+  v                    v
+SPENT                REFUNDABLE
+                       |
+                       | refund confirmed
+                       v
+                    REFUNDED
+```
+
+Terminal state:
+
+- `SPENT`
+- `REFUNDED`
+- `CANCELLED` tanpa dana
+
+Transisi yang dilarang:
+
+```text
+SPENT -> REFUNDED
+REFUNDED -> SPENT
+FUNDED -> payout saat reveal
+session A deposit -> membuka k session B
+```
+
+TODO state machine:
+
+- [ ] Definisikan enum/status yang sama pada contract, relayer DB, SDK, dan API.
+- [ ] Setiap transition memiliki precondition eksplisit.
+- [ ] Setiap transition idempotent atau menolak retry dengan aman.
+- [ ] Simpan tx hash/block untuk transition on-chain.
+- [ ] Rekonsiliasi state relayer dengan contract setelah restart.
+- [ ] Jangan menyimpulkan state finansial hanya dari log atau queue memory.
+
+## Ledger dan Invariant Bisnis
+
+Definisi:
+
+```text
+gross_deposit     = USDC yang ditarik dari user
+deposit_fee       = fee mint/deposit
+net_liability     = gross_deposit - deposit_fee
+redemption_fee    = fee saat spend jika memang diterapkan
+recipient_payout  = net_liability - redemption_fee
+```
+
+Invariant protocol:
+
+- [ ] `assets >= outstanding_liabilities`.
+- [ ] `gross_deposit = deposit_fee + net_liability`.
+- [ ] Satu session hanya menambah liability satu kali.
+- [ ] Satu credential hanya mengurangi liability satu kali.
+- [ ] `SPENT XOR REFUNDED`; tidak boleh keduanya.
+- [ ] Failed/reverted transaction tidak mengubah liability.
+- [ ] Fee hanya diakui setelah transaksi yang mendasarinya berhasil.
+- [ ] Rounding selalu menguntungkan solvency, tetapi tidak mengambil fee
+  tersembunyi.
+- [ ] Decimal token divalidasi; MVP hanya USDC 6 decimal.
+- [ ] Admin tidak dapat mengklaim user principal sebagai yield.
+- [ ] Saldo contract langsung bukan satu-satunya liability ledger.
+
+Ledger minimum yang harus dapat diaudit:
+
+- Total gross deposit.
+- Total fee terkumpul.
+- Total outstanding liability.
+- Total payout confirmed.
+- Total refund confirmed.
+- Total pending/funded sessions.
+- Actual USDC balance.
+- Asset yang ditempatkan di external vault, jika nanti diaktifkan.
+
+## Core Business Flow
+
+### Flow 1 - Create Private Credential
+
+1. Client membuat message/intent privat dan blinding factor `r`.
+2. Client mengirim blinded point ke leader dengan `session_id` dan amount.
+3. Leader membuat masking key `k` dan commitment `com_k`.
+4. Guardians mengembalikan partial signatures.
+5. Leader mengagregasi masked signature.
+6. Client memverifikasi masked signature dan `com_k`.
+7. Client approve lalu deposit USDC ke contract.
+8. Contract mencatat client, amount net, commitment, dan liability.
+9. Setelah receipt final, leader merilis `k`.
+10. Client unmask dan memperoleh credential final.
+
+Checklist:
+
+- [ ] Tidak ada liability sebelum deposit receipt sukses.
+- [ ] `k` tidak bocor sebelum deposit confirmed.
+- [ ] Deposit commitment sama dengan signing commitment.
+- [ ] Amount session sama dengan amount deposit.
+- [ ] Credential final diverifikasi client sebelum dianggap ready.
+- [ ] Reveal tidak mengirim payout.
+
+### Flow 2 - Spend Private Credential
+
+1. Client memilih recipient dan amount.
+2. Authorization/message harus mengikat domain, chain, contract, recipient,
+   amount, asset, expiry, dan nonce/nullifier.
+3. Client/SDK menghasilkan parameter BLS EVM.
+4. Relayer memvalidasi format dan policy.
+5. Contract memverifikasi BLS dan nullifier.
+6. Contract menandai nullifier.
+7. Contract mengurangi liability.
+8. Contract mengirim payout dan fee.
+9. Relayer menunggu receipt lalu melaporkan confirmed.
+
+Checklist:
+
+- [ ] Recipient terikat pada signature.
+- [ ] Amount terikat pada signature.
+- [ ] Chain ID dan contract address terikat pada signature.
+- [ ] Asset terikat pada signature.
+- [ ] Expiry terikat pada signature.
+- [ ] Nullifier unik dan deterministic dari credential/domain.
+- [ ] State update dan transfer atomic.
+- [ ] API tidak melaporkan sukses sebelum settlement state yang disepakati.
+
+### Flow 3 - Refund
+
+Refund hanya untuk funded session yang gagal menghasilkan credential sesuai
+deadline.
+
+1. Deposit confirmed.
+2. Quorum/reveal gagal sampai timeout.
+3. Session menjadi refundable.
+4. Session client mengklaim refund.
+5. Contract mengurangi liability dan mengirim USDC.
+6. Session terminal `REFUNDED`.
+
+Checklist:
+
+- [ ] Credential yang sudah ready tidak dapat direfund.
+- [ ] Session yang sudah spent tidak dapat direfund.
+- [ ] Hanya depositor atau recovery address yang disepakati dapat menerima
+  refund.
+- [ ] Refund tidak membayar lebih dari liability session.
+- [ ] Refund retry tidak menghasilkan transfer kedua.
+
+### Flow 4 - Recovery
+
+- [ ] Jika leader mati sebelum deposit: tidak ada dana yang perlu dipulihkan.
+- [ ] Jika leader mati setelah deposit: session dapat dilanjutkan node baru atau
+  direfund setelah timeout.
+- [ ] Jika guardian kurang quorum: tidak ada `k` release, lalu refund.
+- [ ] Jika relayer mati setelah broadcast: node baru mencari receipt dan
+  melanjutkan state.
+- [ ] Jika contract pause: policy harus menentukan apakah refund tetap aktif.
+- [ ] Tidak ada recovery path yang membutuhkan admin mengambil custody user.
+
+## Core MVP Gate
+
+Core dianggap berhasil hanya jika semua berikut lulus hard test nyata:
+
+- [ ] Deposit nyata.
+- [ ] Masked threshold signing nyata.
+- [ ] Atomic release `k`.
+- [ ] Credential final valid.
+- [ ] Spend BLS valid menghasilkan satu payout.
+- [ ] Signature invalid tidak menghasilkan payout.
+- [ ] Double spend gagal.
+- [ ] Refund berhasil pada failure path.
+- [ ] Spend dan refund tidak pernah sama-sama berhasil.
+- [ ] Restart leader/relayer tidak menghilangkan uang atau request.
+- [ ] Accounting selalu solvent.
+- [ ] Emergency pause/recovery bekerja.
+
+Sebelum gate ini selesai, fitur tambahan tidak boleh menjadi dependency jalur
+uang utama.
+
+## Peta Produk di Atas Core
+
+Semua produk menggunakan credential dan liability core yang sama.
+
+### Produk A - Private Wallet Payment
+
+```text
+User connect wallet -> deposit -> credential -> private transfer/withdraw
+```
+
+Ini adalah produk pertama dan reference flow.
+
+- [ ] UI connect wallet.
+- [ ] Deposit status.
+- [ ] Credential status tanpa mengekspos secret.
+- [ ] Form recipient/amount.
+- [ ] Spend status confirmed.
+- [ ] Refund/recovery UI.
+
+### Produk B - AI Agent Payments
+
+```text
+Agent wallet -> deposit/refill pool -> credential pool -> bayar API/merchant
+```
+
+Tidak membutuhkan contract accounting baru.
+
+- [ ] SDK mengelola token pool.
+- [ ] Agent tidak menyimpan root/guardian share.
+- [ ] Spending policy: budget, recipient allowlist, expiry, max amount.
+- [ ] Retry tidak menyebabkan double payment.
+- [ ] Human owner dapat pause/revoke agent.
+
+### Produk C - x402 API Payment
+
+```text
+API meminta payment -> agent memilih credential -> facilitator settle ->
+API memberi resource
+```
+
+- [ ] Payment terikat ke resource dan merchant.
+- [ ] Resource diberikan setelah settlement policy terpenuhi.
+- [ ] Satu payment tidak dapat membeli resource berbeda jika tidak diizinkan.
+- [ ] x402 memakai core spend, bukan jalur payout terpisah.
+
+### Produk D - Cross-Chain Payment
+
+```text
+Credential core -> source CCIP -> destination verify -> destination payout
+```
+
+- [ ] Baru diaktifkan setelah single-chain core lulus.
+- [ ] Source success dibedakan dari destination success.
+- [ ] Ada recovery jika destination gagal.
+- [ ] Liability cross-chain mempunyai satu source of truth.
+
+### Produk E - Private Polymarket Intent
+
+```text
+Credential core -> payout destination -> buy outcome shares
+```
+
+- [ ] Baru diaktifkan setelah payment dan CCIP stabil.
+- [ ] Failure membeli shares tidak menghilangkan claim user.
+- [ ] Refund recipient terikat pada pemilik intent.
+
+### Produk F - DeFi/RWA Yield
+
+```text
+Idle backing assets -> controlled external allocation -> yield
+```
+
+Ini bukan payment core dan tidak boleh mengubah nilai credential.
+
+- [ ] Baru diaktifkan setelah liability ledger stabil.
+- [ ] Principal selalu dapat memenuhi withdrawal.
+- [ ] Yield dipisahkan dari user principal.
+- [ ] External protocol failure memiliki cap dan emergency unwind.
+
+### Produk G - ZK Compliance
+
+```text
+Optional eligibility proof -> core deposit/spend authorization
+```
+
+- [ ] Compliance menjadi gate tambahan, bukan ledger baru.
+- [ ] Privacy proof tidak boleh mencetak atau menghapus liability.
+- [ ] Tetap prototype sampai circuit dan VK production selesai.
+
+## Urutan Produk
+
+1. **Core MVP + Produk A**: private wallet deposit/spend/refund.
+2. **Produk B**: AI agent memakai core yang sama.
+3. **Produk C**: x402 memakai agent/core settlement.
+4. **Produk D**: cross-chain setelah single-chain stabil.
+5. **Produk E**: Polymarket intent.
+6. **Produk F**: yield optimization setelah accounting matang.
+7. **Produk G**: compliance production setelah circuit diaudit.
+
+Rule:
+
+- [ ] Produk berikutnya tidak boleh mengubah invariant core.
+- [ ] Setiap produk memiliki feature flag/cap terpisah.
+- [ ] Produk gagal tidak boleh membuat core payment insolvent.
+- [ ] Produk tambahan dapat dimatikan tanpa menghalangi refund core.
+
+## Status Saat Ini
+
+### Sudah Nyata
+
+- [x] Parameter ABI byte array menggunakan `stylus_sdk::abi::Bytes`.
+- [x] Relayer menggunakan Alloy `sol!` untuk type-safe calldata `spend(...)`.
+- [x] Relayer dapat mengirim transaksi EVM melalui HTTP atau WebSocket RPC.
+- [x] Primary dan fallback RPC provider tersedia.
+- [x] Gas price dibaca secara dinamis dari RPC.
+- [x] CCIP fee dibaca melalui `IRouterClient.getFee(...)`.
+- [x] CCIP message dikirim melalui `IRouterClient.ccipSend(...)`.
+- [x] Payload CCIP 648-byte dibentuk dan didekode oleh destination contract.
+- [x] `EVMExtraArgsV2` menggunakan `allowOutOfOrderExecution = true`.
+- [x] Destination contract memiliki konfigurasi dan pengecekan caller CCIP
+  router.
+- [x] SQLite memakai atomic `INSERT OR IGNORE` untuk nullifier.
+- [x] Hash-to-curve pada `nimbus-core` menggunakan RFC 9380.
+- [x] Seluruh `cargo test --workspace` lulus: 39 test.
+
+### Kesimpulan Integrasi Terakhir
+
+Integrasi terakhir membuktikan bahwa relayer dapat membentuk calldata dan
+mengirim transaksi spend/CCIP nyata ke chain. Integrasi tersebut belum
+membuktikan bahwa signature BLS telah diverifikasi, message CCIP telah selesai
+dieksekusi di destination chain, atau compliance proof aman secara
+kriptografis.
+
+### Artifact Testnet yang Sudah Ada
+
+- `nimbus-core/examples/generate_bls_test_data.rs`
+- `nimbus-node/.env.test`
+- `scripts/testnet_integration.py`
+- `scripts/run_e2e_test.py`
+- `scripts/run_e2e_vault_test.py`
+
+Catatan:
+
+`generate_bls_test_data.rs` kemungkinan dipakai pada pengujian terakhir untuk
+menghasilkan parameter dengan ukuran ABI yang benar. Namun, vector yang
+dihasilkan saat ini bukan vector BLS production yang valid:
+
+- Menggunakan `SHA256(message) -> scalar * G1`, bukan
+  `nimbus_core::hash_to_g1()` RFC 9380.
+- Nilai yang diberi label `alpha_neg_hex` sebenarnya masih `alpha`, belum
+  dinegasikan.
+- Amount curl contoh adalah `1_000_000` atau 1 USDC, sedangkan contract
+  mensyaratkan minimum spend 5 USDC.
+- Curl menguji endpoint relayer dan keberhasilan broadcast, bukan membuktikan
+  pairing verification contract.
+
+## Hard-Test Charter: Testnet Diperlakukan Seperti Mainnet
+
+Semua fitur yang akan dipercaya di mainnet harus diuji melalui binary release,
+RPC nyata, contract Stylus yang benar-benar terdeploy, transaksi nyata, receipt
+nyata, dan state on-chain nyata. Unit test Rust tetap dipakai untuk feedback
+cepat, tetapi tidak boleh menjadi satu-satunya bukti bahwa fitur selesai.
+
+### Aturan Kelulusan
+
+- [ ] Jalankan contract dan relayer dari commit Git yang dicatat.
+- [ ] Build contract menggunakan profile release yang sama dengan deployment.
+- [ ] Catat hash WASM/contract artifact sebelum deploy.
+- [ ] Catat chain ID, contract address, deployment tx, activation tx, dan block.
+- [ ] Semua transaksi wajib menunggu receipt dan memeriksa status.
+- [ ] Keberhasilan broadcast atau adanya tx hash tidak dianggap sukses.
+- [ ] Untuk CCIP, source receipt saja tidak dianggap E2E sukses.
+- [ ] Setiap positive test wajib memiliki negative control.
+- [ ] Setiap negative test wajib membuktikan state tidak berubah.
+- [ ] Verifikasi state melalui RPC langsung, bukan hanya database/log relayer.
+- [ ] Verifikasi saldo token sebelum dan sesudah transaksi.
+- [ ] Verifikasi event contract dan parameter event.
+- [ ] Simpan revert data/reason untuk transaksi yang memang harus gagal.
+- [ ] Test gagal jika menggunakan mock tx hash, dummy signature, test default
+  key, `#[cfg(test)]` bypass, atau random bytes sebagai proof/signature valid.
+- [ ] Test gagal jika EVM client, Vault, guardian, atau destination monitor tidak
+  tersedia; jangan silently fallback ke mock.
+- [ ] Test runner wajib menghasilkan report JSON dan Markdown yang dapat
+  direproduksi.
+
+### Mode Runtime Khusus Hard Test
+
+- [ ] Tambahkan `NIMBUS_ENV=hard-test`.
+- [ ] Pada `hard-test`, node harus fail startup jika RPC tidak tersedia.
+- [ ] Pada `hard-test`, node harus fail startup jika contract address invalid.
+- [ ] Pada `hard-test`, node harus fail startup jika signer key tidak tersedia.
+- [ ] Pada `hard-test`, guardian harus fail startup jika share key tidak dapat
+  diambil.
+- [ ] Pada `hard-test`, semua mock tx hash dan fallback insecure harus
+  dinonaktifkan.
+- [ ] Pada `hard-test`, default DB key harus ditolak.
+- [ ] Pada `hard-test`, chain ID dan deployed bytecode harus diverifikasi saat
+  startup.
+- [ ] Log startup harus mencetak mode, chain ID, signer address, contract
+  address, dan artifact version tanpa mencetak secret.
+
+### Status Script Test Saat Ini
+
+#### `scripts/run_e2e_test.py`
+
+Saat ini belum valid sebagai hard test karena:
+
+- Menghasilkan `alpha_neg`, `hm`, dan `pk_iss` dari random bytes.
+- Menetapkan lulus hanya jika log berisi
+  `Real CCIP transaction broadcasted successfully`.
+- Hanya memeriksa nullifier masuk SQLite.
+- Tidak menunggu source receipt.
+- Tidak mengambil CCIP message ID dari event.
+- Tidak menunggu destination execution.
+- Menghapus database lama sehingga tidak menguji recovery.
+- Memuat RPC credential dan private key secara hardcoded.
+
+TODO:
+
+- [ ] Ganti seluruh dummy cryptography dengan output protocol nyata.
+- [ ] Ambil konfigurasi hanya dari environment.
+- [ ] Tunggu receipt source dan verifikasi status.
+- [ ] Parse event CCIP dan message ID.
+- [ ] Tunggu destination receipt.
+- [ ] Verifikasi saldo dan state destination.
+- [ ] Gagal jika contract menerima signature invalid.
+
+#### `scripts/run_e2e_vault_test.py`
+
+Saat ini hanya membuktikan node dapat memuat key dari Vault dan broadcast
+request dengan signature random. Spend request itu tidak menggunakan share key
+yang baru diambil untuk menghasilkan signature protocol.
+
+TODO:
+
+- [ ] Hapus Vault token, private key, dan RPC credential hardcoded.
+- [ ] Panggil endpoint signing sehingga share Vault benar-benar digunakan.
+- [ ] Verifikasi partial signature terhadap share index/public commitment.
+- [ ] Lanjutkan sampai aggregate, unmask, spend, dan receipt on-chain.
+- [ ] Test Vault sealed, token invalid, path salah, dan recovery setelah unseal.
+
+#### `scripts/testnet_integration.py`
+
+Saat ini memakai ABI lama `uint8[]`, sedangkan contract terbaru memakai
+Solidity `bytes`. Script juga banyak menggunakan `eth_call` dengan random
+input, sehingga revert dianggap sebagai hasil yang dapat diterima.
+
+TODO:
+
+- [ ] Generate ABI langsung dari build contract terbaru.
+- [ ] Jangan maintain ABI manual yang mudah stale.
+- [ ] Ganti seluruh `uint8[]` menjadi ABI aktual `bytes`.
+- [ ] Gunakan signature/proof valid untuk positive path.
+- [ ] Pisahkan expected success dan expected revert secara tegas.
+- [ ] Fail test jika positive path revert.
+- [ ] Fail test jika negative path unexpectedly sukses.
+
+#### `scripts/simulate_cluster.py`
+
+Script ini berguna untuk simulasi matematika lokal, tetapi bukan distributed
+hard test karena seluruh node dan share berjalan pada satu host, `k` langsung
+dikembalikan, dan final verification hanya dilakukan oleh CLI.
+
+- [ ] Pertahankan sebagai fast local simulation.
+- [ ] Buat script baru untuk leader dan guardian lintas VPS via Tailscale.
+- [ ] Setiap guardian mengambil share sendiri dari environment/Vault.
+- [ ] Leader hanya menerima partial signature.
+- [ ] Uji guardian offline, response lambat, response corrupt, dan index salah.
+- [ ] Lanjutkan ceremony sampai transaksi contract nyata.
+
+#### Script Lain
+
+- [ ] `scripts/check_balance.py` harus mengambil RPC/address dari environment.
+- [ ] `scripts/test_rpc_fallback.sh` harus benar-benar mematikan primary route
+  atau memakai endpoint invalid dan membuktikan transaksi masuk via fallback.
+- [ ] `scripts/deploy_testnet.sh` harus menyimpan deployment manifest.
+- [ ] Semua private key/RPC token hardcoded harus dihapus dari script.
+- [ ] Tambahkan lint/scan yang menggagalkan commit jika pola private key atau
+  Vault token ditemukan.
+
+## Hard-Test Matrix
+
+### HT-00 Deployment Reproducibility
+
+- [ ] Bersihkan build artifact lalu build contract release dari nol.
+- [ ] Jalankan `cargo stylus check`.
+- [ ] Deploy contract baru ke Arbitrum Sepolia.
+- [ ] Aktifkan dan cache contract.
+- [ ] Simpan deployment manifest berisi commit, rustc, cargo-stylus, Stylus SDK,
+  WASM hash, ABI hash, chain ID, addresses, dan tx hashes.
+- [ ] Bandingkan exported ABI dengan Alloy interface relayer.
+- [ ] Pastikan selector semua method sesuai.
+- [ ] Pastikan storage initialization hanya bisa dilakukan sekali.
+- [ ] Pastikan owner, stablecoin, fee recipient, router, dan phase sesuai
+  manifest.
+
+### HT-01 Vault/KMS Nyata
+
+- [ ] Node leader berhasil mengambil share 40-byte dari Vault Tailscale.
+- [ ] Share terdeserialisasi menjadi `(index, Fr)` yang expected.
+- [ ] Node tidak pernah mencetak share.
+- [ ] Token invalid menyebabkan startup gagal pada hard-test mode.
+- [ ] Vault sealed menyebabkan startup gagal atau node tidak-ready.
+- [ ] Setelah Vault unseal, node dapat recovery tanpa mengganti share.
+- [ ] Path salah tidak fallback ke test key.
+- [ ] Hapus `NIMBUS_SHARE_KEY` dan buktikan Vault menjadi sumber key tunggal.
+- [ ] Restart node dan pastikan public key/share index konsisten.
+- [ ] Rotasi/reload key diuji tanpa menghasilkan mixed-key ceremony.
+
+### HT-02 Distributed Threshold Signing via Tailscale
+
+- [ ] Jalankan leader pada VPS ini dan guardian pada VPS Tailscale lain.
+- [ ] Bind guardian hanya ke IP Tailscale.
+- [ ] Buktikan port guardian tidak dapat diakses dari interface publik.
+- [ ] Leader mengirim blinded message dan `k`, bukan meminta share key.
+- [ ] Guardian mengambil share lokal dan mengembalikan partial signature.
+- [ ] Response guardian menyertakan share index asli, key version, session ID,
+  dan request digest.
+- [ ] Leader memverifikasi partial signature sebelum agregasi.
+- [ ] Aggregate minimal threshold menghasilkan masked signature valid.
+- [ ] Sub-threshold signature gagal menghasilkan final signature valid.
+- [ ] Duplicate guardian index ditolak.
+- [ ] Guardian index palsu ditolak.
+- [ ] Partial signature corrupt ditolak.
+- [ ] Guardian timeout tidak membuat leader menganggap ceremony sukses.
+- [ ] Guardian offline menghasilkan retry/failure yang terukur.
+- [ ] Guardian lama dengan key version berbeda ditolak.
+- [ ] Device yang dikeluarkan dari tailnet tidak dapat memanggil endpoint.
+
+### HT-03 Atomic Deposit -> Sign -> Reveal
+
+- [ ] Client membuat `session_id`, message, blinding factor, dan blinded point.
+- [ ] Leader membuat `k` dan `com_k` tetapi tidak memberikan `k`.
+- [ ] Quorum guardian menghasilkan masked signature.
+- [ ] Client memverifikasi masked signature sebelum deposit.
+- [ ] Client approve USDC dan mengirim deposit nyata.
+- [ ] Tunggu receipt deposit dan verifikasi event/state.
+- [ ] Verifikasi fee recipient menerima fee yang tepat.
+- [ ] Verifikasi principal bertambah sebesar net amount.
+- [ ] Leader baru merilis `k` setelah deposit confirmed.
+- [ ] Reveal contract membandingkan dengan commitment tersimpan.
+- [ ] Dana/redeem outcome hanya diterima session client yang benar.
+- [ ] Client dapat unmask dan final signature valid.
+- [ ] Caller lain mencoba reveal dan gagal mengambil dana.
+- [ ] Commitment berbeda ditolak.
+- [ ] `k` berbeda ditolak.
+- [ ] Issuer public key berbeda ditolak.
+- [ ] Session ID duplicate ditolak tanpa mengubah deposit awal.
+- [ ] Reveal kedua idempotent atau ditolak dengan state konsisten.
+- [ ] Restart leader antara deposit dan reveal tidak kehilangan `k`.
+- [ ] Quorum gagal setelah deposit mengaktifkan refund setelah timelock.
+
+### HT-04 Spend BLS On-Chain
+
+- [ ] Fund contract dengan jumlah kecil USDC testnet.
+- [ ] Generate signature melalui alur threshold nyata.
+- [ ] Kirim spend dengan EVM vector RFC 9380 yang valid.
+- [ ] Tunggu receipt sukses.
+- [ ] Verifikasi pairing benar-benar dipanggil pada build deployed.
+- [ ] Verifikasi recipient menerima payout tepat.
+- [ ] Verifikasi fee recipient menerima fee tepat.
+- [ ] Verifikasi principal turun tepat.
+- [ ] Verifikasi nullifier tercatat on-chain.
+- [ ] Ubah satu byte `alpha_neg`: transaksi harus revert/fail.
+- [ ] Ubah satu byte `hm`: transaksi harus revert/fail.
+- [ ] Ganti `pk_iss`: transaksi harus revert/fail.
+- [ ] Gunakan point at infinity/zero: harus ditolak.
+- [ ] Gunakan encoding non-canonical: harus ditolak.
+- [ ] Gunakan panjang 127/129/255/257 byte: harus ditolak.
+- [ ] Replay nullifier valid: harus ditolak.
+- [ ] Signature valid dengan recipient berbeda harus gagal jika recipient
+  seharusnya terikat ke message.
+- [ ] Signature valid dengan amount berbeda harus gagal jika amount seharusnya
+  terikat ke message.
+- [ ] Semua negative test membuktikan saldo, principal, dan nullifier tidak
+  berubah.
+
+### HT-05 Refund dan Timeout
+
+- [ ] Deposit tidak dapat direfund sebelum 24 jam.
+- [ ] Refund tepat pada boundary timelock diuji.
+- [ ] Refund setelah timelock berhasil.
+- [ ] Hanya session client dapat claim refund.
+- [ ] Refund kedua ditolak.
+- [ ] Reveal setelah refund ditolak.
+- [ ] Refund saat contract pause mengikuti policy yang ditentukan.
+- [ ] Vault/Aave/RWA liquidity shortfall menghasilkan state konsisten.
+- [ ] Saldo client kembali tepat setelah fee policy.
+
+### HT-06 Relayer Queue, Crash, dan Recovery
+
+- [ ] Submit spend lalu kill node sebelum worker mengambil queue.
+- [ ] Restart dan pastikan request tetap diproses.
+- [ ] Kill node setelah nullifier reserved tetapi sebelum broadcast.
+- [ ] Kill node setelah broadcast tetapi sebelum receipt.
+- [ ] Restart dan rekonsiliasi tx hash/nonce tanpa double broadcast.
+- [ ] RPC timeout tidak menghapus queue.
+- [ ] RPC returns error tidak menandai nullifier confirmed.
+- [ ] On-chain revert me-release atau menandai terminal failure sesuai policy.
+- [ ] Dua worker bersamaan tidak memproses item yang sama.
+- [ ] Submit nullifier sama secara concurrent; hanya satu settlement terjadi.
+- [ ] Database locked/busy tidak menghilangkan request.
+- [ ] Disk full simulation menghasilkan fail closed.
+- [ ] Corrupt DB diuji dengan restore dari backup.
+- [ ] Retry memiliki batas dan dead-letter state.
+- [ ] Queue order/shuffle tidak melanggar deadline.
+- [ ] Expired request tidak pernah dibroadcast.
+
+### HT-07 RPC dan Nonce Failure Injection
+
+- [ ] Primary RPC dibuat unreachable; fallback RPC digunakan.
+- [ ] Primary memberi stale nonce; relayer recovery.
+- [ ] Fallback juga mati; queue tetap aman.
+- [ ] RPC memberi chain ID salah; node fail closed.
+- [ ] RPC mengembalikan receipt timeout; monitor melanjutkan setelah restart.
+- [ ] Transaction underpriced diuji.
+- [ ] Replacement transaction diuji.
+- [ ] Nonce gap diuji.
+- [ ] Saldo gas di bawah minimum menghentikan broadcast tanpa kehilangan queue.
+- [ ] Gas spike membuat `min_payout` protection menolak transaksi.
+
+### HT-08 CCIP Source ke Destination
+
+- [ ] Deploy/configure contract source dan destination yang benar.
+- [ ] Set router non-zero pada destination.
+- [ ] Allowlist source chain selector dan sender contract.
+- [ ] Kirim payload valid dengan signature nyata.
+- [ ] Tunggu source receipt sukses.
+- [ ] Parse CCIP message ID asli dari event.
+- [ ] Pantau CCIP explorer/API atau destination logs.
+- [ ] Tunggu destination receipt sukses.
+- [ ] Verifikasi destination nullifier dan payout.
+- [ ] Replay message ID ditolak.
+- [ ] Caller non-router ditolak.
+- [ ] Router benar tetapi source selector salah ditolak.
+- [ ] Router benar tetapi sender salah ditolak.
+- [ ] Payload 647/649 byte ditolak.
+- [ ] Payload valid tetapi signature corrupt gagal tanpa payout.
+- [ ] Destination contract paused menghasilkan status failure yang terpantau.
+- [ ] Out-of-order messages tidak memblokir message lain.
+- [ ] Source success + destination failure menghasilkan recovery/refund state.
+- [ ] Native CCIP fee kurang diuji dan harus gagal bersih.
+
+### HT-09 Polymarket Intent dan Failed Refund
+
+- [ ] Gunakan deployment/test double on-chain yang ABI-compatible jika
+  Polymarket testnet tidak tersedia; jangan gunakan Rust mock.
+- [ ] Approve collateral dengan amount tepat.
+- [ ] Successful split position menghasilkan outcome token balance.
+- [ ] CTF revert mencatat failed intent refund.
+- [ ] Failed refund hanya dapat diklaim sekali.
+- [ ] Recipient refund terikat pada intent/session, bukan arbitrary caller.
+- [ ] Malicious collateral token diuji.
+- [ ] Reentrancy dari token/CTF diuji menggunakan deployed adversarial contract.
+- [ ] Allowance sisa setelah failure diperiksa.
+
+### HT-10 Vault DeFi/RWA
+
+- [ ] Deposit nyata mengalokasikan cash/Aave/RWA sesuai target.
+- [ ] Uji ketika Aave address belum dikonfigurasi.
+- [ ] Uji Aave supply/withdraw nyata pada testnet atau deployed protocol stub.
+- [ ] Uji RWA deposit/redeem dengan deployed adversarial and normal contracts.
+- [ ] Cash cukup: tidak melakukan unnecessary withdrawal.
+- [ ] Cash kurang: withdraw Aave tepat.
+- [ ] Aave kurang: redeem RWA tepat.
+- [ ] Semua tier kurang: transaksi gagal tanpa accounting corruption.
+- [ ] `total_assets >= liabilities` dicek setelah setiap scenario.
+- [ ] Yield claim tidak mengambil principal.
+- [ ] Token dengan fee-on-transfer/rebase ditolak atau ditangani eksplisit.
+
+### HT-11 Governance dan Pause
+
+- [ ] Non-owner gagal propose/execute.
+- [ ] Owner propose lalu execute sebelum ETA gagal.
+- [ ] Execute setelah ETA berhasil.
+- [ ] Proposal overwrite/cancel policy diuji.
+- [ ] Ownership transfer dua tahap diuji.
+- [ ] Pending owner salah ditolak.
+- [ ] Pause memblokir semua state-changing user path yang seharusnya diblokir.
+- [ ] Emergency refund behavior saat pause ditentukan dan diuji.
+- [ ] Router, pool, token, dan fee recipient zero-address handling diuji.
+- [ ] Event governance tersedia untuk monitoring.
+
+### HT-12 API Adversarial Test
+
+- [ ] Invalid JSON.
+- [ ] Body lebih dari 64 KiB.
+- [ ] String hex ganjil/non-hex.
+- [ ] Empty fields.
+- [ ] Extremely long idempotency key.
+- [ ] Duplicate idempotency key dengan payload berbeda.
+- [ ] Burst rate-limit dari satu Tailscale identity.
+- [ ] Spoofed `X-Forwarded-For`.
+- [ ] Slowloris/partial body timeout.
+- [ ] Guardian URL SSRF ke localhost, metadata endpoint, dan private services.
+- [ ] Guardian response malformed/oversized.
+- [ ] Request cancellation saat DB/RPC sedang bekerja.
+- [ ] Tidak ada panic atau process crash untuk input adversarial.
+
+### HT-13 x402 End-to-End
+
+- [ ] Merchant/resource mengeluarkan payment requirement nyata.
+- [ ] SDK memilih ready token dan membentuk payment signature.
+- [ ] Facilitator memverifikasi cryptography sebelum settlement.
+- [ ] Payment terikat ke resource, merchant, amount, network, dan expiry.
+- [ ] Settlement hanya terjadi sekali.
+- [ ] Response sukses hanya setelah status settlement yang didefinisikan.
+- [ ] Tidak ada direct broadcast dan queue broadcast ganda.
+- [ ] Invalid HMAC/payment payload ditolak.
+- [ ] Replay payment header ditolak.
+- [ ] Resource berbeda dengan token sama ditolak jika binding diwajibkan.
+
+### HT-14 ZK Compliance On-Chain
+
+Test ini baru boleh dijalankan sebagai security test setelah circuit dan VK nyata
+selesai. Sebelum itu statusnya harus eksplisit `prototype`.
+
+- [ ] Generate proof dengan proving key versioned.
+- [ ] Register clean root nyata.
+- [ ] Proof valid diterima on-chain.
+- [ ] Root berbeda ditolak.
+- [ ] Nullifier berbeda ditolak.
+- [ ] Recipient berbeda ditolak.
+- [ ] Amount berbeda ditolak.
+- [ ] Merkle path invalid ditolak.
+- [ ] Witness yang tidak memenuhi policy ditolak.
+- [ ] Proof dari circuit/VK version lama ditolak.
+- [ ] Semua negative test tidak mengubah state.
+
+### HT-15 Load, Soak, dan Resource Exhaustion
+
+- [ ] Soak test node minimal 24 jam.
+- [ ] Submit transaksi kontinu dengan rate realistis.
+- [ ] Ukur latency p50/p95/p99 dari API sampai confirmed.
+- [ ] Ukur queue depth dan retry count.
+- [ ] Ukur memory growth rate limiter dan queue.
+- [ ] Ukur file descriptor/socket leak.
+- [ ] Ukur pertumbuhan SQLite/WAL.
+- [ ] Jalankan cleanup/vacuum saat load.
+- [ ] Restart Vault, guardian, leader, dan RPC proxy bergantian.
+- [ ] Pastikan tidak ada double settlement setelah recovery.
+- [ ] Catat batas throughput sebelum error rate meningkat.
+
+### HT-16 Economic and Accounting Invariants
+
+- [ ] Untuk setiap flow, hitung delta saldo client, contract, fee recipient,
+  relayer, Aave, RWA, dan destination.
+- [ ] Total debit sama dengan total credit plus explicit fee.
+- [ ] Principal tidak pernah underflow atau silently clamp ke zero.
+- [ ] Fee rounding diuji pada boundary amount.
+- [ ] Minimum amount tepat di bawah, tepat sama, dan tepat di atas batas.
+- [ ] Premium phase 1/2/3 diuji dengan transaksi nyata.
+- [ ] LP utilization tidak melebihi total liquidity.
+- [ ] Claim yield tidak mengurangi kemampuan memenuhi seluruh liability.
+- [ ] Failure/revert tidak menghasilkan profit atau kehilangan user yang tidak
+  dijelaskan.
+
+### HT-17 Upgrade dan Compatibility
+
+- [ ] ABI relayer cocok dengan contract deployment.
+- [ ] SDK-generated vector cocok dengan contract.
+- [ ] Database migration dari versi sebelumnya diuji pada copy database.
+- [ ] Restart binary baru dengan queue lama diuji.
+- [ ] Old client request compatibility ditentukan.
+- [ ] Contract storage layout dibandingkan sebelum redeploy/upgrade.
+- [ ] Rollback binary relayer diuji.
+
+## Evidence dan Report Hard Test
+
+Setiap test case harus menghasilkan:
+
+- Test ID dan deskripsi.
+- Commit hash dan dirty-worktree status.
+- Build/tool versions.
+- Environment name dan chain ID.
+- Contract addresses dan artifact hashes.
+- Input digest tanpa secret.
+- Pre-state balances/storage.
+- Source tx hash, receipt, block, gas, dan logs.
+- CCIP message ID serta destination tx jika relevan.
+- Post-state balances/storage.
+- Expected result dan actual result.
+- Pass/fail dengan alasan machine-readable.
+- Timestamp UTC.
+
+Report tidak boleh berisi:
+
+- Private key.
+- Vault token.
+- Guardian share.
+- Database encryption key.
+- Full secret-bearing environment dump.
+
+## Urutan Hard-Test Campaign
+
+### Campaign A - Harness Trustworthy
+
+- [ ] Hapus secret hardcoded dari seluruh script.
+- [ ] Perbaiki generator BLS dan ABI generation.
+- [ ] Implementasikan hard-test mode tanpa fallback mock.
+- [ ] Implementasikan deployment manifest.
+- [ ] Implementasikan receipt/event/state assertion helpers.
+- [ ] Implementasikan report JSON/Markdown.
+
+Gate A:
+
+- Runner mampu membedakan broadcast, source confirmation, dan destination
+  confirmation.
+- Negative test yang sengaja dibuat valid harus menyebabkan runner gagal,
+  sehingga assertion harness terbukti tidak selalu hijau.
+
+### Campaign B - Single-Chain Core Safety
+
+- [ ] Jalankan HT-00 sampai HT-05.
+- [ ] Fokus pada deposit, commitment, atomic `k`, BLS spend, nullifier, dan
+  refund.
+- [ ] Gunakan amount sekecil mungkin yang masih melewati batas contract.
+
+Gate B:
+
+- Tidak ada cara mengambil payout tanpa signature valid.
+- Tidak ada cara mengambil deposit session lain.
+- Semua failure menjaga accounting dan nullifier tetap konsisten.
+
+### Campaign C - Distributed Relayer Safety
+
+- [ ] Jalankan HT-01, HT-02, HT-06, HT-07, dan HT-12.
+- [ ] Gunakan leader VPS ini dan guardian VPS melalui Tailscale.
+- [ ] Lakukan kill/restart saat setiap transition penting.
+
+Gate C:
+
+- Kehilangan satu proses/RPC tidak menyebabkan lost request atau double spend.
+- Leader tidak pernah memperoleh guardian share.
+- Quorum dan key version selalu ditegakkan.
+
+### Campaign D - Cross-Chain Safety
+
+- [ ] Jalankan HT-08 dan HT-09.
+- [ ] Simpan source tx, message ID, destination tx, dan balance deltas.
+- [ ] Uji destination failure serta recovery, bukan hanya happy path.
+
+Gate D:
+
+- Source success tidak pernah salah dilaporkan sebagai destination success.
+- Replay, wrong source, wrong sender, dan corrupt payload ditolak.
+
+### Campaign E - Extended Features
+
+- [ ] Jalankan HT-10, HT-11, HT-13, dan HT-14.
+- [ ] Jangan mengaktifkan ZK compliance sebagai security control sebelum
+  circuit/VK production selesai.
+
+### Campaign F - Stability dan Economics
+
+- [ ] Jalankan HT-15, HT-16, dan HT-17.
+- [ ] Jalankan minimal dua campaign penuh dari fresh deployment.
+- [ ] Ulangi seluruh critical path setelah setiap perubahan contract.
+
+Final testnet gate:
+
+- [ ] Seluruh P0 lulus hard test nyata.
+- [ ] Seluruh negative test kritis lulus.
+- [ ] Tidak ada unresolved accounting mismatch.
+- [ ] Tidak ada lost queue item atau double settlement.
+- [ ] Tidak ada test yang bergantung pada mock verification.
+- [ ] Evidence package lengkap dan dapat direproduksi dari commit yang sama.
+
+## P0 - Blocker Keamanan
+
+### Aktifkan Verifikasi BLS pada Spend
+
+Lokasi: `nimbus-contracts/src/spend.rs`
+
+- [ ] Validasi panjang `alpha_neg_bytes` harus 128 byte.
+- [ ] Validasi panjang `hm_bytes` harus 128 byte.
+- [ ] Validasi panjang `pk_iss_bytes` harus 256 byte.
+- [ ] Bentuk input dua pairing untuk EIP-2537:
+  `e(-alpha, G2_generator) * e(H(m), pk_iss) == 1`.
+- [ ] Panggil precompile `BLS12_PAIRING_CHECK`.
+- [ ] Tolak transaksi sebelum nullifier atau principal diubah jika signature
+  tidak valid.
+- [ ] Tambahkan negative tests untuk signature, message, dan issuer key palsu.
+- [ ] Jalankan test pada Stylus-compatible environment atau testnet, bukan
+  hanya host mock.
+- [ ] Perbaiki `nimbus-core/examples/generate_bls_test_data.rs` agar memakai
+  primitive yang sama dengan production:
+  `hash_to_g1`, `IssuerSecretKey`, `UnmaskedSignature`,
+  `get_alpha_neg_evm`, `get_hm_evm`, dan `get_pk_iss_evm`.
+- [ ] Pastikan `alpha_neg_hex` benar-benar merupakan `-alpha`.
+- [ ] Gunakan amount test minimal 5 USDC.
+- [ ] Tambahkan mode deterministic seed atau committed known-answer vector agar
+  hasil test dapat direproduksi.
+- [ ] Tambahkan opsi untuk menghasilkan vector invalid dengan satu byte diubah.
+
+Acceptance criteria:
+
+- Spend dengan signature valid berhasil.
+- Perubahan satu byte pada signature, message hash, atau issuer key selalu
+  gagal.
+- Nullifier tidak tercatat jika verifikasi gagal.
+
+### Perbaiki Binding Deposit dan Reveal
+
+Lokasi:
+
+- `nimbus-contracts/src/storage.rs`
+- `nimbus-contracts/src/deposit.rs`
+
+Masalah saat ini:
+
+- `deposit()` menerima tetapi tidak menyimpan `com_k_bytes`.
+- `reveal_mask_key()` menerima `com_k_bytes` dari caller.
+- Dana reveal dikirim kepada `msg.sender`, bukan client yang membuat session.
+- Session ID lama dapat ditimpa oleh deposit baru.
+
+TODO:
+
+- [x] Tambahkan storage commitment per session.
+- [x] Simpan hash `com_k` saat deposit.
+- [x] Tolak deposit jika session ID sudah pernah digunakan.
+- [x] Saat reveal, bandingkan hasil `k * pk_iss` dengan commitment yang tersimpan.
+- [x] Jangan mempercayai `com_k` yang diberikan saat reveal.
+- [x] Reveal dibuat permissionless: caller hanya mengirim bukti dan tidak
+  menerima escrow.
+- [x] Validasi panjang `k`, `pk_iss`, dan commitment sebelum precompile call.
+- [x] Tambahkan test caller lain tidak dapat mengambil collateral saat reveal.
+- [x] Tambahkan test overwrite session ID.
+
+Acceptance criteria:
+
+- Caller lain tidak bisa mengambil deposit milik client.
+- Commitment tidak bisa diganti setelah deposit.
+- Session ID tidak bisa dipakai ulang.
+
+### Hilangkan Secret Share Override dari API
+
+Lokasi:
+
+- `nimbus-node/src/dto.rs`
+- `nimbus-node/src/handlers/threshold.rs`
+
+- [ ] Hapus `share_sk_hex` dari request publik.
+- [ ] Guardian harus selalu menggunakan share dari `KeyManager`.
+- [ ] Untuk testnet, bind endpoint guardian hanya ke IP/interface Tailscale.
+- [ ] Terapkan Tailscale ACL agar hanya node leader yang dapat mengakses port
+  guardian.
+- [ ] Pastikan port guardian tidak listen pada interface publik.
+- [ ] Sebelum production atau ketika trust boundary bertambah, tambahkan
+  application-layer authentication seperti mTLS atau signed request.
+- [ ] Tambahkan allowlist identity leader dan replay protection. Pada testnet,
+  identity dapat berasal dari Tailscale node/tag; production sebaiknya juga
+  diverifikasi pada application layer.
+- [ ] Validasi bahwa request signing terkait deposit/session yang sah.
+- [ ] Jangan menerima arbitrary blinded point tanpa policy dan authorization.
+
+Acceptance criteria:
+
+- Request eksternal tidak dapat memilih secret share yang dipakai guardian.
+- Endpoint guardian tidak dapat dipanggil oleh pihak yang tidak terautentikasi.
+
+Catatan:
+
+mTLS atau API signature tidak wajib untuk testnet tertutup apabila VPS tidak
+memiliki ingress publik, service hanya bind ke Tailscale, ACL hanya mengizinkan
+leader, dan device yang keluar langsung dihapus dari tailnet. Tailscale menjadi
+network identity dan encrypted transport untuk fase tersebut. Application-layer
+authentication tetap diperlukan sebelum production untuk defense-in-depth,
+audit identity, dan perlindungan jika ACL atau akun Tailscale salah konfigurasi.
+
+### Terapkan Atomic Release untuk Masking Key `k`
+
+Lokasi:
+
+- `nimbus-node/src/dto.rs`
+- `nimbus-node/src/handlers/threshold.rs`
+- `nimbus-node/src/handlers/deposit.rs`
+- `nimbus-node/src/database.rs`
+
+Masalah saat ini:
+
+Endpoint `/api/leader/sign` langsung mengembalikan `k_hex` bersama commitment
+dan partial signatures. Client dapat langsung melakukan unmask tanpa menunggu
+deposit atau settlement dikonfirmasi. Ini menghilangkan atomic/fair exchange
+yang seharusnya dijamin oleh alur deposit -> masked signature -> reveal.
+
+TODO:
+
+- [ ] Tambahkan `session_id` pada request dan response signing.
+- [ ] `/api/leader/sign` hanya mengembalikan `com_k` dan partial signatures.
+- [ ] Jangan mengembalikan `k` pada response signing awal.
+- [ ] Simpan `k` secara terenkripsi dengan binding ke `session_id`,
+  commitment, amount, issuer key, dan expiry.
+- [ ] Rilis `k` hanya setelah deposit on-chain untuk session tersebut
+  terkonfirmasi.
+- [ ] Pastikan amount dan commitment deposit sama dengan signing session.
+- [ ] Guardian hanya menandatangani session yang sah dan belum expired.
+- [ ] Tandai `k` sebagai revealed secara atomik agar tidak ada conflicting
+  lifecycle.
+- [ ] Hapus/zeroize `k` setelah reveal selesai atau session expired.
+- [ ] Jangan log `k` atau memasukkannya ke response/error sebelum reveal.
+- [ ] Integrasikan refund timelock jika quorum gagal atau `k` tidak dapat
+  dirilis.
+- [ ] Tambahkan test bahwa client tidak dapat unmask sebelum reveal.
+- [ ] Tambahkan test bahwa deposit session lain tidak dapat membuka `k`.
+- [ ] Tambahkan test retry reveal yang idempotent.
+
+Acceptance criteria:
+
+- Sebelum deposit confirmed, API tidak memberikan informasi yang cukup untuk
+  unmask signature.
+- Setelah deposit confirmed, hanya `k` untuk session yang tepat yang dirilis.
+- Session gagal tetap dapat mengikuti jalur refund tanpa kehilangan dana.
+
+## P1 - Settlement dan Reliabilitas Relayer
+
+### Buat Spend Queue Persisten
+
+Lokasi:
+
+- `nimbus-node/src/state.rs`
+- `nimbus-node/src/database.rs`
+- `nimbus-node/src/handlers/spend.rs`
+
+Masalah saat ini:
+
+- Tabel `spend_queue` tersedia tetapi runtime memakai `Vec` in-memory.
+- Queue hilang saat process restart.
+- Semua item dihapus setelah loop, termasuk broadcast yang gagal.
+
+TODO:
+
+- [ ] Gunakan tabel `spend_queue` sebagai source of truth.
+- [ ] Tambahkan status `queued`, `broadcasting`, `submitted`, `confirmed`,
+  `failed`, dan `retryable`.
+- [ ] Simpan jumlah retry, error terakhir, tx hash, dan timestamp.
+- [ ] Gunakan leasing atau transactional claim agar dua worker tidak mengambil
+  item yang sama.
+- [ ] Hapus atau arsipkan item hanya setelah receipt sukses.
+- [ ] Implementasikan retry dengan exponential backoff.
+- [ ] Pulihkan queue otomatis setelah restart.
+
+### Perbaiki Lifecycle Nullifier
+
+Masalah saat ini:
+
+Nullifier dimasukkan ke database sebelum broadcast/receipt berhasil. Jika RPC,
+encoding, atau transaksi gagal, token dianggap spent oleh relayer.
+
+- [ ] Pisahkan reservation nullifier dari confirmed nullifier.
+- [ ] Gunakan status `reserved`, `submitted`, `confirmed`, dan `released`.
+- [ ] Simpan tx hash setelah broadcast.
+- [ ] Konfirmasi receipt dan status transaksi.
+- [ ] Release reservation jika transaksi gagal sebelum masuk chain.
+- [ ] Rekonsiliasi status database dengan nullifier contract setelah restart.
+
+### Receipt dan Finality
+
+- [ ] Jangan hanya spawn receipt monitor yang hasilnya tidak masuk database.
+- [ ] Tunggu atau monitor receipt secara persisten.
+- [ ] Tandai settlement sukses hanya jika `receipt.status == success`.
+- [ ] Terapkan confirmation threshold sesuai chain.
+- [ ] Tangani replacement transaction dan nonce conflict.
+- [ ] Ekspos status transaksi melalui endpoint API.
+
+### CCIP Message ID dan Destination Tracking
+
+Lokasi: `nimbus-node/src/evm_client.rs`
+
+Masalah saat ini:
+
+Return value `broadcast_ccip_transaction()` adalah source transaction hash,
+bukan CCIP message ID asli.
+
+- [ ] Parse event CCIP dari source transaction receipt.
+- [ ] Ambil message ID asli dari event router.
+- [ ] Simpan source tx hash dan CCIP message ID sebagai field berbeda.
+- [ ] Monitor status message sampai destination execution.
+- [ ] Verifikasi destination receipt dan contract event.
+- [ ] Bedakan status `source_confirmed`, `ccip_in_flight`,
+  `destination_success`, dan `destination_failed`.
+- [ ] Jangan menyebut broadcast source sebagai E2E success.
+
+### Validasi Input Relayer
+
+- [ ] Nullifier wajib tepat 32 byte, jangan silently pad dengan zero.
+- [ ] `alpha_neg` wajib 128 byte.
+- [ ] `hm` wajib 128 byte.
+- [ ] `pk_iss` wajib 256 byte.
+- [ ] Recipient wajib address EVM valid.
+- [ ] Amount wajib memenuhi minimum dan maximum policy.
+- [ ] Validasi chain selector dan destination contract dengan allowlist.
+- [ ] Batasi panjang idempotency key dan string input lainnya.
+
+## P1 - Relayer Deposit dan Reveal
+
+Lokasi: `nimbus-node/src/handlers/deposit.rs`
+
+Masalah saat ini:
+
+- Client address dibuat secara random.
+- Deposit handler hanya menulis database, tidak mengamati transaksi on-chain.
+- Reveal handler hanya mengubah status database dan mencetak `VALID`.
+
+TODO:
+
+- [ ] Ambil client identity dari signed request atau event deposit on-chain.
+- [ ] Verifikasi signature autentikasi client.
+- [ ] Index event deposit dari contract sebagai source of truth.
+- [ ] Simpan block number dan transaction hash deposit.
+- [ ] Verifikasi `k * pk_iss == stored com_k` sebelum resolve.
+- [ ] Sinkronkan resolved state dengan contract.
+- [ ] Jangan mengembalikan pesan "published on-chain" jika tidak ada transaksi.
+
+## P1 - ZK Compliance
+
+Lokasi:
+
+- `nimbus-core/src/compliance_circuit.rs`
+- `nimbus-sdk/src/zk_wasm.rs`
+- `nimbus-contracts/src/verification.rs`
+
+Masalah saat ini:
+
+- Circuit hanya memberi constraint `nullifier = secret + randomness`.
+- Root, recipient, dan amount dialokasikan tetapi tidak diberi constraint.
+- Tidak ada Merkle membership proof.
+- Proving key dibuat saat runtime menggunakan test setup.
+- Verifying key contract memakai scaled generators dan dinyatakan mock.
+- Unit test contract mengembalikan `Ok(true)` untuk proof dengan panjang valid.
+
+TODO:
+
+- [ ] Tentukan statement compliance final secara formal.
+- [ ] Implementasikan hash nullifier yang cryptographically secure.
+- [ ] Implementasikan Merkle membership di dalam circuit.
+- [ ] Bind root, nullifier, recipient, amount, chain ID, dan domain separator.
+- [ ] Tambahkan range constraint untuk amount.
+- [ ] Tambahkan address/field canonicality constraints.
+- [ ] Jalankan trusted setup yang sesuai dengan deployment policy.
+- [ ] Distribusikan proving key sebagai artifact versioned, bukan generate runtime.
+- [ ] Embed atau simpan verifying key nyata pada contract.
+- [ ] Pastikan SDK dan contract memakai circuit/version/VK yang sama.
+- [ ] Tambahkan known-answer vectors lintas core, SDK, dan contract.
+- [ ] Tambahkan negative proof tests.
+
+## P1 - CCIP Contract Security
+
+- [ ] Wajibkan `ccip_router != Address::ZERO` sebelum menerima message.
+- [ ] Tolak semua caller jika router belum dikonfigurasi.
+- [ ] Validasi `source_chain_selector` dengan allowlist.
+- [ ] Decode dan validasi sender CCIP.
+- [ ] Bind sender contract yang sah untuk setiap source chain.
+- [ ] Gunakan message ID untuk replay protection.
+- [ ] Tambahkan event untuk received, executed, dan failed intents.
+- [ ] Audit payload encoding antara source relayer dan destination contract.
+
+## P2 - x402
+
+Lokasi: `nimbus-node/src/handlers/x402.rs`
+
+- [ ] Jangan menghasilkan mock tx hash kecuali explicit development profile.
+- [ ] Jangan mengembalikan `success: true` sebelum settlement terkonfirmasi.
+- [ ] Recipient `"x402-facilitator-pool"` bukan address EVM valid; ganti dengan
+  konfigurasi address nyata.
+- [ ] Verifikasi BLS payment sebelum queue.
+- [ ] Bind payment ke resource URI, merchant, network, asset, amount, dan expiry.
+- [ ] Tambahkan idempotency dan reservation nullifier.
+- [ ] Hindari double broadcast: saat ini request dimasukkan queue dan juga
+  langsung dibroadcast.
+- [ ] Return payment status ID, bukan receipt palsu.
+
+## P2 - KMS, Database, dan Secrets
+
+### Database
+
+- [ ] Hapus default key `"default-change-in-production"`.
+- [ ] Fail startup jika `NIMBUS_DB_KEY` tidak tersedia di non-development mode.
+- [ ] Pastikan build benar-benar memakai SQLCipher dan verifikasi cipher aktif.
+- [ ] Ambil database key dari KMS/OpenBao.
+- [ ] Perbaiki permission path WAL/SHM agar sesuai nama file SQLite sebenarnya.
+- [ ] Tambahkan backup, restore, corruption check, dan migration versioning.
+- [ ] Jangan track file `.db` di Git.
+
+### KMS dan Key Lifecycle
+
+- [ ] Ganti raw TCP HTTP client dengan client HTTPS yang tervalidasi.
+- [ ] Verifikasi TLS certificate untuk Vault dan guardian RPC.
+- [ ] Jangan menghapus awalan `https://` lalu mengirim plaintext TCP.
+- [ ] Gunakan short-lived Vault token atau workload identity.
+- [ ] Validasi key version dan expected guardian index.
+- [ ] Implementasikan threshold proactive refresh yang nyata; re-masking memory
+  bukan penggantian share antar guardian.
+- [ ] Gunakan crate zeroization yang diaudit untuk secret memory.
+
+## P2 - API dan Operasional
+
+- [ ] Tambahkan authentication dan authorization pada endpoint mutating.
+- [ ] Jangan mempercayai `X-Forwarded-For` kecuali request berasal dari trusted
+  proxy.
+- [ ] Gunakan extractor peer socket address untuk direct connections.
+- [ ] Bersihkan rate-limit map agar tidak tumbuh tanpa batas.
+- [ ] Terapkan timeout pada guardian, Vault, dan RPC requests.
+- [ ] Tambahkan structured logging dan request correlation ID.
+- [ ] Jangan log secret, private RPC credential, atau full payload.
+- [ ] Pisahkan development dan production config secara eksplisit.
+- [ ] Production mode harus fail closed jika EVM client tidak tersedia.
+- [ ] Bind address harus configurable; saat ini hanya `127.0.0.1`.
+- [ ] Tambahkan readiness dan liveness endpoint terpisah.
+
+## P2 - Vault dan DeFi/RWA
+
+- [ ] Verifikasi interface Aave dan RWA terhadap deployment target.
+- [ ] Tambahkan slippage/minimum-output pada redeem RWA.
+- [ ] Batasi token dan pool dengan allowlist governance.
+- [ ] Audit allowance lifecycle dan reset approval bila diperlukan.
+- [ ] Gunakan actual asset conversion untuk aToken/RWA, bukan asumsi saldo 1:1.
+- [ ] Tambahkan insolvency invariant:
+  `total_assets >= outstanding user liabilities`.
+- [ ] Bedakan principal deposit, issued liabilities, realized yield, dan fees.
+- [ ] Tambahkan emergency unwind.
+- [ ] Tambahkan tests dengan fork/testnet protocol nyata.
+
+## P2 - Testing
+
+- [ ] Tambahkan production-path tests tanpa `#[cfg(test)]` bypass.
+- [ ] Jalankan Stylus contract dalam local dev node atau supported test harness.
+- [ ] Test precompile EIP-2537 menggunakan known vectors.
+- [ ] Test invalid BLS signature tidak mengubah state.
+- [ ] Test unauthorized reveal.
+- [ ] Test duplicate session.
+- [ ] Test CCIP unauthorized router/source/sender.
+- [ ] Test source success tetapi destination failure.
+- [ ] Test RPC failure setelah nullifier reservation.
+- [ ] Test relayer restart dengan queue yang belum selesai.
+- [ ] Test concurrent workers.
+- [ ] Tambahkan fuzz/property tests untuk ABI and payload decoding.
+- [ ] Tambahkan CI untuk `fmt`, `clippy`, tests, WASM build, dan Stylus check.
+
+### Real Testnet Reproduction
+
+Gunakan artifact berikut untuk pengujian nyata:
+
+```bash
+source nimbus-node/.env.test
+cargo run --package nimbus-core --example generate_bls_test_data
+python3 scripts/testnet_integration.py
+```
+
+Sebelum menjalankan:
+
+- [ ] Perbaiki generator BLS sesuai checklist P0.
+- [ ] Pastikan `.env.test` menunjuk ke contract deployment terbaru.
+- [ ] Pastikan contract terbaru telah diaktifkan dan di-cache di Stylus.
+- [ ] Pastikan `NIMBUS_CCIP_ROUTER` dikonfigurasi pada relayer dan contract.
+- [ ] Pastikan contract memiliki liquidity test secukupnya.
+- [ ] Gunakan wallet dan key khusus testnet, bukan credential production.
+
+Test matrix minimum:
+
+- [ ] Signature BLS valid diterima dan receipt sukses.
+- [ ] Signature dengan satu byte berubah ditolak.
+- [ ] `H(m)` dengan satu byte berubah ditolak.
+- [ ] Issuer public key berbeda ditolak.
+- [ ] Nullifier yang sama ditolak pada percobaan kedua.
+- [ ] Failed signature tidak mengubah nullifier atau principal.
+- [ ] CCIP source transaction sukses dan menghasilkan message ID asli.
+- [ ] CCIP message terpantau sampai destination success.
+- [ ] Invalid source chain atau sender CCIP ditolak.
+
+Evidence yang wajib disimpan:
+
+- Source transaction hash.
+- Source block dan receipt status.
+- CCIP message ID asli dari event.
+- Destination transaction hash.
+- Destination block dan receipt status.
+- Event contract yang menunjukkan nullifier dan payout.
+- Hasil negative test beserta revert reason.
+
+### Pengelolaan `.env.test`
+
+`nimbus-node/.env.test` saat ini tracked oleh Git dan memuat konfigurasi sensitif
+seperti RPC URL, relayer private key, share key, contract address, dan database
+path.
+
+- [ ] Rotasi seluruh credential yang pernah ter-commit atau dibagikan.
+- [ ] Hapus credential nyata dari Git history.
+- [ ] Tambahkan `nimbus-node/.env.test` ke `.gitignore`.
+- [ ] Buat `nimbus-node/.env.test.example` hanya dengan placeholder.
+- [ ] Muat secret melalui secret manager atau environment CI.
+- [ ] Tambahkan secret scanning pada CI.
+- [ ] Pastikan script test tidak mencetak private key, Vault token, atau RPC
+  credential.
+
+## Dokumentasi yang Perlu Dikoreksi
+
+- [ ] Ubah klaim "BLS signature fix" menjadi "BLS signature ABI transport fix"
+  sampai pairing verification diaktifkan.
+- [ ] Ubah "E2E CCIP succeeded" menjadi "CCIP source transaction broadcast
+  succeeded" sampai destination execution diverifikasi.
+- [ ] Jelaskan bahwa tx hash bukan CCIP message ID.
+- [ ] Tandai Groth16 compliance sebagai prototype/demo.
+- [ ] Jangan menyebut relayer atau contract production-ready sebelum seluruh P0
+  selesai.
+- [ ] Catat bahwa unit tests contract menggunakan mocked HostIO/precompile paths.
+
+## Urutan Implementasi yang Disarankan
+
+1. Perbaiki binding deposit/reveal.
+2. Aktifkan BLS verification pada spend.
+3. Hapus secret-share override dan amankan guardian RPC.
+4. Buat persistent settlement state machine untuk queue dan nullifier.
+5. Parse receipt serta CCIP message ID dan monitor destination execution.
+6. Perbaiki relayer deposit/reveal agar mengikuti state on-chain.
+7. Bangun ulang compliance circuit dan gunakan verifying key nyata.
+8. Harden KMS, database encryption, API authentication, dan TLS.
+9. Audit vault, DeFi/RWA, Polymarket, dan x402 setelah invariant pembayaran
+   utama aman.
+
+## Mainnet Gate
+
+Mainnet tidak boleh dilakukan sampai:
+
+- [ ] Seluruh P0 selesai dan diaudit.
+- [ ] Tidak ada cryptographic verification yang dinonaktifkan.
+- [ ] Tidak ada mock key, mock tx hash, atau mock verification pada production
+  profile.
+- [ ] Deposit, reveal, spend, refund, dan CCIP memiliki end-to-end negative
+  tests.
+- [ ] Queue dan settlement tahan restart serta RPC failure.
+- [ ] External security review selesai untuk contract, relayer, threshold
+  protocol, dan ZK circuit.

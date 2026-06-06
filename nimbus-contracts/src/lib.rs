@@ -753,7 +753,9 @@ mod tests {
         // Deposit (must be >= 10_000_000)
         set_msg_sender(client);
         set_block_timestamp(1000);
-        contract.deposit(sid, vec![].into(), U256::from(10_000_000)).unwrap();
+        contract
+            .deposit(sid, vec![0x42; 256].into(), U256::from(10_000_000))
+            .unwrap();
         
         // Claim refund from other address should fail
         set_msg_sender(other);
@@ -770,6 +772,91 @@ mod tests {
         
         // Claiming again should fail
         assert_eq!(contract.claim_refund(sid), Err(b"SESSION_ALREADY_RESOLVED".to_vec()));
+    }
+
+    #[test]
+    fn test_deposit_binds_commitment_and_rejects_duplicate_session() {
+        reset_test_state();
+        let owner = address!("1111111111111111111111111111111111111111");
+        let client = address!("2222222222222222222222222222222222222222");
+
+        set_msg_sender(owner);
+        let mut contract = Nimbus::default();
+        contract.init(owner, Address::ZERO, Address::ZERO).unwrap();
+
+        let sid = FixedBytes::repeat_byte(0xac);
+        let commitment = vec![0x42; 256];
+        set_msg_sender(client);
+
+        assert_eq!(
+            contract.deposit(sid, vec![0x42; 255].into(), U256::from(10_000_000)),
+            Err(b"INVALID_COMMITMENT_LENGTH".to_vec())
+        );
+        contract
+            .deposit(
+                sid,
+                commitment.clone().into(),
+                U256::from(10_000_000),
+            )
+            .unwrap();
+        assert_eq!(
+            contract.deposit(sid, commitment.into(), U256::from(10_000_000)),
+            Err(b"SESSION_ALREADY_EXISTS".to_vec())
+        );
+    }
+
+    #[test]
+    fn test_reveal_cannot_release_collateral_or_change_commitment() {
+        reset_test_state();
+        let owner = address!("1111111111111111111111111111111111111111");
+        let client = address!("2222222222222222222222222222222222222222");
+        let guardian = address!("3333333333333333333333333333333333333333");
+
+        set_msg_sender(owner);
+        let mut contract = Nimbus::default();
+        contract.init(owner, Address::ZERO, Address::ZERO).unwrap();
+
+        let sid = FixedBytes::repeat_byte(0xad);
+        let commitment = vec![0x42; 256];
+        set_msg_sender(client);
+        contract
+            .deposit(
+                sid,
+                commitment.clone().into(),
+                U256::from(10_000_000),
+            )
+            .unwrap();
+        let principal = contract.total_deposited_principal().unwrap();
+
+        set_msg_sender(guardian);
+        assert_eq!(
+            contract.reveal_mask_key(
+                sid,
+                vec![0x11; 32].into(),
+                vec![0x22; 256].into(),
+                vec![0x43; 256].into(),
+            ),
+            Err(b"COMMITMENT_MISMATCH".to_vec())
+        );
+        assert_eq!(contract.total_deposited_principal().unwrap(), principal);
+        assert!(!contract.session_resolved.get(sid));
+
+        assert!(contract
+            .reveal_mask_key(
+                sid,
+                vec![0x11; 32].into(),
+                vec![0x22; 256].into(),
+                commitment.into(),
+            )
+            .unwrap());
+        assert!(contract.session_resolved.get(sid));
+        assert_eq!(contract.total_deposited_principal().unwrap(), principal);
+
+        set_msg_sender(client);
+        assert_eq!(
+            contract.claim_refund(sid),
+            Err(b"SESSION_ALREADY_RESOLVED".to_vec())
+        );
     }
 
     #[test]
@@ -876,7 +963,9 @@ mod tests {
         
         // Test deposit increases principal (must be >= 10_000_000)
         let sid = FixedBytes::repeat_byte(0xde);
-        contract.deposit(sid, vec![].into(), U256::from(20_000_000)).unwrap();
+        contract
+            .deposit(sid, vec![0x42; 256].into(), U256::from(20_000_000))
+            .unwrap();
         
         // fee = (20,000,000 + 999) / 1000 = 20000
         // net_amount = 20,000,000 - 20,000 = 19,980,000 net
@@ -912,7 +1001,11 @@ mod tests {
         let nullifier = FixedBytes::repeat_byte(0xd1);
         
         // Set principal
-        contract.deposit(FixedBytes::repeat_byte(0x99), vec![].into(), U256::from(20_000_000)).unwrap();
+        contract.deposit(
+            FixedBytes::repeat_byte(0x99),
+            vec![0x42; 256].into(),
+            U256::from(20_000_000),
+        ).unwrap();
         
         // Call spend_and_buy_shares with polymarket_ctf = Address::ZERO (which triggers mock fallback in tests)
         let success = contract.spend_and_buy_shares(
@@ -990,5 +1083,3 @@ mod tests {
         assert!(is_valid_registered);
     }
 }
-
-
