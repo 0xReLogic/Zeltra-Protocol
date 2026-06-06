@@ -481,7 +481,11 @@ pub fn aggregate_shares(
 **Severity:** LOW  
 **Location:** All cryptographic operations  
 **Category:** Formal Verification / Mathematical Correctness  
-**Source:** Wikipedia: Zero-Knowledge Proof Security Vulnerabilities
+**Source:** Wikipedia: Zero-Knowledge Proof Security Vulnerabilities  
+**Status:** **REMEDIATED (June 6, 2026)**  
+
+**Remediation:**  
+Implemented algebraic verification checks for Shamir Secret Sharing completeness and soundness (valid/invalid threshold subsets, duplicate indices rejection) and blind signature soundness (mutated message/signature/keys rejection) in `formal_tests.rs`.
 
 **Issue:** The implementation lacks formal verification of:
 - Blind signature correctness

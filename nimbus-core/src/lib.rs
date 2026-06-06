@@ -120,3 +120,6 @@ mod tests {
         assert!(verify_final, "Final unmasked signature verification failed!");
     }
 }
+
+#[cfg(test)]
+mod formal_tests;
