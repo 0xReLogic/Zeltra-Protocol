@@ -26,8 +26,9 @@ See `/security-node/SQLITE_DATABASE_SECURITY_AUDIT.md` for full audit details.
 
 **Features**:
 - SQLite with optimized PRAGMAs
-- Three tables: `sessions`, `nullifiers`, `spend_queue`
+- Four tables: `sessions`, `nullifiers`, `spend_queue`, `idempotency_cache`
 - Atomic double-spend prevention using `INSERT OR IGNORE` pattern
+- Request idempotency caching with TTL-based expiration (24 hours)
 - Async/blocking hybrid using `tokio::spawn_blocking`
 
 **Key PRAGMAs**:
@@ -48,6 +49,9 @@ PRAGMA busy_timeout = 5000;
 | `resolve_session()` | Reveal masking keys, prevent double-reveal |
 | `check_and_insert_nullifier()` | Atomic double-spend prevention (INSERT OR IGNORE) |
 | `is_nullifier_spent()` | Fast nullifier lookup |
+| `check_idempotency()` | Check client-supplied key for duplicate request |
+| `store_idempotency()` | Store client-supplied key with serializable response |
+| `cleanup_idempotency_cache()` | Evict expired keys (older than 24 hours) |
 | `get_stats()` | Monitoring |
 
 ### 3. State Changes
@@ -64,6 +68,10 @@ pub struct AppState {
 ```rust
 pub struct AppState {
     pub db: Database,  // Persistent SQLite
+    pub key_manager: KeyManager,
+    pub guardian_circuit_breaker: CircuitBreaker,
+    pub vault_circuit_breaker: CircuitBreaker,
+    pub rpc_circuit_breaker: CircuitBreaker,
 }
 ```
 
@@ -168,6 +176,17 @@ CREATE TABLE spend_queue (
 );
 ```
 
+### idempotency_cache
+```sql
+CREATE TABLE idempotency_cache (
+    idempotency_key TEXT PRIMARY KEY,
+    endpoint TEXT NOT NULL,
+    response_json TEXT NOT NULL,
+    created_at INTEGER NOT NULL
+);
+CREATE INDEX idx_idempotency_created ON idempotency_cache(created_at);
+```
+
 ## Security
 
 ### Encryption at Rest
@@ -217,8 +236,9 @@ CREATE TABLE spend_queue (
 
 Background task runs daily to:
 1. Delete resolved sessions older than 30 days
-2. Vacuum database to reclaim space
-3. Log database size
+2. Clean up expired idempotency cache records (older than 24 hours)
+3. Vacuum database to reclaim space
+4. Log database size
 
 Manual cleanup:
 ```rust

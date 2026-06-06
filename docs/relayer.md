@@ -55,6 +55,12 @@ Berdasarkan riset L2 Gas Economics 2026, biaya transaksi L2 didominasi oleh L1 b
 2.  **Markup Dinamis**: Relayer memotong **10%** dari selisih penghematan gas (savings) tersebut sebagai margin operasional/profit relayer.
 3.  **Potongan Saldo Bersih (Net Payout)**: Biaya gas batched + markup langsung dikonversi ke nominal USDC dan dipotong dari stablecoin transaksi (`amount`). Penerima menerima *net payout* setelah dikurangi gas fee ini, menghilangkan kebutuhan wallet user untuk memiliki gas token native (ETH).
 
+### E. Resilience, Secrets & Request Deduplication
+Mengikuti rekomendasi audit keamanan infrastruktur relayer node 2026:
+*   **Key Rotation (Vault & In-Memory Re-masking)**: Key shares ditarik dari OpenBao KMS saat startup dan dapat dirotasi secara periodik tanpa restart. Kunci dipecah secara linear di memori (`part1 + part2`) dan di-remask (diacak kembali splitnya) secara periodik untuk pertahanan mendalam (*defense-in-depth*).
+*   **Circuit Breakers**: Membatasi kegagalan kaskade dengan membungkus panggilan eksternal (Guardian RPC, Vault KMS, Blockchain RPC) dalam Circuit Breaker 3-state (Closed, Open, Half-Open).
+*   **Request Idempotency**: Mencegah pemrosesan ganda transaksi akibat retry dari client menggunakan tabel cache idempotency berbasis SQLite dengan key berumur 24 jam.
+
 ---
 
 ## 3. Konfigurasi Node (Environment Variables)
@@ -68,6 +74,10 @@ Every instance of `nimbus-node` reads configurations from environment variables 
 | `NIMBUS_VAULT_TOKEN` | `None` | Token otentikasi OpenBao / HashiCorp Vault. Mengaktifkan penarikan kunci otomatis via KMS. |
 | `NIMBUS_VAULT_ADDR` | `http://127.0.0.1:8200` | URL/Port server OpenBao / HashiCorp Vault. |
 | `NIMBUS_VAULT_PATH` | `v1/secret/data/nimbus` | Endpoint API path untuk mengambil rahasia (KV v2 engine). |
+| `NIMBUS_KEY_ROTATION` | `false` | Mengaktifkan mekanisme rotasi kunci otomatis. |
+| `NIMBUS_KEY_ROTATION_INTERVAL` | `3600` | Durasi interval rotasi/re-masking kunci dalam satuan detik (default: 1 jam). |
+| `NIMBUS_DB_PATH` | `./nimbus-relayer.db` | Path penyimpanan file SQLite persistent. |
+| `NIMBUS_DB_KEY` | `None` | Kunci enkripsi untuk database SQLite/SQLCipher (Wajib diisi di produksi). |
 
 ### Integrasi OpenBao / Vault (Production Mode)
 
@@ -135,9 +145,12 @@ Nimbus Node telah direfaktor menjadi struktur modular yang terorganisir dengan b
 
 ```
 nimbus-node/src/
-├── main.rs              # Entry point minimal (82 baris)
-├── dto.rs               # Request/Response DTOs (19 structs)
-├── state.rs             # AppState + in-memory storage
+├── main.rs              # Entry point minimal
+├── dto.rs               # Request/Response DTOs
+├── state.rs             # AppState + database and circuit breaker state
+├── database.rs          # SQLCipher persistent SQLite database
+├── circuit_breaker.rs   # Resilience Circuit Breaker pattern
+├── key_rotation.rs      # Key rotation and in-memory split management
 ├── http.rs              # HTTP client utilities
 ├── kms.rs               # OpenBao/Vault KMS integration
 └── handlers/
@@ -157,11 +170,11 @@ nimbus-node/src/
 - **Documentation**: 18 comment lines + 2 doc comments tersebar di semua modul
 
 ### Organisasi Handlers:
-- **health.rs**: Health check untuk monitoring
-- **deposit.rs**: Deposit escrow dan reveal masking key
-- **spend.rs**: Spend handler + batch processing dengan gas economics
+- **health.rs**: Health check untuk monitoring (termasuk status database dan RPC)
+- **deposit.rs**: Deposit escrow dan reveal masking key (mendukung idempotensi)
+- **spend.rs**: Spend handler + batch processing dengan gas economics (mendukung slippage, deadline, dan idempotensi)
 - **x402.rs**: x402 protocol facilitator untuk AI agents
-- **threshold.rs**: Distributed threshold signing (Leader + Guardian)
+- **threshold.rs**: Distributed threshold signing (Leader + Guardian) dengan circuit breaker
 
 ---
 
@@ -174,7 +187,7 @@ Mengecek status kesehatan node relayer, jumlah antrean transaksi, nullifier yang
 *   **Response (JSON):**
     ```json
     {
-      "status": "OK",
+      "status": "OK", // Bisa berupa "OK", "DEGRADED_RPC_DOWN", atau "ERROR_DATABASE_DOWN"
       "queued_transactions": 0,
       "processed_nullifiers": 15,
       "relayer_wallet_balance_eth": 10.0,
@@ -191,7 +204,8 @@ Dihubungi oleh klien untuk mendaftarkan sesi deposit minting baru.
     {
       "session_id": "sid_1283918239...",
       "com_k": "commitment_key_hex_in_g2...",
-      "amount": 100000000
+      "amount": 100000000,
+      "idempotency_key": "optional-uuid-string-for-deduplication"
     }
     ```
 *   **Response (JSON):**
@@ -240,7 +254,10 @@ Dihubungi oleh klien untuk mengirimkan token privat secara anonim, baik secara l
       "cross_chain": {
         "destination_chain_selector": 405157,
         "destination_contract": "0xdestination_contract_address..."
-      }
+      },
+      "min_payout": 95000000,                      // Opsional: Slippage protection (USDC base units, 6 desimal)
+      "deadline": 1780720000,                       // Opsional: Deadline timestamp detik (Unix)
+      "idempotency_key": "optional-uuid-string"      // Opsional: Idempotency key untuk deduplikasi request
     }
     ```
     *   *Catatan*: Objek `cross_chain` bersifat opsional. Jika disediakan, Relayer akan memaketkan data transaksi spend ke dalam payload 648 bytes dan mengirimkannya ke Router Chainlink CCIP untuk dieksekusi secara atomik di rantai tujuan.
@@ -249,7 +266,8 @@ Dihubungi oleh klien untuk mengirimkan token privat secara anonim, baik secara l
     {
       "status": "QUEUED",
       "message": "Spend transaction accepted into batching queue",
-      "queue_position": 1
+      "queue_position": 1,
+      "estimated_gas_usdc": 1.25                    // Opsional: Perkiraan beban biaya gas relayer dalam USDC
     }
     ```
 
