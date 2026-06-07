@@ -237,13 +237,12 @@ mod node_tests {
     #[tokio::test]
     async fn test_secure_sign_share() {
         use crate::state::AppState;
-        use crate::dto::{SignShareRequest, SignShareResponse};
+        use crate::dto::SignShareRequest;
         use crate::handlers::handle_sign_share;
         use crate::database::Database;
         use tempfile::TempDir;
         use alloy::signers::{Signer, local::PrivateKeySigner};
         use nimbus_core::*;
-        use std::str::FromStr;
         
         std::env::set_var("NIMBUS_DB_KEY", "test-encryption-key");
         std::env::set_var("NIMBUS_ENV", "test");
@@ -303,6 +302,7 @@ mod node_tests {
             axum::Json(request.clone()),
         ).await;
         assert_eq!(response.0.status, "SUCCESS");
+        assert_eq!(response.0.share_index, Some(share_index));
         
         // 2. Test duplicate session rejection (replay protection)
         let response_dup = handle_sign_share(

@@ -746,12 +746,12 @@ dikembalikan, dan final verification hanya dilakukan oleh CLI.
 - [ ] Buktikan port guardian tidak dapat diakses dari interface publik.
 - [ ] Leader mengirim blinded message dan `k`, bukan meminta share key.
 - [ ] Guardian mengambil share lokal dan mengembalikan partial signature.
-- [ ] Response guardian menyertakan share index asli, key version, session ID,
-  dan request digest.
+- [x] Response guardian menyertakan share index asli dari `KeyManager`.
+- [ ] Response guardian menyertakan key version, session ID, dan request digest.
 - [ ] Leader memverifikasi partial signature sebelum agregasi.
 - [ ] Aggregate minimal threshold menghasilkan masked signature valid.
-- [ ] Sub-threshold signature gagal menghasilkan final signature valid.
-- [ ] Duplicate guardian index ditolak.
+- [x] Leader menolak hasil signing saat jumlah share unik masih sub-threshold.
+- [x] Duplicate guardian index ditolak dan tidak dihitung ke quorum.
 - [ ] Guardian index palsu ditolak.
 - [ ] Partial signature corrupt ditolak.
 - [ ] Guardian timeout tidak membuat leader menganggap ceremony sukses.

@@ -373,9 +373,15 @@ Dihubungi oleh Leader Node ke setiap Guardian Node via jaringan private untuk me
     ```json
     {
       "status": "SUCCESS",
+      "share_index": 2,
       "signature_share_hex": "hex_encoded_partial_bls_signature..."
     }
     ```
+    `share_index` berasal dari `KeyManager` guardian, bukan dari urutan URL
+    guardian pada konfigurasi leader. Leader hanya menghitung indeks non-zero
+    yang unik dan mengembalikan error jika jumlah share belum mencapai
+    `NIMBUS_THRESHOLD` (default `3`). Pemeriksaan ini belum menggantikan
+    verifikasi kriptografis setiap partial signature sebelum agregasi.
 
 ### G. Threshold Minting: Leader Aggregate Sign
 Dihubungi oleh client untuk memulai proses minting token anonim secara terdesentralisasi. Leader Node men-generate masking key $k$, menghubungi semua Guardian secara paralel via private network, mengumpulkan partial signature, lalu mengembalikan semuanya ke client untuk diagregasi menggunakan `client_aggregate_signatures` di SDK. Masking key $k$ disimpan secara privat oleh Leader Node dan tidak dibocorkan di tahap ini.

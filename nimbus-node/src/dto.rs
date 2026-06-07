@@ -169,6 +169,8 @@ pub struct SignShareRequest {
 #[derive(Serialize, Deserialize)]
 pub struct SignShareResponse {
     pub status: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub share_index: Option<u32>,
     pub signature_share_hex: String,
 }
 

@@ -32,6 +32,13 @@ Sebelumnya, terdapat celah di mana secret share atau parameter arbitrary blind s
 4. **Timestamp Verification**:
    - Guardian memverifikasi bahwa `timestamp` yang ditandatangani oleh leader berada dalam rentang toleransi ±60 detik terhadap waktu lokal guardian saat ini (dinonaktifkan jika dalam mode pengujian `cfg!(test)` atau `NIMBUS_ENV=test`).
 
+5. **Share Identity dan Quorum Enforcement**:
+   - Guardian mengembalikan `share_index` asli yang dibaca dari `KeyManager`.
+   - Leader menolak indeks yang kosong, nol, atau sudah diterima sebelumnya.
+   - Leader tidak lagi menurunkan indeks guardian dari urutan URL.
+   - Leader hanya mendaftarkan sesi dan mengembalikan sukses setelah jumlah share unik mencapai `NIMBUS_THRESHOLD` (default `3`).
+   - Verifikasi kriptografis partial signature terhadap public share masing-masing guardian tetap wajib sebelum agregasi dan belum diselesaikan oleh keputusan ini.
+
 ## Sumber primer
 
 - Nimbus Protocol TODO: `Hilangkan Secret Share Override dari API`
@@ -50,3 +57,6 @@ Unit test `test_secure_sign_share` ditambahkan untuk memverifikasi:
 - Upaya double signing dengan session ID yang sama ditolak (replay protection).
 - Modifikasi commitment (`com_k` tidak cocok dengan `pk_iss * k`) dideteksi dan ditolak oleh guardian.
 - Tanda tangan yang tidak sah atau rusak ditolak dengan benar.
+- Guardian mengembalikan share index asli.
+- Indeks guardian yang kosong, nol, atau duplikat tidak menambah jumlah partial signature.
+- Kumpulan share di bawah threshold tidak dianggap memenuhi quorum.

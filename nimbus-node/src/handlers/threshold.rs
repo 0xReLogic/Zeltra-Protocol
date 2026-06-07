@@ -5,6 +5,35 @@
 
 use axum::Json;
 use crate::{state::AppState, dto::*, http};
+use std::collections::HashSet;
+
+fn append_guardian_share(
+    response: SignShareResponse,
+    seen_indices: &mut HashSet<u32>,
+    partial_signatures: &mut Vec<PartialSignatureInfo>,
+) -> Result<(), &'static str> {
+    if response.status != "SUCCESS" {
+        return Err("guardian rejected signing request");
+    }
+
+    let index = response.share_index.ok_or("guardian omitted share index")?;
+    if index == 0 {
+        return Err("guardian returned invalid share index 0");
+    }
+    if !seen_indices.insert(index) {
+        return Err("guardian returned duplicate share index");
+    }
+
+    partial_signatures.push(PartialSignatureInfo {
+        index,
+        signature_hex: response.signature_share_hex,
+    });
+    Ok(())
+}
+
+fn has_signing_quorum(partial_signatures: &[PartialSignatureInfo], threshold: usize) -> bool {
+    threshold > 0 && partial_signatures.len() >= threshold
+}
 
 pub async fn handle_sign_share(
     axum::extract::State(state): axum::extract::State<AppState>,
@@ -23,6 +52,7 @@ pub async fn handle_sign_share(
         if payload.timestamp > now + 60 || now > payload.timestamp + 60 {
             return Json(SignShareResponse {
                 status: "ERROR".to_string(),
+                share_index: None,
                 signature_share_hex: "Timestamp expired or out of bounds".to_string(),
             });
         }
@@ -43,6 +73,7 @@ pub async fn handle_sign_share(
         Ok(b) => b,
         Err(e) => return Json(SignShareResponse {
             status: "ERROR".to_string(),
+            share_index: None,
             signature_share_hex: format!("Invalid signature hex: {}", e),
         }),
     };
@@ -50,6 +81,7 @@ pub async fn handle_sign_share(
         Ok(sig) => sig,
         Err(e) => return Json(SignShareResponse {
             status: "ERROR".to_string(),
+            share_index: None,
             signature_share_hex: format!("Failed to parse signature: {}", e),
         }),
     };
@@ -57,6 +89,7 @@ pub async fn handle_sign_share(
         Ok(addr) => addr,
         Err(e) => return Json(SignShareResponse {
             status: "ERROR".to_string(),
+            share_index: None,
             signature_share_hex: format!("Failed to recover address: {}", e),
         }),
     };
@@ -66,12 +99,14 @@ pub async fn handle_sign_share(
         Ok(addr) => addr,
         Err(e) => return Json(SignShareResponse {
             status: "ERROR".to_string(),
+            share_index: None,
             signature_share_hex: format!("Invalid leader address: {}", e),
         }),
     };
     if recovered_address != expected_leader_address {
         return Json(SignShareResponse {
             status: "ERROR".to_string(),
+            share_index: None,
             signature_share_hex: "Recovered address does not match leader_address".to_string(),
         });
     }
@@ -85,6 +120,7 @@ pub async fn handle_sign_share(
         if !trusted_leaders.contains(&recovered_address) {
             return Json(SignShareResponse {
                 status: "ERROR".to_string(),
+                share_index: None,
                 signature_share_hex: format!("Leader address {} is not trusted", recovered_address),
             });
         }
@@ -93,6 +129,7 @@ pub async fn handle_sign_share(
         if !is_dev_or_test {
             return Json(SignShareResponse {
                 status: "ERROR".to_string(),
+                share_index: None,
                 signature_share_hex: "NIMBUS_TRUSTED_LEADERS is not configured in production".to_string(),
             });
         }
@@ -103,6 +140,7 @@ pub async fn handle_sign_share(
         Ok(b) => b,
         Err(e) => return Json(SignShareResponse {
             status: "ERROR".to_string(),
+            share_index: None,
             signature_share_hex: format!("Invalid blinded hex: {}", e),
         }),
     };
@@ -112,6 +150,7 @@ pub async fn handle_sign_share(
         Ok(b) => b,
         Err(e) => return Json(SignShareResponse {
             status: "ERROR".to_string(),
+            share_index: None,
             signature_share_hex: format!("Invalid k hex: {}", e),
         }),
     };
@@ -120,6 +159,7 @@ pub async fn handle_sign_share(
         Some(x) => x,
         None => return Json(SignShareResponse {
             status: "ERROR".to_string(),
+            share_index: None,
             signature_share_hex: "Failed to deserialize blinded message".to_string(),
         }),
     };
@@ -128,6 +168,7 @@ pub async fn handle_sign_share(
         Some(val) => val,
         None => return Json(SignShareResponse {
             status: "ERROR".to_string(),
+            share_index: None,
             signature_share_hex: "Failed to deserialize masking key k".to_string(),
         }),
     };
@@ -140,12 +181,14 @@ pub async fn handle_sign_share(
         Ok(b) => b,
         Err(e) => return Json(SignShareResponse {
             status: "ERROR".to_string(),
+            share_index: None,
             signature_share_hex: format!("Invalid com_k hex: {}", e),
         }),
     };
     if com_k_bytes != expected_com_k_bytes {
         return Json(SignShareResponse {
             status: "ERROR".to_string(),
+            share_index: None,
             signature_share_hex: "Provided com_k does not match pk_iss * k".to_string(),
         });
     }
@@ -164,12 +207,14 @@ pub async fn handle_sign_share(
         Ok(false) => {
             return Json(SignShareResponse {
                 status: "ERROR".to_string(),
+                share_index: None,
                 signature_share_hex: "Session ID already exists or double sign attempt detected".to_string(),
             });
         }
         Err(e) => {
             return Json(SignShareResponse {
                 status: "ERROR".to_string(),
+                share_index: None,
                 signature_share_hex: format!("Database error: {}", e),
             });
         }
@@ -177,9 +222,18 @@ pub async fn handle_sign_share(
 
     let sig_share = state.sign_share_masked(&blinded, &k).await;
     let sig_share_hex = hex::encode(serialize_to_bytes(&sig_share));
+    let share_index = state.key_manager.share_index().await;
+    if share_index == 0 {
+        return Json(SignShareResponse {
+            status: "ERROR".to_string(),
+            share_index: None,
+            signature_share_hex: "Guardian share index must be non-zero".to_string(),
+        });
+    }
 
     Json(SignShareResponse {
         status: "SUCCESS".to_string(),
+        share_index: Some(share_index),
         signature_share_hex: sig_share_hex,
     })
 }
@@ -230,6 +284,14 @@ pub async fn handle_leader_sign(
     let leader_share_sig = state.sign_share_masked(&blinded, &k).await;
 
     let share_index = state.key_manager.share_index().await;
+    if share_index == 0 {
+        return Json(LeaderSignResponse {
+            status: "ERROR: Leader share index must be non-zero".to_string(),
+            session_id: payload.session_id,
+            com_k_hex: String::new(),
+            partial_signatures: vec![],
+        });
+    }
     let mut partial_signatures = vec![
         PartialSignatureInfo {
             index: share_index,
@@ -294,7 +356,15 @@ pub async fn handle_leader_sign(
     }).unwrap();
 
     // Call guardians with circuit breaker (Finding #15)
-    for (idx, url) in payload.guardian_urls.iter().enumerate() {
+    let required_threshold = std::env::var("NIMBUS_THRESHOLD")
+        .ok()
+        .and_then(|value| value.parse::<usize>().ok())
+        .filter(|value| *value > 0)
+        .unwrap_or(3);
+    let mut seen_indices = HashSet::new();
+    seen_indices.insert(share_index);
+
+    for url in &payload.guardian_urls {
         let target_url = format!("{}/api/sign-share", url.trim_end_matches('/'));
         let body = client_body.clone();
         let url_clone = target_url.clone();
@@ -305,18 +375,32 @@ pub async fn handle_leader_sign(
         }).await {
             Ok(response_body) => {
                 if let Ok(res) = serde_json::from_str::<SignShareResponse>(&response_body) {
-                    if res.status == "SUCCESS" {
-                        partial_signatures.push(PartialSignatureInfo {
-                            index: (idx + 2) as u32,
-                            signature_hex: res.signature_share_hex,
-                        });
+                    if let Err(error) =
+                        append_guardian_share(res, &mut seen_indices, &mut partial_signatures)
+                    {
+                        println!("RELAYER: Guardian {} rejected: {}", url, error);
                     }
+                } else {
+                    println!("RELAYER: Guardian {} returned malformed JSON", url);
                 }
             }
             Err(e) => {
                 println!("RELAYER: Error calling Guardian at {}: {}", url, e);
             }
         }
+    }
+
+    if !has_signing_quorum(&partial_signatures, required_threshold) {
+        return Json(LeaderSignResponse {
+            status: format!(
+                "ERROR: Guardian quorum unavailable: got {} unique shares, require {}",
+                partial_signatures.len(),
+                required_threshold
+            ),
+            session_id: payload.session_id,
+            com_k_hex: String::new(),
+            partial_signatures: vec![],
+        });
     }
 
     // Insert signing session into database
@@ -352,5 +436,73 @@ pub async fn handle_leader_sign(
                 partial_signatures: vec![],
             })
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn response(share_index: Option<u32>) -> SignShareResponse {
+        SignShareResponse {
+            status: "SUCCESS".to_string(),
+            share_index,
+            signature_share_hex: "partial-signature".to_string(),
+        }
+    }
+
+    #[test]
+    fn guardian_share_requires_unique_non_zero_index() {
+        let mut seen_indices = HashSet::from([1]);
+        let mut partial_signatures = vec![PartialSignatureInfo {
+            index: 1,
+            signature_hex: "leader-signature".to_string(),
+        }];
+
+        assert!(append_guardian_share(
+            response(Some(2)),
+            &mut seen_indices,
+            &mut partial_signatures,
+        )
+        .is_ok());
+        assert_eq!(partial_signatures.len(), 2);
+
+        assert!(append_guardian_share(
+            response(Some(2)),
+            &mut seen_indices,
+            &mut partial_signatures,
+        )
+        .is_err());
+        assert!(append_guardian_share(
+            response(Some(0)),
+            &mut seen_indices,
+            &mut partial_signatures,
+        )
+        .is_err());
+        assert!(append_guardian_share(
+            response(None),
+            &mut seen_indices,
+            &mut partial_signatures,
+        )
+        .is_err());
+        assert_eq!(partial_signatures.len(), 2);
+    }
+
+    #[test]
+    fn signing_quorum_rejects_sub_threshold_share_set() {
+        let partial_signatures = vec![
+            PartialSignatureInfo {
+                index: 1,
+                signature_hex: "leader-signature".to_string(),
+            },
+            PartialSignatureInfo {
+                index: 2,
+                signature_hex: "guardian-signature".to_string(),
+            },
+        ];
+
+        assert!(!has_signing_quorum(&partial_signatures, 3));
+        assert!(has_signing_quorum(&partial_signatures, 2));
+        assert!(!has_signing_quorum(&partial_signatures, 0));
     }
 }
