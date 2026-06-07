@@ -1,105 +1,308 @@
-# Model Bisnis & Konsep Monetisasi Nimbus Protocol
+# Model Bisnis Nimbus Protocol
 
-Nimbus Protocol dirancang dengan model bisnis yang ramah bagi pengguna serta ekosistem terdesentralisasi, dengan memindahkan beban biaya operasional ke aktivitas bernilai tinggi (**Whales**, **AI Agents**, dan **Institusi**) serta optimalisasi yield on-chain secara aman menggunakan manajemen risiko modal yang kokoh.
+## 1. Ringkasan
 
----
+Nimbus adalah **shielded payment pool untuk Web3**. Pengguna memasukkan stablecoin
+ke pool Nimbus, lalu manusia, aplikasi, atau AI agent dapat melakukan pembayaran
+tanpa membuka hubungan langsung antara alamat sumber dana dan pembayaran tersebut.
 
-## 1. Filosofi Bisnis: Zero-Cost Retail & Cross-Subsidization
-
-Pada fase awal, tantangan terbesar protokol pembayaran baru adalah dinginnya adopsi jika pengguna dibebani biaya transaksi tinggi. Oleh karena itu, Nimbus menerapkan prinsip **subsidi silang (cross-subsidization)**:
-*   **Retail/Pengguna Kasual**: Biaya transaksi sangat murah hingga mendekati **0%** (hanya membayar gas fee L2 dasar).
-*   **Whale & Institusi**: Menanggung biaya penarikan/minting premium kecil (0.1% - 0.2%) serta biaya likuiditas instan (*fast-path fee*) demi mendapatkan privasi mutlak dan kecepatan eksekusi tinggi tanpa slippage atau frontrunning.
-*   **AI Agents**: Membayar biaya routing mikro per transaksi API untuk mendapatkan kecepatan transaksi nanopayment tanpa latensi ZK-proof.
-
----
-
-## 2. Struktur Biaya & Sumber Pendapatan Protokol
-
-### A. Untuk Toko / Merchant (Retail Pembayaran Offline - Cadangan/Opsional/Lisensi IP)
-*   **Merchant Discount Rate (MDR)**: 
-    *   **Toko Kecil/Mikro**: **0%** biaya transaksi untuk volume di bawah batas tertentu.
-    *   **Toko Menengah/Besar**: **0.1%** per transaksi (jauh lebih murah dari Visa/Mastercard atau QRIS lokal).
-*   **Nilai Akuisisi**: Modul ini disimpan sebagai inovasi cadangan. Perusahaan ritel besar atau institusi keuangan yang ingin menerapkan e-cash luring dapat melisensikan atau mengakuisisi IP/teknologi mesin slashing Shamir ini dari Nimbus.
-
-### B. Untuk Pengguna & Whale (Polymarket Private Betting - Fase B)
-*   **Minting Fee (Deposit)**: **0.1%** dari nominal stablecoin yang dikunci ke dalam smart contract.
-*   **Redemption Fee (Penarikan)**: **0.15%** saat mencairkan token privat kembali ke alamat publik.
-*   **Fast-Path Liquidity Premium (Eksekusi Instan Lintas Rantai)**:
-    *   Pengguna dikenakan **biaya premi likuiditas 0.05% - 0.10%** dari nilai transaksi untuk menggunakan jalur talangan cepat relayer (<5 detik) dibanding antrean CCIP standar (15 menit).
-    *   **Penerapan 3 Fase Rilis Talangan**:
-        1.  *Fase 1 (Launch)*: Jalur cepat dinonaktifkan. Semua transaksi menggunakan CCIP standar (15 menit) untuk menghilangkan kebutuhan modal awal dan risiko finansial.
-        2.  *Fase 2 (Bootstrap)*: Fitur talangan diaktifkan menggunakan modal **hasil yield akumulasi Treasury Nimbus sendiri** secara mandiri (fee premi 100% milik protokol).
-        3.  *Fase 3 (Scaling)*: Membuka Public Liquidity Pool dengan sistem **Dynamic Pool Cap** (membatasi ukuran pool berdasarkan volume aktif) guna menjaga tingkat utilitas modal tinggi dan memberikan APY yang sangat kompetitif bagi penyedia likuiditas (LPs) tanpa inefisiensi modal.
-
-### C. Pendapatan Relayer (Gas Markup EIP-7702)
-*   **Mekanisme**: Relayer batching (`nimbus-node`) menyatukan transaksi spend pengguna ke dalam satu antrean mempool (menghemat gas fee hingga 40%).
-*   **Markup**: Protokol mengambil margin sekitar **5% - 10%** dari *nilai penghematan gas fee* tersebut saat menagih biaya gas dalam bentuk stablecoin (USDC) ke dompet pengguna. Pengguna tetap merasa membayar gas fee lebih murah dibanding melakukan transaksi mandiri.
-
-### D. DeFi & RWA Yield Integration (Model Brankas Dinamis / Dynamic Vault Model)
-*   **Mekanisme**: Setiap token Nimbus yang beredar dijamin 1:1 oleh stablecoin (USDC) yang terkunci di smart contract.
-*   **Optimalisasi (Brankas Dinamis)**: Selama dana tersebut mengendap dan belum dicairkan oleh pemegang token, smart contract secara dinamis menyalurkan dana jaminan ini berdasarkan volume transaksi historis (7-Epoch Moving Average):
-    1.  **Cadangan Kas Dinamis (15% - 45%)**: Jumlah kas likuid yang disimpan di kontrak disesuaikan secara dinamis (default 30%, naik ke 45% saat volume tinggi untuk proteksi penarikan whale, turun ke 15% saat volume rendah).
-    2.  **Alokasi Non-Kas (Rasio 5:2)**: Sisa dana non-kas diinvestasikan secara produktif dengan pembagian ≈71.4% ke DeFi (Aave V3 APY ~3%-4%) dan ≈28.6% ke RWA T-Bills (BlackRock BUIDL / Ondo USDY APY ~5%).
-*   **Keuntungan**: Bunga yang dihasilkan sepenuhnya menjadi milik kas protokol dan penyedia likuiditas (Issuer), tanpa mengurangi saldo pokok pengguna sepeser pun.
-
-### E. AI Agents Nanopayments (x402 Facilitator - Fase C)
-*   **Mekanisme**: AI Agent menggunakan `AgentTokenPool` untuk membayar API secara otomatis melalui rute HTTP `402 Payment Required`.
-*   **Monetisasi**: Protokol memotong biaya routing mikro (**0.05%** per transaksi atau flat fee kecil per API call) untuk memfasilitasi transaksi mikro berfrekuensi tinggi ini.
-
-### F. ZK-Compliance Verification (Kepatuhan Institusi - Fase A)
-*   **Mekanisme**: Sebelum melakukan deposit, pengguna korporat melakukan pembuktian ZK-SNARK secara lokal bahwa alamat mereka berada di dalam daftar Merkle Tree bersih (tidak masuk daftar OFAC/sanksi).
-*   **Monetisasi**: Protokol menarik biaya verifikasi kepatuhan (*Compliance Verification Fee*) untuk memeriksa ZK-proof dan Merkle proof di kontrak on-chain L2.
-
----
-
-## 3. Keuntungan bagi Masing-Masing Pihak
-
-| Pihak | Keuntungan Menggunakan Nimbus | Biaya yang Dikenakan |
-| :--- | :--- | :--- |
-| **Merchant / Toko** | Transaksi instan (< 1 detik), tanpa risiko penipuan/double-spend, tanpa biaya sewa alat EDC. | 0% (toko kecil) atau 0.1% (toko besar). |
-| **Whale / Bettor** | Melindungi alpha taruhan Polymarket, anti copy-trading, taruhan gasless satu klik. | 0.1% - 0.2% per aktivitas minting/redemption + 0.05% - 0.1% fast-path fee (setelah Fase 2). |
-| **AI Agents** | Pembayaran API otonom tanpa MetaMask, menjaga kerahasiaan kueri data komersial. | 0.05% routing fee per transaksi API. |
-| **Institusi** | Transaksi privat yang patuh hukum (OFAC/AML-compliant). | ZK-Compliance Verification Fee. |
-| **Protokol (Kita)** | Akumulasi pendapatan dari yield DeFi/RWA, markup gas relayer, biaya routing x402, dan biaya kepatuhan. | N/A (Penerima laba). |
-
----
-
-## 5. Token Tata Kelola $NIMB (2026 Real Yield & Sustainable Tokenomics)
-
-Untuk menyelaraskan insentif jangka panjang antara pendiri, investor, dan komunitas tanpa menimbulkan risiko klasifikasi regulasi (*securities/investasi pasif*) atau ketidakstabilan kas, Nimbus mengadopsi model **Real Yield & Risk-Based Staking**:
+Nimbus tidak menjual AI dan bukan bisnis SaaS. Nimbus menyediakan smart contract,
+SDK, relayer, dan jaringan guardian sebagai infrastruktur pembayaran privat.
 
 ```text
-Pendapatan Protokol (USDC)
-       │
-       ├──► 40% ──► Buyback & Burn $NIMB (Tekanan Deflasi Pasar)
-       │
-       ├──► 40% ──► Safety Module Staking (USDC Yield untuk Penanggung Risiko)
-       │
-       └──► 20% ──► Treasury Reserve Fund (Biaya Operasional & R&D)
+Pemilik dana
+    |
+    | shield stablecoin
+    v
+Nimbus Privacy Pool
+    |
+    | private payment melalui SDK
+    v
+Merchant / API / dApp
 ```
 
-### Mekanisme Akumulasi Nilai yang Berkelanjutan:
+SDK diberikan gratis agar wallet, dApp, API provider, dan developer AI dapat
+mengintegrasikan Nimbus. Protokol memperoleh pendapatan ketika jaringan benar-benar
+digunakan.
 
-1. **Buyback & Burn Dinamis (40% Pendapatan)**:
-   * Sebesar 40% dari total fee USDC yang dikumpulkan protokol digunakan untuk membeli kembali (*buyback*) token $NIMB dari pasar terbuka secara otomatis, lalu memusnahkannya (*burn*). 
-   * **Manfaat**: Menciptakan tekanan beli dan mengurangi total suplai token secara organik, meningkatkan nilai jangka panjang bagi seluruh pemegang token tanpa memicu klasifikasi sekuritas karena dividen pasif.
+## 2. Nilai Utama
 
-2. **Safety Module Staking Yield (40% Pendapatan)**:
-   * Dividen USDC **tidak dibagikan secara pasif** kepada semua pemegang koin. Pengguna harus mengunci token $NIMB mereka ke dalam **Safety Module (Modul Pengaman)**.
-   * **Peran Penanggung Risiko**: Staker di Safety Module bertindak sebagai penyedia jaminan asuransi (*backstop*) jika protokol mengalami kegagalan teknis, eksploitasi smart contract, atau defisit akibat kegagalan pemotongan slashing luring.
-   * **Imbal Dagang**: Sebagai kompensasi atas risiko penjaminan tersebut, staker menerima yield USDC secara rutin. Hal ini mengubah dividen menjadi **biaya jasa penjaminan aktif** yang sehat secara ekonomi dan aman secara hukum.
+Nimbus memberikan:
 
-3. **Treasury Reserve Fund (20% Pendapatan)**:
-   * Sebesar 20% pendapatan disimpan secara ketat di kas protokol (*Treasury*) untuk membiayai operasional, audit kode berkala, riset kriptografi lanjutan, serta pemasaran.
+- pemutusan hubungan publik antara funding wallet dan pembayaran;
+- ephemeral identifier untuk mengurangi address clustering;
+- private payment bagi manusia dan autonomous agent;
+- relayer agar pengguna tidak perlu memegang native gas token;
+- threshold guardian untuk signing dan accountable privacy;
+- nullifier untuk mencegah double-spending;
+- selective disclosure untuk audit atau proses compliance yang sah.
 
----
+Nimbus tidak menjanjikan anonimitas mutlak. Nominal, waktu, recipient, funding
+source, gas payer, dan pola withdrawal masih dapat menimbulkan korelasi. Produk
+harus diposisikan sebagai **confidential settlement**, bukan alat untuk menghindari
+hukum.
 
-## 6. Rencana Aksi Go-To-Market Awal
+## 3. Pihak dalam Jaringan
 
-1.  **Fase 1: Tarik Volume dari Whale Polymarket (Fase B)**
-    *   Fokus memasarkan fitur taruhan privat Polymarket dengan pre-funding instan. Ini akan menghasilkan volume transaksi besar (TVL) awal di smart contract kita, yang menghasilkan yield DeFi/RWA instan untuk mendanai operasional awal protokol.
-2.  **Fase 2: Integrasi SDK AI Agent untuk API Provider (Fase C)**
-    *   Menawarkan Nimbus x402 SDK kepada penyedia API kecerdasan buatan agar AI Agent dapat membayar kueri secara privat dan otonom.
-3.  **Fase 3: Layanan Kepatuhan Institusional (Fase A)**
-    *   Membuka pintu gerbang bagi dana korporat dengan menyediakan fitur ZK-Compliance agar mereka bisa bertransaksi secara privat namun tetap lolos audit hukum.
+| Pihak | Peran |
+|---|---|
+| Pengguna | Memiliki dan membelanjakan dana dari privacy pool |
+| AI agent | Berbelanja memakai mandat pemilik melalui Nimbus SDK |
+| Merchant | API provider, dApp, marketplace, game, atau penerima pembayaran |
+| Relayer | Membayar gas native terlebih dahulu dan mengirim transaksi |
+| Guardian | Menjalankan threshold signing dan menjaga availability |
+| Protocol treasury | Membiayai pengembangan, RPC, domain, audit, monitoring, dan bug bounty |
 
+Merchant bukan hanya toko retail. Dalam konteks Nimbus, merchant adalah pihak mana
+pun yang menerima pembayaran melalui protokol.
+
+## 4. Alur Pembayaran
+
+### 4.1 Shield
+
+Pengguna memasukkan stablecoin ke Nimbus Privacy Pool. Setelah proses issuance
+selesai, pengguna memperoleh kemampuan melakukan private spend tanpa memakai
+funding wallet untuk setiap pembelian.
+
+### 4.2 Private Spend
+
+Pengguna atau agent membuat payment payload melalui SDK. Relayer memverifikasi
+payload, membayar gas native, dan mengirim settlement. Merchant menerima nominal
+harga yang diminta.
+
+```text
+Harga merchant + Network Fee = total yang dibayar pengguna
+```
+
+Merchant tidak dipaksa menanggung biaya privasi milik pengirim.
+
+Kontrak saat ini memotong protocol fee dari `amount`. Karena itu, SDK harus
+melakukan gross-up saat merchant meminta nominal pasti:
+
+```text
+contract amount = harga merchant / (1 - 0,0015)
+```
+
+Dengan cara ini, fee tetap berasal dari pengirim dan merchant menerima harga yang
+diminta. Pembulatan final harus mengikuti integer stablecoin dan diverifikasi
+terhadap quote kontrak.
+
+### 4.3 Unshield
+
+Pengguna dapat mengeluarkan saldo dari privacy pool menuju alamat publik. Proses
+ini dikenai protocol fee karena menggunakan privacy boundary dan infrastruktur
+jaringan.
+
+## 5. Model Biaya Target
+
+| Aktivitas | Biaya target | Penerima |
+|---|---:|---|
+| Deposit/shield | 0,10% dari nominal | Protocol treasury |
+| Private spend/transaction | 0,15% dari nominal | Protocol treasury |
+| Execution fee | Fixed quote sebelum tanda tangan | Relayer/protokol |
+| Unshield tanpa pembayaran | 0,15% dari nominal | Protocol treasury |
+| Fast/cross-chain settlement | Quote dinamis | Relayer/LP, jaringan, treasury |
+| SDK dan integrasi | Gratis | N/A |
+
+Persentase tersebut adalah hipotesis awal yang harus diuji di testnet dan kepada
+calon integrator. Governance tidak boleh dapat menaikkannya tanpa batas.
+
+### 5.1 Network Fee
+
+Biaya pengguna terdiri dari protocol fee dan fixed execution quote:
+
+```text
+Network Fee =
+    protocol fee 0,15% dari nominal transaksi
+  + fixed execution quote
+```
+
+Contoh ilustratif, bukan harga tetap:
+
+```text
+Harga merchant                  100,0000 USDC
+Gross-up protocol fee            ~0,1502 USDC
+Execution quote                   0,0250 USDC
+                                -------------
+Total pengguna                 ~100,1752 USDC
+Merchant menerima              100,0000 USDC
+```
+
+Relayer membayar gas dalam ETH terlebih dahulu. Execution quote ditetapkan sebelum
+user menandatangani dan cukup untuk menutup jalur single. Jika beberapa transaksi
+berhasil dibatch dengan biaya aktual lebih rendah, selisihnya menjadi margin
+efisiensi relayer/protokol.
+
+Protocol fee `0,15%` masuk ke treasury. Treasury kemudian membiayai guardian,
+domain, RPC, audit, pengembangan, monitoring, dan cadangan keamanan. User tidak
+ditagih guardian fee atau hosting fee sebagai komponen terpisah.
+
+### 5.2 Execution Quote dan Margin Batch
+
+Execution quote bukan klaim penggantian gas aktual. User mengetahui total biaya
+sebelum tanda tangan. Relayer boleh menggabungkan 2 sampai 8 same-chain spend dan
+menyimpan selisih efisiensi setelah gas dibayar.
+
+Karena itu:
+
+- quote harus cukup menutup jalur transaksi single;
+- batch menambah waktu tunggu normal maksimal sekitar 1 detik dan hard timeout
+  sekitar 2 detik sebelum broadcast;
+- cross-chain dan transaksi dengan deadline dekat tidak dipaksa menunggu batch;
+- pendapatan protokol berasal dari fee deposit `0,10%` dan transaksi `0,15%`;
+- biaya harus ditampilkan sebagai satu quote sebelum pengguna menandatangani.
+
+Payload harus memuat `max_fee` dan expiry agar relayer atau governance tidak dapat
+menaikkan biaya setelah persetujuan pengguna.
+
+## 6. AI Agent dan SDK
+
+Nimbus tidak membuat atau mengoperasikan AI milik pengguna. Developer memasang
+Nimbus SDK ke agent mereka agar agent dapat membayar merchant atau API secara
+privat.
+
+```text
+Pemilik mengisi AgentTokenPool
+    |
+    | menetapkan mandat dan batas pengeluaran
+    v
+AI agent menerima HTTP 402
+    |
+    | SDK membuat ephemeral payment payload
+    v
+Nimbus melakukan private settlement
+    |
+    v
+API provider menerima stablecoin
+```
+
+Mandat agent minimal harus mencakup:
+
+- batas saldo;
+- maksimum per transaksi;
+- batas pengeluaran harian;
+- merchant atau kategori yang diizinkan;
+- expiry;
+- nonce dan nullifier;
+- maksimum Network Fee.
+
+Nanopayment tidak boleh mengirim satu transaksi on-chain untuk setiap API call.
+Saldo atau authorization kecil dikumpulkan dan diselesaikan secara batch agar
+biaya jaringan tidak lebih besar daripada nilai pembelian.
+
+## 7. Dynamic Vault: 30/50/20
+
+Rasio `30/50/20` mengatur collateral pengguna, bukan pembagian Network Fee:
+
+| Alokasi normal | Porsi | Fungsi |
+|---|---:|---|
+| Kas likuid | 30% | Memenuhi spend dan withdrawal |
+| Aave | 50% | Menghasilkan yield likuid |
+| RWA | 20% | Diversifikasi yield dan reserve |
+
+Model aktual bersifat dinamis. Target kas dapat bergerak antara 15% dan 45%
+berdasarkan kebutuhan likuiditas. Sisa dana non-kas dibagi dengan rasio 5:2 antara
+DeFi dan RWA, sehingga kondisi normal menghasilkan 30/50/20.
+
+```text
+Principal pengguna  -> Dynamic Vault
+Network Fee         -> operator dan treasury
+```
+
+Principal, yield, dan pendapatan operator harus dicatat terpisah. Yield hanya
+pendapatan tambahan dan tidak boleh digunakan untuk menutupi unit economics
+relayer yang negatif. Sebelum mainnet, penggunaan collateral di DeFi/RWA harus
+melewati audit solvency, liquidity stress test, dan kajian hukum.
+
+## 8. Pendapatan dan Biaya Operasional
+
+### Protocol treasury menerima
+
+- deposit/shield fee `0,10%`;
+- private spend/unshield fee `0,15%`;
+- bagian yang transparan dari fast/cross-chain settlement;
+- yield vault jika model tersebut telah diaudit dan diizinkan.
+
+### Protocol treasury membayar
+
+- pengembangan kontrak, node, dan SDK;
+- RPC dan data availability;
+- domain, hosting, database, dan monitoring;
+- audit keamanan dan bug bounty;
+- incident reserve;
+- subsidi testnet atau akuisisi integrator yang memiliki batas anggaran.
+
+### Relayer menerima
+
+- fixed execution quote;
+- margin efisiensi batch setelah biaya gas aktual dibayar;
+- premium modal dan risiko untuk fast/cross-chain settlement.
+
+### Guardian menerima
+
+- reward dari anggaran protocol treasury berdasarkan pekerjaan signing yang valid;
+- reward hanya setelah memenuhi aturan availability dan tidak melakukan
+  double-signing.
+
+Pada testnet, seluruh operator dapat dimiliki Nimbus. Pembukuan tetap harus
+memisahkan pendapatan relayer, guardian, dan treasury agar biaya jaringan nyata
+dapat diukur sebelum operator eksternal dibuka.
+
+## 9. Unit Economics
+
+Contoh tahunan:
+
+```text
+Deposit volume     100.000.000 USDC x 0,10% = 100.000 USDC
+Spend volume        80.000.000 USDC x 0,15% = 120.000 USDC
+                                             ------------
+Gross protocol revenue                       220.000 USDC
+```
+
+Bagian execution quote yang mengganti gas bukan revenue bersih. Selisih setelah
+gas aktual dibayar adalah margin relayer/protokol. Reward guardian dibayar dari
+anggaran treasury sampai tersedia mekanisme operator network yang teruji.
+
+Metrik utama:
+
+- shielded volume;
+- private settlement volume;
+- active wallets dan active agents;
+- jumlah integrasi SDK;
+- biaya gas aktual per settlement;
+- pendapatan bersih per transaksi;
+- uptime relayer dan guardian;
+- collateral utilization dan kemampuan memenuhi withdrawal.
+
+## 10. Strategi Pertumbuhan
+
+1. Buktikan private settlement end-to-end di testnet tanpa mock.
+2. Integrasikan SDK ke wallet, dApp, dan API provider sebagai distribution channel.
+3. Gunakan AI agent sebagai sumber transaksi, bukan sebagai produk Nimbus.
+4. Buka relayer dan guardian eksternal setelah reward serta slashing teruji.
+5. Aktifkan fast path dan cross-chain hanya setelah quote, reimbursement, dan
+   accounting aman.
+6. Tunda token, buyback, dan distribusi staking sampai protokol memiliki penggunaan
+   serta pendapatan nyata.
+
+## 11. Batas Implementasi Saat Ini
+
+Dokumen ini menjelaskan **model bisnis target**, bukan seluruh perilaku kontrak
+yang sudah aktif.
+
+Implementasi saat ini sudah:
+
+- memotong `0,1%` saat deposit;
+- memotong `0,15%` saat spend/redemption.
+
+Implementasi saat ini masih:
+
+- sudah memiliki entrypoint dan broadcaster batch untuk 2 sampai 8 same-chain
+  spend, tetapi penghematan gas belum dibenchmark di testnet;
+- belum menagih fixed execution quote kepada pengguna;
+- belum memiliki signed `max_execution_fee` dan quote expiry;
+- belum membuktikan settlement batch nanopayment dengan beban produksi.
+
+Sebelum mainnet, implementasi fee harus direfaktor menjadi policy terpusat,
+memiliki batas maksimum permanen, timelock, event perubahan, signed quote, dan
+accounting terpisah untuk principal, operator, serta treasury.

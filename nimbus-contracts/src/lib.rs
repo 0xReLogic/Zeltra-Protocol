@@ -342,6 +342,54 @@ impl Nimbus {
         )
     }
 
+    pub fn batch_spend(
+        &mut self,
+        nullifiers: Vec<FixedBytes<32>>,
+        alpha_neg_items: Vec<Bytes>,
+        pk_iss_items: Vec<Bytes>,
+        recipients: Vec<Address>,
+        amounts: Vec<U256>,
+        recipient_or_intent_hashes: Vec<FixedBytes<32>>,
+        expiries: Vec<U256>,
+        nonces: Vec<FixedBytes<32>>,
+    ) -> Result<bool, Vec<u8>> {
+        const MAX_BATCH_SIZE: usize = 8;
+        let len = nullifiers.len();
+        if len == 0 {
+            return Err(b"EMPTY_BATCH".to_vec());
+        }
+        if len > MAX_BATCH_SIZE {
+            return Err(b"BATCH_TOO_LARGE".to_vec());
+        }
+        if alpha_neg_items.len() != len
+            || pk_iss_items.len() != len
+            || recipients.len() != len
+            || amounts.len() != len
+            || recipient_or_intent_hashes.len() != len
+            || expiries.len() != len
+            || nonces.len() != len
+        {
+            return Err(b"BATCH_LENGTH_MISMATCH".to_vec());
+        }
+
+        for i in 0..len {
+            let valid = self._spend(
+                nullifiers[i],
+                alpha_neg_items[i].clone(),
+                pk_iss_items[i].clone(),
+                recipients[i],
+                amounts[i],
+                recipient_or_intent_hashes[i],
+                expiries[i],
+                nonces[i],
+            )?;
+            if !valid {
+                return Err(b"BATCH_ITEM_INVALID".to_vec());
+            }
+        }
+        Ok(true)
+    }
+
     pub fn spend_and_buy_shares(
         &mut self,
         nullifier: FixedBytes<32>,
@@ -1417,5 +1465,45 @@ mod tests {
             vec![0; 128].into(),
         ).unwrap();
         assert!(is_valid_registered);
+    }
+
+    #[test]
+    fn test_batch_spend_rejects_invalid_sizes() {
+        let mut contract = Nimbus::default();
+        assert_eq!(
+            contract.batch_spend(
+                vec![], vec![], vec![], vec![], vec![], vec![], vec![], vec![],
+            ),
+            Err(b"EMPTY_BATCH".to_vec())
+        );
+
+        let empty = || Bytes::from(Vec::<u8>::new());
+        assert_eq!(
+            contract.batch_spend(
+                vec![FixedBytes::ZERO; 9],
+                (0..9).map(|_| empty()).collect(),
+                (0..9).map(|_| empty()).collect(),
+                vec![Address::ZERO; 9],
+                vec![U256::ZERO; 9],
+                vec![FixedBytes::ZERO; 9],
+                vec![U256::ZERO; 9],
+                vec![FixedBytes::ZERO; 9],
+            ),
+            Err(b"BATCH_TOO_LARGE".to_vec())
+        );
+
+        assert_eq!(
+            contract.batch_spend(
+                vec![FixedBytes::ZERO; 2],
+                vec![empty()],
+                vec![empty(), empty()],
+                vec![Address::ZERO; 2],
+                vec![U256::ZERO; 2],
+                vec![FixedBytes::ZERO; 2],
+                vec![U256::ZERO; 2],
+                vec![FixedBytes::ZERO; 2],
+            ),
+            Err(b"BATCH_LENGTH_MISMATCH".to_vec())
+        );
     }
 }

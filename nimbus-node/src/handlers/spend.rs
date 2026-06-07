@@ -7,6 +7,8 @@
 
 use axum::Json;
 use crate::{state::AppState, dto::*};
+use crate::database::QueuedSpend;
+use crate::evm_client::BatchSpendItem;
 
 pub async fn handle_spend(
     axum::extract::State(state): axum::extract::State<AppState>,
@@ -142,90 +144,174 @@ pub async fn process_spend_batch(state: &AppState) {
         return;
     }
 
+    let mut same_chain = Vec::new();
+    let mut direct = Vec::new();
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+
     for item in items {
-        let request = &item.request;
-        // --- Finding #9: Deadline enforcement during batch processing ---
-        if let Some(deadline) = request.deadline {
-            let now = std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap_or_default()
-                .as_secs();
-            if now > deadline {
-                eprintln!(
-                    "  SLIPPAGE-REJECT: Transaction {}... deadline expired (deadline={}, now={})",
-                    &request.nullifier[..8.min(request.nullifier.len())],
-                    deadline,
-                    now
-                );
-                let _ = state.db.fail_spend(item.id, None, "deadline expired before broadcast").await;
-                continue;
-            }
-        }
-        let Some(ref evm_client) = state.evm_client else {
-            let _ = state.db.retry_spend(item.id, "EVM client unavailable", item.retry_count).await;
-            continue;
-        };
-
-        let result = if let Some(cc) = &request.cross_chain {
-            let stablecoin_addr = std::env::var("NIMBUS_STABLECOIN_ADDRESS")
-                .unwrap_or_else(|_| "0x75faf114eafb1bdbe2f0316df893fd58ce46aa4d".to_string());
-            evm_client.broadcast_ccip_transaction(
-                    cc.destination_chain_selector,
-                    &cc.destination_contract,
-                    &request.nullifier,
-                    &request.alpha_neg_hex,
-                    &request.pk_iss_hex,
-                    &request.recipient,
-                    &stablecoin_addr,
-                    None, // Default to standard cross-chain spend (no condition_id)
-                    request.amount,
-                    request.expiry.unwrap_or(0),
-                    request.nonce_hex.as_deref().unwrap_or("0x0000000000000000000000000000000000000000000000000000000000000000"),
-                ).await
+        if item.request.deadline.is_some_and(|deadline| now > deadline) {
+            let _ = state.db.fail_spend(
+                item.id,
+                None,
+                "deadline expired before broadcast",
+            ).await;
+        } else if item.request.cross_chain.is_some() {
+            direct.push(item);
         } else {
-            evm_client.broadcast_spend_transaction(
-                    &request.nullifier,
-                    &request.alpha_neg_hex,
-                    &request.pk_iss_hex,
-                    &request.recipient,
-                    request.amount,
-                    request.recipient_or_intent_hash_hex.as_deref().unwrap_or("0x0000000000000000000000000000000000000000000000000000000000000000"),
-                    request.expiry.unwrap_or(0),
-                    request.nonce_hex.as_deref().unwrap_or("0x0000000000000000000000000000000000000000000000000000000000000000"),
-                ).await
-        };
+            same_chain.push(item);
+        }
+    }
 
-        match result {
-            Ok(outcome) if outcome.success => {
-                if let Err(e) = state.db.mark_spend_submitted(item.id, &outcome.tx_hash).await {
-                    eprintln!("SETTLEMENT: failed to persist submitted tx: {}", e);
+    let batch_enabled = std::env::var("NIMBUS_BATCH_ENABLED")
+        .map(|value| value == "true" || value == "1")
+        .unwrap_or(false);
+    if batch_enabled {
+        while same_chain.len() >= 2 {
+            let take = same_chain.len().min(8);
+            let batch: Vec<_> = same_chain.drain(..take).collect();
+            process_same_chain_batch(state, batch).await;
+        }
+    }
+    direct.extend(same_chain);
+    for item in direct {
+        process_single_spend(state, item).await;
+    }
+}
+
+fn batch_item(item: &QueuedSpend) -> BatchSpendItem {
+    const ZERO_WORD: &str =
+        "0x0000000000000000000000000000000000000000000000000000000000000000";
+    BatchSpendItem {
+        nullifier: item.request.nullifier.clone(),
+        alpha_neg_hex: item.request.alpha_neg_hex.clone(),
+        pk_iss_hex: item.request.pk_iss_hex.clone(),
+        recipient: item.request.recipient.clone(),
+        amount: item.request.amount,
+        recipient_or_intent_hash_hex: item.request.recipient_or_intent_hash_hex
+            .clone().unwrap_or_else(|| ZERO_WORD.to_string()),
+        expiry: item.request.expiry.unwrap_or(0),
+        nonce_hex: item.request.nonce_hex.clone()
+            .unwrap_or_else(|| ZERO_WORD.to_string()),
+    }
+}
+
+async fn process_same_chain_batch(state: &AppState, items: Vec<QueuedSpend>) {
+    let Some(ref evm_client) = state.evm_client else {
+        for item in items {
+            let _ = state.db.retry_spend(
+                item.id, "EVM client unavailable", item.retry_count,
+            ).await;
+        }
+        return;
+    };
+    let payload: Vec<_> = items.iter().map(batch_item).collect();
+    match evm_client.broadcast_spend_batch(&payload).await {
+        Ok(outcome) if outcome.success => {
+            for item in items {
+                if state.db.mark_spend_submitted(item.id, &outcome.tx_hash).await.is_err() {
                     continue;
                 }
-                if let Err(e) = state.db.mark_spend_confirmed(
+                let _ = state.db.mark_spend_confirmed(
                     item.id,
-                    &request.nullifier,
+                    &item.request.nullifier,
                     &outcome.tx_hash,
                     outcome.block_number,
-                ).await {
-                    eprintln!("SETTLEMENT: receipt succeeded but DB confirmation failed: {}", e);
-                }
+                ).await;
             }
-            Ok(outcome) => {
+        }
+        Ok(outcome) => {
+            for item in items {
                 let _ = state.db.mark_spend_submitted(item.id, &outcome.tx_hash).await;
                 let _ = state.db.fail_spend(
                     item.id,
                     Some(&outcome.tx_hash),
-                    "transaction receipt status was reverted",
+                    "batch transaction receipt status was reverted",
                 ).await;
             }
-            Err(e) => {
-                let error = e.to_string();
+        }
+        Err(error) => {
+            let message = error.to_string();
+            for item in items {
                 if item.retry_count >= 7 {
-                    let _ = state.db.fail_spend(item.id, None, &error).await;
+                    let _ = state.db.fail_spend(item.id, None, &message).await;
                 } else {
-                    let _ = state.db.retry_spend(item.id, &error, item.retry_count).await;
+                    let _ = state.db.retry_spend(
+                        item.id, &message, item.retry_count,
+                    ).await;
                 }
             }
+        }
+    }
+}
+
+async fn process_single_spend(state: &AppState, item: QueuedSpend) {
+    const ZERO_WORD: &str =
+        "0x0000000000000000000000000000000000000000000000000000000000000000";
+    let Some(ref evm_client) = state.evm_client else {
+        let _ = state.db.retry_spend(
+            item.id, "EVM client unavailable", item.retry_count,
+        ).await;
+        return;
+    };
+    let request = &item.request;
+    let result = if let Some(cc) = &request.cross_chain {
+        let stablecoin_addr = std::env::var("NIMBUS_STABLECOIN_ADDRESS")
+            .unwrap_or_else(|_| "0x75faf114eafb1bdbe2f0316df893fd58ce46aa4d".to_string());
+        evm_client.broadcast_ccip_transaction(
+            cc.destination_chain_selector,
+            &cc.destination_contract,
+            &request.nullifier,
+            &request.alpha_neg_hex,
+            &request.pk_iss_hex,
+            &request.recipient,
+            &stablecoin_addr,
+            None,
+            request.amount,
+            request.expiry.unwrap_or(0),
+            request.nonce_hex.as_deref().unwrap_or(ZERO_WORD),
+        ).await
+    } else {
+        evm_client.broadcast_spend_transaction(
+            &request.nullifier,
+            &request.alpha_neg_hex,
+            &request.pk_iss_hex,
+            &request.recipient,
+            request.amount,
+            request.recipient_or_intent_hash_hex.as_deref().unwrap_or(ZERO_WORD),
+            request.expiry.unwrap_or(0),
+            request.nonce_hex.as_deref().unwrap_or(ZERO_WORD),
+        ).await
+    };
+
+    match result {
+        Ok(outcome) if outcome.success => {
+            if state.db.mark_spend_submitted(item.id, &outcome.tx_hash).await.is_ok() {
+                let _ = state.db.mark_spend_confirmed(
+                    item.id,
+                    &request.nullifier,
+                    &outcome.tx_hash,
+                    outcome.block_number,
+                ).await;
+            }
+        }
+        Ok(outcome) => {
+            let _ = state.db.mark_spend_submitted(item.id, &outcome.tx_hash).await;
+            let _ = state.db.fail_spend(
+                item.id,
+                Some(&outcome.tx_hash),
+                "transaction receipt status was reverted",
+            ).await;
+        }
+        Err(error) if item.retry_count >= 7 => {
+            let _ = state.db.fail_spend(item.id, None, &error.to_string()).await;
+        }
+        Err(error) => {
+            let _ = state.db.retry_spend(
+                item.id, &error.to_string(), item.retry_count,
+            ).await;
         }
     }
 }

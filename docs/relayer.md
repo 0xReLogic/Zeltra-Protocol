@@ -53,8 +53,15 @@ mengembalikan status `QUEUED`.
     `submitted`, `confirmed`, atau `failed`.
 *   Retry count, error terakhir, tx hash, block number, dan timestamp disimpan.
 *   Item terminal dipertahankan untuk audit dan tidak dihapus setelah satu loop.
-*   Implementasi saat ini mengirim transaksi satu per satu. Klaim penghematan
-    batch/multicall belum berlaku sampai multicall nyata dan benchmark tersedia.
+*   Same-chain spend digabungkan secara adaptif melalui `batchSpend()` dengan
+    ukuran 2 sampai 8 item. Satu item dan cross-chain spend memakai jalur single.
+*   Batch bersifat opt-in melalui `NIMBUS_BATCH_ENABLED=true` dan hanya boleh
+    diaktifkan setelah kontrak yang memiliki `batchSpend()` selesai dideploy.
+*   Batch window normal ditargetkan maksimal 1 detik dengan hard timeout worker
+    2 detik. Pengguna harus diberi tahu bahwa batching dapat menambah latency
+    sekitar 1 sampai 2 detik sebelum broadcast.
+*   Penghematan gas belum boleh dinyatakan sebagai persentase tetap sampai
+    benchmark testnet membandingkan single spend dan batch receipt.
 
 ### C. Batas Privasi Metadata
 
@@ -63,17 +70,20 @@ Worker saat ini mengambil item berdasarkan urutan `created_at` dan `id`.
 Timing correlation, traffic analysis, dan strategi batching/shuffling masih perlu
 threat model serta benchmark tersendiri sebelum diklaim sebagai kontrol privasi.
 
-### D. Rencana Gas Reimbursement dan Markup
+### D. Fixed Execution Quote dan Margin Batch
 
 Biaya transaksi L2 terdiri dari execution cost dan komponen data/L1. Model
-Share-of-Savings Markup masih berupa rencana dan belum menjadi settlement
-accounting aktif:
-1.  **Estimasi Penghematan**: Relayer mengestimasi biaya transaksi jika dikirim secara individual versus biaya riil yang dibagi per transaksi dalam batch.
-2.  **Markup Dinamis**: Relayer memotong **10%** dari selisih penghematan gas (savings) tersebut sebagai margin operasional/profit relayer.
-3.  **Status Implementasi**: Runtime settlement saat ini meneruskan `amount`
+fixed quote masih memerlukan settlement accounting sebelum aktif:
+1.  **Quote Sebelum Tanda Tangan**: User menyetujui execution fee maksimum dan
+    expiry. Quote harus cukup untuk menutup jalur single.
+2.  **Margin Efisiensi**: Jika transaksi berhasil digabungkan, selisih antara
+    execution quote dan biaya batch aktual menjadi margin relayer/protokol.
+3.  **Transparansi**: Biaya disebut `execution fee`, bukan `actual gas`, karena
+    nilainya tidak wajib sama dengan receipt cost setiap user.
+4.  **Status Implementasi**: Runtime settlement saat ini meneruskan `amount`
     yang telah ditandatangani ke contract tanpa pemotongan kedua oleh relayer.
-    Billing gas dan markup belum menjadi accounting production sampai actual
-    receipt cost, rounding, authorization, dan reconciliation ditentukan.
+    Billing execution fee belum production sampai `max_execution_fee`, expiry,
+    rounding, authorization, dan reconciliation diimplementasikan.
 
 ### E. Resilience, Secrets & Request Deduplication
 Mengikuti rekomendasi audit keamanan infrastruktur relayer node 2026:
@@ -99,6 +109,7 @@ Every instance of `nimbus-node` reads configurations from environment variables 
 | `NIMBUS_DB_PATH` | `./nimbus-relayer.db` | Path penyimpanan file SQLite persistent. |
 | `NIMBUS_DB_KEY` | `None` | Kunci enkripsi untuk database SQLite/SQLCipher (Wajib diisi di produksi). |
 | `NIMBUS_X402_RECIPIENT` | `None` | Address EVM penerima settlement x402. Endpoint x402 menolak request jika tidak dikonfigurasi. |
+| `NIMBUS_BATCH_ENABLED` | `false` | Aktifkan adaptive same-chain batching setelah kontrak `batchSpend()` dideploy dan diuji. |
 
 ### Integrasi OpenBao / Vault (Production Mode)
 

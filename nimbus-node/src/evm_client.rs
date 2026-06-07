@@ -22,6 +22,17 @@ sol! {
         bytes32 nonce
     ) external returns (bool);
 
+    function batchSpend(
+        bytes32[] calldata nullifiers,
+        bytes[] calldata alphaNegItems,
+        bytes[] calldata pkIssItems,
+        address[] calldata recipients,
+        uint256[] calldata amounts,
+        bytes32[] calldata recipientOrIntentHashes,
+        uint256[] calldata expiries,
+        bytes32[] calldata nonces
+    ) external returns (bool);
+
     struct EVMTokenAmount {
         address token;
         uint256 amount;
@@ -59,6 +70,18 @@ pub struct TransactionOutcome {
     pub tx_hash: String,
     pub block_number: u64,
     pub success: bool,
+}
+
+#[derive(Clone, Debug)]
+pub struct BatchSpendItem {
+    pub nullifier: String,
+    pub alpha_neg_hex: String,
+    pub pk_iss_hex: String,
+    pub recipient: String,
+    pub amount: u64,
+    pub recipient_or_intent_hash_hex: String,
+    pub expiry: u64,
+    pub nonce_hex: String,
 }
 
 impl EvmClient {
@@ -310,6 +333,102 @@ impl EvmClient {
         println!("  Tx Hash     : {}", outcome.tx_hash);
 
         Ok(outcome)
+    }
+
+    pub async fn broadcast_spend_batch(
+        &self,
+        items: &[BatchSpendItem],
+    ) -> Result<TransactionOutcome> {
+        if !(2..=8).contains(&items.len()) {
+            anyhow::bail!("batch size must be between 2 and 8");
+        }
+
+        let mut nullifiers = Vec::with_capacity(items.len());
+        let mut alpha_neg_items = Vec::with_capacity(items.len());
+        let mut pk_iss_items = Vec::with_capacity(items.len());
+        let mut recipients = Vec::with_capacity(items.len());
+        let mut amounts = Vec::with_capacity(items.len());
+        let mut recipient_or_intent_hashes = Vec::with_capacity(items.len());
+        let mut expiries = Vec::with_capacity(items.len());
+        let mut nonces = Vec::with_capacity(items.len());
+
+        for item in items {
+            let nullifier = hex::decode(item.nullifier.trim_start_matches("0x"))
+                .context("Invalid batch nullifier hex")?;
+            if nullifier.len() != 32 {
+                anyhow::bail!("Invalid batch nullifier length");
+            }
+            let mut nullifier_fixed = [0u8; 32];
+            nullifier_fixed.copy_from_slice(&nullifier);
+            nullifiers.push(nullifier_fixed.into());
+
+            let alpha_neg = hex::decode(item.alpha_neg_hex.trim_start_matches("0x"))
+                .context("Invalid batch alpha_neg hex")?;
+            if alpha_neg.len() != 128 {
+                anyhow::bail!("Invalid batch alpha_neg length");
+            }
+            alpha_neg_items.push(Bytes::from(alpha_neg));
+
+            let pk_iss = hex::decode(item.pk_iss_hex.trim_start_matches("0x"))
+                .context("Invalid batch pk_iss hex")?;
+            if pk_iss.len() != 256 {
+                anyhow::bail!("Invalid batch pk_iss length");
+            }
+            pk_iss_items.push(Bytes::from(pk_iss));
+
+            recipients.push(Address::from_str(&item.recipient)
+                .context("Invalid batch recipient")?);
+            amounts.push(U256::from(item.amount));
+
+            let intent_hash = hex::decode(
+                item.recipient_or_intent_hash_hex.trim_start_matches("0x"),
+            )
+            .context("Invalid batch recipient_or_intent_hash hex")?;
+            if intent_hash.len() != 32 {
+                anyhow::bail!("Invalid batch recipient_or_intent_hash length");
+            }
+            let mut intent_hash_fixed = [0u8; 32];
+            intent_hash_fixed.copy_from_slice(&intent_hash);
+            recipient_or_intent_hashes.push(intent_hash_fixed.into());
+
+            expiries.push(U256::from(item.expiry));
+
+            let nonce = hex::decode(item.nonce_hex.trim_start_matches("0x"))
+                .context("Invalid batch nonce hex")?;
+            if nonce.len() != 32 {
+                anyhow::bail!("Invalid batch nonce length");
+            }
+            let mut nonce_fixed = [0u8; 32];
+            nonce_fixed.copy_from_slice(&nonce);
+            nonces.push(nonce_fixed.into());
+        }
+
+        let call_data = batchSpendCall {
+            nullifiers,
+            alphaNegItems: alpha_neg_items,
+            pkIssItems: pk_iss_items,
+            recipients,
+            amounts,
+            recipientOrIntentHashes: recipient_or_intent_hashes,
+            expiries,
+            nonces,
+        }.abi_encode();
+
+        let gas_price = self.get_gas_price().await.unwrap_or(20_000_000);
+        let max_fee = gas_price * 125 / 100;
+        let gas_limit = 250_000u64
+            .saturating_add(850_000u64.saturating_mul(items.len() as u64));
+
+        let tx = TransactionRequest::default()
+            .with_to(self.contract_address)
+            .with_value(U256::ZERO)
+            .with_gas_limit(gas_limit)
+            .with_max_fee_per_gas(max_fee)
+            .with_max_priority_fee_per_gas(1_000_000)
+            .with_input(Bytes::from(call_data));
+
+        println!("RELAYER: Broadcasting batch of {} same-chain spends", items.len());
+        self.send_tx_with_fallback(tx).await
     }
 
     pub async fn broadcast_ccip_transaction(

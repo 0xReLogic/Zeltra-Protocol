@@ -1304,6 +1304,82 @@ Sisa hard test: kill process pada setiap boundary broadcast/receipt, concurrent
 worker, disk full, corrupt DB, dan reconciliation sender+nonce tetap mengikuti
 HT-06.
 
+### Adaptive Private Spend Batching dan Monetisasi
+
+Decision:
+`research/decisions/DEC-006-adaptive-private-spend-batching.md`
+
+Tujuan:
+
+- Menggabungkan 2 sampai 8 same-chain spend dalam satu transaksi on-chain.
+- User menyetujui fixed execution quote sebelum tanda tangan.
+- User diberi tahu batching dapat menambah latency sekitar 1 sampai 2 detik.
+- Selisih antara execution quote dan biaya batch aktual menjadi margin
+  relayer/protokol.
+- Merchant tetap menerima nominal yang diminta dan protocol fee 0,15% tidak
+  berubah.
+
+Fondasi kode yang sudah selesai:
+
+- [x] Tambahkan entrypoint contract `batch_spend()` dengan maksimum 8 item.
+- [x] Validasi empty batch, ukuran maksimum, dan panjang seluruh array.
+- [x] Pertahankan verifikasi signature, nullifier, amount, recipient, expiry,
+  dan nonce untuk setiap item melalui `_spend()`.
+- [x] Tambahkan Alloy ABI dan broadcaster `batchSpend()` pada EVM client.
+- [x] Kelompokkan 2-8 same-chain spend; single item dan cross-chain tetap
+  memakai jalur single.
+- [x] Gunakan satu tx hash dan receipt batch untuk seluruh item terkait.
+- [x] Tambahkan feature flag `NIMBUS_BATCH_ENABLED`, default `false` agar node
+  tetap kompatibel dengan contract deployment lama.
+- [x] Tambahkan unit test batas ukuran batch.
+- [x] Contract tests dan seluruh node/integration tests lulus setelah perubahan.
+
+**STATUS FITUR: BELUM SELESAI DAN BELUM BOLEH DIAKTIFKAN UNTUK MONETISASI.**
+
+Sisa implementasi wajib:
+
+- [ ] Tambahkan `max_execution_fee`, `quote_expiry`, `quote_id`, chain ID, dan
+  relayer identity ke message/hash yang ditandatangani user.
+- [ ] Buat endpoint quote deterministik untuk jalur single dan estimasi batch.
+- [ ] Pastikan relayer tidak dapat memotong lebih dari fixed quote.
+- [ ] Implementasikan pemotongan execution fee dalam stablecoin tanpa mengubah
+  nominal bersih yang diterima merchant.
+- [ ] Pisahkan accounting: gas cost, reimbursement, gross execution fee,
+  relayer margin, protocol share, dan rounding.
+- [ ] Simpan quote, batch ID, jumlah item, receipt gas used, effective gas
+  price, total cost, dan margin pada database.
+- [ ] Buat konfirmasi batch/nullifier dalam satu transaksi database atomic,
+  bukan update row satu per satu.
+- [ ] Jika batch revert, pecah batch untuk mengidentifikasi item invalid tanpa
+  membuat item valid gagal permanen atau terjebak retry bersama.
+- [ ] Terapkan deadline-near bypass; transaksi yang mendekati expiry langsung
+  memakai jalur single.
+- [ ] Terapkan adaptive window nyata: target 1 detik, hard timeout 2 detik,
+  kirim lebih cepat ketika batch penuh.
+- [ ] Hubungkan pemeriksaan saldo ETH relayer sebelum single/batch broadcast.
+- [ ] Deploy contract baru yang memiliki `batchSpend()` ke Arbitrum Sepolia.
+- [ ] Generate ABI deployment terbaru dan cocokkan selector dengan relayer.
+- [ ] Aktifkan `NIMBUS_BATCH_ENABLED=true` hanya pada deployment baru tersebut.
+- [ ] Hard test batch ukuran 1, 2, 8, dan 9 pada testnet.
+- [ ] Hard test satu item invalid dalam batch dan buktikan tidak ada partial
+  payout/nullifier corruption.
+- [ ] Benchmark gas receipt single versus batch 2/4/8; jangan memakai asumsi
+  persentase penghematan.
+- [ ] Ukur latency API-to-broadcast dan API-to-confirmed p50/p95/p99.
+- [ ] Buktikan total debit user = merchant payout + protocol fee + execution
+  quote, tanpa hidden fee.
+- [ ] Buktikan margin batch positif setelah gas, RPC, retry, dan transaksi
+  revert diperhitungkan.
+- [ ] Tambahkan integration test signed quote sampai settlement accounting.
+- [ ] Audit eksternal jalur fee dan batch sebelum mainnet.
+
+Terminal condition:
+
+- Item ini baru boleh dicentang selesai setelah contract baru dideploy, signed
+  execution quote tidak dapat dimanipulasi, accounting durable cocok dengan
+  receipt, merchant menerima nominal tepat, benchmark testnet tersimpan, dan
+  seluruh negative test lulus.
+
 ### Perbaiki Lifecycle Nullifier
 
 Status sebelum DEC-005:
