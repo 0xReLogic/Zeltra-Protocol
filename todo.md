@@ -728,13 +728,21 @@ dikembalikan, dan final verification hanya dilakukan oleh CLI.
 ### HT-00 Deployment Reproducibility
 
 - [ ] Bersihkan build artifact lalu build contract release dari nol.
-- [ ] Jalankan `cargo stylus check`.
+- [x] Jalankan `cargo stylus check`.
   - 2026-06-07: gagal sebelum release profile size optimization
     (`95.6 KB`, 4 fragments, `execution reverted, data: 0x`).
   - 2026-06-07: lolos setelah `opt-level = "z"`, LTO, `panic = "abort"`,
     `codegen-units = 1`, dan `strip = true` (`65.9 KB`, 3 fragments).
-- [ ] Deploy contract baru ke Arbitrum Sepolia.
+- [x] Deploy contract baru ke Arbitrum Sepolia.
+  - 2026-06-07: deployed `0x5e5bff9f5979989f93fca5c460873cb49dbb3b3e`
+    pada commit `8fafd05`; deployment tx
+    `0xdc3f714fe4dc3291e553500e8ac24aa5fc40baaf63a7095a5ff4127349fc3b08`.
 - [ ] Aktifkan dan cache contract.
+  - Activation sukses dengan tx
+    `0xaa4cf529e212fe2836bfd226b1712cf85192f7c7bd7f9fcae54e51bc07c902cb`.
+    Cache ArbOS belum selesai; `cargo stylus cache bid ... 0` gagal karena
+    estimasi gas cache manager menjadi sangat besar dan wallet dianggap
+    insufficient funds.
 - [ ] Simpan deployment manifest berisi commit, rustc, cargo-stylus, Stylus SDK,
   WASM hash, ABI hash, chain ID, addresses, dan tx hashes.
   - Script deploy sudah menulis manifest dasar; item ini tetap belum selesai
@@ -1655,7 +1663,7 @@ python3 scripts/testnet_integration.py
 Sebelum menjalankan:
 
 - [ ] Perbaiki generator BLS sesuai checklist P0.
-- [ ] Pastikan `.env.test` menunjuk ke contract deployment terbaru.
+- [x] Pastikan `.env.test` menunjuk ke contract deployment terbaru.
 - [ ] Pastikan contract terbaru telah diaktifkan dan di-cache di Stylus.
 - [ ] Pastikan `NIMBUS_CCIP_ROUTER` dikonfigurasi pada relayer dan contract.
 - [ ] Pastikan contract memiliki liquidity test secukupnya.

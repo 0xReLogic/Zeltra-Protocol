@@ -11,6 +11,7 @@ DEPLOYMENT_DIR="${NIMBUS_DEPLOYMENT_DIR:-${REPO_ROOT}/deployments}"
 CHECK_URL=${RPC_URL:-${NIMBUS_RPC_URL:-"https://sepolia-rollup.arbitrum.io/rpc"}}
 DEPLOY_PRIVATE_KEY="${PRIVATE_KEY:-${NIMBUS_RELAYER_PRIVATE_KEY:-}}"
 STYLUS_FEATURES="${NIMBUS_STYLUS_FEATURES:-}"
+STYLUS_NO_VERIFY="${NIMBUS_STYLUS_NO_VERIFY:-true}"
 CHAIN_ID_HINT="${CHAIN_ID:-421614}"
 TIMESTAMP_UTC="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
 TIMESTAMP_FILE="$(date -u +"%Y%m%dT%H%M%SZ")"
@@ -61,7 +62,8 @@ write_manifest() {
     "cargo_stylus": $(printf '%s' "${cargo_stylus_version}" | json_escape)
   },
   "build": {
-    "features": $(printf '%s' "${STYLUS_FEATURES}" | json_escape)
+    "features": $(printf '%s' "${STYLUS_FEATURES}" | json_escape),
+    "no_verify": $(if [ "$STYLUS_NO_VERIFY" = "true" ]; then echo true; else echo false; fi)
   },
   "checks": {
     "stylus_check": "${status}"
@@ -84,6 +86,9 @@ STYLUS_DEPLOY_ARGS=(--endpoint="$CHECK_URL")
 if [ -n "$STYLUS_FEATURES" ]; then
     STYLUS_CHECK_ARGS+=(--features="$STYLUS_FEATURES")
     STYLUS_DEPLOY_ARGS+=(--features="$STYLUS_FEATURES")
+fi
+if [ "$STYLUS_NO_VERIFY" = "true" ]; then
+    STYLUS_DEPLOY_ARGS+=(--no-verify)
 fi
 
 # 1. Check if rustc is installed
@@ -149,12 +154,20 @@ if [ -n "${DEPLOY_PRIVATE_KEY}" ]; then
     DEPLOY_MANIFEST="${DEPLOYMENT_DIR}/arbitrum-sepolia-${TIMESTAMP_FILE}-deploy.json"
 
     if [ "${DEPLOY_STATUS}" -eq 0 ]; then
+        if [ -z "${CONTRACT_ADDRESS}" ]; then
+            write_manifest "${DEPLOY_MANIFEST}" "deploy" "failed" "${CONTRACT_ADDRESS}" "${DEPLOY_LOG}"
+            echo "Deployment command exited successfully but no contract address was extracted."
+            echo "Failure manifest written to: ${DEPLOY_MANIFEST}"
+            exit 1
+        fi
+        if grep -Eq '(^|[^[:alpha:]])error(:|\\[)' "${DEPLOY_LOG}"; then
+            write_manifest "${DEPLOY_MANIFEST}" "deploy" "failed" "${CONTRACT_ADDRESS}" "${DEPLOY_LOG}"
+            echo "Deployment log contains compiler or cargo-stylus errors."
+            echo "Failure manifest written to: ${DEPLOY_MANIFEST}"
+            exit 1
+        fi
         write_manifest "${DEPLOY_MANIFEST}" "deploy" "passed" "${CONTRACT_ADDRESS}" "${DEPLOY_LOG}"
         echo "Deployment manifest written to: ${DEPLOY_MANIFEST}"
-        if [ -z "${CONTRACT_ADDRESS}" ]; then
-            echo "Warning: deployment succeeded but contract address was not extracted from cargo stylus output."
-            echo "Add the deployed address to the manifest before hard-test evidence is accepted."
-        fi
     else
         write_manifest "${DEPLOY_MANIFEST}" "deploy" "failed" "${CONTRACT_ADDRESS}" "${DEPLOY_LOG}"
         echo "Deployment failed. Failure manifest written to: ${DEPLOY_MANIFEST}"
