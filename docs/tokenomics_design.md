@@ -80,6 +80,13 @@ Untuk memaksimalkan efisiensi gas dan mengoptimalkan perolehan hasil yield secar
     *   Pada rasio kas tinggi (Kas 45%), pembagian menjadi: 45% Kas, 39.3% Aave, dan 15.7% RWA.
     *   Pada rasio kas rendah (Kas 15%), pembagian menjadi: 15% Kas, 60.7% Aave, dan 24.3% RWA.
 3.  **Hysteresis & Batch Rebalancing**: Sistem ini diatur untuk meminimalisir transaksi interaksi eksternal on-chain dari pengguna demi menghemat pengeluaran gas operasional platform secara keseluruhan hingga **90%-99%**.
+4.  **Proteksi "Whale Hijacking" & "MEV Vault Front-Running"**:
+    Meskipun model alokasi dinamis di atas sangat efisien, terdapat celah logika (*economic vector vulnerability*) yang bisa dieksploitasi jika brankas dinamis tidak diproteksi dari penarikan berskala besar:
+    *   **Skenario Serangan**: Saat pasar sepi, target kas likuid secara otomatis diturunkan ke level minimum (15%), sementara 85% sisanya dikunci secara produktif di Aave dan Ondo RWA. Tepat setelah epoch baru dimulai, seorang *Whale* jahat (atau kompetitor) melakukan penarikan dana mendadak (*flash withdrawal*) sebesar 30% dari total TVL.
+    *   **Dampak Kerugian**: Karena kas likuid hanya ada 15%, smart contract terpaksa mengeksekusi penarikan darurat (*forced liquidation*) dari Aave dan Ondo secara on-chain secara instan (dalam blok transaksi yang sama) untuk menutupi sisa 15% kekurangan dana si Whale. Hal ini akan memicu pengeluaran gas fee penarikan yang sangat mahal, memicu *slippage loss* pada kas Treasury, dan menurunkan performa *yield* staker jujur lainnya.
+    *   **Mitigasi Proteksi**:
+        *   **Masa Antrean Penarikan (Withdrawal Delay / Lock-up Period)**: Penarikan dana berskala besar (misalnya di atas ambang batas tertentu seperti >5% dari total TVL) tidak diperbolehkan terjadi secara instan dalam 1 detik. Penarikan skala besar ini diwajibkan masuk ke antrean penarikan (*withdrawal queue*) dengan masa penangguhan selama 24-48 jam.
+        *   **Biaya Penarikan Likuidasi Darurat (Emergency Dynamic Withdrawal Fee)**: Jika pengguna memaksakan penarikan instan saat kas likuid sedang berada di batas minimum (15%) dan penarikan tersebut melebihi kapasitas kas aktif saat itu, penarik dikenakan biaya penarikan ekstra (*slippage fee/penalty*). Biaya penalty ini digunakan untuk menutup biaya gas penarikan paksa dari Aave/Ondo, sehingga modal staker jujur lainnya tetap utuh dan terlindungi.
 
 ### G. Circuit-Breaker Mechanism (Security Hardening 2026)
 Sebagai antisipasi terhadap volatilitas ekstrem dan serangan manipulasi pasar, Nimbus menerapkan **Circuit-Breaker Mechanism** dengan kontrol adaptif:
