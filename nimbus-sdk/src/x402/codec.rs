@@ -104,3 +104,34 @@ pub fn build_nimbus_payment_signature(
         },
     }
 }
+
+/// Builds a payment signature where the caller starts from the merchant's exact
+/// requested amount. The embedded contract amount is grossed up so the on-chain
+/// 0.15% spend fee does not reduce the merchant payout.
+pub fn build_nimbus_payment_signature_for_merchant_amount(
+    nullifier_hex: &str,
+    alpha_neg_hex: &str,
+    hm_hex: &str,
+    pk_iss_hex: &str,
+    merchant_amount: u64,
+    scheme: &str,
+    network: &str,
+    recipient_or_intent_hash_hex: Option<String>,
+    expiry: Option<u64>,
+    nonce_hex: Option<String>,
+) -> Result<X402PaymentSignature, String> {
+    let contract_amount = nimbus_core::gross_up_private_spend_amount(merchant_amount)
+        .ok_or_else(|| "Invalid merchant amount".to_string())?;
+    Ok(build_nimbus_payment_signature(
+        nullifier_hex,
+        alpha_neg_hex,
+        hm_hex,
+        pk_iss_hex,
+        contract_amount,
+        scheme,
+        network,
+        recipient_or_intent_hash_hex,
+        expiry,
+        nonce_hex,
+    ))
+}

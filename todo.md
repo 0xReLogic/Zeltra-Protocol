@@ -1344,7 +1344,8 @@ Sisa implementasi wajib:
 
 - [ ] Tambahkan `max_execution_fee`, `quote_expiry`, `quote_id`, chain ID, dan
   relayer identity ke message/hash yang ditandatangani user.
-- [ ] Buat endpoint quote deterministik untuk jalur single dan estimasi batch.
+- [x] Buat endpoint quote deterministik untuk jalur single private spend.
+- [ ] Tambahkan estimasi batch ke endpoint quote setelah benchmark gas testnet.
 - [ ] Pastikan relayer tidak dapat memotong lebih dari fixed quote.
 - [ ] Implementasikan pemotongan execution fee dalam stablecoin tanpa mengubah
   nominal bersih yang diterima merchant.
@@ -1370,6 +1371,8 @@ Sisa implementasi wajib:
 - [ ] Benchmark gas receipt single versus batch 2/4/8; jangan memakai asumsi
   persentase penghematan.
 - [ ] Ukur latency API-to-broadcast dan API-to-confirmed p50/p95/p99.
+- [x] Tambahkan fee helper terpusat untuk menghitung gross-up supaya merchant
+  menerima nominal exact setelah protocol fee contract.
 - [ ] Buktikan total debit user = merchant payout + protocol fee + execution
   quote, tanpa hidden fee.
 - [ ] Buktikan margin batch positif setelah gas, RPC, retry, dan transaksi

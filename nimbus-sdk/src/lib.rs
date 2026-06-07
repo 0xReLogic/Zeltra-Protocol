@@ -3,6 +3,7 @@ mod blind_wasm;
 mod evm_wasm;
 mod threshold_wasm;
 mod zk_wasm;
+mod fee_wasm;
 pub mod x402;
 
 pub use wasm_types::*;
@@ -10,6 +11,7 @@ pub use blind_wasm::*;
 pub use evm_wasm::*;
 pub use threshold_wasm::*;
 pub use zk_wasm::*;
+pub use fee_wasm::*;
 
 /// Securely zero out memory of a value to prevent sensitive data leakage.
 /// Uses volatile writes to ensure the compiler doesn't optimize it away.
@@ -102,6 +104,5 @@ mod sdk_tests {
         assert_eq!(proof.public_inputs_g1_hex().len(), 256); // 128 bytes hex
     }
 }
-
 
 

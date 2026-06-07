@@ -294,6 +294,8 @@ Implementasi saat ini sudah:
 
 - memotong `0,1%` saat deposit;
 - memotong `0,15%` saat spend/redemption.
+- memiliki helper fee terpusat di `nimbus-core` dan SDK untuk menghitung
+  gross-up private spend agar merchant menerima nominal exact.
 
 Implementasi saat ini masih:
 

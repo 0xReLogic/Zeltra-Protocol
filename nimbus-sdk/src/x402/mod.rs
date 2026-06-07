@@ -181,4 +181,30 @@ mod tests {
         assert!(!header_val.is_empty());
         assert_eq!(pool.get_ready_token_count(1000), 0);
     }
+
+    #[test]
+    fn test_build_payment_signature_grosses_up_merchant_amount() {
+        let sig = build_nimbus_payment_signature_for_merchant_amount(
+            "0xabc123nullifier",
+            "0xalpha_neg_hex_data",
+            "0xhm_hex_data",
+            "0xpk_iss_hex_data",
+            100_000_000,
+            "exact",
+            "eip155:42161",
+            None,
+            None,
+            None,
+        )
+        .unwrap();
+
+        assert_eq!(sig.payment.amount, 100_150_226);
+        assert_eq!(
+            nimbus_core::net_after_fee(
+                sig.payment.amount,
+                nimbus_core::PRIVATE_SPEND_FEE_BPS,
+            ),
+            Some(100_000_000),
+        );
+    }
 }

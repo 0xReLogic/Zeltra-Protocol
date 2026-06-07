@@ -102,6 +102,25 @@ pub struct SpendResponse {
     pub estimated_gas_usdc: Option<f64>,
 }
 
+#[derive(Deserialize)]
+pub struct PrivateSpendQuoteRequest {
+    pub merchant_amount: u64,
+    #[serde(default)]
+    pub execution_fee: Option<u64>,
+}
+
+#[derive(Serialize)]
+pub struct PrivateSpendQuoteResponse {
+    pub status: String,
+    pub merchant_amount: u64,
+    pub contract_amount: u64,
+    pub protocol_fee: u64,
+    pub execution_fee: u64,
+    pub user_total_debit: u64,
+    pub fee_bps: u64,
+    pub message: String,
+}
+
 #[derive(Serialize)]
 pub struct HealthResponse {
     pub status: String,

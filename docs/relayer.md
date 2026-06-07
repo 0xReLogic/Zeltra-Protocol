@@ -93,6 +93,34 @@ Mengikuti rekomendasi audit keamanan infrastruktur relayer node 2026:
 
 ---
 
+### Fee Quote Guardrail
+
+Relayer menyediakan quote informasional deterministik untuk UI dan backend:
+
+```http
+GET /api/quote/private-spend?merchant_amount=100000000&execution_fee=25000
+```
+
+Response:
+
+```json
+{
+  "status": "OK",
+  "merchant_amount": 100000000,
+  "contract_amount": 100150226,
+  "protocol_fee": 150226,
+  "execution_fee": 25000,
+  "user_total_debit": 100175226,
+  "fee_bps": 15,
+  "message": "Informational quote only; signed max_execution_fee is not active yet"
+}
+```
+
+`contract_amount` adalah nominal yang harus masuk ke payload spend agar contract
+memotong fee 0,15% tetapi merchant tetap menerima `merchant_amount`. Endpoint
+ini belum menggantikan signed `max_execution_fee`; monetisasi execution fee
+tetap belum boleh diaktifkan sebelum quote ditandatangani dan direkonsiliasi.
+
 ## 3. Konfigurasi Node (Environment Variables)
 
 Every instance of `nimbus-node` reads configurations from environment variables at startup:
@@ -113,6 +141,7 @@ Every instance of `nimbus-node` reads configurations from environment variables 
 | `NIMBUS_DB_KEY` | `None` | Kunci enkripsi untuk database SQLite/SQLCipher (Wajib diisi di produksi). |
 | `NIMBUS_X402_RECIPIENT` | `None` | Address EVM penerima settlement x402. Endpoint x402 menolak request jika tidak dikonfigurasi. |
 | `NIMBUS_BATCH_ENABLED` | `false` | Aktifkan adaptive same-chain batching setelah kontrak `batchSpend()` dideploy dan diuji. |
+| `NIMBUS_EXECUTION_FEE_USDC_BASE_UNITS` | `0` | Default execution fee quote dalam base unit USDC untuk endpoint quote informasional. Jangan dipakai sebagai pemotongan production sebelum signed quote aktif. |
 
 ### Integrasi OpenBao / Vault (Production Mode)
 

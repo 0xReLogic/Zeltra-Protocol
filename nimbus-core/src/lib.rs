@@ -5,6 +5,7 @@ mod evm;
 mod blind_sign;
 mod threshold;
 mod compliance_circuit;
+mod fees;
 
 pub use ark_bls12_381::{Bls12_381, Fr, G1Projective, G2Projective};
 pub use ark_ec::pairing::Pairing;
@@ -36,6 +37,14 @@ pub use blind_sign::{
 pub use threshold::{
     aggregate_shares, compute_lagrange_coefficient, public_key_for_share, sign_share,
     split_secret_key, verify_partial_signature,
+};
+
+// Re-export fee policy helpers
+pub use fees::{
+    ceil_div, deposit_fee, fee_round_up, gross_up_for_exact_net,
+    gross_up_private_spend_amount, net_after_fee, private_spend_fee,
+    quote_private_spend, SpendQuote, DEPOSIT_FEE_BPS, FEE_DENOMINATOR_BPS,
+    PRIVATE_SPEND_FEE_BPS,
 };
 
 // Re-export compliance circuit

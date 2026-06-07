@@ -147,6 +147,7 @@ async fn main() {
         .route("/api/deposit", post(handle_deposit))
         .route("/api/reveal", post(handle_reveal))
         .route("/api/spend", post(handle_spend))
+        .route("/api/quote/private-spend", get(handle_private_spend_quote))
         .route("/api/x402/verify", post(handle_x402_verify))
         .route("/api/sign-share", post(handle_sign_share))
         .route("/api/leader/sign", post(handle_leader_sign))
