@@ -452,16 +452,29 @@ Ini adalah produk pertama dan reference flow.
 ### Produk B - AI Agent Payments
 
 ```text
-Agent wallet -> deposit/refill pool -> credential pool -> bayar API/merchant
+Owner deposit -> Agent Spending Wallet L7 -> credential pool -> bayar API/merchant
 ```
 
-Tidak membutuhkan contract accounting baru.
+Tidak membutuhkan contract accounting baru. Agent Spending Wallet adalah
+pre-staged authorization state di Layer 7, bukan wallet kustodian baru. Saldo
+tetap liability pool, tetapi owner memberi allowance terbatas agar agent dapat
+melakukan instant private settlement tanpa deposit baru untuk setiap API call.
 
 - [ ] SDK mengelola token pool.
 - [ ] Agent tidak menyimpan root/guardian share.
 - [ ] Spending policy: budget, recipient allowlist, expiry, max amount.
+- [ ] Spending policy mencakup merchant/category allowlist, per-tx cap, daily
+  cap, expiry, nonce/nullifier, dan max Network Fee.
+- [ ] Agent Spending Wallet tidak dapat spend melebihi saldo pool atau credential
+  yang tersedia.
+- [ ] Pre-staged state terikat ke owner dan tidak dapat dipakai ulang oleh agent
+  lain.
+- [ ] Agent budget habis menghasilkan gagal aman tanpa partial payment.
 - [ ] Retry tidak menyebabkan double payment.
 - [ ] Human owner dapat pause/revoke agent.
+- [ ] Pause/revoke owner langsung memblokir issuance payload baru.
+- [ ] Dokumentasikan bahwa Agent Spending Wallet adalah working balance untuk
+  instant private settlement, bukan lock, yield product, atau kustodian baru.
 
 ### Produk C - x402 API Payment
 
@@ -1307,6 +1320,41 @@ Decision: `research/decisions/DEC-005-persistent-spend-settlement-queue.md`
 Sisa hard test: kill process pada setiap boundary broadcast/receipt, concurrent
 worker, disk full, corrupt DB, dan reconciliation sender+nonce tetap mengikuti
 HT-06.
+
+### Withdraw Fee dan Instant Agent Settlement
+
+Target bisnis:
+
+- Deposit/shield fee: `0,10%`.
+- Private spend fee: `0,15%`.
+- Withdraw/unshield fee: `0,10%`.
+- Agent Spending Wallet memakai pre-staged state Layer 7 agar agent dapat
+  melakukan instant private settlement tanpa funding ulang per request.
+
+Status:
+
+- [x] Dokumentasikan target withdraw fee `0,10%` dan Agent Spending Wallet di
+  `docs/bisnis.md`.
+
+Sisa implementasi wajib:
+
+- [ ] Pisahkan private spend fee `0,15%` dari dedicated withdraw/unshield fee
+  `0,10%` pada contract, SDK, relayer, dan quote API.
+- [ ] Tambahkan dedicated withdraw/unshield quote yang menampilkan gross amount,
+  fee, net payout, recipient, expiry, dan chain ID sebelum user tanda tangan.
+- [ ] Pastikan refund akibat gagal issuance/settlement tidak dikenai withdraw fee.
+- [ ] Pastikan withdraw tidak bisa melewati outstanding liability, pending spend,
+  atau locked/pre-staged agent allowance.
+- [ ] Tambahkan test rounding untuk withdraw fee `0,10%` pada decimal stablecoin
+  yang didukung.
+- [ ] Tambahkan event/accounting terpisah untuk deposit fee, spend fee, withdraw
+  fee, execution fee, relayer markup, dan batch margin.
+- [ ] Tambahkan hard test deposit -> Agent Spending Wallet -> private spend ->
+  pause/revoke -> withdraw sisa saldo.
+- [ ] Tambahkan hard test bahwa agent tidak dapat spend setelah owner withdraw
+  saldo yang sebelumnya pre-staged.
+- [ ] Tambahkan hard test bahwa pending agent spend dan withdraw bersamaan tidak
+  menyebabkan double debit atau insolvency.
 
 ### Adaptive Private Spend Batching dan Monetisasi
 

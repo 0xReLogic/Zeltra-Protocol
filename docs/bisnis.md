@@ -64,6 +64,9 @@ Pengguna memasukkan stablecoin ke Nimbus Privacy Pool. Setelah proses issuance
 selesai, pengguna memperoleh kemampuan melakukan private spend tanpa memakai
 funding wallet untuk setiap pembelian.
 
+Deposit/shield dikenai fee `0,10%`. Saldo bersih setelah fee menjadi liability
+pool dan dapat dipakai sebagai pre-staged balance untuk manusia atau agent.
+
 ### 4.2 Private Spend
 
 Pengguna atau agent membuat payment payload melalui SDK. Relayer memverifikasi
@@ -90,8 +93,10 @@ terhadap quote kontrak.
 ### 4.3 Unshield
 
 Pengguna dapat mengeluarkan saldo dari privacy pool menuju alamat publik. Proses
-ini dikenai protocol fee karena menggunakan privacy boundary dan infrastruktur
-jaringan.
+ini dikenai fee `0,10%`, simetris dengan deposit. Alasannya: unshield adalah
+perpindahan saldo keluar dari pool, bukan private payment ke merchant. Private
+spend tetap memakai fee transaksi yang lebih tinggi karena menggunakan jalur
+settlement, relayer, quote, dan merchant exact-payout.
 
 ## 5. Model Biaya Target
 
@@ -100,7 +105,7 @@ jaringan.
 | Deposit/shield | 0,10% dari nominal | Protocol treasury |
 | Private spend/transaction | 0,15% dari nominal | Protocol treasury |
 | Execution fee | Gas quote + markup relayer | Relayer |
-| Unshield tanpa pembayaran | 0,15% dari nominal | Protocol treasury |
+| Unshield tanpa pembayaran | 0,10% dari nominal | Protocol treasury |
 | Fast/cross-chain settlement | Quote dinamis | Relayer/LP, jaringan, treasury |
 | SDK dan integrasi | Gratis | N/A |
 
@@ -152,35 +157,46 @@ Karena itu:
 - batch menambah waktu tunggu normal maksimal sekitar 1 detik dan hard timeout
   sekitar 2 detik sebelum broadcast;
 - cross-chain dan transaksi dengan deadline dekat tidak dipaksa menunggu batch;
-- pendapatan protokol berasal dari fee deposit `0,10%` dan transaksi `0,15%`;
+- pendapatan protokol berasal dari fee deposit `0,10%`, withdraw `0,10%`, dan
+  transaksi `0,15%`;
 - pendapatan relayer berasal dari reimbursement gas, markup gas, dan margin batch;
 - biaya harus ditampilkan sebagai satu quote sebelum pengguna menandatangani.
 
 Payload harus memuat `max_fee` dan expiry agar relayer atau governance tidak dapat
 menaikkan biaya setelah persetujuan pengguna.
 
-## 6. AI Agent dan SDK
+## 6. AI Agent Spending Wallet dan SDK
 
 Nimbus tidak membuat atau mengoperasikan AI milik pengguna. Developer memasang
 Nimbus SDK ke agent mereka agar agent dapat membayar merchant atau API secara
 privat.
 
 ```text
-Pemilik mengisi AgentTokenPool
+Pemilik deposit ke Nimbus Privacy Pool
     |
-    | menetapkan mandat dan batas pengeluaran
+    | menetapkan Agent Spending Wallet di Layer 7
     v
-AI agent menerima HTTP 402
+Pre-staged state: balance, allowance, policy, nonce
+    |
+    v
+AI agent menerima HTTP 402 atau payment request
     |
     | SDK membuat ephemeral payment payload
     v
-Nimbus melakukan private settlement
+Nimbus melakukan instant private settlement
     |
     v
 API provider menerima stablecoin
 ```
 
-Mandat agent minimal harus mencakup:
+Agent Spending Wallet bukan wallet kustodian baru dan bukan AI milik Nimbus.
+Ini adalah state otorisasi Layer 7 di atas liability pool: owner sudah menaruh
+saldo, lalu agent diberi policy terbatas untuk membelanjakan saldo tersebut.
+Karena saldo sudah pre-staged, agent tidak perlu melakukan deposit baru untuk
+setiap API call. Settlement bisa langsung dibuat, diquote, ditandatangani, dan
+masuk queue relayer.
+
+Mandat atau pre-staged state agent minimal harus mencakup:
 
 - batas saldo;
 - maksimum per transaksi;
@@ -189,6 +205,12 @@ Mandat agent minimal harus mencakup:
 - expiry;
 - nonce dan nullifier;
 - maksimum Network Fee.
+- status pause/revoke dari owner.
+
+Model ini menjadi alasan ekonomi agar user menyimpan working balance di pool
+tanpa dipaksa lock. User tetap dapat withdraw saldo yang tidak terpakai dengan
+fee unshield `0,10%`, tetapi agent hanya bisa spend sesuai policy yang sudah
+ditandatangani owner.
 
 Nanopayment tidak boleh mengirim satu transaksi on-chain untuk setiap API call.
 Saldo atau authorization kecil dikumpulkan dan diselesaikan secara batch agar
@@ -223,7 +245,8 @@ melewati audit solvency, liquidity stress test, dan kajian hukum.
 ### Protocol treasury menerima
 
 - deposit/shield fee `0,10%`;
-- private spend/unshield fee `0,15%`;
+- private spend fee `0,15%`;
+- withdraw/unshield fee `0,10%`;
 - bagian yang transparan dari fast/cross-chain settlement;
 - yield vault jika model tersebut telah diaudit dan diizinkan.
 
@@ -260,8 +283,9 @@ Contoh tahunan:
 ```text
 Deposit volume     100.000.000 USDC x 0,10% = 100.000 USDC
 Spend volume        80.000.000 USDC x 0,15% = 120.000 USDC
+Withdraw volume     20.000.000 USDC x 0,10% =  20.000 USDC
                                              ------------
-Gross protocol revenue                       220.000 USDC
+Gross protocol revenue                       240.000 USDC
 ```
 
 Bagian execution quote yang mengganti gas bukan revenue bersih. Markup gas dan
@@ -284,7 +308,8 @@ Metrik utama:
 
 1. Buktikan private settlement end-to-end di testnet tanpa mock.
 2. Integrasikan SDK ke wallet, dApp, dan API provider sebagai distribution channel.
-3. Gunakan AI agent sebagai sumber transaksi, bukan sebagai produk Nimbus.
+3. Gunakan Agent Spending Wallet sebagai alasan user menyimpan working balance
+   untuk instant private settlement.
 4. Buka relayer dan guardian eksternal setelah reward serta slashing teruji.
 5. Aktifkan fast path dan cross-chain hanya setelah quote, reimbursement, dan
    accounting aman.
@@ -307,6 +332,8 @@ Implementasi saat ini sudah:
 
 Implementasi saat ini masih:
 
+- belum memisahkan private spend fee `0,15%` dan dedicated withdraw/unshield fee
+  `0,10%` pada contract, SDK, dan quote API;
 - sudah memiliki entrypoint dan broadcaster batch untuk 2 sampai 8 same-chain
   spend, tetapi penghematan gas belum dibenchmark di testnet;
 - belum menagih fixed execution quote kepada pengguna;
