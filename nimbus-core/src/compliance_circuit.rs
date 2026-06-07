@@ -12,7 +12,9 @@
 
 use ark_bls12_381::{Bls12_381, Fr};
 use ark_ff::{One, UniformRand};
-use ark_relations::r1cs::{ConstraintSynthesizer, ConstraintSystemRef, LinearCombination, SynthesisError};
+use ark_relations::r1cs::{
+    ConstraintSynthesizer, ConstraintSystemRef, LinearCombination, SynthesisError,
+};
 use ark_snark::SNARK;
 
 /// Compliance circuit that verifies spend validity
@@ -35,20 +37,25 @@ impl ConstraintSynthesizer<Fr> for ComplianceCircuit {
     fn generate_constraints(self, cs: ConstraintSystemRef<Fr>) -> Result<(), SynthesisError> {
         // Allocate public inputs
         let _root = cs.new_input_variable(|| self.root.ok_or(SynthesisError::AssignmentMissing))?;
-        let nullifier = cs.new_input_variable(|| self.nullifier.ok_or(SynthesisError::AssignmentMissing))?;
-        let _recipient = cs.new_input_variable(|| self.recipient.ok_or(SynthesisError::AssignmentMissing))?;
-        let _amount = cs.new_input_variable(|| self.amount.ok_or(SynthesisError::AssignmentMissing))?;
+        let nullifier =
+            cs.new_input_variable(|| self.nullifier.ok_or(SynthesisError::AssignmentMissing))?;
+        let _recipient =
+            cs.new_input_variable(|| self.recipient.ok_or(SynthesisError::AssignmentMissing))?;
+        let _amount =
+            cs.new_input_variable(|| self.amount.ok_or(SynthesisError::AssignmentMissing))?;
 
         // Allocate private witnesses
-        let secret = cs.new_witness_variable(|| self.secret.ok_or(SynthesisError::AssignmentMissing))?;
-        let randomness = cs.new_witness_variable(|| self.randomness.ok_or(SynthesisError::AssignmentMissing))?;
+        let secret =
+            cs.new_witness_variable(|| self.secret.ok_or(SynthesisError::AssignmentMissing))?;
+        let randomness =
+            cs.new_witness_variable(|| self.randomness.ok_or(SynthesisError::AssignmentMissing))?;
 
         // Constraint 1: Nullifier is derived from secret and randomness
         // nullifier = H(secret || randomness) (simplified as linear combination for demo)
         let secret_lc: LinearCombination<Fr> = secret.into();
         let randomness_lc: LinearCombination<Fr> = randomness.into();
         let computed_nullifier = secret_lc + randomness_lc;
-        
+
         // Enforce: computed_nullifier * 1 = nullifier
         let one_lc = (Fr::one(), ark_relations::r1cs::Variable::One).into();
         cs.enforce_constraint(computed_nullifier, one_lc, nullifier.into())?;
@@ -130,7 +137,7 @@ pub fn verify_compliance_proof(
     recipient: Fr,
     amount: Fr,
 ) -> bool {
-    use ark_groth16::{Groth16, prepare_verifying_key};
+    use ark_groth16::{prepare_verifying_key, Groth16};
 
     let public_inputs = vec![root, nullifier, recipient, amount];
     let pvk = prepare_verifying_key(vk);
@@ -155,7 +162,7 @@ mod tests {
         let amount = Fr::from(1000u64);
         let secret = Fr::rand(&mut rng);
         let randomness = Fr::rand(&mut rng);
-        
+
         // Nullifier must equal secret + randomness to satisfy constraint
         let nullifier = secret + randomness;
 

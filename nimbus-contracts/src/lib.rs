@@ -2,15 +2,15 @@
 #![allow(unused_variables, dead_code, unused_imports)]
 extern crate alloc;
 
-mod types;
-mod interfaces;
-mod storage;
 mod constants;
-mod helpers;
-mod verification;
-mod vault;
 mod deposit;
+mod helpers;
+mod interfaces;
 mod spend;
+mod storage;
+mod types;
+mod vault;
+mod verification;
 
 use alloc::vec::Vec;
 use ark_bls12_381::{Fr, G1Affine, G2Affine};
@@ -18,17 +18,22 @@ use ark_ec::AffineRepr;
 use ark_ff::Field;
 
 use alloy_primitives::{keccak256, Address, FixedBytes};
-use stylus_sdk::{prelude::*, alloy_primitives::U256, call::RawCall, abi::Bytes};
+use stylus_sdk::{abi::Bytes, alloy_primitives::U256, call::RawCall, prelude::*};
 
-pub use types::{to_evm_g1, to_evm_g2, to_evm_scalar};
+pub use constants::*;
 pub use interfaces::*;
 pub use storage::Nimbus;
-pub use constants::*;
+pub use types::{to_evm_g1, to_evm_g2, to_evm_scalar};
 
 #[public]
 impl Nimbus {
     /// Initialize the contract and set the owner, stablecoin, and fee recipient addresses.
-    pub fn init(&mut self, owner: Address, stablecoin_addr: Address, fee_recipient_addr: Address) -> Result<(), Vec<u8>> {
+    pub fn init(
+        &mut self,
+        owner: Address,
+        stablecoin_addr: Address,
+        fee_recipient_addr: Address,
+    ) -> Result<(), Vec<u8>> {
         if self.owner.get() != Address::ZERO {
             return Err(b"ALREADY_INITIALIZED".to_vec());
         }
@@ -41,7 +46,8 @@ impl Nimbus {
         self.fee_recipient.set(fee_recipient_addr);
         self.fast_path_phase.set(U256::from(1));
         self.target_cash_pct.set(U256::from(30));
-        self.epoch_start_timestamp.set(U256::from(self.block_timestamp()));
+        self.epoch_start_timestamp
+            .set(U256::from(self.block_timestamp()));
         self.current_epoch_id.set(U256::ZERO);
         self.current_epoch_volume.set(U256::ZERO);
         Ok(())
@@ -84,7 +90,8 @@ impl Nimbus {
             return Err(b"INVALID_RECIPIENT".to_vec());
         }
         self.proposed_fee_recipient.set(recipient);
-        self.fee_recipient_eta.set(U256::from(self.block_timestamp() + 86400));
+        self.fee_recipient_eta
+            .set(U256::from(self.block_timestamp() + 86400));
         Ok(())
     }
 
@@ -114,7 +121,8 @@ impl Nimbus {
             return Err(b"INVALID_PHASE".to_vec());
         }
         self.proposed_fast_path_phase.set(phase);
-        self.fast_path_phase_eta.set(U256::from(self.block_timestamp() + 86400));
+        self.fast_path_phase_eta
+            .set(U256::from(self.block_timestamp() + 86400));
         Ok(())
     }
 
@@ -156,7 +164,8 @@ impl Nimbus {
         self.check_owner()?;
         self.proposed_aave_pool.set(pool);
         self.proposed_a_token.set(a_token);
-        self.aave_params_eta.set(U256::from(self.block_timestamp() + 86400));
+        self.aave_params_eta
+            .set(U256::from(self.block_timestamp() + 86400));
         Ok(())
     }
 
@@ -181,7 +190,8 @@ impl Nimbus {
     pub fn propose_rwa_token(&mut self, rwa: Address) -> Result<(), Vec<u8>> {
         self.check_owner()?;
         self.proposed_rwa_token.set(rwa);
-        self.rwa_token_eta.set(U256::from(self.block_timestamp() + 86400));
+        self.rwa_token_eta
+            .set(U256::from(self.block_timestamp() + 86400));
         Ok(())
     }
 
@@ -279,7 +289,8 @@ impl Nimbus {
         if pk_iss_bytes.iter().all(|byte| *byte == 0) {
             return Err(b"POINT_AT_INFINITY_NOT_ALLOWED".to_vec());
         }
-        self.trusted_issuer_keys.insert(keccak256(&pk_iss_bytes), true);
+        self.trusted_issuer_keys
+            .insert(keccak256(&pk_iss_bytes), true);
         Ok(())
     }
 
@@ -288,7 +299,8 @@ impl Nimbus {
         if pk_iss_bytes.len() != 256 {
             return Err(b"INVALID_PUBLIC_KEY_LENGTH".to_vec());
         }
-        self.trusted_issuer_keys.insert(keccak256(&pk_iss_bytes), false);
+        self.trusted_issuer_keys
+            .insert(keccak256(&pk_iss_bytes), false);
         Ok(())
     }
 
@@ -309,7 +321,9 @@ impl Nimbus {
             let stablecoin_address = self.stablecoin.get();
             let contract_address = stylus_sdk::contract::address();
             let erc20 = IErc20::new(stablecoin_address);
-            let contract_balance = erc20.balance_of(&*self, contract_address).map_err(|_| b"INVARIANT_BALANCE_CHECK_FAILED".to_vec())?;
+            let contract_balance = erc20
+                .balance_of(&*self, contract_address)
+                .map_err(|_| b"INVARIANT_BALANCE_CHECK_FAILED".to_vec())?;
 
             let outstanding_liabilities = self.total_deposited_principal.get();
 
@@ -323,7 +337,12 @@ impl Nimbus {
 
     // --- EVM Public Delegates to Modular Component Implementations ---
 
-    pub fn deposit(&mut self, sid: FixedBytes<32>, com_k_bytes: Bytes, amount: U256) -> Result<(), Vec<u8>> {
+    pub fn deposit(
+        &mut self,
+        sid: FixedBytes<32>,
+        com_k_bytes: Bytes,
+        amount: U256,
+    ) -> Result<(), Vec<u8>> {
         self._deposit(sid, com_k_bytes, amount)
     }
 
@@ -519,11 +538,11 @@ impl Nimbus {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ark_bls12_381::{G1Affine, G2Affine, Fr};
+    use alloy_primitives::address;
+    use ark_bls12_381::{Fr, G1Affine, G2Affine};
     use ark_ff::UniformRand;
     use ark_serialize::{CanonicalDeserialize, CanonicalSerialize};
     use rand::thread_rng;
-    use alloy_primitives::address;
 
     // --- Mock Stylus HostIO Symbols to satisfy the linker during host tests ---
     use std::cell::RefCell;
@@ -602,9 +621,7 @@ mod tests {
 
     #[no_mangle]
     pub unsafe extern "C" fn block_timestamp() -> u64 {
-        BLOCK_TIMESTAMP.with(|ts| {
-            *ts.borrow()
-        })
+        BLOCK_TIMESTAMP.with(|ts| *ts.borrow())
     }
 
     #[no_mangle]
@@ -613,7 +630,7 @@ mod tests {
         let dest_slice = std::slice::from_raw_parts_mut(dest, 32);
         let mut k = [0u8; 32];
         k.copy_from_slice(key_slice);
-        
+
         STORAGE.with(|storage| {
             if let Some(val) = storage.borrow().get(&k) {
                 dest_slice.copy_from_slice(val);
@@ -633,7 +650,7 @@ mod tests {
         k.copy_from_slice(key_slice);
         let mut v = [0u8; 32];
         v.copy_from_slice(src_slice);
-        
+
         STORAGE.with(|storage| {
             storage.borrow_mut().insert(k, v);
         });
@@ -695,11 +712,7 @@ mod tests {
     }
 
     #[no_mangle]
-    pub unsafe extern "C" fn read_return_data(
-        dest: *mut u8,
-        _offset: usize,
-        size: usize,
-    ) -> usize {
+    pub unsafe extern "C" fn read_return_data(dest: *mut u8, _offset: usize, size: usize) -> usize {
         let dest_slice = std::slice::from_raw_parts_mut(dest, size);
         for byte in dest_slice.iter_mut() {
             *byte = 0;
@@ -715,7 +728,7 @@ mod tests {
         let mut rng = thread_rng();
         let g1 = G1Affine::rand(&mut rng);
         let evm_g1 = to_evm_g1(&g1);
-        
+
         assert_eq!(evm_g1.len(), 128);
         for i in 0..16 {
             assert_eq!(evm_g1[i], 0);
@@ -728,7 +741,7 @@ mod tests {
         let mut rng = thread_rng();
         let g2 = G2Affine::rand(&mut rng);
         let evm_g2 = to_evm_g2(&g2);
-        
+
         assert_eq!(evm_g2.len(), 256);
         for i in 0..16 {
             assert_eq!(evm_g2[i], 0);
@@ -745,10 +758,6 @@ mod tests {
         let evm_scalar = to_evm_scalar(&scalar);
         assert_eq!(evm_scalar.len(), 32);
     }
-
-
-
-
 
     #[test]
     fn test_groth16_input_length_validation() {
@@ -771,16 +780,18 @@ mod tests {
         let nimbus_contract = Nimbus::default();
         // Since we stubbed static_call_contract, return_data_size and read_return_data to return success,
         // this test should successfully verify the Groth16 proof with valid lengths!
-        let is_valid = nimbus_contract.verify_groth16_proof(
-            vec![0; 128].into(),
-            vec![0; 256].into(),
-            vec![0; 128].into(),
-            vec![0; 128].into(),
-            vec![0; 128].into(),
-            vec![0; 256].into(),
-            vec![0; 256].into(),
-            vec![0; 256].into(),
-        ).unwrap();
+        let is_valid = nimbus_contract
+            .verify_groth16_proof(
+                vec![0; 128].into(),
+                vec![0; 256].into(),
+                vec![0; 128].into(),
+                vec![0; 128].into(),
+                vec![0; 128].into(),
+                vec![0; 256].into(),
+                vec![0; 256].into(),
+                vec![0; 256].into(),
+            )
+            .unwrap();
         assert!(is_valid, "Mocked Groth16 proof verification failed!");
     }
 
@@ -815,16 +826,15 @@ mod tests {
         // payload[520..552] is expiry (zeros)
         // payload[552..584] is nonce (zeros)
 
-        let result = nimbus_contract.ccip_receive(
-            FixedBytes::ZERO,
-            1,
-            vec![].into(),
-            payload.into(),
-        );
+        let result =
+            nimbus_contract.ccip_receive(FixedBytes::ZERO, 1, vec![].into(), payload.into());
         match result {
             Ok(_) => {}
             Err(e) => {
-                panic!("ccip_receive returned error: {:?}", String::from_utf8_lossy(&e));
+                panic!(
+                    "ccip_receive returned error: {:?}",
+                    String::from_utf8_lossy(&e)
+                );
             }
         }
     }
@@ -834,16 +844,22 @@ mod tests {
         reset_test_state();
         let owner = address!("1111111111111111111111111111111111111111");
         set_msg_sender(owner);
-        
+
         let mut contract = Nimbus::default();
         // Init with ZERO owner should fail
-        assert_eq!(contract.init(Address::ZERO, Address::ZERO, Address::ZERO), Err(b"INVALID_OWNER".to_vec()));
+        assert_eq!(
+            contract.init(Address::ZERO, Address::ZERO, Address::ZERO),
+            Err(b"INVALID_OWNER".to_vec())
+        );
 
         // First init should succeed
         assert!(contract.init(owner, Address::ZERO, Address::ZERO).is_ok());
-        
+
         // Second init should fail
-        assert_eq!(contract.init(owner, Address::ZERO, Address::ZERO), Err(b"ALREADY_INITIALIZED".to_vec()));
+        assert_eq!(
+            contract.init(owner, Address::ZERO, Address::ZERO),
+            Err(b"ALREADY_INITIALIZED".to_vec())
+        );
     }
 
     #[test]
@@ -851,24 +867,24 @@ mod tests {
         reset_test_state();
         let owner = address!("1111111111111111111111111111111111111111");
         let non_owner = address!("2222222222222222222222222222222222222222");
-        
+
         set_msg_sender(owner);
         let mut contract = Nimbus::default();
         contract.init(owner, Address::ZERO, Address::ZERO).unwrap();
-        
+
         // Non-owner pausing should fail
         set_msg_sender(non_owner);
         assert_eq!(contract.pause(), Err(b"NOT_OWNER".to_vec()));
-        
+
         // Owner pausing should succeed
         set_msg_sender(owner);
         assert!(contract.pause().is_ok());
         assert_eq!(contract.paused.get(), true);
-        
+
         // Non-owner unpausing should fail
         set_msg_sender(non_owner);
         assert_eq!(contract.unpause(), Err(b"NOT_OWNER".to_vec()));
-        
+
         // Owner unpausing should succeed
         set_msg_sender(owner);
         assert!(contract.unpause().is_ok());
@@ -880,11 +896,11 @@ mod tests {
         reset_test_state();
         let owner = address!("1111111111111111111111111111111111111111");
         set_msg_sender(owner);
-        
+
         let mut contract = Nimbus::default();
         contract.init(owner, Address::ZERO, Address::ZERO).unwrap();
         contract.pause().unwrap();
-        
+
         // Try guarded operations
         let sid = FixedBytes::ZERO;
         assert_eq!(
@@ -927,10 +943,7 @@ mod tests {
             contract.register_clean_root(FixedBytes::ZERO),
             Err(b"CONTRACT_PAUSED".to_vec())
         );
-        assert_eq!(
-            contract.claim_refund(sid),
-            Err(b"CONTRACT_PAUSED".to_vec())
-        );
+        assert_eq!(contract.claim_refund(sid), Err(b"CONTRACT_PAUSED".to_vec()));
     }
 
     #[test]
@@ -939,35 +952,44 @@ mod tests {
         let owner = address!("1111111111111111111111111111111111111111");
         let client = address!("2222222222222222222222222222222222222222");
         let other = address!("3333333333333333333333333333333333333333");
-        
+
         set_msg_sender(owner);
         let mut contract = Nimbus::default();
         contract.init(owner, Address::ZERO, Address::ZERO).unwrap();
-        
+
         let sid = FixedBytes::repeat_byte(0xab);
-        
+
         // Deposit (must be >= 10_000_000)
         set_msg_sender(client);
         set_block_timestamp(1000);
         contract
             .deposit(sid, vec![0x42; 256].into(), U256::from(10_000_000))
             .unwrap();
-        
+
         // Claim refund from other address should fail
         set_msg_sender(other);
-        assert_eq!(contract.claim_refund(sid), Err(b"NOT_SESSION_CLIENT".to_vec()));
-        
+        assert_eq!(
+            contract.claim_refund(sid),
+            Err(b"NOT_SESSION_CLIENT".to_vec())
+        );
+
         // Claim refund from client before timelock (24 hours = 86400 secs)
         set_msg_sender(client);
         set_block_timestamp(1000 + 86399); // 1 second before expiry
-        assert_eq!(contract.claim_refund(sid), Err(b"TIMELOCK_NOT_EXPIRED".to_vec()));
-        
+        assert_eq!(
+            contract.claim_refund(sid),
+            Err(b"TIMELOCK_NOT_EXPIRED".to_vec())
+        );
+
         // Claim refund at expiry should succeed
         set_block_timestamp(1000 + 86400);
         assert!(contract.claim_refund(sid).is_ok());
-        
+
         // Claiming again should fail
-        assert_eq!(contract.claim_refund(sid), Err(b"SESSION_ALREADY_RESOLVED".to_vec()));
+        assert_eq!(
+            contract.claim_refund(sid),
+            Err(b"SESSION_ALREADY_RESOLVED".to_vec())
+        );
     }
 
     #[test]
@@ -989,11 +1011,7 @@ mod tests {
             Err(b"INVALID_COMMITMENT_LENGTH".to_vec())
         );
         contract
-            .deposit(
-                sid,
-                commitment.clone().into(),
-                U256::from(10_000_000),
-            )
+            .deposit(sid, commitment.clone().into(), U256::from(10_000_000))
             .unwrap();
         assert_eq!(
             contract.deposit(sid, commitment.into(), U256::from(10_000_000)),
@@ -1016,11 +1034,7 @@ mod tests {
         let commitment = vec![0x42; 256];
         set_msg_sender(client);
         contract
-            .deposit(
-                sid,
-                commitment.clone().into(),
-                U256::from(10_000_000),
-            )
+            .deposit(sid, commitment.clone().into(), U256::from(10_000_000))
             .unwrap();
         let principal = contract.total_deposited_principal().unwrap();
 
@@ -1060,15 +1074,18 @@ mod tests {
         reset_test_state();
         let owner = address!("1111111111111111111111111111111111111111");
         let non_owner = address!("2222222222222222222222222222222222222222");
-        
+
         set_msg_sender(owner);
         let mut contract = Nimbus::default();
         contract.init(owner, Address::ZERO, Address::ZERO).unwrap();
-        
+
         // Non-owner should not be able to register clean root
         set_msg_sender(non_owner);
-        assert_eq!(contract.register_clean_root(FixedBytes::ZERO), Err(b"NOT_OWNER".to_vec()));
-        
+        assert_eq!(
+            contract.register_clean_root(FixedBytes::ZERO),
+            Err(b"NOT_OWNER".to_vec())
+        );
+
         // Owner should be able to register clean root
         set_msg_sender(owner);
         assert!(contract.register_clean_root(FixedBytes::ZERO).is_ok());
@@ -1101,7 +1118,9 @@ mod tests {
             Err(b"POINT_AT_INFINITY_NOT_ALLOWED".to_vec())
         );
         contract.register_issuer_key(pk_iss.clone().into()).unwrap();
-        assert!(contract.is_issuer_key_trusted(pk_iss.clone().into()).unwrap());
+        assert!(contract
+            .is_issuer_key_trusted(pk_iss.clone().into())
+            .unwrap());
         contract.revoke_issuer_key(pk_iss.clone().into()).unwrap();
         assert!(!contract.is_issuer_key_trusted(pk_iss.into()).unwrap());
     }
@@ -1116,15 +1135,15 @@ mod tests {
 
         let alpha_neg = vec![0x11; 128];
         let pk_iss = vec![0x33; 256];
-        
+
         let amount = U256::from(5_000_000);
         let recipient_or_intent_hash = FixedBytes::ZERO;
         let expiry = U256::ZERO;
         let nonce = FixedBytes::ZERO;
-        
+
         let chain_id = U256::from(1337);
         let contract_address = Address::ZERO;
-        
+
         let m_hash = helpers::compute_spend_hash(
             chain_id,
             contract_address,
@@ -1175,7 +1194,12 @@ mod tests {
         set_msg_sender(owner);
         let mut contract = Nimbus::default();
         contract.init(owner, Address::ZERO, Address::ZERO).unwrap();
-        let (alpha_neg, hm, pk_iss, nullifier) = register_mock_issuer(&mut contract, owner, U256::from(5_000_000), FixedBytes::ZERO);
+        let (alpha_neg, hm, pk_iss, nullifier) = register_mock_issuer(
+            &mut contract,
+            owner,
+            U256::from(5_000_000),
+            FixedBytes::ZERO,
+        );
 
         assert_eq!(
             contract.spend(
@@ -1224,13 +1248,50 @@ mod tests {
     }
 
     #[test]
+    fn test_spend_rejects_recipient_substitution() {
+        reset_test_state();
+        let owner = address!("1111111111111111111111111111111111111111");
+        let intended_recipient = address!("2222222222222222222222222222222222222222");
+        let substituted_recipient = address!("3333333333333333333333333333333333333333");
+        set_msg_sender(owner);
+        let mut contract = Nimbus::default();
+        contract.init(owner, Address::ZERO, Address::ZERO).unwrap();
+
+        let mut recipient_hash = [0u8; 32];
+        recipient_hash[12..].copy_from_slice(intended_recipient.as_slice());
+        let recipient_hash = FixedBytes::from(recipient_hash);
+        let (alpha_neg, _hm, pk_iss, nullifier) =
+            register_mock_issuer(&mut contract, owner, U256::from(5_000_000), recipient_hash);
+
+        assert_eq!(
+            contract.spend(
+                nullifier,
+                alpha_neg.into(),
+                pk_iss.into(),
+                substituted_recipient,
+                U256::from(5_000_000),
+                recipient_hash,
+                U256::ZERO,
+                FixedBytes::ZERO,
+            ),
+            Err(b"RECIPIENT_INTENT_MISMATCH".to_vec())
+        );
+        assert!(!contract.nullifiers.get(nullifier));
+    }
+
+    #[test]
     fn test_spend_replay_and_insufficient_principal_preserve_state() {
         reset_test_state();
         let owner = address!("1111111111111111111111111111111111111111");
         set_msg_sender(owner);
         let mut contract = Nimbus::default();
         contract.init(owner, Address::ZERO, Address::ZERO).unwrap();
-        let (alpha_neg, hm, pk_iss, nullifier) = register_mock_issuer(&mut contract, owner, U256::from(5_000_000), FixedBytes::ZERO);
+        let (alpha_neg, hm, pk_iss, nullifier) = register_mock_issuer(
+            &mut contract,
+            owner,
+            U256::from(5_000_000),
+            FixedBytes::ZERO,
+        );
 
         assert_eq!(
             contract.spend(
@@ -1287,48 +1348,64 @@ mod tests {
         reset_test_state();
         let owner = address!("1111111111111111111111111111111111111111");
         set_msg_sender(owner);
-        
+
         let mut contract = Nimbus::default();
         contract.init(owner, Address::ZERO, Address::ZERO).unwrap();
-        
+
         // Default phase should be 1
         assert_eq!(contract.fast_path_phase().unwrap(), U256::from(1));
-        
+
         // Fase 1: Premium is always 0
         let amount = U256::from(10_000_000); // 10,000,000 (10 USDC)
-        assert_eq!(contract.calculate_fast_path_premium(amount).unwrap(), U256::ZERO);
-        
+        assert_eq!(
+            contract.calculate_fast_path_premium(amount).unwrap(),
+            U256::ZERO
+        );
+
         // Change to Fase 2 via propose & execute
         contract.propose_fast_path_phase(U256::from(2)).unwrap();
         set_block_timestamp(86401);
         contract.execute_fast_path_phase().unwrap();
         assert_eq!(contract.fast_path_phase().unwrap(), U256::from(2));
         // Fase 2: 0.05% flat premium => 10,000,000 * 5 / 10,000 = 5000
-        assert_eq!(contract.calculate_fast_path_premium(amount).unwrap(), U256::from(5000));
-        
+        assert_eq!(
+            contract.calculate_fast_path_premium(amount).unwrap(),
+            U256::from(5000)
+        );
+
         // Change to Fase 3 via propose & execute
         contract.propose_fast_path_phase(U256::from(3)).unwrap();
         set_block_timestamp(86401 * 2);
         contract.execute_fast_path_phase().unwrap();
         assert_eq!(contract.fast_path_phase().unwrap(), U256::from(3));
-        
+
         // Fase 3 with zero liquidity should fail
         assert!(contract.calculate_fast_path_premium(amount).is_err());
-        
+
         // Set LP liquidity: total = 100,000,000 (100 USDC), utilized = 0
-        contract.set_lp_liquidity(U256::from(100000000), U256::from(0)).unwrap();
+        contract
+            .set_lp_liquidity(U256::from(100000000), U256::from(0))
+            .unwrap();
         // New utilization after adding amount(10,000,000) is 10,000,000 / 100,000,000 = 10% (1,000 bps)
         // Rate = 5 + 10 * 1,000 / 10,000 = 5 + 1 = 6 bps
         // Premium = 10,000,000 * 6 / 10,000 = 6000
-        assert_eq!(contract.calculate_fast_path_premium(amount).unwrap(), U256::from(6000));
-        
+        assert_eq!(
+            contract.calculate_fast_path_premium(amount).unwrap(),
+            U256::from(6000)
+        );
+
         // Set utilized to 80,000,000 (80 USDC)
-        contract.set_lp_liquidity(U256::from(100000000), U256::from(80000000)).unwrap();
+        contract
+            .set_lp_liquidity(U256::from(100000000), U256::from(80000000))
+            .unwrap();
         // New utilization after adding amount(10,000,000) is 90,000,000 / 100,000,000 = 90% (9,000 bps)
         // Rate = 5 + 10 * 9,000 / 10,000 = 5 + 9 = 14 bps
         // Premium = 10,000,000 * 14 / 10,000 = 14000
-        assert_eq!(contract.calculate_fast_path_premium(amount).unwrap(), U256::from(14000));
-        
+        assert_eq!(
+            contract.calculate_fast_path_premium(amount).unwrap(),
+            U256::from(14000)
+        );
+
         // Request amount exceeding capacity (capacity is 20,000,000, we request 30,000,000)
         let large_amount = U256::from(30000000);
         // Should trigger Dynamic Pool Cap limit and error
@@ -1340,57 +1417,70 @@ mod tests {
         reset_test_state();
         let owner = address!("1111111111111111111111111111111111111111");
         set_msg_sender(owner);
-        
+
         let mut contract = Nimbus::default();
         contract.init(owner, Address::ZERO, Address::ZERO).unwrap();
-        
+
         // Assert initial addresses
         assert_eq!(contract.aave_pool().unwrap(), Address::ZERO);
         assert_eq!(contract.a_token().unwrap(), Address::ZERO);
         assert_eq!(contract.rwa_token().unwrap(), Address::ZERO);
         assert_eq!(contract.total_deposited_principal().unwrap(), U256::ZERO);
-        
+
         // Test propose & execute params
         let pool = address!("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
         let a_token = address!("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb");
         let rwa = address!("cccccccccccccccccccccccccccccccccccccccc");
-        
+
         contract.propose_aave_params(pool, a_token).unwrap();
         contract.propose_rwa_token(rwa).unwrap();
         set_block_timestamp(86401);
         contract.execute_aave_params().unwrap();
         contract.execute_rwa_token().unwrap();
-        
+
         assert_eq!(contract.aave_pool().unwrap(), pool);
         assert_eq!(contract.a_token().unwrap(), a_token);
         assert_eq!(contract.rwa_token().unwrap(), rwa);
-        
+
         // Test deposit increases principal (must be >= 10_000_000)
         let sid = FixedBytes::repeat_byte(0xde);
         contract
             .deposit(sid, vec![0x42; 256].into(), U256::from(20_000_000))
             .unwrap();
-        
+
         // fee = (20,000,000 + 999) / 1000 = 20000
         // net_amount = 20,000,000 - 20,000 = 19,980,000 net
-        assert_eq!(contract.total_deposited_principal().unwrap(), U256::from(19_980_000));
-        
+        assert_eq!(
+            contract.total_deposited_principal().unwrap(),
+            U256::from(19_980_000)
+        );
+
         // Test spend decreases principal
-        let (alpha_neg, hm, pk_iss, nullifier) = register_mock_issuer(&mut contract, owner, U256::from(10_000_000), FixedBytes::ZERO);
-        let is_valid = contract.spend(
-            nullifier,
-            alpha_neg.into(),
-            pk_iss.into(),
-            Address::ZERO,
+        let (alpha_neg, hm, pk_iss, nullifier) = register_mock_issuer(
+            &mut contract,
+            owner,
             U256::from(10_000_000),
             FixedBytes::ZERO,
-            U256::ZERO,
-            FixedBytes::ZERO,
-        ).unwrap();
-        
+        );
+        let is_valid = contract
+            .spend(
+                nullifier,
+                alpha_neg.into(),
+                pk_iss.into(),
+                Address::ZERO,
+                U256::from(10_000_000),
+                FixedBytes::ZERO,
+                U256::ZERO,
+                FixedBytes::ZERO,
+            )
+            .unwrap();
+
         assert!(is_valid);
-        assert_eq!(contract.total_deposited_principal().unwrap(), U256::from(9_980_000));
-        
+        assert_eq!(
+            contract.total_deposited_principal().unwrap(),
+            U256::from(9_980_000)
+        );
+
         // Test yield claim under test (where total assets = principal, so yield is 0)
         assert_eq!(contract.claim_accumulated_yield().unwrap(), U256::ZERO);
     }
@@ -1400,47 +1490,64 @@ mod tests {
         reset_test_state();
         let owner = address!("1111111111111111111111111111111111111111");
         set_msg_sender(owner);
-        
+
         let mut contract = Nimbus::default();
         contract.init(owner, Address::ZERO, Address::ZERO).unwrap();
-        
+
         // Set principal
-        contract.deposit(
-            FixedBytes::repeat_byte(0x99),
-            vec![0x42; 256].into(),
-            U256::from(20_000_000),
-        ).unwrap();
-        let (alpha_neg, hm, pk_iss, nullifier) = register_mock_issuer(&mut contract, owner, U256::from(10_000_000), FixedBytes::ZERO);
-        
-        // Call spend_and_buy_shares with polymarket_ctf = Address::ZERO (which triggers mock fallback in tests)
-        let success = contract.spend_and_buy_shares(
-            nullifier,
-            alpha_neg.into(),
-            pk_iss.into(),
-            Address::ZERO, // triggers fallback simulation in test block
-            Address::ZERO,
-            FixedBytes::ZERO,
+        contract
+            .deposit(
+                FixedBytes::repeat_byte(0x99),
+                vec![0x42; 256].into(),
+                U256::from(20_000_000),
+            )
+            .unwrap();
+        let (alpha_neg, hm, pk_iss, nullifier) = register_mock_issuer(
+            &mut contract,
+            owner,
             U256::from(10_000_000),
-            U256::ZERO,
             FixedBytes::ZERO,
-        ).unwrap();
-        
+        );
+
+        // Call spend_and_buy_shares with polymarket_ctf = Address::ZERO (which triggers mock fallback in tests)
+        let success = contract
+            .spend_and_buy_shares(
+                nullifier,
+                alpha_neg.into(),
+                pk_iss.into(),
+                Address::ZERO, // triggers fallback simulation in test block
+                Address::ZERO,
+                FixedBytes::ZERO,
+                U256::from(10_000_000),
+                U256::ZERO,
+                FixedBytes::ZERO,
+            )
+            .unwrap();
+
         // Under our mock try-catch, it should return true (gracefully handled)
         assert!(success);
-        
+
         // The net payout should be calculated:
         // 10,000,000 - base_fee = 10,000,000 - 15000 = 9,985,000
         let expected_payout = U256::from(9_985_000);
-        assert_eq!(contract.get_failed_intent_refund(nullifier).unwrap(), expected_payout);
-        
+        assert_eq!(
+            contract.get_failed_intent_refund(nullifier).unwrap(),
+            expected_payout
+        );
+
         // Claim the refund to a recipient
         let recipient = address!("4444444444444444444444444444444444444444");
-        let claim_ok = contract.claim_failed_intent_refund(nullifier, recipient).unwrap();
+        let claim_ok = contract
+            .claim_failed_intent_refund(nullifier, recipient)
+            .unwrap();
         assert!(claim_ok);
-        
+
         // The refund amount should now be cleared (zero)
-        assert_eq!(contract.get_failed_intent_refund(nullifier).unwrap(), U256::ZERO);
-        
+        assert_eq!(
+            contract.get_failed_intent_refund(nullifier).unwrap(),
+            U256::ZERO
+        );
+
         // Claiming again should fail
         assert_eq!(
             contract.claim_failed_intent_refund(nullifier, recipient),
@@ -1461,15 +1568,17 @@ mod tests {
         let amount = U256::from(10_000_000);
 
         // When root is not registered, verify_compliance should return Ok(false)
-        let is_valid_unregistered = contract.verify_compliance(
-            root,
-            nullifier,
-            recipient,
-            amount,
-            vec![0; 128].into(),
-            vec![0; 256].into(),
-            vec![0; 128].into(),
-        ).unwrap();
+        let is_valid_unregistered = contract
+            .verify_compliance(
+                root,
+                nullifier,
+                recipient,
+                amount,
+                vec![0; 128].into(),
+                vec![0; 256].into(),
+                vec![0; 128].into(),
+            )
+            .unwrap();
         assert!(!is_valid_unregistered);
 
         // Register clean root
@@ -1477,15 +1586,17 @@ mod tests {
 
         // When root is registered, it calls get_compliance_vk, compute_public_inputs_g1, and verify_groth16_proof.
         // Under #[cfg(test)], these are mocked to succeed, so it should return Ok(true).
-        let is_valid_registered = contract.verify_compliance(
-            root,
-            nullifier,
-            recipient,
-            amount,
-            vec![0; 128].into(),
-            vec![0; 256].into(),
-            vec![0; 128].into(),
-        ).unwrap();
+        let is_valid_registered = contract
+            .verify_compliance(
+                root,
+                nullifier,
+                recipient,
+                amount,
+                vec![0; 128].into(),
+                vec![0; 256].into(),
+                vec![0; 128].into(),
+            )
+            .unwrap();
         assert!(is_valid_registered);
     }
 
@@ -1494,7 +1605,14 @@ mod tests {
         let mut contract = Nimbus::default();
         assert_eq!(
             contract.batch_spend(
-                vec![], vec![], vec![], vec![], vec![], vec![], vec![], vec![],
+                vec![],
+                vec![],
+                vec![],
+                vec![],
+                vec![],
+                vec![],
+                vec![],
+                vec![],
             ),
             Err(b"EMPTY_BATCH".to_vec())
         );
@@ -1568,26 +1686,39 @@ mod tests {
             )
             .unwrap());
         let after_reveal_principal = contract.total_deposited_principal().unwrap();
-        assert_eq!(before_reveal_principal, after_reveal_principal, "Reveal must not decrease principal");
+        assert_eq!(
+            before_reveal_principal, after_reveal_principal,
+            "Reveal must not decrease principal"
+        );
         assert!(contract.session_resolved.get(sid));
 
         // 3. Register issuer key and perform spend - principal should decrease exactly once
-        let (alpha_neg, hm, pk_iss, nullifier) = register_mock_issuer(&mut contract, owner, net_amount, FixedBytes::ZERO);
+        let mut recipient_hash = [0u8; 32];
+        recipient_hash[12..].copy_from_slice(recipient.as_slice());
+        let recipient_hash = FixedBytes::from(recipient_hash);
+        let (alpha_neg, hm, pk_iss, nullifier) =
+            register_mock_issuer(&mut contract, owner, net_amount, recipient_hash);
         let before_spend_principal = contract.total_deposited_principal().unwrap();
-        
-        assert!(contract.spend(
-            nullifier,
-            alpha_neg.clone().into(),
-            pk_iss.clone().into(),
-            recipient,
-            net_amount,
-            FixedBytes::ZERO,
-            U256::ZERO,
-            FixedBytes::ZERO,
-        ).unwrap());
+
+        assert!(contract
+            .spend(
+                nullifier,
+                alpha_neg.clone().into(),
+                pk_iss.clone().into(),
+                recipient,
+                net_amount,
+                recipient_hash,
+                U256::ZERO,
+                FixedBytes::ZERO,
+            )
+            .unwrap());
 
         let after_spend_principal = contract.total_deposited_principal().unwrap();
-        assert_eq!(after_spend_principal, before_spend_principal - net_amount, "Spend must decrease principal by net amount");
+        assert_eq!(
+            after_spend_principal,
+            before_spend_principal - net_amount,
+            "Spend must decrease principal by net amount"
+        );
 
         // 4. Verify cannot spend again with same nullifier (replay protection)
         assert_eq!(
@@ -1597,7 +1728,7 @@ mod tests {
                 pk_iss.clone().into(),
                 recipient,
                 net_amount,
-                FixedBytes::ZERO,
+                recipient_hash,
                 U256::ZERO,
                 FixedBytes::ZERO,
             ),
@@ -1605,7 +1736,10 @@ mod tests {
             "Double spend with same nullifier must fail"
         );
         // Principal should remain unchanged after failed double spend
-        assert_eq!(contract.total_deposited_principal().unwrap(), after_spend_principal);
+        assert_eq!(
+            contract.total_deposited_principal().unwrap(),
+            after_spend_principal
+        );
 
         // 5. Verify cannot refund after spend
         set_msg_sender(client);
@@ -1615,10 +1749,16 @@ mod tests {
             "Refund must fail after session resolved"
         );
         // Principal should remain unchanged
-        assert_eq!(contract.total_deposited_principal().unwrap(), after_spend_principal);
+        assert_eq!(
+            contract.total_deposited_principal().unwrap(),
+            after_spend_principal
+        );
 
         // 6. Invariant check: principal should be back to initial state
-        assert_eq!(contract.total_deposited_principal().unwrap(), initial_principal);
+        assert_eq!(
+            contract.total_deposited_principal().unwrap(),
+            initial_principal
+        );
     }
 
     #[test]
@@ -1651,7 +1791,11 @@ mod tests {
         let before_refund_principal = contract.total_deposited_principal().unwrap();
         contract.claim_refund(sid).unwrap();
         let after_refund_principal = contract.total_deposited_principal().unwrap();
-        assert_eq!(after_refund_principal, before_refund_principal - net_amount, "Refund must decrease principal");
+        assert_eq!(
+            after_refund_principal,
+            before_refund_principal - net_amount,
+            "Refund must decrease principal"
+        );
 
         // 4. Verify cannot refund again
         assert_eq!(
@@ -1661,9 +1805,15 @@ mod tests {
         );
 
         // 5. Principal should remain unchanged after failed double refund
-        assert_eq!(contract.total_deposited_principal().unwrap(), after_refund_principal);
+        assert_eq!(
+            contract.total_deposited_principal().unwrap(),
+            after_refund_principal
+        );
 
         // 6. Invariant check: principal should be back to initial state
-        assert_eq!(contract.total_deposited_principal().unwrap(), initial_principal);
+        assert_eq!(
+            contract.total_deposited_principal().unwrap(),
+            initial_principal
+        );
     }
 }

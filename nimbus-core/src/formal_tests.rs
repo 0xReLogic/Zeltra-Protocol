@@ -1,10 +1,10 @@
 #[cfg(test)]
 mod tests {
     use crate::*;
-    use rand::{thread_rng, Rng, RngCore};
     use ark_bls12_381::{Fr, G1Projective, G2Projective};
     use ark_ff::UniformRand;
     use ark_std::Zero;
+    use rand::{thread_rng, Rng, RngCore};
 
     /// 1. FORMAL VERIFICATION: Shamir Secret Sharing & Lagrange Reconstruction Correctness
     /// Verifies the algebraic correctness of Shamir Secret Sharing across multiple random scenarios
@@ -44,7 +44,8 @@ mod tests {
             }
             let valid_subset = &subset[0..t];
 
-            let aggregated = aggregate_shares(valid_subset).expect("Failed to aggregate valid subset");
+            let aggregated =
+                aggregate_shares(valid_subset).expect("Failed to aggregate valid subset");
             let unmasked = client_unmask(&aggregated, &r, &MaskingKey(k))
                 .expect("Failed to unmask aggregated signature");
 
@@ -56,11 +57,12 @@ mod tests {
             // B. Test soundness: Any subset of size < t MUST NOT be able to reconstruct a valid signature
             if t > 2 {
                 let invalid_subset = &subset[0..(t - 1)];
-                let aggregated_invalid = aggregate_shares(invalid_subset)
-                    .expect("Aggregation should still work mathematically but with wrong coefficients");
+                let aggregated_invalid = aggregate_shares(invalid_subset).expect(
+                    "Aggregation should still work mathematically but with wrong coefficients",
+                );
                 let unmasked_invalid = client_unmask(&aggregated_invalid, &r, &MaskingKey(k))
                     .expect("Failed to unmask");
-                
+
                 assert!(
                     !verify_unmasked(message, &unmasked_invalid, &pk_iss),
                     "Soundness failure: Sub-threshold subset successfully verified!"
@@ -174,21 +176,30 @@ mod tests {
             let mut local_rng = thread_rng();
             split_secret_key(&sk, 5, 3, &mut local_rng);
         }));
-        assert!(res_t_greater_than_n.is_err(), "split_secret_key should panic when t > n");
+        assert!(
+            res_t_greater_than_n.is_err(),
+            "split_secret_key should panic when t > n"
+        );
 
         // B. Verify that t = 0 panics safely via assertion
         let res_t_zero = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             let mut local_rng = thread_rng();
             split_secret_key(&sk, 0, 5, &mut local_rng);
         }));
-        assert!(res_t_zero.is_err(), "split_secret_key should panic when t == 0");
+        assert!(
+            res_t_zero.is_err(),
+            "split_secret_key should panic when t == 0"
+        );
 
         // C. Verify that n > 1000 panics safely via assertion
         let res_n_too_large = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             let mut local_rng = thread_rng();
             split_secret_key(&sk, 3, 1005, &mut local_rng);
         }));
-        assert!(res_n_too_large.is_err(), "split_secret_key should panic when n > 1000");
+        assert!(
+            res_n_too_large.is_err(),
+            "split_secret_key should panic when n > 1000"
+        );
 
         // D. Verify that zero secret key panics safely via assertion
         let res_zero_key = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
@@ -196,6 +207,9 @@ mod tests {
             let zero_sk = IssuerSecretKey(Fr::zero());
             split_secret_key(&zero_sk, 3, 5, &mut local_rng);
         }));
-        assert!(res_zero_key.is_err(), "split_secret_key should panic when secret key is zero");
+        assert!(
+            res_zero_key.is_err(),
+            "split_secret_key should panic when secret key is zero"
+        );
     }
 }

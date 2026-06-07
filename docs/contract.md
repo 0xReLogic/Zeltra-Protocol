@@ -4,9 +4,10 @@ Dokumen ini menjelaskan desain, alur dana, state, API, dan status implementasi
 smart contract Nimbus. Targetnya adalah pembaca dapat memahami perilaku kontrak
 tanpa harus membaca source code.
 
-> **Status:** testnet/development. Pairing BLS pada jalur `spend` sudah aktif,
-> tetapi canonical transaction binding belum selesai dan verifying key ZK masih
-> mock.
+> **Status:** testnet/development. Pairing BLS pada jalur `spend` sudah aktif
+> di kode, dan direct recipient binding sudah diterapkan. Hard-test 2026-06-07
+> di Arbitrum Sepolia masih gagal pada `BLS12_PAIRING_CHECK` karena target chain
+> belum mengaktifkan/mendukung EIP-2537. Verifying key ZK masih mock.
 
 ## 1. Gambaran Sistem
 
@@ -345,6 +346,15 @@ Arkworks. Helper di `types.rs` mengubah field element ke representasi EVM:
 Jangan mengasumsikan semua L2 mendukung precompile pada address dan behavior
 yang sama. Deployment harus diuji langsung pada target chain.
 
+Catatan hard-test 2026-06-07:
+
+- Contract Stylus patched berhasil deploy dan activate di Arbitrum Sepolia:
+  `0x3a814eb65b442890abe3f666acac2d4f9ff6ad9c`.
+- Jalur `spend` mencapai `BLS12_PAIRING_CHECK`, tetapi call revert
+  `BLS_PAIRING_PRECOMPILE_FAILED`.
+- Rilis mainnet di Arbitrum tidak boleh mengandalkan EIP-2537 sampai support
+  chain dikonfirmasi ulang atau desain fallback dipilih.
+
 ## 9. ZK Compliance
 
 Flow compliance yang dituju:
@@ -526,8 +536,10 @@ eksplisit. Deployment baru harus mendaftarkan issuer key sebelum hard test spend
 ### Blocker sebelum dana nyata
 
 1. Ganti mock compliance VK dengan artifact circuit production.
-3. Hard test deposit, reveal, refund, dan spend pada Stylus testnet.
-4. Uji precompile EIP-2537 dengan test vector valid dan invalid.
+3. Hard test deposit, reveal, refund, dan spend pada chain/harness yang
+   benar-benar mendukung EIP-2537.
+4. Uji precompile EIP-2537 dengan test vector valid dan invalid di target
+   supported chain; Arbitrum Sepolia saat hard-test 2026-06-07 belum lolos.
 5. Audit liability, fee, rounding, dan solvency pada seluruh state transition.
 6. Lengkapi authentication dan replay protection CCIP.
 7. Uji Aave, RWA, dan Polymarket tanpa mock.

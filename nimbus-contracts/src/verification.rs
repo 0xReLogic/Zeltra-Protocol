@@ -3,51 +3,53 @@
 //! Handles Groth16 ZK-Proof verification using EIP-2537 pairing precompiles.
 
 use alloc::vec::Vec;
+use alloy_primitives::{Address, FixedBytes, U256};
 use ark_bls12_381::{Fr, G1Affine, G2Affine};
 use ark_ec::{AffineRepr, CurveGroup};
-use alloy_primitives::{Address, FixedBytes, U256};
 use stylus_sdk::abi::Bytes;
 use stylus_sdk::call::RawCall;
 
+use crate::constants::{BLS12_G1_ADD, BLS12_G1_MSM, BLS12_PAIRING_CHECK};
 use crate::storage::Nimbus;
 use crate::types::{to_evm_g1, to_evm_g2};
-use crate::constants::{BLS12_G1_ADD, BLS12_G1_MSM, BLS12_PAIRING_CHECK};
 
 impl Nimbus {
     /// Retrieve the Verifying Key (VK) for the compliance Groth16 circuit.
-    /// 
+    ///
     /// WARNING: This is a MOCK implementation for development/testing only!
-    /// 
+    ///
     /// PRODUCTION DEPLOYMENT REQUIRES:
     /// 1. Trusted setup ceremony using Circom to compile the circuit
     /// 2. Generate proper proving/verifying keys via Powers of Tau
     /// 3. Store VK parameters on-chain (either in contract storage or as constants)
     /// 4. Load real VK instead of using scaled generators
-    /// 
+    ///
     /// Current implementation uses generator scaling which is NOT cryptographically secure.
     /// This is ONLY for testnet demonstration and must be replaced before mainnet.
-    pub(crate) fn get_compliance_vk(&self) -> (
-        [u8; 128], // vk_alpha_g1
-        [u8; 256], // vk_beta_g2
-        [u8; 256], // vk_gamma_g2
-        [u8; 256], // vk_delta_g2
+    pub(crate) fn get_compliance_vk(
+        &self,
+    ) -> (
+        [u8; 128],      // vk_alpha_g1
+        [u8; 256],      // vk_beta_g2
+        [u8; 256],      // vk_gamma_g2
+        [u8; 256],      // vk_delta_g2
         [[u8; 128]; 5], // vk_ic
     ) {
         let g1 = G1Affine::generator();
         let g2 = G2Affine::generator();
-        
+
         let vk_alpha_g1 = to_evm_g1(&g1);
         let vk_beta_g2 = to_evm_g2(&g2);
         let vk_gamma_g2 = to_evm_g2(&g2);
         let vk_delta_g2 = to_evm_g2(&g2);
-        
+
         let mut vk_ic = [[0u8; 128]; 5];
         for i in 0..5 {
             // Scale the generator to get distinct valid G1 points: (i+1) * g1
             let point = (g1 * Fr::from((i + 1) as u64)).into_affine();
             vk_ic[i] = to_evm_g1(&point);
         }
-        
+
         (vk_alpha_g1, vk_beta_g2, vk_gamma_g2, vk_delta_g2, vk_ic)
     }
 
@@ -73,12 +75,7 @@ impl Nimbus {
             let amount_bytes = amount.to_be_bytes::<32>();
 
             // Public inputs sequence: [root, nullifier, recipient_bytes, amount_bytes]
-            let inputs = [
-                root.0,
-                nullifier.0,
-                recipient_bytes,
-                amount_bytes,
-            ];
+            let inputs = [root.0, nullifier.0, recipient_bytes, amount_bytes];
 
             // G1 MSM precompile input: (G1_point_1, scalar_1) || (G1_point_2, scalar_2) || ...
             // Number of inputs is 4. vk_ic[1..5] are the G1 points corresponding to public inputs.
@@ -89,10 +86,8 @@ impl Nimbus {
             }
 
             // Call G1 MSM precompile (0x0c)
-            let msm_result = unsafe {
-                RawCall::new_static()
-                    .call(BLS12_G1_MSM, &msm_input)
-            }.map_err(|_| b"G1_MSM_PRECOMPILE_FAILED".to_vec())?;
+            let msm_result = unsafe { RawCall::new_static().call(BLS12_G1_MSM, &msm_input) }
+                .map_err(|_| b"G1_MSM_PRECOMPILE_FAILED".to_vec())?;
 
             if msm_result.len() != 128 {
                 return Err(b"INVALID_MSM_RESULT_LENGTH".to_vec());
@@ -104,10 +99,8 @@ impl Nimbus {
             add_input.extend_from_slice(&vk_ic[0]);
             add_input.extend_from_slice(&msm_result);
 
-            let add_result = unsafe {
-                RawCall::new_static()
-                    .call(BLS12_G1_ADD, &add_input)
-            }.map_err(|_| b"G1_ADD_PRECOMPILE_FAILED".to_vec())?;
+            let add_result = unsafe { RawCall::new_static().call(BLS12_G1_ADD, &add_input) }
+                .map_err(|_| b"G1_ADD_PRECOMPILE_FAILED".to_vec())?;
 
             if add_result.len() != 128 {
                 return Err(b"INVALID_ADD_RESULT_LENGTH".to_vec());
@@ -123,14 +116,14 @@ impl Nimbus {
     /// Formula: e(-A, B) * e(IC, gamma) * e(C, delta) * e(alpha, beta) == 1
     pub fn _verify_groth16_proof(
         &self,
-        proof_a_neg_bytes: Bytes, // -A (128 bytes EVM format)
-        proof_b_bytes: Bytes,     // B (256 bytes EVM format)
-        proof_c_bytes: Bytes,     // C (128 bytes EVM format)
+        proof_a_neg_bytes: Bytes,      // -A (128 bytes EVM format)
+        proof_b_bytes: Bytes,          // B (256 bytes EVM format)
+        proof_c_bytes: Bytes,          // C (128 bytes EVM format)
         public_inputs_g1_bytes: Bytes, // IC linear combination (128 bytes EVM format)
-        vk_alpha_bytes: Bytes,    // alpha (128 bytes EVM format)
-        vk_beta_bytes: Bytes,     // beta (256 bytes EVM format)
-        vk_gamma_bytes: Bytes,    // gamma (256 bytes EVM format)
-        vk_delta_bytes: Bytes,    // delta (256 bytes EVM format)
+        vk_alpha_bytes: Bytes,         // alpha (128 bytes EVM format)
+        vk_beta_bytes: Bytes,          // beta (256 bytes EVM format)
+        vk_gamma_bytes: Bytes,         // gamma (256 bytes EVM format)
+        vk_delta_bytes: Bytes,         // delta (256 bytes EVM format)
     ) -> Result<bool, Vec<u8>> {
         if proof_a_neg_bytes.len() != 128
             || proof_b_bytes.len() != 256
@@ -167,10 +160,8 @@ impl Nimbus {
             input.extend_from_slice(&vk_beta_bytes);
 
             // Call EIP-2537 pairing precompile at 0x0f
-            let output = unsafe {
-                RawCall::new_static()
-                    .call(BLS12_PAIRING_CHECK, &input)
-            }.map_err(|_| b"ZK_PAIRING_PRECOMPILE_CALL_FAILED".to_vec())?;
+            let output = unsafe { RawCall::new_static().call(BLS12_PAIRING_CHECK, &input) }
+                .map_err(|_| b"ZK_PAIRING_PRECOMPILE_CALL_FAILED".to_vec())?;
 
             // Output is 32 bytes, last byte is 1 if pairing check passes
             if output.len() == 32 && output[31] == 1 {
@@ -186,7 +177,7 @@ impl Nimbus {
     ///
     /// NOTE (Ephemeral Agent Identifiers Pathway):
     /// To support stealth-identity-based AI Agents (Roadmap Section 10) and thwart Address Clustering Attacks,
-    /// future upgrades will verify that the spent nullifier and ephemeral public key are derived via Blind 
+    /// future upgrades will verify that the spent nullifier and ephemeral public key are derived via Blind
     /// Signature Derivation from a valid master identity, while keeping the master identity hidden on-chain.
     pub fn _verify_compliance(
         &self,
@@ -207,7 +198,9 @@ impl Nimbus {
         let (vk_alpha, vk_beta, vk_gamma, vk_delta, vk_ic) = self.get_compliance_vk();
 
         // 3. Compute the public inputs G1 linear combination on-chain (binds the parameters)
-        let public_inputs_g1_bytes = self.compute_public_inputs_g1(&vk_ic, root, nullifier, recipient, amount)?.to_vec();
+        let public_inputs_g1_bytes = self
+            .compute_public_inputs_g1(&vk_ic, root, nullifier, recipient, amount)?
+            .to_vec();
 
         // 4. Verify ZK Proof (Groth16) using EIP-2537 pairing precompile
         let is_zk_valid = self._verify_groth16_proof(

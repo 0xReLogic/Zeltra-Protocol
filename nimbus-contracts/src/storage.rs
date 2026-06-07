@@ -7,12 +7,12 @@ sol_storage! {
     pub struct Nimbus {
         // Mapping of Issuer Public Key hash to their escrowed collateral
         mapping(bytes32 => uint256) collateral;
-        
+
         // Mapping of Session ID to their client address, masking key commitment, and deposit amount
         mapping(bytes32 => address) session_client;
         mapping(bytes32 => uint256) session_amount;
         mapping(bytes32 => bool) session_resolved;
-        
+
         // Nullifier mapping to prevent double-spending of ephemeral keys
         mapping(bytes32 => bool) nullifiers;
 
@@ -65,7 +65,7 @@ sol_storage! {
         uint256 aave_params_eta;
         address proposed_rwa_token;
         uint256 rwa_token_eta;
-        
+
         // --- CCIP Router Address Configuration (Production Security Best Practice) ---
         address ccip_router;
 

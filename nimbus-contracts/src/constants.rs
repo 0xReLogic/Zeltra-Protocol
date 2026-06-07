@@ -1,6 +1,6 @@
 //! EIP-2537 BLS12-381 precompiled contract addresses
 
-use alloy_primitives::{Address, address};
+use alloy_primitives::{address, Address};
 
 // Precompiled contracts introduced by EIP-2537 in the Pectra upgrade
 pub const BLS12_G1_ADD: Address = address!("000000000000000000000000000000000000000b");

@@ -1,6 +1,6 @@
 use nimbus_core::*;
-use std::time::Instant;
 use rand::thread_rng;
+use std::time::Instant;
 
 const ITERATIONS: u32 = 1000;
 
@@ -11,7 +11,10 @@ fn main() {
     println!("================================================================================");
     println!("Running benchmarks with {} iterations...", ITERATIONS);
     println!("================================================================================");
-    println!("{:<30} | {:<12} | {:<12} | {:<12}", "Operation", "Total (ms)", "Avg (us)", "Ops/sec");
+    println!(
+        "{:<30} | {:<12} | {:<12} | {:<12}",
+        "Operation", "Total (ms)", "Avg (us)", "Ops/sec"
+    );
     println!("--------------------------------------------------------------------------------");
 
     // 1. Client Blind
@@ -25,7 +28,10 @@ fn main() {
         let total_ms = elapsed.as_millis() as f64;
         let avg_us = elapsed.as_micros() as f64 / ITERATIONS as f64;
         let ops_per_sec = ITERATIONS as f64 / elapsed.as_secs_f64();
-        println!("{:<30} | {:<12.2} | {:<12.2} | {:<12.0}", "Client Blind (G1)", total_ms, avg_us, ops_per_sec);
+        println!(
+            "{:<30} | {:<12.2} | {:<12.2} | {:<12.0}",
+            "Client Blind (G1)", total_ms, avg_us, ops_per_sec
+        );
     }
 
     // 2. Issuer Sign Blinded
@@ -42,7 +48,10 @@ fn main() {
         let total_ms = elapsed.as_millis() as f64;
         let avg_us = elapsed.as_micros() as f64 / ITERATIONS as f64;
         let ops_per_sec = ITERATIONS as f64 / elapsed.as_secs_f64();
-        println!("{:<30} | {:<12.2} | {:<12.2} | {:<12.0}", "Issuer Sign Blinded (G2 MSM)", total_ms, avg_us, ops_per_sec);
+        println!(
+            "{:<30} | {:<12.2} | {:<12.2} | {:<12.0}",
+            "Issuer Sign Blinded (G2 MSM)", total_ms, avg_us, ops_per_sec
+        );
     }
 
     // 3. Client Verify Masked
@@ -60,7 +69,10 @@ fn main() {
         let total_ms = elapsed.as_millis() as f64;
         let avg_us = elapsed.as_micros() as f64 / ITERATIONS as f64;
         let ops_per_sec = ITERATIONS as f64 / elapsed.as_secs_f64();
-        println!("{:<30} | {:<12.2} | {:<12.2} | {:<12.0}", "Client Verify Masked (Pairing)", total_ms, avg_us, ops_per_sec);
+        println!(
+            "{:<30} | {:<12.2} | {:<12.2} | {:<12.0}",
+            "Client Verify Masked (Pairing)", total_ms, avg_us, ops_per_sec
+        );
     }
 
     // 4. Client Unmask
@@ -78,7 +90,10 @@ fn main() {
         let total_ms = elapsed.as_millis() as f64;
         let avg_us = elapsed.as_micros() as f64 / ITERATIONS as f64;
         let ops_per_sec = ITERATIONS as f64 / elapsed.as_secs_f64();
-        println!("{:<30} | {:<12.2} | {:<12.2} | {:<12.0}", "Client Unmask (Fr Inv)", total_ms, avg_us, ops_per_sec);
+        println!(
+            "{:<30} | {:<12.2} | {:<12.2} | {:<12.0}",
+            "Client Unmask (Fr Inv)", total_ms, avg_us, ops_per_sec
+        );
     }
 
     // 5. Verify Unmasked
@@ -98,7 +113,10 @@ fn main() {
         let total_ms = elapsed.as_millis() as f64;
         let avg_us = elapsed.as_micros() as f64 / ITERATIONS as f64;
         let ops_per_sec = ITERATIONS as f64 / elapsed.as_secs_f64();
-        println!("{:<30} | {:<12.2} | {:<12.2} | {:<12.0}", "Verify Unmasked (Pairing)", total_ms, avg_us, ops_per_sec);
+        println!(
+            "{:<30} | {:<12.2} | {:<12.2} | {:<12.0}",
+            "Verify Unmasked (Pairing)", total_ms, avg_us, ops_per_sec
+        );
     }
 
     println!("================================================================================");

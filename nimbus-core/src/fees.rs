@@ -71,8 +71,7 @@ pub fn quote_private_spend(
 ) -> Option<SpendQuote> {
     let contract_amount = gross_up_private_spend_amount(merchant_amount)?;
     let protocol_fee = contract_amount.checked_sub(merchant_amount)?;
-    let (relayer_markup, execution_fee) =
-        quote_execution_fee(gas_cost, relayer_markup_bps)?;
+    let (relayer_markup, execution_fee) = quote_execution_fee(gas_cost, relayer_markup_bps)?;
     let user_total_debit = contract_amount.checked_add(execution_fee)?;
 
     Some(SpendQuote {
@@ -135,10 +134,7 @@ mod tests {
             let gross = gross_up_private_spend_amount(merchant_amount).unwrap();
             assert!(net_after_fee(gross, PRIVATE_SPEND_FEE_BPS).unwrap() >= merchant_amount);
             if gross > 0 {
-                assert!(
-                    net_after_fee(gross - 1, PRIVATE_SPEND_FEE_BPS).unwrap()
-                        < merchant_amount
-                );
+                assert!(net_after_fee(gross - 1, PRIVATE_SPEND_FEE_BPS).unwrap() < merchant_amount);
             }
         }
     }

@@ -5,10 +5,10 @@
 
 use alloc::vec::Vec;
 use alloy_primitives::{keccak256, Address, FixedBytes, U256};
-use stylus_sdk::abi::Bytes;
-use stylus_sdk::call::RawCall;
 use ark_bls12_381::G2Affine;
 use ark_ec::AffineRepr;
+use stylus_sdk::abi::Bytes;
+use stylus_sdk::call::RawCall;
 
 use crate::constants::BLS12_PAIRING_CHECK;
 use crate::interfaces::{IConditionalTokens, IErc20};
@@ -73,19 +73,23 @@ impl Nimbus {
     ) -> Result<bool, Vec<u8>> {
         // 1. CHECKS
         self.check_not_paused()?;
-        
+
         // Expiry check
         let current_time = U256::from(self.block_timestamp());
         if expiry != U256::ZERO && current_time > expiry {
             return Err(b"TRANSACTION_EXPIRED".to_vec());
         }
-        
+
         // Enforce minimum transaction size of 5 USDC/stablecoin (5,000,000 units)
         let min_amount = U256::from(5_000_000);
         if amount < min_amount {
             return Err(b"AMOUNT_TOO_SMALL".to_vec());
         }
-        
+
+        if recipient != Address::ZERO && recipient_or_intent_hash != recipient_hash(recipient) {
+            return Err(b"RECIPIENT_INTENT_MISMATCH".to_vec());
+        }
+
         // Check double spend (Nullifier)
         if self.nullifiers.get(nullifier) {
             return Ok(false);
@@ -115,27 +119,36 @@ impl Nimbus {
         }
 
         // Calculate standard redemption/withdrawal fee of 0.15% (amount * 15 / 10000, round up)
-        let base_fee = (amount.checked_mul(U256::from(15))
-            .ok_or_else(|| b"BASE_FEE_MUL_OVERFLOW".to_vec())? + U256::from(9999)) / U256::from(10000);
-        
+        let base_fee = (amount
+            .checked_mul(U256::from(15))
+            .ok_or_else(|| b"BASE_FEE_MUL_OVERFLOW".to_vec())?
+            + U256::from(9999))
+            / U256::from(10000);
+
         // Calculate dynamic premium if Fase 2 or 3 is active
         let premium = self._calculate_fast_path_premium(amount)?;
-        
+
         // fee_recipient gets base_fee + 20% of premium
-        let premium_share = (premium.checked_mul(U256::from(20))
-            .ok_or_else(|| b"PREMIUM_SHARE_MUL_OVERFLOW".to_vec())? + U256::from(99)) / U256::from(100);
-            
-        let protocol_share = base_fee.checked_add(premium_share)
+        let premium_share = (premium
+            .checked_mul(U256::from(20))
+            .ok_or_else(|| b"PREMIUM_SHARE_MUL_OVERFLOW".to_vec())?
+            + U256::from(99))
+            / U256::from(100);
+
+        let protocol_share = base_fee
+            .checked_add(premium_share)
             .ok_or_else(|| b"PROTOCOL_SHARE_OVERFLOW".to_vec())?;
-            
+
         if amount < protocol_share {
             return Err(b"AMOUNT_LESS_THAN_FEES".to_vec());
         }
-        let payout = amount.checked_sub(protocol_share)
+        let payout = amount
+            .checked_sub(protocol_share)
             .ok_or_else(|| b"PAYOUT_UNDERFLOW".to_vec())?;
 
         let principal = self.total_deposited_principal.get();
-        let new_principal = principal.checked_sub(amount)
+        let new_principal = principal
+            .checked_sub(amount)
             .ok_or_else(|| b"INSUFFICIENT_PRINCIPAL".to_vec())?;
 
         #[cfg(test)]
@@ -158,29 +171,31 @@ impl Nimbus {
             // 2. EFFECTS
             self.nullifiers.insert(nullifier, true);
             self.total_deposited_principal.set(new_principal);
-            
+
             // Track epoch volume for dynamic rebalancing
             self.update_epoch_and_rebalance_ratio(amount)?;
-            
+
             // 3. INTERACTIONS
             self.ensure_liquidity(amount)?;
-            
+
             let stablecoin_address = self.stablecoin.get();
             let erc20 = IErc20::new(stablecoin_address);
-            
+
             // Transfer payout to recipient (if not zero address)
             if recipient != Address::ZERO && payout > U256::ZERO {
-                let success = erc20.transfer(&mut *self, recipient, payout)
+                let success = erc20
+                    .transfer(&mut *self, recipient, payout)
                     .map_err(|e| e)?;
                 if !success {
                     return Err(b"SPEND_TRANSFER_FAILED".to_vec());
                 }
             }
-            
+
             // Transfer fee to fee_recipient
             if protocol_share > U256::ZERO {
                 let recipient_fee = self.fee_recipient.get();
-                let fee_success = erc20.transfer(&mut *self, recipient_fee, protocol_share)
+                let fee_success = erc20
+                    .transfer(&mut *self, recipient_fee, protocol_share)
                     .map_err(|e| e)?;
                 if !fee_success {
                     return Err(b"SPEND_FEE_TRANSFER_FAILED".to_vec());
@@ -244,14 +259,22 @@ impl Nimbus {
         }
 
         // Calculate payout (net after fees) using the same safe round-up math as spend()
-        let base_fee = (amount.checked_mul(U256::from(15))
-            .ok_or_else(|| b"BASE_FEE_MUL_OVERFLOW".to_vec())? + U256::from(9999)) / U256::from(10000);
+        let base_fee = (amount
+            .checked_mul(U256::from(15))
+            .ok_or_else(|| b"BASE_FEE_MUL_OVERFLOW".to_vec())?
+            + U256::from(9999))
+            / U256::from(10000);
         let premium = self._calculate_fast_path_premium(amount)?;
-        let premium_share = (premium.checked_mul(U256::from(20))
-            .ok_or_else(|| b"PREMIUM_SHARE_MUL_OVERFLOW".to_vec())? + U256::from(99)) / U256::from(100);
-        let protocol_share = base_fee.checked_add(premium_share)
+        let premium_share = (premium
+            .checked_mul(U256::from(20))
+            .ok_or_else(|| b"PREMIUM_SHARE_MUL_OVERFLOW".to_vec())?
+            + U256::from(99))
+            / U256::from(100);
+        let protocol_share = base_fee
+            .checked_add(premium_share)
             .ok_or_else(|| b"PROTOCOL_SHARE_OVERFLOW".to_vec())?;
-        let payout = amount.checked_sub(protocol_share)
+        let payout = amount
+            .checked_sub(protocol_share)
             .ok_or_else(|| b"PAYOUT_UNDERFLOW".to_vec())?;
 
         #[cfg(test)]
@@ -267,12 +290,13 @@ impl Nimbus {
         #[cfg(not(test))]
         {
             let erc20 = IErc20::new(collateral_token);
-            
+
             // If condition_id is zero, this is a standard cross-chain transfer (not Polymarket).
             // In this case, polymarket_ctf acts as the recipient's wallet address.
             if condition_id == FixedBytes::ZERO {
                 if polymarket_ctf != Address::ZERO && payout > U256::ZERO {
-                    let success = erc20.transfer(&mut *self, polymarket_ctf, payout)
+                    let success = erc20
+                        .transfer(&mut *self, polymarket_ctf, payout)
                         .map_err(|e| e)?;
                     if !success {
                         return Err(b"CCIP_TRANSFER_FAILED".to_vec());
@@ -280,9 +304,10 @@ impl Nimbus {
                 }
                 return Ok(true);
             }
-            
+
             // Approve Polymarket CTF to spend payout amount of collateral token
-            let approve_success = erc20.approve(&mut *self, polymarket_ctf, payout)
+            let approve_success = erc20
+                .approve(&mut *self, polymarket_ctf, payout)
                 .map_err(|e| e)?;
             if !approve_success {
                 return Err(b"POLYMARKET_APPROVE_FAILED".to_vec());
@@ -290,14 +315,19 @@ impl Nimbus {
 
             // Perform external call to Polymarket Conditional Tokens Contract (Gnosis CTF)
             let ctf = IConditionalTokens::new(polymarket_ctf);
-            
+
             // Partition for YES/NO outcome slots [1, 2]
             let partition = vec![U256::from(1), U256::from(2)];
-            
-            match ctf.split_position(&mut *self, collateral_token, FixedBytes::ZERO, condition_id, partition, payout) {
-                Ok(_) => {
-                    Ok(true)
-                }
+
+            match ctf.split_position(
+                &mut *self,
+                collateral_token,
+                FixedBytes::ZERO,
+                condition_id,
+                partition,
+                payout,
+            ) {
+                Ok(_) => Ok(true),
                 Err(_) => {
                     // Try-Catch Fallback (Aha! Moment): record refund instead of reverting.
                     // This prevents locking the CCIP flow and allows recovery of user deposits.
@@ -336,7 +366,8 @@ impl Nimbus {
         {
             let stablecoin_address = self.stablecoin.get();
             let erc20 = IErc20::new(stablecoin_address);
-            let success = erc20.transfer(&mut *self, recipient, amount)
+            let success = erc20
+                .transfer(&mut *self, recipient, amount)
                 .map_err(|e| e)?;
             if !success {
                 return Err(b"REFUND_TRANSFER_FAILED".to_vec());
@@ -369,22 +400,22 @@ impl Nimbus {
         }
         let mut nullifier = [0u8; 32];
         nullifier.copy_from_slice(&payload[0..32]);
-        
+
         let alpha_neg_bytes = payload[32..160].to_vec();
         let pk_iss_bytes = payload[160..416].to_vec();
-        
+
         let polymarket_ctf = Address::from_slice(&payload[416..436]);
         let collateral_token = Address::from_slice(&payload[436..456]);
-        
+
         let mut condition_id = [0u8; 32];
         condition_id.copy_from_slice(&payload[456..488]);
-        
+
         let amount = U256::from_be_slice(&payload[488..520]);
         let expiry = U256::from_be_slice(&payload[520..552]);
-        
+
         let mut nonce = [0u8; 32];
         nonce.copy_from_slice(&payload[552..584]);
-        
+
         // Execute spend and buy shares on destination chain
         let success = self._spend_and_buy_shares(
             nullifier.into(),
@@ -397,11 +428,17 @@ impl Nimbus {
             expiry,
             nonce.into(),
         )?;
-        
+
         if !success {
             return Err(b"CCIP_EXECUTION_FAILED".to_vec());
         }
-        
+
         Ok(())
     }
+}
+
+fn recipient_hash(recipient: Address) -> FixedBytes<32> {
+    let mut out = [0u8; 32];
+    out[12..].copy_from_slice(recipient.as_slice());
+    FixedBytes::from(out)
 }

@@ -797,10 +797,23 @@ dikembalikan, dan final verification hanya dilakukan oleh CLI.
 - [ ] Leader membuat `k` dan `com_k` tetapi tidak memberikan `k`.
 - [ ] Quorum guardian menghasilkan masked signature.
 - [ ] Client memverifikasi masked signature sebelum deposit.
-- [ ] Client approve USDC dan mengirim deposit nyata.
-- [ ] Tunggu receipt deposit dan verifikasi event/state.
-- [ ] Verifikasi fee recipient menerima fee yang tepat.
-- [ ] Verifikasi principal bertambah sebesar net amount.
+- [x] Client approve USDC dan mengirim deposit nyata.
+  - Arbitrum Sepolia approve tx:
+    `0xe39e66d5fd51301965604f3ddbde195275363a51e190c130c14a80f4dcc9519e`
+  - Arbitrum Sepolia deposit tx:
+    `0xc0c4c59bc6992603aaf46922062651fb25032afe535d919107339a27b5eb0545`
+  - Session:
+    `0x9b1ac450be38cc42ac6b51c8da89f4a9409c85143f1ef47c0d440b361028c5bf`
+- [x] Tunggu receipt deposit dan verifikasi event/state.
+- [x] Verifikasi fee recipient menerima fee yang tepat.
+  - Deposit 10 USDC, fee 0.01 USDC, wallet fee recipient sama dengan
+    depositor sehingga wallet turun net 9.99 USDC.
+- [x] Verifikasi principal bertambah sebesar net amount.
+  - `totalDepositedPrincipal = 9.99 USDC` setelah deposit.
+  - Deployment patched recipient-binding:
+    `0x3a814eb65b442890abe3f666acac2d4f9ff6ad9c`
+  - Patched deposit tx:
+    `0x8192bda4a9c1b8765f5572d0af4391b88dbb23e1e2e8604bf5578a5187d27d7f`
 - [ ] Leader baru merilis `k` setelah deposit confirmed.
 - [ ] Reveal contract membandingkan dengan commitment tersimpan.
 - [ ] Dana/redeem outcome hanya diterima session client yang benar.
@@ -816,11 +829,25 @@ dikembalikan, dan final verification hanya dilakukan oleh CLI.
 
 ### HT-04 Spend BLS On-Chain
 
-- [ ] Fund contract dengan jumlah kecil USDC testnet.
+- [x] Fund contract dengan jumlah kecil USDC testnet.
+  - Contract balance naik dari 15 USDC menjadi 24.99 USDC lewat jalur
+    `approve + deposit`, bukan transfer langsung.
+- [x] Generate signature sesuai hash spend contract deployed.
+  - `nimbus-core/examples/generate_bls_test_data.rs` sekarang mendukung mode
+    `--spend-contract` untuk mengikat `chain_id`, `contract`, `amount`,
+    `recipient_or_intent_hash`, `expiry`, dan `nonce`.
 - [ ] Generate signature melalui alur threshold nyata.
 - [ ] Kirim spend dengan EVM vector RFC 9380 yang valid.
+  - 2026-06-07 hard-test Arbitrum Sepolia blocked:
+    `spend` revert `BLS_PAIRING_PRECOMPILE_FAILED`.
+  - Riset cepat menemukan disclosure Arbitrum bahwa EIP-2537 BLS12-381
+    precompile belum supported/enabled pada Arbitrum chains. Jangan anggap
+    Arbitrum One/Sepolia siap untuk BLS on-chain sampai diverifikasi ulang.
 - [ ] Tunggu receipt sukses.
-- [ ] Verifikasi pairing benar-benar dipanggil pada build deployed.
+- [x] Verifikasi pairing benar-benar dipanggil pada build deployed.
+  - Patched contract masuk jalur precompile dan gagal di call
+    `BLS12_PAIRING_CHECK`, membuktikan branch pairing aktif tetapi target chain
+    belum mendukung precompile.
 - [ ] Verifikasi recipient menerima payout tepat.
 - [ ] Verifikasi fee recipient menerima fee tepat.
 - [ ] Verifikasi principal turun tepat.
@@ -1150,11 +1177,18 @@ Lokasi: `nimbus-contracts/src/spend.rs`
   infinity, issuer key tidak dipercaya, nullifier mismatch, dan replay.
 - [ ] Jalankan test pada Stylus-compatible environment atau testnet, bukan
   hanya host mock.
+  - 2026-06-07 Arbitrum Sepolia: deployed Stylus path mencapai
+    `BLS12_PAIRING_CHECK`, tetapi chain mengembalikan
+    `BLS_PAIRING_PRECOMPILE_FAILED`.
+  - Blocker eksternal: EIP-2537 belum enabled/supported pada Arbitrum target.
 - [x] Perbaiki `nimbus-core/examples/generate_bls_test_data.rs` agar memakai
   primitive yang sama dengan production:
   `hash_to_g1`, `IssuerSecretKey`, `UnmaskedSignature`,
   `get_alpha_neg_evm`, `get_hm_evm`, dan `get_pk_iss_evm`.
 - [x] Pastikan `alpha_neg_hex` benar-benar merupakan `-alpha`.
+- [x] Bind direct spend recipient ke signature/intention hash.
+  - `spend()` sekarang menolak recipient substitution dengan
+    `RECIPIENT_INTENT_MISMATCH` sebelum nullifier/principal berubah.
 - [x] Gunakan amount test minimal 5 USDC.
 - [x] Tambahkan deterministic seed agar hasil test dapat direproduksi.
 - [x] Tambahkan opsi `--invalid` untuk menghasilkan vector dengan satu byte
@@ -1639,6 +1673,9 @@ Lokasi: `nimbus-node/src/handlers/x402.rs`
 - [ ] Tambahkan production-path tests tanpa `#[cfg(test)]` bypass.
 - [ ] Jalankan Stylus contract dalam local dev node atau supported test harness.
 - [ ] Test precompile EIP-2537 menggunakan known vectors.
+  - Jangan jalankan di Arbitrum sampai support EIP-2537 dikonfirmasi.
+  - Perlu target chain/harness yang benar-benar mengaktifkan Prague/Pectra
+    EIP-2537.
 - [ ] Test invalid BLS signature tidak mengubah state.
 - [ ] Test unauthorized reveal.
 - [ ] Test duplicate session.
@@ -1717,6 +1754,8 @@ path.
 - [ ] Jangan menyebut relayer atau contract production-ready sebelum seluruh P0
   selesai.
 - [ ] Catat bahwa unit tests contract menggunakan mocked HostIO/precompile paths.
+- [x] Catat hard-test Arbitrum Sepolia EIP-2537 gagal karena precompile tidak
+  tersedia/aktif.
 
 ## Urutan Implementasi yang Disarankan
 

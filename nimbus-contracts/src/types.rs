@@ -38,7 +38,7 @@ pub fn to_evm_g2(point: &G2Affine) -> [u8; 256] {
         return [0u8; 256];
     }
     let mut evm_buf = [0u8; 256];
-    
+
     // EVM blocks: block 0 is X1, block 1 is X0, block 2 is Y1, block 3 is Y0
     // Arkworks order of elements: coeff 0 is X0, coeff 1 is X1, coeff 2 is Y0, coeff 3 is Y1
     let src_indices = [1, 0, 3, 2];

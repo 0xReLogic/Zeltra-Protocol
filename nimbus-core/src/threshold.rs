@@ -1,13 +1,12 @@
 use crate::types::{
-    BlindedMessage, IssuerPublicKey, IssuerSecretKey, MaskedBlindSignature,
-    PartialBlindSignature,
+    BlindedMessage, IssuerPublicKey, IssuerSecretKey, MaskedBlindSignature, PartialBlindSignature,
 };
 use ark_bls12_381::{Bls12_381, Fr, G1Projective, G2Projective};
 use ark_ec::pairing::Pairing;
 use ark_ec::PrimeGroup;
 use ark_ff::{Field, UniformRand};
-use rand::Rng;
 use ark_std::Zero;
+use rand::Rng;
 
 /// Shamir Secret Sharing: Splits the issuer secret key into n shares with threshold t.
 pub fn split_secret_key<R: Rng>(
@@ -20,13 +19,13 @@ pub fn split_secret_key<R: Rng>(
     assert!(t > 0, "Threshold must be greater than 0");
     assert!(n <= 1000, "Validator set size n cannot exceed 1000");
     assert!(!sk.0.is_zero(), "Secret key cannot be zero");
-    
+
     // Generate coefficients a_1 to a_{t-1}
     let mut coefficients = vec![sk.0];
     for _ in 1..t {
         coefficients.push(Fr::rand(rng));
     }
-    
+
     let mut shares = vec![];
     for i in 1..=n {
         let x = Fr::from(i as u64);
@@ -50,7 +49,7 @@ pub fn compute_lagrange_coefficient(i: usize, s: &[usize]) -> Result<Fr, String>
             return Err("Duplicate indices detected in s".to_string());
         }
     }
-    
+
     // 2. Validate that i is in s
     if !s.contains(&i) {
         return Err("Target index not found in validator set s".to_string());
@@ -67,23 +66,19 @@ pub fn compute_lagrange_coefficient(i: usize, s: &[usize]) -> Result<Fr, String>
         num *= j_fr;
         den *= j_fr - i_fr;
     }
-    
+
     // 3. Check for zero denominator before inverting
     if den.is_zero() {
         return Err("Zero denominator in Lagrange coefficient computation".to_string());
     }
-    
+
     den.inverse()
         .map(|inv| num * inv)
         .ok_or_else(|| "Lagrange denominator inverse failed".to_string())
 }
 
 /// Validator: signs a blinded message using their secret key share and a temporary masking key k.
-pub fn sign_share(
-    share_sk: &Fr,
-    x: &BlindedMessage,
-    k: &Fr,
-) -> PartialBlindSignature {
+pub fn sign_share(share_sk: &Fr, x: &BlindedMessage, k: &Fr) -> PartialBlindSignature {
     let scalar = (*k) * (*share_sk);
     PartialBlindSignature(x.0 * scalar)
 }
@@ -114,7 +109,7 @@ pub fn aggregate_shares(
     partial_sigs: &[(usize, PartialBlindSignature)],
 ) -> Result<MaskedBlindSignature, String> {
     let indices: Vec<usize> = partial_sigs.iter().map(|(i, _)| *i).collect();
-    
+
     // 1. Validate uniqueness of indices
     let mut unique_indices = std::collections::HashSet::new();
     for &i in &indices {

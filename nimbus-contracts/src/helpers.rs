@@ -1,8 +1,8 @@
 //! Private helper methods for Nimbus contract
 
+use crate::storage::Nimbus;
 use alloc::vec::Vec;
 use alloy_primitives::Address;
-use crate::storage::Nimbus;
 
 impl Nimbus {
     #[inline(always)]
@@ -68,12 +68,12 @@ impl Nimbus {
     }
 }
 
-use sha2::Sha256;
-use ark_bls12_381::{G1Affine, G1Projective, g1::Config as G1Config};
+use ark_bls12_381::{g1::Config as G1Config, G1Affine, G1Projective};
 use ark_ec::hashing::curve_maps::wb::WBMap;
 use ark_ec::hashing::map_to_curve_hasher::MapToCurveBasedHasher;
-use ark_ff::fields::field_hashers::DefaultFieldHasher;
 use ark_ec::hashing::HashToCurve;
+use ark_ff::fields::field_hashers::DefaultFieldHasher;
+use sha2::Sha256;
 
 pub fn hash_to_g1(message: &[u8]) -> G1Affine {
     let hasher = MapToCurveBasedHasher::<
@@ -82,7 +82,7 @@ pub fn hash_to_g1(message: &[u8]) -> G1Affine {
         WBMap<G1Config>,
     >::new(b"BLS_SIG_BLS12381G1_XMD:SHA-256_SSWU_RO_NUL_")
     .unwrap();
-    
+
     hasher.hash(message).unwrap()
 }
 
@@ -105,6 +105,6 @@ pub fn compute_spend_hash(
     msg_bytes.extend_from_slice(recipient_or_intent_hash.as_slice());
     msg_bytes.extend_from_slice(&expiry.to_be_bytes::<32>());
     msg_bytes.extend_from_slice(nonce.as_slice());
-    
+
     alloy_primitives::keccak256(&msg_bytes).0
 }

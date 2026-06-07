@@ -1,14 +1,14 @@
 use crate::crypto::hash_to_g1;
 use crate::types::{
-    BlindedMessage, BlindingFactor, IssuerPublicKey, IssuerSecretKey,
-    MaskedBlindSignature, MaskingKey, MaskingKeyCommitment, UnmaskedSignature,
+    BlindedMessage, BlindingFactor, IssuerPublicKey, IssuerSecretKey, MaskedBlindSignature,
+    MaskingKey, MaskingKeyCommitment, UnmaskedSignature,
 };
 use ark_bls12_381::{Bls12_381, Fr, G2Projective};
 use ark_ec::pairing::Pairing;
 use ark_ec::PrimeGroup;
 use ark_ff::{Field, UniformRand};
-use rand::Rng;
 use ark_std::Zero;
+use rand::Rng;
 
 /// Client: blinds a message (ephemeral public key) using a random blinding factor.
 /// X = r * H(m)
@@ -62,7 +62,8 @@ pub fn client_unmask(
         return None;
     }
     let r_k = r.0 * k.0;
-    r_k.inverse().map(|inv| UnmaskedSignature(masked_sig.0 * inv))
+    r_k.inverse()
+        .map(|inv| UnmaskedSignature(masked_sig.0 * inv))
 }
 
 /// Verifier: verifies the unmasked signature.

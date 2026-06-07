@@ -1,11 +1,11 @@
-mod types;
-mod serialization;
+mod blind_sign;
+mod compliance_circuit;
 mod crypto;
 mod evm;
-mod blind_sign;
-mod threshold;
-mod compliance_circuit;
 mod fees;
+mod serialization;
+mod threshold;
+mod types;
 
 pub use ark_bls12_381::{Bls12_381, Fr, G1Projective, G2Projective};
 pub use ark_ec::pairing::Pairing;
@@ -14,9 +14,8 @@ pub use ark_ff::{Field, PrimeField, UniformRand};
 
 // Re-export types for backward compatibility
 pub use types::{
-    BlindedMessage, BlindingFactor, IssuerPublicKey, IssuerSecretKey,
-    MaskedBlindSignature, MaskingKey, MaskingKeyCommitment,
-    PartialBlindSignature, UnmaskedSignature,
+    BlindedMessage, BlindingFactor, IssuerPublicKey, IssuerSecretKey, MaskedBlindSignature,
+    MaskingKey, MaskingKeyCommitment, PartialBlindSignature, UnmaskedSignature,
 };
 
 // Re-export serialization helpers
@@ -41,14 +40,15 @@ pub use threshold::{
 
 // Re-export fee policy helpers
 pub use fees::{
-    ceil_div, deposit_fee, fee_round_up, gross_up_for_exact_net,
-    gross_up_private_spend_amount, net_after_fee, private_spend_fee,
-    quote_execution_fee, quote_private_spend, SpendQuote, DEFAULT_RELAYER_MARKUP_BPS,
-    DEPOSIT_FEE_BPS, FEE_DENOMINATOR_BPS, PRIVATE_SPEND_FEE_BPS,
+    ceil_div, deposit_fee, fee_round_up, gross_up_for_exact_net, gross_up_private_spend_amount,
+    net_after_fee, private_spend_fee, quote_execution_fee, quote_private_spend, SpendQuote,
+    DEFAULT_RELAYER_MARKUP_BPS, DEPOSIT_FEE_BPS, FEE_DENOMINATOR_BPS, PRIVATE_SPEND_FEE_BPS,
 };
 
 // Re-export compliance circuit
-pub use compliance_circuit::{generate_compliance_keys, generate_compliance_proof, verify_compliance_proof, ComplianceKeys};
+pub use compliance_circuit::{
+    generate_compliance_keys, generate_compliance_proof, verify_compliance_proof, ComplianceKeys,
+};
 
 #[cfg(test)]
 mod tests {
@@ -79,10 +79,11 @@ mod tests {
 
         // 6. Verifier checks the final unmasked signature
         let verify_final = verify_unmasked(message, &alpha, &pk_iss);
-        assert!(verify_final, "Final unmasked signature verification failed!");
+        assert!(
+            verify_final,
+            "Final unmasked signature verification failed!"
+        );
     }
-
-
 
     #[test]
     fn test_threshold_bdhke_flow() {
@@ -91,7 +92,7 @@ mod tests {
         // 1. Setup Issuer and split the key into 5 shares with threshold 3
         let sk_iss = IssuerSecretKey::generate(&mut rng);
         let pk_iss = sk_iss.public_key();
-        
+
         let t = 3;
         let n = 5;
         let shares = split_secret_key(&sk_iss, t, n, &mut rng);
@@ -111,16 +112,15 @@ mod tests {
         let sig_share5 = sign_share(&shares[4].1, &x, &k); // share 5 (index 5)
 
         // 5. Client aggregates partial signatures
-        let gathered = vec![
-            (1, sig_share1),
-            (3, sig_share3),
-            (5, sig_share5),
-        ];
+        let gathered = vec![(1, sig_share1), (3, sig_share3), (5, sig_share5)];
         let aggregated_masked_sig = aggregate_shares(&gathered).unwrap();
 
         // 6. Client verifies aggregated masked signature against com_k
         let verify_masked = client_verify_masked(&x, &com_k, &aggregated_masked_sig);
-        assert!(verify_masked, "Aggregated masked signature verification failed!");
+        assert!(
+            verify_masked,
+            "Aggregated masked signature verification failed!"
+        );
 
         // 7. Client unmasks signature once k is revealed
         let masking_key = MaskingKey(k);
@@ -129,7 +129,10 @@ mod tests {
 
         // 8. Verifier checks the final unmasked signature against aggregate public key pk_iss
         let verify_final = verify_unmasked(message, &alpha, &pk_iss);
-        assert!(verify_final, "Final unmasked signature verification failed!");
+        assert!(
+            verify_final,
+            "Final unmasked signature verification failed!"
+        );
     }
 }
 
