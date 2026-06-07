@@ -63,8 +63,8 @@ pub async fn handle_leader_sign(
         Ok(b) => b,
         Err(e) => return Json(LeaderSignResponse {
             status: format!("ERROR: Invalid blinded hex: {}", e),
+            session_id: payload.session_id,
             com_k_hex: String::new(),
-            k_hex: String::new(),
             partial_signatures: vec![],
         }),
     };
@@ -73,8 +73,8 @@ pub async fn handle_leader_sign(
         Some(x) => x,
         None => return Json(LeaderSignResponse {
             status: "ERROR: Failed to deserialize blinded message".to_string(),
+            session_id: payload.session_id,
             com_k_hex: String::new(),
-            k_hex: String::new(),
             partial_signatures: vec![],
         }),
     };
@@ -135,10 +135,41 @@ pub async fn handle_leader_sign(
         }
     }
 
-    Json(LeaderSignResponse {
-        status: "SUCCESS".to_string(),
-        com_k_hex: hex::encode(serialize_to_bytes(&MaskingKeyCommitment(com_k))),
-        k_hex: hex::encode(serialize_to_bytes(&MaskingKey(k))),
-        partial_signatures,
-    })
+    let com_k_hex = hex::encode(serialize_to_bytes(&MaskingKeyCommitment(com_k)));
+    let k_hex = hex::encode(serialize_to_bytes(&MaskingKey(k)));
+
+    // Insert signing session into database
+    match state.db.insert_signing_session(
+        &payload.session_id,
+        &com_k_hex,
+        payload.amount,
+        &payload.client_address,
+        &k_hex,
+    ).await {
+        Ok(true) => {
+            println!("RELAYER: Signing session registered for Session ID: {}", payload.session_id);
+            Json(LeaderSignResponse {
+                status: "SUCCESS".to_string(),
+                session_id: payload.session_id,
+                com_k_hex,
+                partial_signatures,
+            })
+        }
+        Ok(false) => {
+            Json(LeaderSignResponse {
+                status: "ERROR: Session ID already exists".to_string(),
+                session_id: payload.session_id,
+                com_k_hex: String::new(),
+                partial_signatures: vec![],
+            })
+        }
+        Err(e) => {
+            Json(LeaderSignResponse {
+                status: format!("ERROR: Database error: {}", e),
+                session_id: payload.session_id,
+                com_k_hex: String::new(),
+                partial_signatures: vec![],
+            })
+        }
+    }
 }

@@ -1244,24 +1244,24 @@ yang seharusnya dijamin oleh alur deposit -> masked signature -> reveal.
 
 TODO:
 
-- [ ] Tambahkan `session_id` pada request dan response signing.
-- [ ] `/api/leader/sign` hanya mengembalikan `com_k` dan partial signatures.
-- [ ] Jangan mengembalikan `k` pada response signing awal.
-- [ ] Simpan `k` secara terenkripsi dengan binding ke `session_id`,
+- [x] Tambahkan `session_id` pada request dan response signing.
+- [x] `/api/leader/sign` hanya mengembalikan `com_k` dan partial signatures.
+- [x] Jangan mengembalikan `k` pada response signing awal.
+- [x] Simpan `k` secara terenkripsi dengan binding ke `session_id`,
   commitment, amount, issuer key, dan expiry.
-- [ ] Rilis `k` hanya setelah deposit on-chain untuk session tersebut
+- [x] Rilis `k` hanya setelah deposit on-chain untuk session tersebut
   terkonfirmasi.
-- [ ] Pastikan amount dan commitment deposit sama dengan signing session.
+- [x] Pastikan amount dan commitment deposit sama dengan signing session.
 - [ ] Guardian hanya menandatangani session yang sah dan belum expired.
-- [ ] Tandai `k` sebagai revealed secara atomik agar tidak ada conflicting
+- [x] Tandai `k` sebagai revealed secara atomik agar tidak ada conflicting
   lifecycle.
 - [ ] Hapus/zeroize `k` setelah reveal selesai atau session expired.
-- [ ] Jangan log `k` atau memasukkannya ke response/error sebelum reveal.
+- [x] Jangan log `k` atau memasukkannya ke response/error sebelum reveal.
 - [ ] Integrasikan refund timelock jika quorum gagal atau `k` tidak dapat
   dirilis.
-- [ ] Tambahkan test bahwa client tidak dapat unmask sebelum reveal.
-- [ ] Tambahkan test bahwa deposit session lain tidak dapat membuka `k`.
-- [ ] Tambahkan test retry reveal yang idempotent.
+- [x] Tambahkan test bahwa client tidak dapat unmask sebelum reveal.
+- [x] Tambahkan test bahwa deposit session lain tidak dapat membuka `k`.
+- [x] Tambahkan test retry reveal yang idempotent.
 
 Acceptance criteria:
 

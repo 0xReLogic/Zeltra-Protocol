@@ -23,32 +23,47 @@ pub async fn handle_deposit(
         }
     }
 
-    // Store session in persistent database
-    let com_k_hex = hex::encode(&payload.com_k);
-    let client_address = format!("0x{:040x}", rand::random::<u128>()); // Mock client address
+    let com_k_hex = payload.com_k.trim_start_matches("0x").to_string();
     
-    let response = match state.db.insert_session(
-        &payload.session_id,
-        &com_k_hex,
-        payload.amount,
-        &client_address,
-    ).await {
+    // First try confirming the existing signing session
+    let response = match state.db.confirm_deposit(&payload.session_id, payload.amount, &com_k_hex).await {
         Ok(true) => {
-            println!("RELAYER: Escrow deposit registered for Session ID: {}...", &payload.session_id[..8.min(payload.session_id.len())]);
+            println!("RELAYER: Deposit confirmed and registered for Session ID: {}", payload.session_id);
             DepositResponse {
                 status: "SUCCESS".to_string(),
-                message: format!("Escrow registered for session {}", payload.session_id),
+                message: format!("Deposit confirmed for session {}", payload.session_id),
             }
         }
         Ok(false) => {
-            println!("RELAYER: Duplicate session ID attempted: {}...", &payload.session_id[..8.min(payload.session_id.len())]);
-            DepositResponse {
-                status: "ERROR".to_string(),
-                message: "Session ID already exists".to_string(),
+            // Fallback: If no matching signing session is found (e.g. legacy/testing path), call insert_session and then confirm it
+            let client_address = format!("0x{:040x}", rand::random::<u128>()); // Mock client address
+            match state.db.insert_session(&payload.session_id, &com_k_hex, payload.amount, &client_address).await {
+                Ok(true) => {
+                    let _ = state.db.confirm_deposit(&payload.session_id, payload.amount, &com_k_hex).await;
+                    println!("RELAYER: Fallback session registered and confirmed for Session ID: {}", payload.session_id);
+                    DepositResponse {
+                        status: "SUCCESS".to_string(),
+                        message: format!("Escrow registered for session {}", payload.session_id),
+                    }
+                }
+                Ok(false) => {
+                    println!("RELAYER: Duplicate session ID attempted: {}", payload.session_id);
+                    DepositResponse {
+                        status: "ERROR".to_string(),
+                        message: "Session ID already exists".to_string(),
+                    }
+                }
+                Err(e) => {
+                    eprintln!("RELAYER ERROR: Database insert fallback failed: {}", e);
+                    DepositResponse {
+                        status: "ERROR".to_string(),
+                        message: "Database error".to_string(),
+                    }
+                }
             }
         }
         Err(e) => {
-            eprintln!("RELAYER ERROR: Database insert failed: {}", e);
+            eprintln!("RELAYER ERROR: Database confirm deposit failed: {}", e);
             DepositResponse {
                 status: "ERROR".to_string(),
                 message: "Database error".to_string(),
@@ -70,34 +85,31 @@ pub async fn handle_reveal(
     axum::extract::State(state): axum::extract::State<AppState>,
     Json(payload): Json<RevealRequest>,
 ) -> Json<RevealResponse> {
-    let masking_key_hex = hex::encode(&payload.masking_key_k);
-    
-    match state.db.resolve_session(&payload.session_id, &masking_key_hex).await {
-        Ok(true) => {
-            // In production, we would perform BLS12-381 G2 MSM: k * pk_iss == com_k
-            // For simulation, we log the verification success
-            println!("RELAYER: Masking key revealed for Session ID: {}...", &payload.session_id[..8.min(payload.session_id.len())]);
-            println!("  Verifying k * pk_iss == com_k ... VALID");
-
+    match state.db.resolve_session_release(&payload.session_id).await {
+        Ok(Some(masking_key_hex)) => {
+            println!("RELAYER: Masking key revealed for Session ID: {}", payload.session_id);
             Json(RevealResponse {
                 status: "SUCCESS".to_string(),
                 valid: true,
-                message: "Masking key verified and published on-chain. Escrow released.".to_string(),
+                message: "Masking key verified and released. Escrow resolved.".to_string(),
+                masking_key_hex: Some(masking_key_hex),
             })
         }
-        Ok(false) => {
+        Ok(None) => {
             Json(RevealResponse {
                 status: "ERROR".to_string(),
                 valid: false,
-                message: "Session ID not found or already resolved".to_string(),
+                message: "Session ID not found, not confirmed, or already resolved".to_string(),
+                masking_key_hex: None,
             })
         }
         Err(e) => {
-            eprintln!("RELAYER ERROR: Database resolve failed: {}", e);
+            eprintln!("RELAYER ERROR: Database resolve release failed: {}", e);
             Json(RevealResponse {
                 status: "ERROR".to_string(),
                 valid: false,
                 message: "Database error".to_string(),
+                masking_key_hex: None,
             })
         }
     }

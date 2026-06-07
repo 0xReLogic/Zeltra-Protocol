@@ -216,15 +216,14 @@ Dihubungi oleh klien untuk mendaftarkan sesi deposit minting baru.
     }
     ```
 
-### C. Pengungkapan Kunci Masking
-Dihubungi oleh Issuer untuk menyerahkan kunci masking $k$ setelah deposit terekam di blockchain.
+### C. Pengungkapan Kunci Masking (Atomic Release)
+Dihubungi oleh klien untuk meminta kunci masking $k$ setelah deposit stablecoin dikonfirmasi on-chain.
 *   **Method:** `POST`
 *   **Path:** `/api/reveal`
 *   **Payload (JSON):**
     ```json
     {
-      "session_id": "sid_1283918239...",
-      "masking_key_k": "k_key_hex_scalar..."
+      "session_id": "sid_1283918239..."
     }
     ```
 *   **Response (JSON):**
@@ -232,7 +231,8 @@ Dihubungi oleh Issuer untuk menyerahkan kunci masking $k$ setelah deposit tereka
     {
       "status": "SUCCESS",
       "valid": true,
-      "message": "Masking key verified and published on-chain. Escrow released."
+      "message": "Masking key verified and released. Escrow resolved.",
+      "masking_key_hex": "k_key_hex_scalar..."
     }
     ```
 
@@ -321,12 +321,15 @@ Dihubungi oleh Leader Node ke setiap Guardian Node via jaringan private untuk me
     ```
 
 ### G. Threshold Minting: Leader Aggregate Sign
-Dihubungi oleh client untuk memulai proses minting token anonim secara terdesentralisasi. Leader Node men-generate masking key $k$, menghubungi semua Guardian secara paralel via private network, mengumpulkan partial signature, lalu mengembalikan semuanya ke client untuk diagregasi menggunakan `client_aggregate_signatures` di SDK.
+Dihubungi oleh client untuk memulai proses minting token anonim secara terdesentralisasi. Leader Node men-generate masking key $k$, menghubungi semua Guardian secara paralel via private network, mengumpulkan partial signature, lalu mengembalikan semuanya ke client untuk diagregasi menggunakan `client_aggregate_signatures` di SDK. Masking key $k$ disimpan secara privat oleh Leader Node dan tidak dibocorkan di tahap ini.
 *   **Method:** `POST`
 *   **Path:** `/api/leader/sign`
 *   **Payload (JSON):**
     ```json
     {
+      "session_id": "sid_1283918239...",
+      "amount": 100000000,
+      "client_address": "0xclient_address...",
       "blinded_hex": "hex_encoded_blinded_message_G1_point...",
       "guardian_urls": [
         "http://10.0.0.2:8080",
@@ -337,14 +340,17 @@ Dihubungi oleh client untuk memulai proses minting token anonim secara terdesent
       "pk_iss_hex": "hex_encoded_issuer_public_key_g2_point..."
     }
     ```
+    *   `session_id`: ID sesi minting yang unik untuk mencegah replay dan overwrite.
+    *   `amount`: Jumlah nominal stablecoin (dalam unit basis 6 desimal).
+    *   `client_address`: Alamat dompet client.
     *   `guardian_urls`: Daftar URL internal Guardian Node (IP private / VPN). Tidak pernah berupa alamat publik.
     *   `pk_iss_hex`: Opsional -- public key Issuer untuk komputasi commitment $com_k = k \cdot pk_{iss}$.
 *   **Response (JSON):**
     ```json
     {
       "status": "SUCCESS",
+      "session_id": "sid_1283918239...",
       "com_k_hex": "hex_encoded_masking_key_commitment_g2_point...",
-      "k_hex": "hex_encoded_masking_key_fr_scalar...",
       "partial_signatures": [
         { "index": 1, "signature_hex": "hex_partial_sig_leader..." },
         { "index": 2, "signature_hex": "hex_partial_sig_guardian2..." },
@@ -355,19 +361,28 @@ Dihubungi oleh client untuk memulai proses minting token anonim secara terdesent
     *   `com_k_hex`: Commitment kunci masking ($com_k = k \cdot pk_{iss}$) yang akan diverifikasi client sebelum unmasking.
     *   `partial_signatures`: Daftar partial BLS signature dari setiap node yang berhasil merespons. Client membutuhkan minimal $t$ signature untuk aggregasi Lagrange.
 
-#### Alur Threshold Minting End-to-End (t=3, n=5)
+#### Alur Threshold Minting End-to-End dengan Atomic Release (t=3, n=5)
 
 ```mermaid
 sequenceDiagram
-    Client->>Leader Node: POST /api/leader/sign (blinded_hex)
+    Client->>Leader Node: POST /api/leader/sign (session_id, amount, client_address, blinded_hex)
+    Note over Leader Node: Generate k & com_k privat
     Leader Node->>Guardian 2: POST /api/sign-share (blinded_hex, k)
     Leader Node->>Guardian 3: POST /api/sign-share (blinded_hex, k)
     Leader Node->>Guardian 4: POST /api/sign-share (blinded_hex, k)
     Guardian 2-->>Leader Node: signature_share_2
     Guardian 3-->>Leader Node: signature_share_3
     Guardian 4-->>Leader Node: signature_share_4
-    Leader Node-->>Client: com_k, k, [partial_sigs index 1..4]
+    Note over Leader Node: Simpan k ke database (deposit_confirmed = 0)
+    Leader Node-->>Client: com_k, [partial_sigs index 1..4] (TANPA k)
     Client->>Client: client_aggregate_signatures([1,2,3], [sig1, sig2, sig3])
+    Client->>L2 Contract: deposit(session_id, com_k, amount)
+    Note over L2 Contract: Emit Deposit event
+    Client->>Leader Node: POST /api/deposit (session_id, com_k, amount)
+    Note over Leader Node: Verifikasi & set deposit_confirmed = 1
+    Client->>Leader Node: POST /api/reveal (session_id)
+    Note over Leader Node: Set resolved = 1 & ambil k dari DB
+    Leader Node-->>Client: k (masking_key_hex)
     Client->>Client: client_unmask_signature(aggregated, r, k)
     Note over Client: Token anonim final siap dibelanjakan
 ```

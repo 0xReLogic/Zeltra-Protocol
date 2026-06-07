@@ -81,7 +81,6 @@ pub struct DepositResponse {
 #[derive(Deserialize)]
 pub struct RevealRequest {
     pub session_id: String,
-    pub masking_key_k: String,
 }
 
 #[derive(Serialize)]
@@ -89,6 +88,8 @@ pub struct RevealResponse {
     pub status: String,
     pub valid: bool,
     pub message: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub masking_key_hex: Option<String>,
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -166,6 +167,9 @@ pub struct SignShareResponse {
 
 #[derive(Deserialize)]
 pub struct LeaderSignRequest {
+    pub session_id: String,
+    pub amount: u64,
+    pub client_address: String,
     pub blinded_hex: String,
     pub guardian_urls: Vec<String>,
     pub pk_iss_hex: Option<String>,
@@ -180,7 +184,7 @@ pub struct PartialSignatureInfo {
 #[derive(Serialize)]
 pub struct LeaderSignResponse {
     pub status: String,
+    pub session_id: String,
     pub com_k_hex: String,
-    pub k_hex: String,
     pub partial_signatures: Vec<PartialSignatureInfo>,
 }

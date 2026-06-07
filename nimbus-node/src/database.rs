@@ -69,6 +69,7 @@ impl Database {
                     com_k_hex TEXT NOT NULL,
                     amount INTEGER NOT NULL,
                     resolved BOOLEAN NOT NULL DEFAULT 0,
+                    deposit_confirmed BOOLEAN NOT NULL DEFAULT 0,
                     masking_key_hex TEXT,
                     client_address TEXT NOT NULL,
                     created_at INTEGER NOT NULL,
@@ -78,7 +79,7 @@ impl Database {
                 CREATE INDEX IF NOT EXISTS idx_sessions_client ON sessions(client_address);
                 
                 -- Nullifier tracking (double-spend prevention)
-                -- Inspired by Nullmask, Anubis, Umbra nullifier registries
+                -- Inspired by ZK Rollup nullifier registries
                 CREATE TABLE IF NOT EXISTS nullifiers (
                     nullifier TEXT PRIMARY KEY,
                     spent_at INTEGER NOT NULL,
@@ -100,8 +101,6 @@ impl Database {
                 CREATE INDEX IF NOT EXISTS idx_queue_processed ON spend_queue(processed);
                 
                 -- Idempotency cache (request deduplication)
-                -- Based on 2026 best practice: client-supplied idempotency keys
-                -- with TTL-based expiry (24h default)
                 CREATE TABLE IF NOT EXISTS idempotency_cache (
                     idempotency_key TEXT PRIMARY KEY,
                     endpoint TEXT NOT NULL,
@@ -110,6 +109,9 @@ impl Database {
                 );
                 CREATE INDEX IF NOT EXISTS idx_idempotency_created ON idempotency_cache(created_at);
             ")?;
+            
+            // Run migration for existing databases (fails silently if column already exists)
+            let _ = conn.execute("ALTER TABLE sessions ADD COLUMN deposit_confirmed BOOLEAN NOT NULL DEFAULT 0", params![]);
             
             Ok(())
         })
@@ -210,6 +212,126 @@ impl Database {
             )?;
             
             Ok(changes > 0)
+        })
+        .await?
+    }
+
+    /// Insert a signing session before deposit occurs (Atomic Release flow)
+    /// Returns true if inserted, false if already exists
+    pub async fn insert_signing_session(
+        &self,
+        session_id: &str,
+        com_k_hex: &str,
+        amount: u64,
+        client_address: &str,
+        masking_key_hex: &str,
+    ) -> Result<bool> {
+        let path = self.path.clone();
+        let session_id = session_id.to_string();
+        let com_k_hex = com_k_hex.to_string();
+        let client_address = client_address.to_string();
+        let masking_key_hex = masking_key_hex.to_string();
+        
+        let db_key = std::env::var("NIMBUS_DB_KEY")
+            .unwrap_or_else(|_| "default-change-in-production".to_string());
+        
+        task::spawn_blocking(move || -> Result<bool> {
+            let conn = Connection::open(&path)?;
+            conn.pragma_update(None, "key", &db_key)?;
+            let now = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)?
+                .as_secs() as i64;
+            
+            let changes = conn.execute(
+                "INSERT OR IGNORE INTO sessions 
+                 (session_id, com_k_hex, amount, resolved, deposit_confirmed, masking_key_hex, client_address, created_at) 
+                 VALUES (?, ?, ?, 0, 0, ?, ?, ?)",
+                params![session_id, com_k_hex, amount as i64, masking_key_hex, client_address, now],
+            )?;
+            
+            Ok(changes > 0)
+        })
+        .await?
+    }
+
+    /// Confirm deposit for a session by verifying session_id, amount, and com_k
+    /// Updates deposit_confirmed to 1
+    /// Returns true if updated (matching session exists and was updated), false otherwise
+    pub async fn confirm_deposit(
+        &self,
+        session_id: &str,
+        amount: u64,
+        com_k_hex: &str,
+    ) -> Result<bool> {
+        let path = self.path.clone();
+        let session_id = session_id.to_string();
+        let com_k_hex = com_k_hex.to_string();
+        
+        let db_key = std::env::var("NIMBUS_DB_KEY")
+            .unwrap_or_else(|_| "default-change-in-production".to_string());
+        
+        task::spawn_blocking(move || -> Result<bool> {
+            let conn = Connection::open(&path)?;
+            conn.pragma_update(None, "key", &db_key)?;
+            
+            let changes = conn.execute(
+                "UPDATE sessions 
+                 SET deposit_confirmed = 1 
+                 WHERE session_id = ? AND amount = ? AND com_k_hex = ? AND deposit_confirmed = 0",
+                params![session_id, amount as i64, com_k_hex],
+            )?;
+            
+            Ok(changes > 0)
+        })
+        .await?
+    }
+
+    /// Resolve session and retrieve masking key (Atomic Release flow)
+    /// Sets resolved = 1 and returns the masking_key_hex ONLY IF deposit_confirmed = 1
+    /// Returns Ok(Some(masking_key_hex)) if successful, Ok(None) if not found, already resolved, or not confirmed.
+    pub async fn resolve_session_release(
+        &self,
+        session_id: &str,
+    ) -> Result<Option<String>> {
+        let path = self.path.clone();
+        let session_id = session_id.to_string();
+        
+        let db_key = std::env::var("NIMBUS_DB_KEY")
+            .unwrap_or_else(|_| "default-change-in-production".to_string());
+        
+        task::spawn_blocking(move || -> Result<Option<String>> {
+            let conn = Connection::open(&path)?;
+            conn.pragma_update(None, "key", &db_key)?;
+            
+            // First check if the session is confirmed and not resolved
+            let session_info: Option<(String, i64, i64)> = conn
+                .query_row(
+                    "SELECT masking_key_hex, resolved, deposit_confirmed FROM sessions WHERE session_id = ?",
+                    params![session_id],
+                    |row| Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?, row.get::<_, i64>(2)?)),
+                )
+                .optional()?;
+            
+            if let Some((masking_key_hex, resolved, deposit_confirmed)) = session_info {
+                if deposit_confirmed == 1 && resolved == 0 {
+                    let now = std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)?
+                        .as_secs() as i64;
+                    
+                    conn.execute(
+                        "UPDATE sessions 
+                         SET resolved = 1, resolved_at = ? 
+                         WHERE session_id = ? AND resolved = 0",
+                        params![now, session_id],
+                    )?;
+                    
+                    Ok(Some(masking_key_hex))
+                } else {
+                    Ok(None)
+                }
+            } else {
+                Ok(None)
+            }
         })
         .await?
     }
@@ -534,6 +656,51 @@ mod tests {
         // Can't resolve twice
         let resolved_again = db.resolve_session(sid, masking_key).await.unwrap();
         assert!(!resolved_again);
+    }
+
+    #[tokio::test]
+    async fn test_atomic_release_session_lifecycle() {
+        std::env::set_var("NIMBUS_DB_KEY", "test-encryption-key");
+        let tmp = TempDir::new().unwrap();
+        let db_path = tmp.path().join("test_atomic.db");
+        let db = Database::new(&db_path).await.unwrap();
+        
+        let sid = "session_atomic_123";
+        let com_k = "0xcom_k_123";
+        let client = "0xclient_123";
+        let masking_key = "0xmasking_key_123";
+        let amount = 2000u64;
+        
+        // 1. Insert signing session
+        let inserted = db.insert_signing_session(sid, com_k, amount, client, masking_key).await.unwrap();
+        assert!(inserted);
+        
+        // Try resolving before deposit is confirmed -> should fail (return None)
+        let resolved_before = db.resolve_session_release(sid).await.unwrap();
+        assert!(resolved_before.is_none());
+        
+        // 2. Confirm deposit with wrong amount or com_k -> should fail (return false)
+        let confirmed_wrong_amount = db.confirm_deposit(sid, amount + 1, com_k).await.unwrap();
+        assert!(!confirmed_wrong_amount);
+        
+        let confirmed_wrong_com_k = db.confirm_deposit(sid, amount, "0xwrong_com_k").await.unwrap();
+        assert!(!confirmed_wrong_com_k);
+        
+        // 3. Confirm deposit with correct details -> should succeed (return true)
+        let confirmed_correct = db.confirm_deposit(sid, amount, com_k).await.unwrap();
+        assert!(confirmed_correct);
+        
+        // Confirming again should be rejected (idempotent / already confirmed)
+        let confirmed_again = db.confirm_deposit(sid, amount, com_k).await.unwrap();
+        assert!(!confirmed_again);
+        
+        // 4. Resolve session after deposit confirmed -> should succeed and return the masking key
+        let resolved_after = db.resolve_session_release(sid).await.unwrap();
+        assert_eq!(resolved_after, Some(masking_key.to_string()));
+        
+        // Resolving again should return None (already resolved)
+        let resolved_again = db.resolve_session_release(sid).await.unwrap();
+        assert!(resolved_again.is_none());
     }
     
     #[tokio::test]
