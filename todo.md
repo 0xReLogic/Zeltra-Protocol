@@ -729,10 +729,10 @@ dikembalikan, dan final verification hanya dilakukan oleh CLI.
 
 - [ ] Bersihkan build artifact lalu build contract release dari nol.
 - [ ] Jalankan `cargo stylus check`.
-  - 2026-06-07: `cargo stylus check` untuk contract penuh gagal di Arbitrum
-    Sepolia dengan `execution reverted, data: 0x` sebelum deploy. Artifact
-    terkompresi sekitar 95.6 KB / 4 fragments. Deploy RC tidak boleh
-    dilanjutkan sampai Stylus validation lolos.
+  - 2026-06-07: gagal sebelum release profile size optimization
+    (`95.6 KB`, 4 fragments, `execution reverted, data: 0x`).
+  - 2026-06-07: lolos setelah `opt-level = "z"`, LTO, `panic = "abort"`,
+    `codegen-units = 1`, dan `strip = true` (`65.9 KB`, 3 fragments).
 - [ ] Deploy contract baru ke Arbitrum Sepolia.
 - [ ] Aktifkan dan cache contract.
 - [ ] Simpan deployment manifest berisi commit, rustc, cargo-stylus, Stylus SDK,
