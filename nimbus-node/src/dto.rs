@@ -106,7 +106,9 @@ pub struct SpendResponse {
 pub struct PrivateSpendQuoteRequest {
     pub merchant_amount: u64,
     #[serde(default)]
-    pub execution_fee: Option<u64>,
+    pub estimated_gas_cost: Option<u64>,
+    #[serde(default)]
+    pub relayer_markup_bps: Option<u64>,
 }
 
 #[derive(Serialize)]
@@ -115,9 +117,12 @@ pub struct PrivateSpendQuoteResponse {
     pub merchant_amount: u64,
     pub contract_amount: u64,
     pub protocol_fee: u64,
+    pub gas_cost: u64,
+    pub relayer_markup: u64,
     pub execution_fee: u64,
     pub user_total_debit: u64,
     pub fee_bps: u64,
+    pub relayer_markup_bps: u64,
     pub message: String,
 }
 

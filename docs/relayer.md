@@ -98,7 +98,7 @@ Mengikuti rekomendasi audit keamanan infrastruktur relayer node 2026:
 Relayer menyediakan quote informasional deterministik untuk UI dan backend:
 
 ```http
-GET /api/quote/private-spend?merchant_amount=100000000&execution_fee=25000
+GET /api/quote/private-spend?merchant_amount=100000000&estimated_gas_cost=20000&relayer_markup_bps=1500
 ```
 
 Response:
@@ -109,9 +109,12 @@ Response:
   "merchant_amount": 100000000,
   "contract_amount": 100150226,
   "protocol_fee": 150226,
-  "execution_fee": 25000,
-  "user_total_debit": 100175226,
+  "gas_cost": 20000,
+  "relayer_markup": 3000,
+  "execution_fee": 23000,
+  "user_total_debit": 100173226,
   "fee_bps": 15,
+  "relayer_markup_bps": 1500,
   "message": "Informational quote only; signed max_execution_fee is not active yet"
 }
 ```
@@ -141,7 +144,8 @@ Every instance of `nimbus-node` reads configurations from environment variables 
 | `NIMBUS_DB_KEY` | `None` | Kunci enkripsi untuk database SQLite/SQLCipher (Wajib diisi di produksi). |
 | `NIMBUS_X402_RECIPIENT` | `None` | Address EVM penerima settlement x402. Endpoint x402 menolak request jika tidak dikonfigurasi. |
 | `NIMBUS_BATCH_ENABLED` | `false` | Aktifkan adaptive same-chain batching setelah kontrak `batchSpend()` dideploy dan diuji. |
-| `NIMBUS_EXECUTION_FEE_USDC_BASE_UNITS` | `0` | Default execution fee quote dalam base unit USDC untuk endpoint quote informasional. Jangan dipakai sebagai pemotongan production sebelum signed quote aktif. |
+| `NIMBUS_ESTIMATED_GAS_COST_USDC_BASE_UNITS` | `0` | Default estimasi gas dalam base unit USDC untuk endpoint quote informasional. |
+| `NIMBUS_RELAYER_MARKUP_BPS` | `1500` | Markup relayer atas gas quote dalam basis points. `1500` berarti 15% dari estimasi gas. Jangan dipakai sebagai pemotongan production sebelum signed quote aktif. |
 
 ### Integrasi OpenBao / Vault (Production Mode)
 

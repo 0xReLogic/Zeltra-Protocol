@@ -1373,6 +1373,7 @@ Sisa implementasi wajib:
 - [ ] Ukur latency API-to-broadcast dan API-to-confirmed p50/p95/p99.
 - [x] Tambahkan fee helper terpusat untuk menghitung gross-up supaya merchant
   menerima nominal exact setelah protocol fee contract.
+- [x] Pisahkan gas reimbursement dan markup relayer dalam quote informasional.
 - [ ] Buktikan total debit user = merchant payout + protocol fee + execution
   quote, tanpa hidden fee.
 - [ ] Buktikan margin batch positif setelah gas, RPC, retry, dan transaksi

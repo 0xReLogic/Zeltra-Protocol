@@ -43,8 +43,8 @@ pub use threshold::{
 pub use fees::{
     ceil_div, deposit_fee, fee_round_up, gross_up_for_exact_net,
     gross_up_private_spend_amount, net_after_fee, private_spend_fee,
-    quote_private_spend, SpendQuote, DEPOSIT_FEE_BPS, FEE_DENOMINATOR_BPS,
-    PRIVATE_SPEND_FEE_BPS,
+    quote_execution_fee, quote_private_spend, SpendQuote, DEFAULT_RELAYER_MARKUP_BPS,
+    DEPOSIT_FEE_BPS, FEE_DENOMINATOR_BPS, PRIVATE_SPEND_FEE_BPS,
 };
 
 // Re-export compliance circuit

@@ -99,7 +99,7 @@ jaringan.
 |---|---:|---|
 | Deposit/shield | 0,10% dari nominal | Protocol treasury |
 | Private spend/transaction | 0,15% dari nominal | Protocol treasury |
-| Execution fee | Fixed quote sebelum tanda tangan | Relayer/protokol |
+| Execution fee | Gas quote + markup relayer | Relayer |
 | Unshield tanpa pembayaran | 0,15% dari nominal | Protocol treasury |
 | Fast/cross-chain settlement | Quote dinamis | Relayer/LP, jaringan, treasury |
 | SDK dan integrasi | Gratis | N/A |
@@ -114,7 +114,8 @@ Biaya pengguna terdiri dari protocol fee dan fixed execution quote:
 ```text
 Network Fee =
     protocol fee 0,15% dari nominal transaksi
-  + fixed execution quote
+  + gas reimbursement
+  + relayer markup
 ```
 
 Contoh ilustratif, bukan harga tetap:
@@ -122,16 +123,18 @@ Contoh ilustratif, bukan harga tetap:
 ```text
 Harga merchant                  100,0000 USDC
 Gross-up protocol fee            ~0,1502 USDC
-Execution quote                   0,0250 USDC
+Gas quote                         0,0200 USDC
+Relayer markup 15% gas            0,0030 USDC
                                 -------------
-Total pengguna                 ~100,1752 USDC
+Total pengguna                 ~100,1732 USDC
 Merchant menerima              100,0000 USDC
 ```
 
-Relayer membayar gas dalam ETH terlebih dahulu. Execution quote ditetapkan sebelum
-user menandatangani dan cukup untuk menutup jalur single. Jika beberapa transaksi
-berhasil dibatch dengan biaya aktual lebih rendah, selisihnya menjadi margin
-efisiensi relayer/protokol.
+Relayer membayar gas dalam ETH terlebih dahulu. Execution quote ditetapkan
+sebelum user menandatangani dan terdiri dari estimasi gas dalam stablecoin plus
+markup relayer, misalnya 15% dari gas quote. Jika beberapa transaksi berhasil
+dibatch dengan biaya aktual lebih rendah, selisihnya menjadi margin efisiensi
+relayer/protokol.
 
 Protocol fee `0,15%` masuk ke treasury. Treasury kemudian membiayai guardian,
 domain, RPC, audit, pengembangan, monitoring, dan cadangan keamanan. User tidak
@@ -139,9 +142,9 @@ ditagih guardian fee atau hosting fee sebagai komponen terpisah.
 
 ### 5.2 Execution Quote dan Margin Batch
 
-Execution quote bukan klaim penggantian gas aktual. User mengetahui total biaya
-sebelum tanda tangan. Relayer boleh menggabungkan 2 sampai 8 same-chain spend dan
-menyimpan selisih efisiensi setelah gas dibayar.
+Execution quote bukan klaim penggantian gas aktual setelah transaksi. User
+mengetahui total biaya sebelum tanda tangan. Relayer boleh menggabungkan 2 sampai
+8 same-chain spend dan menyimpan selisih efisiensi setelah gas dibayar.
 
 Karena itu:
 
@@ -150,6 +153,7 @@ Karena itu:
   sekitar 2 detik sebelum broadcast;
 - cross-chain dan transaksi dengan deadline dekat tidak dipaksa menunggu batch;
 - pendapatan protokol berasal dari fee deposit `0,10%` dan transaksi `0,15%`;
+- pendapatan relayer berasal dari reimbursement gas, markup gas, dan margin batch;
 - biaya harus ditampilkan sebagai satu quote sebelum pengguna menandatangani.
 
 Payload harus memuat `max_fee` dan expiry agar relayer atau governance tidak dapat
@@ -234,7 +238,8 @@ melewati audit solvency, liquidity stress test, dan kajian hukum.
 
 ### Relayer menerima
 
-- fixed execution quote;
+- reimbursement gas yang sudah diquote;
+- markup relayer atas gas, misalnya 15% dari gas quote;
 - margin efisiensi batch setelah biaya gas aktual dibayar;
 - premium modal dan risiko untuk fast/cross-chain settlement.
 
@@ -259,9 +264,10 @@ Spend volume        80.000.000 USDC x 0,15% = 120.000 USDC
 Gross protocol revenue                       220.000 USDC
 ```
 
-Bagian execution quote yang mengganti gas bukan revenue bersih. Selisih setelah
-gas aktual dibayar adalah margin relayer/protokol. Reward guardian dibayar dari
-anggaran treasury sampai tersedia mekanisme operator network yang teruji.
+Bagian execution quote yang mengganti gas bukan revenue bersih. Markup gas dan
+selisih setelah gas aktual dibayar adalah margin relayer/protokol. Reward
+guardian dibayar dari anggaran treasury sampai tersedia mekanisme operator
+network yang teruji.
 
 Metrik utama:
 
@@ -295,7 +301,9 @@ Implementasi saat ini sudah:
 - memotong `0,1%` saat deposit;
 - memotong `0,15%` saat spend/redemption.
 - memiliki helper fee terpusat di `nimbus-core` dan SDK untuk menghitung
-  gross-up private spend agar merchant menerima nominal exact.
+  gross-up private spend agar merchant menerima nominal exact;
+- memiliki helper quote execution fee untuk memisahkan gas reimbursement dan
+  markup relayer.
 
 Implementasi saat ini masih:
 
