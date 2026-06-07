@@ -63,6 +63,7 @@ pub struct EvmClient {
     signer_address: Address,
     contract_address: Address,
     ccip_router_address: Address,
+    pub signer: PrivateKeySigner,
 }
 
 #[derive(Clone, Debug)]
@@ -112,7 +113,7 @@ impl EvmClient {
 
         // Fallback provider (opsional, dari env var NIMBUS_RPC_FALLBACK_URL)
         let fallback_provider = if let Ok(fallback_url) = std::env::var("NIMBUS_RPC_FALLBACK_URL") {
-            let fallback_wallet = EthereumWallet::from(signer);
+            let fallback_wallet = EthereumWallet::from(signer.clone());
             
             let p_res = if fallback_url.starts_with("ws://") || fallback_url.starts_with("wss://") {
                 let fallback_ws = WsConnect::new(&fallback_url);
@@ -164,6 +165,7 @@ impl EvmClient {
             signer_address,
             contract_address: contract_addr,
             ccip_router_address,
+            signer,
         })
     }
 
@@ -579,5 +581,24 @@ impl EvmClient {
 
     pub fn signer_address(&self) -> String {
         format!("0x{:x}", self.signer_address)
+    }
+
+    pub async fn sign_leader_payload(
+        &self,
+        session_id: &str,
+        blinded_hex: &str,
+        k_hex: &str,
+        timestamp: u64,
+        amount: u64,
+        client_address: &str,
+        com_k_hex: &str,
+    ) -> Result<String, anyhow::Error> {
+        use alloy::signers::Signer;
+        let message = format!(
+            "{}:{}:{}:{}:{}:{}:{}",
+            session_id, blinded_hex, k_hex, timestamp, amount, client_address, com_k_hex
+        );
+        let signature = self.signer.sign_message(message.as_bytes()).await?;
+        Ok(hex::encode(signature.as_bytes()))
     }
 }

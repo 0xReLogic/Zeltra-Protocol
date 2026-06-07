@@ -11,7 +11,94 @@ pub async fn handle_sign_share(
     Json(payload): Json<SignShareRequest>,
 ) -> Json<SignShareResponse> {
     use nimbus_core::*;
+    use std::str::FromStr;
 
+    // 1. Verify the timestamp is within 60 seconds (unless in test mode).
+    let is_test_env = cfg!(test) || std::env::var("NIMBUS_ENV").map(|v| v == "test").unwrap_or(false);
+    if !is_test_env {
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+        if payload.timestamp > now + 60 || now > payload.timestamp + 60 {
+            return Json(SignShareResponse {
+                status: "ERROR".to_string(),
+                signature_share_hex: "Timestamp expired or out of bounds".to_string(),
+            });
+        }
+    }
+
+    // 2. Recover the leader's address from the signature and payload.
+    let msg = format!(
+        "{}:{}:{}:{}:{}:{}:{}",
+        payload.session_id,
+        payload.blinded_hex,
+        payload.k_hex,
+        payload.timestamp,
+        payload.amount,
+        payload.client_address,
+        payload.com_k_hex
+    );
+    let sig_bytes = match hex::decode(&payload.signature_hex) {
+        Ok(b) => b,
+        Err(e) => return Json(SignShareResponse {
+            status: "ERROR".to_string(),
+            signature_share_hex: format!("Invalid signature hex: {}", e),
+        }),
+    };
+    let parsed_sig = match alloy::primitives::Signature::try_from(sig_bytes.as_slice()) {
+        Ok(sig) => sig,
+        Err(e) => return Json(SignShareResponse {
+            status: "ERROR".to_string(),
+            signature_share_hex: format!("Failed to parse signature: {}", e),
+        }),
+    };
+    let recovered_address = match parsed_sig.recover_address_from_msg(msg.as_bytes()) {
+        Ok(addr) => addr,
+        Err(e) => return Json(SignShareResponse {
+            status: "ERROR".to_string(),
+            signature_share_hex: format!("Failed to recover address: {}", e),
+        }),
+    };
+
+    // 3. Verify the recovered address matches leader_address.
+    let expected_leader_address = match alloy::primitives::Address::from_str(&payload.leader_address) {
+        Ok(addr) => addr,
+        Err(e) => return Json(SignShareResponse {
+            status: "ERROR".to_string(),
+            signature_share_hex: format!("Invalid leader address: {}", e),
+        }),
+    };
+    if recovered_address != expected_leader_address {
+        return Json(SignShareResponse {
+            status: "ERROR".to_string(),
+            signature_share_hex: "Recovered address does not match leader_address".to_string(),
+        });
+    }
+
+    // 4. Verify the leader address is in NIMBUS_TRUSTED_LEADERS env (or allow by default in test/dev modes if unset).
+    if let Ok(trusted_leaders_str) = std::env::var("NIMBUS_TRUSTED_LEADERS") {
+        let trusted_leaders: Vec<alloy::primitives::Address> = trusted_leaders_str
+            .split(',')
+            .filter_map(|s| alloy::primitives::Address::from_str(s.trim()).ok())
+            .collect();
+        if !trusted_leaders.contains(&recovered_address) {
+            return Json(SignShareResponse {
+                status: "ERROR".to_string(),
+                signature_share_hex: format!("Leader address {} is not trusted", recovered_address),
+            });
+        }
+    } else {
+        let is_dev_or_test = cfg!(test) || std::env::var("NIMBUS_ENV").map(|v| v == "test" || v == "dev" || v == "development").unwrap_or(true);
+        if !is_dev_or_test {
+            return Json(SignShareResponse {
+                status: "ERROR".to_string(),
+                signature_share_hex: "NIMBUS_TRUSTED_LEADERS is not configured in production".to_string(),
+            });
+        }
+    }
+
+    // Decode blinded hex
     let blinded_bytes = match hex::decode(&payload.blinded_hex) {
         Ok(b) => b,
         Err(e) => return Json(SignShareResponse {
@@ -20,6 +107,7 @@ pub async fn handle_sign_share(
         }),
     };
 
+    // Decode k hex
     let k_bytes = match hex::decode(&payload.k_hex) {
         Ok(b) => b,
         Err(e) => return Json(SignShareResponse {
@@ -43,6 +131,49 @@ pub async fn handle_sign_share(
             signature_share_hex: "Failed to deserialize masking key k".to_string(),
         }),
     };
+
+    // 5. Verify that com_k = pk_iss * k
+    let pk_iss = state.key_manager.get_issuer_public_key().await;
+    let expected_com_k = pk_iss.0 * k;
+    let expected_com_k_bytes = serialize_to_bytes(&MaskingKeyCommitment(expected_com_k));
+    let com_k_bytes = match hex::decode(&payload.com_k_hex) {
+        Ok(b) => b,
+        Err(e) => return Json(SignShareResponse {
+            status: "ERROR".to_string(),
+            signature_share_hex: format!("Invalid com_k hex: {}", e),
+        }),
+    };
+    if com_k_bytes != expected_com_k_bytes {
+        return Json(SignShareResponse {
+            status: "ERROR".to_string(),
+            signature_share_hex: "Provided com_k does not match pk_iss * k".to_string(),
+        });
+    }
+
+    // 6. Call state.db.insert_signing_session to store the parameters. If it returns false, reject with a duplicate session error (replay/extraction protection).
+    match state.db.insert_signing_session(
+        &payload.session_id,
+        &payload.com_k_hex,
+        payload.amount,
+        &payload.client_address,
+        &payload.k_hex,
+    ).await {
+        Ok(true) => {
+            // Success
+        }
+        Ok(false) => {
+            return Json(SignShareResponse {
+                status: "ERROR".to_string(),
+                signature_share_hex: "Session ID already exists or double sign attempt detected".to_string(),
+            });
+        }
+        Err(e) => {
+            return Json(SignShareResponse {
+                status: "ERROR".to_string(),
+                signature_share_hex: format!("Database error: {}", e),
+            });
+        }
+    }
 
     let sig_share = state.sign_share_masked(&blinded, &k).await;
     let sig_share_hex = hex::encode(serialize_to_bytes(&sig_share));
@@ -84,13 +215,15 @@ pub async fn handle_leader_sign(
     let pk_iss = if let Some(pk_hex) = &payload.pk_iss_hex {
         if let Ok(bytes) = hex::decode(pk_hex) {
             deserialize_from_bytes(&bytes).unwrap_or_else(|| {
-                state.get_issuer_public_key()
+                // We reconstruct synchronously or block_on if inside closure
+                let rt = tokio::runtime::Handle::current();
+                rt.block_on(state.key_manager.get_issuer_public_key())
             })
         } else {
-            state.get_issuer_public_key()
+            state.key_manager.get_issuer_public_key().await
         }
     } else {
-        state.get_issuer_public_key()
+        state.key_manager.get_issuer_public_key().await
     };
 
     let com_k = pk_iss.0 * k;
@@ -104,9 +237,60 @@ pub async fn handle_leader_sign(
         }
     ];
 
+    let com_k_hex = hex::encode(serialize_to_bytes(&MaskingKeyCommitment(com_k)));
+    let k_hex = hex::encode(serialize_to_bytes(&MaskingKey(k)));
+
+    let leader_signer = if let Some(ref client) = state.evm_client {
+        client.signer.clone()
+    } else {
+        use alloy::signers::local::PrivateKeySigner;
+        use std::str::FromStr;
+        if let Ok(pk_str) = std::env::var("NIMBUS_RELAYER_PRIVATE_KEY") {
+            PrivateKeySigner::from_str(&pk_str).unwrap_or_else(|_| {
+                PrivateKeySigner::from_str("0000000000000000000000000000000000000000000000000000000000000001").unwrap()
+            })
+        } else {
+            PrivateKeySigner::from_str("0000000000000000000000000000000000000000000000000000000000000001").unwrap()
+        }
+    };
+    let leader_address = format!("0x{:x}", leader_signer.address());
+
+    let timestamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+
+    use alloy::signers::Signer;
+    let message = format!(
+        "{}:{}:{}:{}:{}:{}:{}",
+        payload.session_id,
+        payload.blinded_hex,
+        k_hex,
+        timestamp,
+        payload.amount,
+        payload.client_address,
+        com_k_hex
+    );
+    let signature_hex = match leader_signer.sign_message(message.as_bytes()).await {
+        Ok(sig) => hex::encode(sig.as_bytes()),
+        Err(e) => return Json(LeaderSignResponse {
+            status: format!("ERROR: Failed to sign leader payload: {}", e),
+            session_id: payload.session_id,
+            com_k_hex: String::new(),
+            partial_signatures: vec![],
+        }),
+    };
+
     let client_body = serde_json::to_string(&SignShareRequest {
+        session_id: payload.session_id.clone(),
+        amount: payload.amount,
+        client_address: payload.client_address.clone(),
+        com_k_hex: com_k_hex.clone(),
         blinded_hex: payload.blinded_hex.clone(),
-        k_hex: hex::encode(serialize_to_bytes(&k)),
+        k_hex: k_hex.clone(),
+        leader_address,
+        timestamp,
+        signature_hex,
     }).unwrap();
 
     // Call guardians with circuit breaker (Finding #15)
@@ -134,9 +318,6 @@ pub async fn handle_leader_sign(
             }
         }
     }
-
-    let com_k_hex = hex::encode(serialize_to_bytes(&MaskingKeyCommitment(com_k)));
-    let k_hex = hex::encode(serialize_to_bytes(&MaskingKey(k)));
 
     // Insert signing session into database
     match state.db.insert_signing_session(

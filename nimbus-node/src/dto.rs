@@ -153,10 +153,17 @@ pub struct X402VerifyResponse {
     pub message: String,
 }
 
-#[derive(Deserialize, Serialize)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct SignShareRequest {
+    pub session_id: String,
+    pub amount: u64,
+    pub client_address: String,
+    pub com_k_hex: String,
     pub blinded_hex: String,
     pub k_hex: String,
+    pub leader_address: String,
+    pub timestamp: u64,
+    pub signature_hex: String,
 }
 
 #[derive(Serialize, Deserialize)]

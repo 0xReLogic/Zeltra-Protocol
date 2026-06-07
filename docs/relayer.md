@@ -343,14 +343,32 @@ Dihubungi oleh Leader Node ke setiap Guardian Node via jaringan private untuk me
 *   **Payload (JSON):**
     ```json
     {
+      "session_id": "sid_1283918239...",
+      "amount": 100000000,
+      "client_address": "0xclient_address...",
+      "com_k_hex": "hex_encoded_masking_key_commitment_g2_point...",
       "blinded_hex": "hex_encoded_blinded_message_G1_point...",
       "k_hex": "hex_encoded_masking_key_fr_scalar...",
-      "share_sk_hex": null
+      "leader_address": "0xleader_address...",
+      "timestamp": 1780720000,
+      "signature_hex": "hex_encoded_leader_ecdsa_signature..."
     }
     ```
+    *   `session_id`: ID sesi minting yang unik untuk registrasi dan replay protection.
+    *   `amount`: Jumlah nominal stablecoin sesi minting ini.
+    *   `client_address`: Alamat dompet klien.
+    *   `com_k_hex`: Commitment kunci masking ($com_k = k \cdot pk_{iss}$).
     *   `blinded_hex`: Blinded message G1 point dari client (hex-encoded bytes).
     *   `k_hex`: Masking key sementara $k$ yang di-generate oleh Leader untuk sesi ini.
-    *   `share_sk_hex`: Opsional -- override share secret key (hanya untuk keperluan testing). Jika `null`, node menggunakan `NIMBUS_SHARE_KEY` dari environment.
+    *   `leader_address`: Address dompet EVM Leader yang meminta tanda tangan.
+    *   `timestamp`: Epoch timestamp request penandatanganan (Unix timestamp detik).
+    *   `signature_hex`: Tanda tangan ECDSA milik Leader atas payload parameter sesi untuk membuktikan keaslian request.
+*   **Logika Verifikasi Guardian:**
+    Sebelum Guardian menghasilkan partial signature share, node Guardian akan melakukan verifikasi berlapis:
+    1.  **Timestamp Validation:** Memastikan request dikirim dalam rentang ±60 detik terakhir.
+    2.  **Leader ECDSA Signature Verification:** Memulihkan address penandatangan dari `signature_hex` dan memastikan address tersebut cocok dengan `leader_address` serta terdaftar dalam allowlist `NIMBUS_TRUSTED_LEADERS`.
+    3.  **Cryptographic Point Verification:** Menghitung $com_k = k \cdot pk_{iss}$ secara independen menggunakan $k$ dan memverifikasi hasilnya sama dengan `com_k_hex` untuk menjamin konsistensi komitmen kunci masking.
+    4.  **Replay Protection:** Mendaftarkan sesi secara lokal di database relayer. Jika `session_id` sudah pernah diproses sebelumnya, request akan ditolak untuk mencegah double signing.
 *   **Response (JSON):**
     ```json
     {

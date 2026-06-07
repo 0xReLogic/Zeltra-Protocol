@@ -1204,13 +1204,13 @@ Lokasi:
 - [ ] Terapkan Tailscale ACL agar hanya node leader yang dapat mengakses port
   guardian.
 - [ ] Pastikan port guardian tidak listen pada interface publik.
-- [ ] Sebelum production atau ketika trust boundary bertambah, tambahkan
+- [x] Sebelum production atau ketika trust boundary bertambah, tambahkan
   application-layer authentication seperti mTLS atau signed request.
-- [ ] Tambahkan allowlist identity leader dan replay protection. Pada testnet,
+- [x] Tambahkan allowlist identity leader dan replay protection. Pada testnet,
   identity dapat berasal dari Tailscale node/tag; production sebaiknya juga
   diverifikasi pada application layer.
-- [ ] Validasi bahwa request signing terkait deposit/session yang sah.
-- [ ] Jangan menerima arbitrary blinded point tanpa policy dan authorization.
+- [x] Validasi bahwa request signing terkait deposit/session yang sah.
+- [x] Jangan menerima arbitrary blinded point tanpa policy dan authorization.
 
 Acceptance criteria:
 

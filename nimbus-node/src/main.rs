@@ -220,4 +220,143 @@ mod node_tests {
 
         std::env::remove_var("NIMBUS_SHARE_KEY");
     }
+
+    #[tokio::test]
+    async fn test_alloy_signature() {
+        use alloy::signers::{Signer, local::PrivateKeySigner};
+        let signer = PrivateKeySigner::random();
+        let msg = b"hello world";
+        let sig = signer.sign_message(msg).await.unwrap();
+        let sig_hex = hex::encode(sig.as_bytes());
+        let sig_bytes = hex::decode(&sig_hex).unwrap();
+        let parsed_sig = alloy::primitives::Signature::try_from(sig_bytes.as_slice()).unwrap();
+        let recovered = parsed_sig.recover_address_from_msg(msg).unwrap();
+        assert_eq!(recovered, signer.address());
+    }
+
+    #[tokio::test]
+    async fn test_secure_sign_share() {
+        use crate::state::AppState;
+        use crate::dto::{SignShareRequest, SignShareResponse};
+        use crate::handlers::handle_sign_share;
+        use crate::database::Database;
+        use tempfile::TempDir;
+        use alloy::signers::{Signer, local::PrivateKeySigner};
+        use nimbus_core::*;
+        use std::str::FromStr;
+        
+        std::env::set_var("NIMBUS_DB_KEY", "test-encryption-key");
+        std::env::set_var("NIMBUS_ENV", "test");
+        
+        let tmp = TempDir::new().unwrap();
+        let db_path = tmp.path().join("secure_sign.db");
+        let db = Database::new(&db_path).await.unwrap();
+        
+        // Generate keys
+        let share_sk = Fr::from(1u64);
+        let share_index = 1;
+        let state = AppState::new(db, share_sk, share_index, None).await;
+        
+        // Create leader identity
+        let leader_signer = PrivateKeySigner::random();
+        let leader_address = format!("0x{:x}", leader_signer.address());
+        
+        // Setup payload values
+        let session_id = "test-session-123".to_string();
+        let amount = 1000u64;
+        let client_address = "0x0000000000000000000000000000000000000001".to_string();
+        
+        // Setup mock blinded point and masking key
+        let (blinded, _blinding_factor) = nimbus_core::client_blind(b"test", &mut rand::thread_rng());
+        let blinded_hex = hex::encode(serialize_to_bytes(&blinded));
+        let k = Fr::from(5u64);
+        let k_hex = hex::encode(serialize_to_bytes(&MaskingKey(k)));
+        
+        let pk_iss = state.key_manager.get_issuer_public_key().await;
+        let com_k = pk_iss.0 * k;
+        let com_k_hex = hex::encode(serialize_to_bytes(&MaskingKeyCommitment(com_k)));
+        let timestamp = 1234567890u64;
+        
+        // 1. Verify that valid signature works
+        let message = format!(
+            "{}:{}:{}:{}:{}:{}:{}",
+            session_id, blinded_hex, k_hex, timestamp, amount, client_address, com_k_hex
+        );
+        let signature = leader_signer.sign_message(message.as_bytes()).await.unwrap();
+        let signature_hex = hex::encode(signature.as_bytes());
+        
+        let request = SignShareRequest {
+            session_id: session_id.clone(),
+            amount,
+            client_address: client_address.clone(),
+            com_k_hex: com_k_hex.clone(),
+            blinded_hex: blinded_hex.clone(),
+            k_hex: k_hex.clone(),
+            leader_address: leader_address.clone(),
+            timestamp,
+            signature_hex: signature_hex.clone(),
+        };
+        
+        // With default dev/test environment, NIMBUS_TRUSTED_LEADERS is bypassed if unset.
+        let response = handle_sign_share(
+            axum::extract::State(state.clone()),
+            axum::Json(request.clone()),
+        ).await;
+        assert_eq!(response.0.status, "SUCCESS");
+        
+        // 2. Test duplicate session rejection (replay protection)
+        let response_dup = handle_sign_share(
+            axum::extract::State(state.clone()),
+            axum::Json(request.clone()),
+        ).await;
+        assert_eq!(response_dup.0.status, "ERROR");
+        assert!(response_dup.0.signature_share_hex.contains("already exists") || response_dup.0.signature_share_hex.contains("double sign"));
+        
+        // 3. Test invalid commitment validation
+        let new_session_id = "test-session-456".to_string();
+        let wrong_com_k_hex = hex::encode(serialize_to_bytes(&MaskingKeyCommitment(pk_iss.0 * Fr::from(999u64))));
+        let wrong_msg = format!(
+            "{}:{}:{}:{}:{}:{}:{}",
+            new_session_id, blinded_hex, k_hex, timestamp, amount, client_address, wrong_com_k_hex
+        );
+        let wrong_signature = leader_signer.sign_message(wrong_msg.as_bytes()).await.unwrap();
+        let wrong_signature_hex = hex::encode(wrong_signature.as_bytes());
+        
+        let request_wrong_com = SignShareRequest {
+            session_id: new_session_id.clone(),
+            amount,
+            client_address: client_address.clone(),
+            com_k_hex: wrong_com_k_hex.clone(),
+            blinded_hex: blinded_hex.clone(),
+            k_hex: k_hex.clone(),
+            leader_address: leader_address.clone(),
+            timestamp,
+            signature_hex: wrong_signature_hex,
+        };
+        
+        let response_wrong_com = handle_sign_share(
+            axum::extract::State(state.clone()),
+            axum::Json(request_wrong_com),
+        ).await;
+        assert_eq!(response_wrong_com.0.status, "ERROR");
+        assert!(response_wrong_com.0.signature_share_hex.contains("does not match pk_iss * k"));
+        
+        // 4. Test wrong signature recovery rejection
+        let invalid_sig_request = SignShareRequest {
+            session_id: "test-session-789".to_string(),
+            amount,
+            client_address: client_address.clone(),
+            com_k_hex: com_k_hex.clone(),
+            blinded_hex: blinded_hex.clone(),
+            k_hex: k_hex.clone(),
+            leader_address: leader_address.clone(),
+            timestamp,
+            signature_hex: "00".repeat(65), // dummy invalid sig
+        };
+        let response_invalid_sig = handle_sign_share(
+            axum::extract::State(state.clone()),
+            axum::Json(invalid_sig_request),
+        ).await;
+        assert_eq!(response_invalid_sig.0.status, "ERROR");
+    }
 }
