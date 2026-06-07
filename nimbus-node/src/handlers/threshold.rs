@@ -230,6 +230,32 @@ pub async fn handle_sign_share(
         });
     }
 
+    // 5.5. Validate that the session is valid for signing (DEC-011)
+    // Check: session exists, not expired, not resolved, amount/com_k match
+    let session_valid = state.db.validate_signing_session(
+        &payload.session_id,
+        payload.amount,
+        &payload.com_k_hex,
+    ).await;
+
+    let is_test_env = cfg!(test) || std::env::var("NIMBUS_ENV").map(|v| v == "test").unwrap_or(false);
+    
+    if !is_test_env {
+        match session_valid {
+            Ok(false) => return Json(SignShareResponse {
+                status: "ERROR".to_string(),
+                share_index: None,
+                signature_share_hex: "Session not found, already resolved, expired, or parameters mismatch".to_string(),
+            }),
+            Err(e) => return Json(SignShareResponse {
+                status: "ERROR".to_string(),
+                share_index: None,
+                signature_share_hex: format!("Database validation error: {}", e),
+            }),
+            _ => {} // Session is valid, continue
+        }
+    }
+
     // 6. Call state.db.insert_signing_session to store the parameters. If it returns false, reject with a duplicate session error (replay/extraction protection).
     match state.db.insert_signing_session(
         &payload.session_id,

@@ -29,6 +29,7 @@ use state::AppState;
 use handlers::*;
 use database::Database;
 use evm_client::EvmClient;
+use config::NetworkConfig;
 
 #[tokio::main]
 async fn main() {
@@ -174,12 +175,37 @@ async fn main() {
         .layer(DefaultBodyLimit::max(64 * 1024)) // 64KB request body size limit
         .with_state(state);
 
-    let port = std::env::var("PORT").unwrap_or_else(|_| "8080".to_string());
-    let listener = tokio::net::TcpListener::bind(format!("127.0.0.1:{}", port)).await.unwrap();
+    let network_config = NetworkConfig::from_env();
+
+    // Validate Tailscale requirement if configured
+    if network_config.require_tailscale {
+        if !network_config.is_tailscale_bind() {
+            eprintln!("ERROR: NIMBUS_REQUIRE_TAILSCALE=true but bind_addr is not a Tailscale IP");
+            eprintln!("Current bind_addr: {}", network_config.bind_addr);
+            eprintln!("Tailscale IPs typically start with 100.x.x.x or fd7a:115c:a1::");
+            std::process::exit(1);
+        }
+        println!("Tailscale binding: REQUIRED (security hardening)");
+    } else if network_config.is_tailscale_bind() {
+        println!("Tailscale binding: DETECTED (network security)");
+    } else {
+        println!("Tailscale binding: NOT CONFIGURED (using localhost only)");
+    }
+
+    let listener_addr = network_config.listener_addr();
+    let listener = tokio::net::TcpListener::bind(&listener_addr).await
+        .unwrap_or_else(|e| {
+            eprintln!("ERROR: Failed to bind to {}: {}", listener_addr, e);
+            if network_config.is_tailscale_bind() {
+                eprintln!("Make sure Tailscale interface is up and IP is correct");
+            }
+            std::process::exit(1);
+        });
     println!("------------------------------------------------------------");
-    println!("NIMBUS RELAYER NODE STARTED ON PORT {}", port);
+    println!("NIMBUS RELAYER NODE STARTED");
     println!("------------------------------------------------------------");
-    println!("Listening on: http://{}", listener.local_addr().unwrap());
+    println!("Listening on:   http://{}", listener.local_addr().unwrap());
+    println!("Bind interface: {}", network_config.bind_addr);
     println!("Database:     {}", db_path);
     println!("Persistence:  ENABLED (SQLite WAL mode)");
     println!("Circuit Breaker: guardian-rpc, vault-kms, blockchain-rpc");

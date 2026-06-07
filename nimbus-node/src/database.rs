@@ -589,6 +589,54 @@ impl Database {
         .await?
     }
 
+    /// Validate that a session is valid for signing
+    /// Returns Ok(true) if session exists, is not resolved, and matches amount/com_k
+    /// Returns Ok(false) if session doesn't exist, is resolved, or parameters don't match
+    /// Returns Error for database errors
+    pub async fn validate_signing_session(
+        &self,
+        session_id: &str,
+        amount: u64,
+        com_k_hex: &str,
+    ) -> Result<bool> {
+        let path = self.path.clone();
+        let session_id = session_id.to_string();
+        let com_k_hex = com_k_hex.to_string();
+
+        let db_key = database_key()?;
+
+        task::spawn_blocking(move || -> Result<bool> {
+            let conn = open_connection(&path, &db_key)?;
+
+            // Check if session exists, is not resolved, and parameters match
+            let (count, created_at): (i64, i64) = conn
+                .query_row(
+                    "SELECT COUNT(*), created_at FROM sessions 
+                     WHERE session_id = ? AND amount = ? AND com_k_hex = ? AND resolved = 0",
+                    params![session_id, amount as i64, com_k_hex],
+                    |row| Ok((row.get::<_, i64>(0)?, row.get::<_, i64>(1)?)),
+                )
+                .unwrap_or((0, 0));
+
+            if count == 0 {
+                return Ok(false);
+            }
+
+            // Check expiry: sessions expire after 1 hour (3600 seconds)
+            let now = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)?
+                .as_secs() as i64;
+            
+            let expiry = created_at + 3600; // 1 hour expiry
+            if now > expiry {
+                return Ok(false); // Session expired
+            }
+
+            Ok(true)
+        })
+        .await?
+    }
+
     /// Resolve session and retrieve masking key (Atomic Release flow)
     /// Sets resolved = 1 and returns the masking_key_hex ONLY IF deposit_confirmed = 1
     /// Returns Ok(Some(masking_key_hex)) if successful, Ok(None) if not found, already resolved, or not confirmed.
@@ -633,6 +681,65 @@ impl Database {
             } else {
                 Ok(None)
             }
+        })
+        .await?
+    }
+
+    /// Zeroize (clear) the masking key from a session after reveal (DEC-011)
+    /// This should be called after the masking key has been successfully used
+    /// Returns true if the key was zeroized, false if session not found
+    pub async fn zeroize_session_masking_key(
+        &self,
+        session_id: &str,
+    ) -> Result<bool> {
+        let path = self.path.clone();
+        let session_id = session_id.to_string();
+        
+        let db_key = database_key()?;
+        
+        task::spawn_blocking(move || -> Result<bool> {
+            let conn = open_connection(&path, &db_key)?;
+            
+            // Zeroize the masking key by setting it to a dummy value
+            let changes = conn.execute(
+                "UPDATE sessions 
+                 SET masking_key_hex = 'ZEROIZED' 
+                 WHERE session_id = ? AND masking_key_hex != 'ZEROIZED'",
+                params![session_id],
+            )?;
+            
+            Ok(changes > 0)
+        })
+        .await?
+    }
+
+    /// Cleanup expired sessions by zeroizing their keys (DEC-011)
+    /// Should be called periodically by a background job
+    /// Returns the number of sessions cleaned up
+    pub async fn cleanup_expired_sessions(&self) -> Result<u64> {
+        let path = self.path.clone();
+        
+        let db_key = database_key()?;
+        
+        task::spawn_blocking(move || -> Result<u64> {
+            let conn = open_connection(&path, &db_key)?;
+            
+            let now = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)?
+                .as_secs() as i64;
+            
+            // Sessions expire after 1 hour (3600 seconds)
+            let expiry_threshold = now - 3600;
+            
+            // Zeroize masking keys for expired sessions
+            let changes = conn.execute(
+                "UPDATE sessions 
+                 SET masking_key_hex = 'ZEROIZED' 
+                 WHERE created_at < ? AND masking_key_hex != 'ZEROIZED'",
+                params![expiry_threshold],
+            )?;
+            
+            Ok(changes as u64)
         })
         .await?
     }

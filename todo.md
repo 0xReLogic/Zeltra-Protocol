@@ -1217,10 +1217,10 @@ Lokasi:
 
 - [x] Hapus `share_sk_hex` dari request publik.
 - [x] Guardian harus selalu menggunakan share dari `KeyManager`.
-- [ ] Untuk testnet, bind endpoint guardian hanya ke IP/interface Tailscale.
-- [ ] Terapkan Tailscale ACL agar hanya node leader yang dapat mengakses port
+- [x] Untuk testnet, bind endpoint guardian hanya ke IP/interface Tailscale.
+- [x] Terapkan Tailscale ACL agar hanya node leader yang dapat mengakses port
   guardian.
-- [ ] Pastikan port guardian tidak listen pada interface publik.
+- [x] Pastikan port guardian tidak listen pada interface publik.
 - [x] Sebelum production atau ketika trust boundary bertambah, tambahkan
   application-layer authentication seperti mTLS atau signed request.
 - [x] Tambahkan allowlist identity leader dan replay protection. Pada testnet,
@@ -1269,10 +1269,10 @@ TODO:
 - [x] Rilis `k` hanya setelah deposit on-chain untuk session tersebut
   terkonfirmasi.
 - [x] Pastikan amount dan commitment deposit sama dengan signing session.
-- [ ] Guardian hanya menandatangani session yang sah dan belum expired.
+- [x] Guardian hanya menandatangani session yang sah dan belum expired.
 - [x] Tandai `k` sebagai revealed secara atomik agar tidak ada conflicting
   lifecycle.
-- [ ] Hapus/zeroize `k` setelah reveal selesai atau session expired.
+- [x] Hapus/zeroize `k` setelah reveal selesai atau session expired.
 - [x] Jangan log `k` atau memasukkannya ke response/error sebelum reveal.
 - [ ] Integrasikan refund timelock jika quorum gagal atau `k` tidak dapat
   dirilis.

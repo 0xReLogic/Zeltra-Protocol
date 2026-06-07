@@ -15,6 +15,7 @@ base64 = "0.22.1"
 rusqlite = { version = "0.32", features = ["bundled-sqlcipher"] }
 anyhow = "1.0"
 alloy = { version = "1.0", features = ["node-bindings", "provider-ws", "signer-local"] }
+zeroize = "1.8"
 
 [dev-dependencies]
 tempfile = "3.0"

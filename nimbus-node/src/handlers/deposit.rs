@@ -85,9 +85,23 @@ pub async fn handle_reveal(
     axum::extract::State(state): axum::extract::State<AppState>,
     Json(payload): Json<RevealRequest>,
 ) -> Json<RevealResponse> {
-    match state.db.resolve_session_release(&payload.session_id).await {
+    let session_id = payload.session_id.clone();
+    match state.db.resolve_session_release(&session_id).await {
         Ok(Some(masking_key_hex)) => {
-            println!("RELAYER: Masking key revealed for Session ID: {}", payload.session_id);
+            println!("RELAYER: Masking key revealed for Session ID: {}", session_id);
+            
+            // Zeroize the masking key after revealing (DEC-011)
+            // Spawn background task to avoid delaying the response
+            let state_clone = state.clone();
+            let session_id_clone = session_id.clone();
+            tokio::spawn(async move {
+                match state_clone.db.zeroize_session_masking_key(&session_id_clone).await {
+                    Ok(true) => println!("RELAYER: Masking key zeroized for Session ID: {}", session_id_clone),
+                    Ok(false) => println!("RELAYER: Session already zeroized or not found: {}", session_id_clone),
+                    Err(e) => eprintln!("RELAYER ERROR: Failed to zeroize masking key for Session ID {}: {}", session_id_clone, e),
+                }
+            });
+            
             Json(RevealResponse {
                 status: "SUCCESS".to_string(),
                 valid: true,
