@@ -8,7 +8,9 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 CONTRACT_DIR="${REPO_ROOT}/nimbus-contracts"
 DEPLOYMENT_DIR="${NIMBUS_DEPLOYMENT_DIR:-${REPO_ROOT}/deployments}"
-CHECK_URL=${RPC_URL:-"https://sepolia-rollup.arbitrum.io/rpc"}
+CHECK_URL=${RPC_URL:-${NIMBUS_RPC_URL:-"https://sepolia-rollup.arbitrum.io/rpc"}}
+DEPLOY_PRIVATE_KEY="${PRIVATE_KEY:-${NIMBUS_RELAYER_PRIVATE_KEY:-}}"
+STYLUS_FEATURES="${NIMBUS_STYLUS_FEATURES:-}"
 CHAIN_ID_HINT="${CHAIN_ID:-421614}"
 TIMESTAMP_UTC="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
 TIMESTAMP_FILE="$(date -u +"%Y%m%dT%H%M%SZ")"
@@ -58,6 +60,9 @@ write_manifest() {
     "rustc": $(printf '%s' "${rustc_version}" | json_escape),
     "cargo_stylus": $(printf '%s' "${cargo_stylus_version}" | json_escape)
   },
+  "build": {
+    "features": $(printf '%s' "${STYLUS_FEATURES}" | json_escape)
+  },
   "checks": {
     "stylus_check": "${status}"
   },
@@ -73,6 +78,13 @@ echo "=========================================================="
 # No emoji as per system constraints
 echo "NIMBUS SMART CONTRACT STYLUS DEPLOYMENT HELPERS"
 echo "=========================================================="
+
+STYLUS_CHECK_ARGS=(--endpoint="$CHECK_URL")
+STYLUS_DEPLOY_ARGS=(--endpoint="$CHECK_URL")
+if [ -n "$STYLUS_FEATURES" ]; then
+    STYLUS_CHECK_ARGS+=(--features="$STYLUS_FEATURES")
+    STYLUS_DEPLOY_ARGS+=(--features="$STYLUS_FEATURES")
+fi
 
 # 1. Check if rustc is installed
 if ! command -v rustc &> /dev/null; then
@@ -102,7 +114,7 @@ fi
 # 4. Perform compilation and optimization check
 echo "Performing Stylus validation check..."
 cd "${CONTRACT_DIR}"
-cargo stylus check --endpoint="$CHECK_URL"
+cargo stylus check "${STYLUS_CHECK_ARGS[@]}"
 
 mkdir -p "${DEPLOYMENT_DIR}"
 CHECK_MANIFEST="${DEPLOYMENT_DIR}/arbitrum-sepolia-${TIMESTAMP_FILE}-check.json"
@@ -120,13 +132,14 @@ echo "  --private-key='YOUR_PRIVATE_KEY'"
 echo ""
 echo "Or configure the following environment variables and run this script as:"
 echo "RPC_URL=https://sepolia-rollup.arbitrum.io/rpc PRIVATE_KEY=0x... ./deploy_testnet.sh"
+echo "or source nimbus-node/.env.test and run ./scripts/deploy_testnet.sh"
 echo "=========================================================="
 
-if [ -n "${RPC_URL:-}" ] && [ -n "${PRIVATE_KEY:-}" ]; then
-    echo "Executing deployment to $RPC_URL..."
+if [ -n "${DEPLOY_PRIVATE_KEY}" ]; then
+    echo "Executing deployment to $CHECK_URL..."
     DEPLOY_LOG="${DEPLOYMENT_DIR}/arbitrum-sepolia-${TIMESTAMP_FILE}-deploy.log"
     set +e
-    cargo stylus deploy --endpoint="$RPC_URL" --private-key="$PRIVATE_KEY" 2>&1 | tee "${DEPLOY_LOG}"
+    cargo stylus deploy "${STYLUS_DEPLOY_ARGS[@]}" --private-key="$DEPLOY_PRIVATE_KEY" 2>&1 | tee "${DEPLOY_LOG}"
     DEPLOY_STATUS=${PIPESTATUS[0]}
     set -e
 
