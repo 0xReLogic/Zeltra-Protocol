@@ -718,7 +718,7 @@ dikembalikan, dan final verification hanya dilakukan oleh CLI.
 - [ ] `scripts/check_balance.py` harus mengambil RPC/address dari environment.
 - [ ] `scripts/test_rpc_fallback.sh` harus benar-benar mematikan primary route
   atau memakai endpoint invalid dan membuktikan transaksi masuk via fallback.
-- [ ] `scripts/deploy_testnet.sh` harus menyimpan deployment manifest.
+- [x] `scripts/deploy_testnet.sh` harus menyimpan deployment manifest.
 - [ ] Semua private key/RPC token hardcoded harus dihapus dari script.
 - [ ] Tambahkan lint/scan yang menggagalkan commit jika pola private key atau
   Vault token ditemukan.
@@ -733,6 +733,9 @@ dikembalikan, dan final verification hanya dilakukan oleh CLI.
 - [ ] Aktifkan dan cache contract.
 - [ ] Simpan deployment manifest berisi commit, rustc, cargo-stylus, Stylus SDK,
   WASM hash, ABI hash, chain ID, addresses, dan tx hashes.
+  - Script deploy sudah menulis manifest dasar; item ini tetap belum selesai
+    sampai deploy RC nyata mencatat address, tx hash, WASM hash, ABI hash, dan
+    hasil verifikasi receipt.
 - [ ] Bandingkan exported ABI dengan Alloy interface relayer.
 - [ ] Pastikan selector semua method sesuai.
 - [ ] Pastikan storage initialization hanya bisa dilakukan sekali.
@@ -1047,7 +1050,7 @@ Report tidak boleh berisi:
 - [ ] Hapus secret hardcoded dari seluruh script.
 - [ ] Perbaiki generator BLS dan ABI generation.
 - [ ] Implementasikan hard-test mode tanpa fallback mock.
-- [ ] Implementasikan deployment manifest.
+- [x] Implementasikan deployment manifest.
 - [ ] Implementasikan receipt/event/state assertion helpers.
 - [ ] Implementasikan report JSON/Markdown.
 
