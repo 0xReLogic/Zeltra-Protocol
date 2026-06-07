@@ -91,6 +91,11 @@ Mengikuti rekomendasi audit keamanan infrastruktur relayer node 2026:
 *   **Circuit Breakers**: Membatasi kegagalan kaskade dengan membungkus panggilan eksternal (Guardian RPC, Vault KMS, Blockchain RPC) dalam Circuit Breaker 3-state (Closed, Open, Half-Open).
 *   **Request Idempotency**: Mencegah pemrosesan ganda transaksi akibat retry dari client menggunakan tabel cache idempotency berbasis SQLite dengan key berumur 24 jam.
 
+### F. Security Hardening (DEC-010 & DEC-011)
+*   **Tailscale Network Security (DEC-010)**: Guardian endpoint dibind ke Tailscale interface dengan ACL strict untuk membatasi akses hanya dari node leader. Mencegah public exposure dan scanning. Dikonfigurasi via `NIMBUS_BIND_ADDR` dan `NIMBUS_REQUIRE_TAILSCALE`.
+*   **Session Validation (DEC-011)**: Guardian menolak session expired (1 jam), resolved, atau dengan parameter mismatch. Mencegah signature pada session yang tidak valid. Validasi dilakukan sebelum signing di `/api/sign-share`.
+*   **Key Zeroization (DEC-011)**: Masking key di-zeroize dari database setelah reveal dan untuk session expired secara berkala. Meminimalkan exposure window cryptographic secrets menggunakan `zeroize` crate.
+
 ---
 
 ### Fee Quote Guardrail
@@ -146,6 +151,9 @@ Every instance of `nimbus-node` reads configurations from environment variables 
 | `NIMBUS_BATCH_ENABLED` | `false` | Aktifkan adaptive same-chain batching setelah kontrak `batchSpend()` dideploy dan diuji. |
 | `NIMBUS_ESTIMATED_GAS_COST_USDC_BASE_UNITS` | `0` | Default estimasi gas dalam base unit USDC untuk endpoint quote informasional. |
 | `NIMBUS_RELAYER_MARKUP_BPS` | `1500` | Markup relayer atas gas quote dalam basis points. `1500` berarti 15% dari estimasi gas. Jangan dipakai sebagai pemotongan production sebelum signed quote aktif. |
+| `NIMBUS_BIND_ADDR` | `127.0.0.1` | IP address untuk HTTP server binding. Gunakan Tailscale IP (100.x.x.x) untuk production. |
+| `NIMBUS_REQUIRE_TAILSCALE` | `false` | Enforce Tailscale binding. Jika `true`, node akan fail startup jika `NIMBUS_BIND_ADDR` bukan Tailscale IP. |
+| `PORT` | `8080` | Port untuk HTTP server. |
 
 ### Integrasi OpenBao / Vault (Production Mode)
 
@@ -163,10 +171,36 @@ Untuk deployment di tingkat produksi (production-ready), kunci rahasia pembagian
    NIMBUS_VAULT_ADDR="http://127.0.0.1:8200" \
    NIMBUS_VAULT_TOKEN="hvs.xxxxxxxxxxxxxxxxxxxx" \
    NIMBUS_VAULT_PATH="v1/secret/data/nimbus" \
+   NIMBUS_BIND_ADDR="100.x.x.x" \
+   NIMBUS_REQUIRE_TAILSCALE=true \
    cargo run
    ```
 
 Metode ini memastikan kunci didekripsi langsung di memori RAM dan tidak pernah bocor ke disk server atau environment variable Linux.
+
+### Tailscale Network Security (DEC-010)
+
+Untuk production deployment, guardian endpoint WAJIB dibind ke Tailscale network interface:
+
+1. **Tailscale ACL Configuration**: Configure tailnet ACL untuk hanya mengizinkan akses dari node leader:
+   ```json
+   {
+     "acls": [
+       {
+         "action": "accept",
+         "src": ["tag:leader"],
+         "dst": ["tag:guardian:8080"]
+       }
+     ],
+     "tagOwners": {
+       "tag:leader": ["admin@tailnet"],
+       "tag:guardian": ["admin@tailnet"]
+     }
+   }
+   ```
+2. **Network Binding**: Set `NIMBUS_BIND_ADDR` ke Tailscale IP (100.x.x.x untuk IPv4 atau fd7a:... untuk IPv6)
+3. **Validation**: Node akan fail startup jika `NIMBUS_REQUIRE_TAILSCALE=true` dan bind address bukan Tailscale IP
+4. **Public Interface**: Guardian endpoint tidak akan listen pada interface publik, mencegah scanning dan unauthorized access
 
 ### Panduan Pengamanan OpenBao untuk Produksi (Rekomendasi Ahli)
 
@@ -305,6 +339,7 @@ Dihubungi oleh klien untuk meminta kunci masking $k$ setelah deposit stablecoin 
       "masking_key_hex": "k_key_hex_scalar..."
     }
     ```
+*   **Key Zeroization (DEC-011):** Setelah masking key berhasil di-reveal ke client, key di-zeroize dari database secara otomatis untuk meminimalkan exposure window. Session expired juga akan di-zeroize secara berkala oleh background cleanup job.
 
 ### D. Pengiriman Pembayaran Gasless & Lintas Rantai
 Dihubungi oleh klien untuk mengirimkan token privat secara anonim, baik secara lokal di rantai asal maupun lintas rantai (Fase B) tanpa menggunakan gas fee ETH.
@@ -406,7 +441,8 @@ Dihubungi oleh Leader Node ke setiap Guardian Node via jaringan private untuk me
     1.  **Timestamp Validation:** Memastikan request dikirim dalam rentang ±60 detik terakhir.
     2.  **Leader ECDSA Signature Verification:** Memulihkan address penandatangan dari `signature_hex` dan memastikan address tersebut cocok dengan `leader_address` serta terdaftar dalam allowlist `NIMBUS_TRUSTED_LEADERS`.
     3.  **Cryptographic Point Verification:** Menghitung $com_k = k \cdot pk_{iss}$ secara independen menggunakan $k$ dan memverifikasi hasilnya sama dengan `com_k_hex` untuk menjamin konsistensi komitmen kunci masking.
-    4.  **Replay Protection:** Mendaftarkan sesi secara lokal di database relayer. Jika `session_id` sudah pernah diproses sebelumnya, request akan ditolak untuk mencegah double signing.
+    4.  **Session Validation (DEC-011):** Memvalidasi bahwa session exists, belum expired (1 jam dari creation), belum resolved, dan amount/com_k sesuai dengan expected values. Mencegah guardian menandatangani session yang tidak valid.
+    5.  **Replay Protection:** Mendaftarkan sesi secara lokal di database relayer. Jika `session_id` sudah pernah diproses sebelumnya, request akan ditolak untuk mencegah double signing.
 *   **Response (JSON):**
     ```json
     {
