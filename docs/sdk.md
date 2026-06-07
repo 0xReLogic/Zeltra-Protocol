@@ -247,8 +247,9 @@ sequenceDiagram
     AI Agent->>Nimbus SDK: 7. encode_payment_signature(sig)
     AI Agent->>Resource Server: 8. GET /api/market-data + PAYMENT-SIGNATURE header
     Resource Server->>Nimbus Relayer: 9. POST /api/x402/verify (facilitator)
-    Nimbus Relayer-->>Resource Server: 10. X402VerifyResponse (settlement receipt)
-    Resource Server-->>AI Agent: 11. HTTP 200 + data + PAYMENT-RESPONSE header
+    Nimbus Relayer-->>Resource Server: 10. X402VerifyResponse (queued, tx_hash null)
+    Note over Resource Server,Nimbus Relayer: Resource policy waits for confirmed settlement
+    Resource Server-->>AI Agent: 11. HTTP 200 only after configured settlement policy
 ```
 
 ### B. Struktur Data Utama

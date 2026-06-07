@@ -18,9 +18,6 @@ pub struct AppState {
     /// Persistent SQLite database (replaces in-memory storage)
     pub db: Database,
     
-    /// In-memory spend queue (batched before on-chain submission)
-    pub spend_queue: Arc<Mutex<Vec<crate::dto::SpendRequest>>>,
-    
     /// Key manager with rotation and re-masking support
     pub key_manager: KeyManager,
     
@@ -73,7 +70,6 @@ impl AppState {
         
         Self {
             db,
-            spend_queue: Arc::new(Mutex::new(Vec::new())),
             key_manager,
             relayer_wallet_balance_eth: Arc::new(Mutex::new(10.0)),
             relayer_accumulated_profit_usdc: Arc::new(Mutex::new(0.0)),

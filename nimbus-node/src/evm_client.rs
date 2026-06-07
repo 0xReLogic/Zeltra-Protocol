@@ -54,6 +54,13 @@ pub struct EvmClient {
     ccip_router_address: Address,
 }
 
+#[derive(Clone, Debug)]
+pub struct TransactionOutcome {
+    pub tx_hash: String,
+    pub block_number: u64,
+    pub success: bool,
+}
+
 impl EvmClient {
     pub async fn new(rpc_url: &str, private_key: &str, contract_address: &str) -> Result<Self> {
         let signer = PrivateKeySigner::from_str(private_key)
@@ -137,7 +144,7 @@ impl EvmClient {
         })
     }
 
-    async fn send_tx_with_fallback(&self, tx: TransactionRequest) -> Result<String> {
+    async fn send_tx_with_fallback(&self, tx: TransactionRequest) -> Result<TransactionOutcome> {
         // Try primary provider
         let result = self.provider.send_transaction(tx.clone()).await;
         
@@ -159,17 +166,21 @@ impl EvmClient {
         };
 
         let tx_hash = format!("0x{:x}", pending_tx.tx_hash());
-        
-        // Spawn async receipt monitoring
-        tokio::spawn(async move {
-            if let Ok(receipt) = pending_tx.get_receipt().await {
-                println!("RELAYER: Confirmed in block {}", receipt.block_number.unwrap_or(0));
-                println!("  Gas Used    : {}", receipt.gas_used);
-                println!("  Status      : {}", if receipt.status() { "SUCCESS" } else { "FAILED" });
-            }
-        });
+        let receipt = pending_tx
+            .get_receipt()
+            .await
+            .context("transaction broadcasted but receipt was not confirmed")?;
+        let block_number = receipt.block_number.unwrap_or(0);
+        let success = receipt.status();
+        println!("RELAYER: Confirmed in block {}", block_number);
+        println!("  Gas Used    : {}", receipt.gas_used);
+        println!("  Status      : {}", if success { "SUCCESS" } else { "FAILED" });
 
-        Ok(tx_hash)
+        Ok(TransactionOutcome {
+            tx_hash,
+            block_number,
+            success,
+        })
     }
 
     /// Fetch gas price from blockchain with fallback
@@ -205,7 +216,7 @@ impl EvmClient {
         recipient_or_intent_hash_hex: &str,
         expiry: u64,
         nonce_hex: &str,
-    ) -> Result<String> {
+    ) -> Result<TransactionOutcome> {
         println!("RELAYER: Broadcasting spend transaction");
         println!("  Nullifier   : {}...", &nullifier[..core::cmp::min(8, nullifier.len())]);
         println!("  Recipient   : {}", recipient);
@@ -293,12 +304,12 @@ impl EvmClient {
             .with_max_priority_fee_per_gas(1_000_000)
             .with_input(Bytes::from(call_data));
 
-        let tx_hash = self.send_tx_with_fallback(tx).await?;
+        let outcome = self.send_tx_with_fallback(tx).await?;
         
         println!("RELAYER: Transaction broadcasted");
-        println!("  Tx Hash     : {}", tx_hash);
+        println!("  Tx Hash     : {}", outcome.tx_hash);
 
-        Ok(tx_hash)
+        Ok(outcome)
     }
 
     pub async fn broadcast_ccip_transaction(
@@ -314,7 +325,7 @@ impl EvmClient {
         amount: u64,
         expiry: u64,
         nonce_hex: &str,
-    ) -> Result<String> {
+    ) -> Result<TransactionOutcome> {
         println!("RELAYER: Preparing CCIP Transaction");
         println!("  Destination Chain    : {}", destination_chain_selector);
         println!("  Destination Contract : {}", destination_contract);
@@ -438,13 +449,13 @@ impl EvmClient {
             .with_max_priority_fee_per_gas(1_000_000)
             .with_input(Bytes::from(ccip_send_call));
 
-        let tx_hash = self.send_tx_with_fallback(tx).await?;
+        let outcome = self.send_tx_with_fallback(tx).await?;
         
         println!("RELAYER: Real CCIP transaction broadcasted successfully");
-        println!("  Tx Hash              : {}", tx_hash);
-        println!("  CCIP Message ID      : {} (derived from tx hash)", tx_hash);
+        println!("  Source Tx Hash       : {}", outcome.tx_hash);
+        println!("  CCIP Message ID      : pending event parsing");
 
-        Ok(tx_hash)
+        Ok(outcome)
     }
 
     pub fn signer_address(&self) -> String {

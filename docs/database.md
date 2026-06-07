@@ -1,12 +1,13 @@
 # Database Integration
 
-**Status**: COMPLETE  
-**Date**: June 5, 2026
-**Security Update**: June 6, 2026 - Added SQLCipher encryption, file permissions, and log redaction  
+**Status**: Persistent queue implemented; crash/nonce reconciliation pending
+**Date**: June 7, 2026
 
 ## Overview
 
-Replaced in-memory storage with SQLite database for persistent session and nullifier tracking.
+SQLite menyimpan session, idempotency, persistent spend queue, dan nullifier
+yang sudah confirmed. Desain settlement queue mengikuti
+[`DEC-005`](../research/decisions/DEC-005-persistent-spend-settlement-queue.md).
 
 ### Security Improvements (June 6, 2026)
 
@@ -27,7 +28,10 @@ See `/security-node/SQLITE_DATABASE_SECURITY_AUDIT.md` for full audit details.
 **Features**:
 - SQLite with optimized PRAGMAs
 - Four tables: `sessions`, `nullifiers`, `spend_queue`, `idempotency_cache`
-- Atomic double-spend prevention using `INSERT OR IGNORE` pattern
+- Transactional queue claim dengan lease
+- Persistent lifecycle `queued`, `retryable`, `broadcasting`, `submitted`,
+  `confirmed`, dan `failed`
+- Nullifier confirmed ditulis hanya setelah receipt sukses
 - Request idempotency caching with TTL-based expiration (24 hours)
 - Async/blocking hybrid using `tokio::spawn_blocking`
 
@@ -49,6 +53,12 @@ PRAGMA busy_timeout = 5000;
 | `resolve_session()` | Reveal masking keys, prevent double-reveal |
 | `check_and_insert_nullifier()` | Atomic double-spend prevention (INSERT OR IGNORE) |
 | `is_nullifier_spent()` | Fast nullifier lookup |
+| `enqueue_spend()` | Persist request dan reserve nullifier aktif |
+| `claim_spends()` | Transactional worker claim dengan lease |
+| `retry_spend()` | Exponential backoff untuk failure sebelum confirmation |
+| `mark_spend_submitted()` | Simpan source tx hash |
+| `mark_spend_confirmed()` | Atomic queue confirmation + confirmed nullifier |
+| `fail_spend()` | Simpan terminal failure tanpa menghapus evidence |
 | `check_idempotency()` | Check client-supplied key for duplicate request |
 | `store_idempotency()` | Store client-supplied key with serializable response |
 | `cleanup_idempotency_cache()` | Evict expired keys (older than 24 hours) |
@@ -78,9 +88,9 @@ pub struct AppState {
 ### 4. Handler Updates
 
 - `handlers/deposit.rs` - Uses `db.insert_session()` and `db.resolve_session()`
-- `handlers/spend.rs` - Uses `db.is_nullifier_spent()` and `db.check_and_insert_nullifier()`
-- `handlers/x402.rs` - Uses `db.is_nullifier_spent()`
-- `handlers/health.rs` - Uses `db.get_stats()`
+- `handlers/spend.rs` - Enqueue dan process persistent settlement lifecycle
+- `handlers/x402.rs` - Enqueue saja; tidak direct broadcast
+- `handlers/health.rs` - Membaca queue depth dari database
 
 ### 5. Dependencies
 
@@ -94,25 +104,18 @@ tempfile = "3.0"  # for tests
 
 ## Why SQLite
 
-SQLite dipilih karena:
-1. Simple - single file database, no server
-2. Fast enough - handles <1000 TPS (cukup untuk MVP)
-3. Proven - Cloudflare D1, Turso use it in production
-4. Easy backup - just copy the .db file
-5. **Secure with SQLCipher** - AES-256 encryption for sensitive data
-
-Nanti kalau traffic >1000 TPS baru migrate ke PostgreSQL. Sekarang SQLite cukup.
+SQLite dipilih untuk relayer single-node karena sudah menjadi dependency repo,
+memberikan transaksi atomic dan WAL crash recovery, serta menjaga scope
+operasional MVP. Batas throughput belum diklaim sebelum load test, WAL
+checkpoint test, disk-full test, backup, dan restore selesai.
 
 ## Test Results
 
-```bash
-running 9 tests total
-- 3 unit tests (database module)
-- 4 binary tests
-- 2 integration tests
+`cargo test -p nimbus-node -- --test-threads=1` lulus pada 7 Juni 2026:
 
-test result: ok. 9 passed; 0 failed
-```
+- 11 library tests
+- 12 binary tests
+- 2 integration tests
 
 ## Deployment
 
@@ -172,7 +175,15 @@ CREATE TABLE spend_queue (
     amount INTEGER NOT NULL,
     created_at INTEGER NOT NULL,
     processed BOOLEAN NOT NULL DEFAULT 0,
-    tx_hash TEXT
+    tx_hash TEXT,
+    request_json TEXT,
+    status TEXT NOT NULL DEFAULT 'queued',
+    retry_count INTEGER NOT NULL DEFAULT 0,
+    last_error TEXT,
+    available_at INTEGER NOT NULL DEFAULT 0,
+    lease_until INTEGER,
+    updated_at INTEGER NOT NULL DEFAULT 0,
+    block_number INTEGER
 );
 ```
 
@@ -204,24 +215,27 @@ CREATE INDEX idx_idempotency_created ON idempotency_cache(created_at);
 ### Data Protection
 - **Secure Delete**: `PRAGMA secure_delete = ON` overwrites deleted data
 - **Log Redaction**: Sensitive data (nullifiers, keys) redacted to 8 characters in logs
-- **Double-spend prevention**: Atomic `INSERT OR IGNORE` (race-safe)
+- **Reservation**: Satu nullifier hanya memiliki satu queue item aktif
+- **Confirmation**: `nullifiers` ditulis bersama perubahan queue ke `confirmed`
 - **Session uniqueness**: Primary key constraint
 - **Data persistence**: WAL mode survives crashes
 - **Concurrent access**: 5s busy timeout
 
 ### Operational Security
-- Database is operational cache, not source of truth
+- Contract tetap source of truth settlement finansial
+- Database menjadi source of truth workflow relayer lokal
 - If database is lost/corrupted:
-  - User funds: SAFE (on blockchain)
-  - Nullifiers: Rebuild from blockchain events
-  - Pending batches: Lost (users resubmit)
+  - confirmed state harus direkonsiliasi dari chain;
+  - pending queue membutuhkan backup/restore;
+  - jangan menganggap user resubmit selalu aman karena transaksi sebelumnya
+    mungkin sudah diterima RPC.
 
-## Performance
+## Remaining Reliability Work
 
-- Session insert: ~0.5ms
-- Nullifier check: ~0.2ms
-- Bottleneck: SQLite single writer (good for <1000 TPS)
-- Migration path: PostgreSQL when needed
+- Persistent nonce allocation dan signed raw transaction storage.
+- Reconciliation sender+nonce dan nullifier contract setelah restart.
+- Confirmation threshold serta reorg handling.
+- Disk-full, corrupt database, backup/restore, dan process-kill hard test.
 
 ## Storage Size
 

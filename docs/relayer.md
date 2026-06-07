@@ -17,7 +17,10 @@ Berikut adalah informasi deployment resmi kontrak Nimbus di testnet Arbitrum Sep
 ## 1. Peran Utama Relayer (Nimbus Node)
 
 Nimbus Node berjalan sebagai server web API mandiri (ditulis menggunakan **Rust Axum**) yang bertindak sebagai **Paymaster/Relayer** untuk menyelesaikan dua kendala utama UX Web3:
-1.  **Cold Start Barrier (Bebas Gas Fee):** Pengguna tidak memerlukan saldo ETH di dompet mereka untuk mentransfer token privat. Relayer menalangi gas fee ETH on-chain dan memotongnya dalam bentuk stablecoin dari nominal transaksi.
+1.  **Cold Start Barrier (Bebas Gas Fee):** Pengguna tidak memerlukan saldo ETH
+    di dompet mereka untuk mentransfer token privat. Relayer menalangi gas fee
+    ETH on-chain. Mekanisme reimbursement stablecoin masih memerlukan desain
+    accounting dan authorization sebelum diaktifkan.
 2.  **EIP-7702 Delegation:** Mengaktifkan fitur smart wallet (seperti tanda tangan gasless dan batching) langsung pada alamat dompet EOA biasa (seperti Metamask tradisional) tanpa biaya deployment kontrak yang mahal.
 
 ---
@@ -38,22 +41,39 @@ graph TD
 *   Klien mengirim otorisasi tersebut bersama data transfer privat ke `nimbus-node`.
 *   `nimbus-node` mengirimkan transaksi ke blockchain L2, membayar gas fee ETH, dan memotong stablecoin (USDC) dari transaksi untuk biaya relayer.
 
-### B. Antrean Batching Otomatis (40% Gas Reduction)
-Untuk menekan biaya transaksi, Relayer tidak langsung memproses transaksi secara satuan. Sebaliknya, Relayer menerapkan sistem **Batching Queue**:
-*   Setiap request `spend` dimasukkan ke dalam antrean di memori server.
-*   Pekerja latar belakang (background worker) berjalan setiap **2 detik** untuk mengambil semua transaksi di antrean, menggabungkannya ke dalam satu batch transaksi multi-call, dan menyetorkannya ke blockchain L2.
-*   Metode ini menghemat gas fee dasar EVM hingga **40%** (dari ~200.000 gas menjadi ~120.000 gas per transfer).
+### B. Antrean Settlement Persisten
 
-### C. Shuffling Anonymization Pool (Pencegahan Timing Attack)
-Untuk melindungi strategi perdagangan dan privasi pengguna/AI Agent dari serangan analisis metadata waktu (*timing correlation attacks*):
-*   Sebelum pekerja latar belakang (*background worker*) memproses dan menyetor batch transaksi multi-call ke L2, relayer secara acak mengacak (*shuffle*) urutan antrean transaksi di memori.
-*   Ini memutus korelasi kronologis antara waktu pengiriman request HTTP API oleh agen dengan urutan eksekusi transaksi yang tercatat pada blok on-chain L2. Pengamat luar tidak dapat mengaitkan transaksi berdasarkan urutan masuknya.
+Relayer tidak langsung menyatakan pembayaran berhasil ketika request diterima.
+Setiap request `spend` disimpan ke tabel SQLite `spend_queue` sebelum API
+mengembalikan status `QUEUED`.
 
-### D. Dynamic Batch Gas Reimbursement & Share-of-Savings Markup
-Berdasarkan riset L2 Gas Economics 2026, biaya transaksi L2 didominasi oleh L1 batch posting cost (calldata/blobs) dan L2 execution cost. Dengan menggunakan batching, biaya L1 posting cost dapat dibagi rata di antara seluruh transaksi dalam batch tersebut. Nimbus Node mengadopsi model **Share-of-Savings Markup**:
+*   Worker berjalan setiap **2 detik** dan mengambil item menggunakan
+    transactional claim serta lease.
+*   Status queue mengikuti lifecycle `queued`, `retryable`, `broadcasting`,
+    `submitted`, `confirmed`, atau `failed`.
+*   Retry count, error terakhir, tx hash, block number, dan timestamp disimpan.
+*   Item terminal dipertahankan untuk audit dan tidak dihapus setelah satu loop.
+*   Implementasi saat ini mengirim transaksi satu per satu. Klaim penghematan
+    batch/multicall belum berlaku sampai multicall nyata dan benchmark tersedia.
+
+### C. Batas Privasi Metadata
+
+Persistent queue melindungi reliabilitas settlement, bukan anonimitas metadata.
+Worker saat ini mengambil item berdasarkan urutan `created_at` dan `id`.
+Timing correlation, traffic analysis, dan strategi batching/shuffling masih perlu
+threat model serta benchmark tersendiri sebelum diklaim sebagai kontrol privasi.
+
+### D. Rencana Gas Reimbursement dan Markup
+
+Biaya transaksi L2 terdiri dari execution cost dan komponen data/L1. Model
+Share-of-Savings Markup masih berupa rencana dan belum menjadi settlement
+accounting aktif:
 1.  **Estimasi Penghematan**: Relayer mengestimasi biaya transaksi jika dikirim secara individual versus biaya riil yang dibagi per transaksi dalam batch.
 2.  **Markup Dinamis**: Relayer memotong **10%** dari selisih penghematan gas (savings) tersebut sebagai margin operasional/profit relayer.
-3.  **Potongan Saldo Bersih (Net Payout)**: Biaya gas batched + markup langsung dikonversi ke nominal USDC dan dipotong dari stablecoin transaksi (`amount`). Penerima menerima *net payout* setelah dikurangi gas fee ini, menghilangkan kebutuhan wallet user untuk memiliki gas token native (ETH).
+3.  **Status Implementasi**: Runtime settlement saat ini meneruskan `amount`
+    yang telah ditandatangani ke contract tanpa pemotongan kedua oleh relayer.
+    Billing gas dan markup belum menjadi accounting production sampai actual
+    receipt cost, rounding, authorization, dan reconciliation ditentukan.
 
 ### E. Resilience, Secrets & Request Deduplication
 Mengikuti rekomendasi audit keamanan infrastruktur relayer node 2026:
@@ -78,6 +98,7 @@ Every instance of `nimbus-node` reads configurations from environment variables 
 | `NIMBUS_KEY_ROTATION_INTERVAL` | `3600` | Durasi interval rotasi/re-masking kunci dalam satuan detik (default: 1 jam). |
 | `NIMBUS_DB_PATH` | `./nimbus-relayer.db` | Path penyimpanan file SQLite persistent. |
 | `NIMBUS_DB_KEY` | `None` | Kunci enkripsi untuk database SQLite/SQLCipher (Wajib diisi di produksi). |
+| `NIMBUS_X402_RECIPIENT` | `None` | Address EVM penerima settlement x402. Endpoint x402 menolak request jika tidak dikonfigurasi. |
 
 ### Integrasi OpenBao / Vault (Production Mode)
 
@@ -260,12 +281,15 @@ Dihubungi oleh klien untuk mengirimkan token privat secara anonim, baik secara l
       "idempotency_key": "optional-uuid-string"      // Opsional: Idempotency key untuk deduplikasi request
     }
     ```
-    *   *Catatan*: Objek `cross_chain` bersifat opsional. Jika disediakan, Relayer akan memaketkan data transaksi spend ke dalam payload 648 bytes dan mengirimkannya ke Router Chainlink CCIP untuk dieksekusi secara atomik di rantai tujuan.
+    *   *Catatan*: Objek `cross_chain` bersifat opsional. Jika disediakan,
+        relayer membuat payload 584 byte dan mengirim source transaction ke
+        Router Chainlink CCIP. Source receipt belum membuktikan destination
+        execution.
 *   **Response (JSON):**
     ```json
     {
       "status": "QUEUED",
-      "message": "Spend transaction accepted into batching queue",
+      "message": "Spend persisted with settlement id 42",
       "queue_position": 1,
       "estimated_gas_usdc": 1.25                    // Opsional: Perkiraan beban biaya gas relayer dalam USDC
     }
@@ -292,10 +316,14 @@ Menerima payload PAYMENT-SIGNATURE terenkode Base64 dari AI Agent yang menggunak
     ```json
     {
       "success": true,
-      "tx_hash": "0xmocked_settlement_transaction_hash...",
-      "message": "Nimbus anonymous payment verified and queued for settlement"
+      "tx_hash": null,
+      "message": "Nimbus payment persisted as settlement 42; awaiting receipt confirmation"
     }
     ```
+
+Response tersebut hanya mengakui bahwa request berhasil disimpan. Resource
+server tidak boleh menganggapnya sebagai bukti settlement on-chain. Konfigurasi
+`NIMBUS_X402_RECIPIENT` wajib berupa address EVM valid.
 
 ### F. Threshold Minting: Guardian Sign-Share
 Dihubungi oleh Leader Node ke setiap Guardian Node via jaringan private untuk meminta partial signature menggunakan share kunci lokal node tersebut. Guardian Node tidak pernah mengekspos endpoint ini ke internet publik.
@@ -393,17 +421,10 @@ sequenceDiagram
 
 ## 7. Real Transaction Broadcasting & RPC Fallback (Roadmap #12)
 
-### A. Arsitektur EVM Client (Alloy 1.0)
+### A. Arsitektur EVM Client (Alloy 1.x)
 
-Nimbus Node menggunakan **Alloy 1.0** (Rust EVM toolkit production-stable dari Paradigm) untuk broadcasting transaksi real ke Arbitrum Sepolia L2. Implementasi ini menggantikan mock transaction hash dengan real on-chain execution.
-
-**Keunggulan Alloy 1.0:**
-- 10x faster ABI encoding vs ethers-rs
-- Blazingly fast U256 arithmetic operations
-- Built-in nonce management (NonceFiller) - ga perlu manual tracking
-- Built-in gas estimation (GasFiller) - automatic gas price discovery
-- DynProvider untuk type erasure (avoid Rust generic type hell)
-- Compile time: 20 detik (vs 3+ menit ethers-rs)
+Nimbus Node menggunakan Alloy 1.x untuk encoding ABI, signing, RPC submission,
+dan pengambilan receipt transaksi EVM.
 
 **Struktur Modul:**
 ```rust
@@ -435,10 +456,11 @@ export NIMBUS_CONTRACT_ADDRESS="0x208f0e4390f59e3052c557bf23a47b2ab4697a10"
 cargo run
 ```
 
-**Fallback Mode (Graceful Degradation):**
-- Jika env vars tidak di-set, relayer otomatis fallback ke **mock mode** (development)
-- Mock mode generate random tx hash untuk testing tanpa real blockchain
-- Production deployment **WAJIB** set semua env vars
+**Mode tanpa EVM client:**
+- Request tetap berada di persistent queue dengan status `retryable`.
+- Worker tidak menghasilkan mock tx hash.
+- Production dan hard-test tetap wajib fail closed jika konfigurasi EVM tidak
+  tersedia; enforcement startup khusus mode tersebut masih TODO.
 
 ### C. RPC Fallback Mechanism
 
@@ -448,7 +470,7 @@ Untuk menghindari downtime akibat RPC provider rate-limiting atau network issues
 ```mermaid
 graph LR
     A[Client Request] --> B[Primary RPC\nChainstack]
-    B -->|Success| C[Tx Hash]
+    B -->|Success| C[Receipt]
     B -->|Error/Timeout| D[Fallback RPC\nInfura]
     D -->|Success| C
     D -->|Error| E[Return Error]
@@ -456,7 +478,10 @@ graph LR
 
 **Implementasi:**
 ```rust
-async fn send_tx_with_fallback(&self, tx: TransactionRequest) -> Result<String> {
+async fn send_tx_with_fallback(
+    &self,
+    tx: TransactionRequest,
+) -> Result<TransactionOutcome> {
     // Try primary provider
     let result = self.provider.send_transaction(tx.clone()).await;
     
@@ -477,7 +502,13 @@ async fn send_tx_with_fallback(&self, tx: TransactionRequest) -> Result<String> 
         }
     };
 
-    Ok(format!("0x{:x}", pending_tx.tx_hash()))
+    let tx_hash = format!("0x{:x}", pending_tx.tx_hash());
+    let receipt = pending_tx.get_receipt().await?;
+    Ok(TransactionOutcome {
+        tx_hash,
+        block_number: receipt.block_number.unwrap_or(0),
+        success: receipt.status(),
+    })
 }
 ```
 
@@ -497,7 +528,7 @@ pub async fn broadcast_spend_transaction(
     nullifier: &str,
     recipient: &str,
     amount: u64,
-) -> Result<String> {
+) -> Result<TransactionOutcome> {
     println!("RELAYER: Broadcasting spend transaction");
     println!("  Nullifier   : {}...", &nullifier[..12]);
     println!("  Recipient   : {}", recipient);
@@ -508,12 +539,7 @@ pub async fn broadcast_spend_transaction(
         .with_value(U256::ZERO)
         .with_gas_limit(500_000);  // Fixed gas limit
 
-    let tx_hash = self.send_tx_with_fallback(tx).await?;
-    
-    println!("RELAYER: Transaction broadcasted");
-    println!("  Tx Hash     : {}", tx_hash);
-
-    Ok(tx_hash)
+    self.send_tx_with_fallback(tx).await
 }
 ```
 
@@ -525,15 +551,14 @@ pub async fn broadcast_ccip_transaction(
     destination_contract: &str,
     nullifier_hex: &str,
     alpha_neg_hex: &str,
-    hm_hex: &str,
     pk_iss_hex: &str,
     recipient_hex: &str,
     collateral_token_hex: &str,
     condition_id_hex: Option<&str>,
     amount: u64,
-) -> Result<String> {
-    // 1. Pack 648-byte payload from coordinates, token, recipient, and amount
-    let mut payload = vec![0u8; 648];
+) -> Result<TransactionOutcome> {
+    // 1. Pack 584-byte payload
+    let mut payload = vec![0u8; 584];
     // ... packing logic ...
 
     // 2. Encode EVMExtraArgsV2 with allowOutOfOrderExecution = true (Aha! Moment)
@@ -561,34 +586,22 @@ pub async fn broadcast_ccip_transaction(
         .with_gas_limit(1_200_000)
         .with_input(Bytes::from(ccip_send_call));
 
-    let tx_hash = self.send_tx_with_fallback(tx).await?;
-    Ok(tx_hash)
+    self.send_tx_with_fallback(tx).await
 }
 ```
 
 ### E. Gas Economics Integration
 
-Real transaction broadcasting terintegrasi penuh dengan sistem gas economics yang sudah dijelaskan di Section 2.D:
+Settlement worker menunggu receipt sebelum menandai item `confirmed`.
 
-**Flow Lengkap:**
-1. Relayer estimate gas cost per transaksi dalam batch
-2. Calculate savings (individual tx cost vs batched cost)
-3. Apply 10% markup dari savings sebagai relayer profit
-4. Broadcast batch transaction ke L2 via primary RPC
-5. If primary fail, auto-switch ke fallback RPC
-6. Monitor receipt confirmation asynchronously
-7. Deduct gas cost + markup dari user's USDC amount (net payout)
-
-**Async Receipt Monitoring:**
+**Receipt-backed confirmation:**
 ```rust
-// Spawn async receipt monitoring (non-blocking)
-tokio::spawn(async move {
-    if let Ok(receipt) = pending_tx.get_receipt().await {
-        println!("RELAYER: Confirmed in block {}", receipt.block_number.unwrap_or(0));
-        println!("  Gas Used    : {}", receipt.gas_used);
-        println!("  Status      : {}", if receipt.status() { "SUCCESS" } else { "FAILED" });
-    }
-});
+let receipt = pending_tx.get_receipt().await?;
+let outcome = TransactionOutcome {
+    tx_hash,
+    block_number: receipt.block_number.unwrap_or(0),
+    success: receipt.status(),
+};
 ```
 
 ### F. Security & Error Handling
@@ -596,16 +609,18 @@ tokio::spawn(async move {
 **Key Security Measures:**
 - Private key NEVER logged or printed ke console
 - WebSocket connection menggunakan TLS (wss://)
-- Transaction nonce managed automatically (prevent nonce collision)
+- Persistent nonce allocation dan replacement policy belum selesai
 - Gas limit fixed per transaction type (prevent gas griefing)
-- Nullifier double-spend check BEFORE broadcasting
+- Queue aktif mereservasi nullifier; tabel `nullifiers` hanya diisi setelah
+  receipt sukses
 
 **Error Handling Strategy:**
 - Primary RPC error: Automatic fallback ke secondary RPC
-- Both RPC fail: Return error ke client (queue tetap intact)
-- Nonce conflict: Automatic retry dengan nonce refresh
+- Both RPC fail: item kembali `retryable` dengan exponential backoff
+- Nonce conflict dan replacement transaction masih memerlukan reconciliation
 - Gas estimation fail: Use fixed gas limit fallback
-- Receipt timeout: Continue operation (async monitoring)
+- Receipt error: item retryable sampai retry limit; crash boundary dan
+  sender+nonce reconciliation tetap harus di-hard-test
 
 **Logging Best Practices:**
 ```rust
@@ -616,24 +631,11 @@ println!("  Tx Hash     : {}", tx_hash);  // Public info, OK to log
 // println!("Private Key: {}", private_key);  // FORBIDDEN
 ```
 
-### G. Performance Benchmarks
+### G. Batas Verifikasi
 
-**Alloy 1.0 vs Ethers-rs:**
-| Metric | Alloy 1.0 | Ethers-rs | Improvement |
-|--------|-----------|-----------|-------------|
-| Compile Time | 20s | 3m 15s | 9.75x faster |
-| ABI Encoding | 1.2ms | 12.5ms | 10.4x faster |
-| U256 Math | 0.3μs | 2.1μs | 7x faster |
-| Nonce Management | Built-in | Manual | Auto |
-| Gas Estimation | Built-in | Manual | Auto |
-
-**RPC Fallback Latency:**
-- Primary RPC success: ~200-500ms
-- Primary fail + fallback: ~1-2s (acceptable trade-off)
-- Both RPC fail: Return error immediately
-
-**Storage Cleanup (Rust Toolchains):**
-- Removed unused toolchains: 1.82, 1.85, 1.91, 1.93, 1.96
-- Cleaned cargo cache registry
-- Total space saved: 7.6GB
-- Current toolchain: 1.92.0 (stable)
+- DEC-005 membuktikan persistence, lease, retry, duplicate reservation, dan
+  receipt status melalui unit/integration test lokal.
+- Confirmation depth, reorg handling, persistent nonce, replacement
+  transaction, serta crash setelah RPC menerima transaksi tetapi sebelum tx
+  hash tersimpan masih terbuka.
+- Hard-test HT-06 tetap wajib sebelum mainnet.

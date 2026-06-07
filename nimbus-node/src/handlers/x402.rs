@@ -65,10 +65,20 @@ pub async fn handle_x402_verify(
     }
 
     // 4. Queue the anonymous spend internally
+    let recipient = match std::env::var("NIMBUS_X402_RECIPIENT") {
+        Ok(value) => value,
+        Err(_) => {
+            return Json(X402VerifyResponse {
+                success: false,
+                tx_hash: None,
+                message: "NIMBUS_X402_RECIPIENT is not configured".to_string(),
+            });
+        }
+    };
     let spend_req = SpendRequest {
         nullifier: sig.payment.nullifier.clone(),
         sig_hex: sig.payment.alpha_neg_hex.clone(),
-        recipient: "x402-facilitator-pool".to_string(),
+        recipient,
         amount: sig.payment.amount,
         eip7702_auth: None,
         cross_chain: None,
@@ -83,10 +93,24 @@ pub async fn handle_x402_verify(
         idempotency_key: None,
     };
 
-    let mut queue = state.spend_queue.lock().await;
-    queue.push(spend_req);
-    let position = queue.len();
-    drop(queue);
+    let queue_id = match state.db.enqueue_spend(&spend_req).await {
+        Ok(Some(id)) => id,
+        Ok(None) => {
+            return Json(X402VerifyResponse {
+                success: false,
+                tx_hash: None,
+                message: "Payment nullifier already has an active settlement".to_string(),
+            });
+        }
+        Err(e) => {
+            return Json(X402VerifyResponse {
+                success: false,
+                tx_hash: None,
+                message: format!("Failed to persist settlement: {}", e),
+            });
+        }
+    };
+    let position = state.db.queued_spend_count().await.unwrap_or(1);
 
     let resource_info = payload.resource_uri.unwrap_or_else(|| "<unknown>".to_string());
     println!("X402 FACILITATOR: Verified anonymous payment");
@@ -96,38 +120,12 @@ pub async fn handle_x402_verify(
     println!("  Resource   : {}", resource_info);
     println!("  Queue Pos  : {}", position);
 
-    // 5. Return settlement receipt
-    let tx_hash = if let Some(ref evm_client) = state.evm_client {
-        // Real transaction broadcasting
-        match evm_client.broadcast_spend_transaction(
-            &sig.payment.nullifier,
-            &sig.payment.alpha_neg_hex,
-            &sig.payment.pk_iss_hex,
-            "x402-facilitator-pool",
-            sig.payment.amount,
-            sig.payment.recipient_or_intent_hash_hex.as_deref().unwrap_or("0x0000000000000000000000000000000000000000000000000000000000000000"),
-            sig.payment.expiry.unwrap_or(0),
-            sig.payment.nonce_hex.as_deref().unwrap_or("0x0000000000000000000000000000000000000000000000000000000000000000"),
-        ).await {
-            Ok(hash) => hash,
-            Err(e) => {
-                eprintln!("X402 ERROR: Failed to broadcast transaction: {}", e);
-                return Json(X402VerifyResponse {
-                    success: false,
-                    tx_hash: None,
-                    message: format!("Transaction broadcast failed: {}", e),
-                });
-            }
-        }
-    } else {
-        // Fallback to mock tx hash for dev mode
-        println!("X402 WARNING: Using mock tx hash (dev mode - EVM client not configured)");
-        format!("0x{}", hex::encode(rand::random::<[u8; 32]>()))
-    };
-
     Json(X402VerifyResponse {
         success: true,
-        tx_hash: Some(tx_hash),
-        message: "Nimbus anonymous payment verified and queued for settlement".to_string(),
+        tx_hash: None,
+        message: format!(
+            "Nimbus payment persisted as settlement {}; awaiting receipt confirmation",
+            queue_id
+        ),
     })
 }

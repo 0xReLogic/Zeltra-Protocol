@@ -1280,7 +1280,7 @@ Lokasi:
 - `nimbus-node/src/database.rs`
 - `nimbus-node/src/handlers/spend.rs`
 
-Masalah saat ini:
+Status sebelum DEC-005:
 
 - Tabel `spend_queue` tersedia tetapi runtime memakai `Vec` in-memory.
 - Queue hilang saat process restart.
@@ -1288,35 +1288,43 @@ Masalah saat ini:
 
 TODO:
 
-- [ ] Gunakan tabel `spend_queue` sebagai source of truth.
-- [ ] Tambahkan status `queued`, `broadcasting`, `submitted`, `confirmed`,
+- [x] Gunakan tabel `spend_queue` sebagai source of truth (`DEC-005`).
+- [x] Tambahkan status `queued`, `broadcasting`, `submitted`, `confirmed`,
   `failed`, dan `retryable`.
-- [ ] Simpan jumlah retry, error terakhir, tx hash, dan timestamp.
-- [ ] Gunakan leasing atau transactional claim agar dua worker tidak mengambil
+- [x] Simpan jumlah retry, error terakhir, tx hash, dan timestamp.
+- [x] Gunakan leasing atau transactional claim agar dua worker tidak mengambil
   item yang sama.
-- [ ] Hapus atau arsipkan item hanya setelah receipt sukses.
-- [ ] Implementasikan retry dengan exponential backoff.
-- [ ] Pulihkan queue otomatis setelah restart.
+- [x] Jangan hapus item setelah loop; pertahankan lifecycle terminal untuk audit.
+- [x] Implementasikan retry dengan exponential backoff.
+- [x] Pulihkan queue otomatis setelah restart.
+
+Decision: `research/decisions/DEC-005-persistent-spend-settlement-queue.md`
+
+Sisa hard test: kill process pada setiap boundary broadcast/receipt, concurrent
+worker, disk full, corrupt DB, dan reconciliation sender+nonce tetap mengikuti
+HT-06.
 
 ### Perbaiki Lifecycle Nullifier
 
-Masalah saat ini:
+Status sebelum DEC-005:
 
 Nullifier dimasukkan ke database sebelum broadcast/receipt berhasil. Jika RPC,
 encoding, atau transaksi gagal, token dianggap spent oleh relayer.
 
-- [ ] Pisahkan reservation nullifier dari confirmed nullifier.
+- [x] Pisahkan reservation nullifier dari confirmed nullifier: queue aktif
+  menjadi reservation; tabel `nullifiers` hanya berisi receipt sukses.
 - [ ] Gunakan status `reserved`, `submitted`, `confirmed`, dan `released`.
-- [ ] Simpan tx hash setelah broadcast.
-- [ ] Konfirmasi receipt dan status transaksi.
-- [ ] Release reservation jika transaksi gagal sebelum masuk chain.
+- [x] Simpan tx hash dan block untuk transaksi yang memperoleh receipt.
+- [x] Konfirmasi receipt dan status transaksi.
+- [x] Release reservation melalui status `retryable` atau `failed` jika
+  transaksi belum confirmed.
 - [ ] Rekonsiliasi status database dengan nullifier contract setelah restart.
 
 ### Receipt dan Finality
 
-- [ ] Jangan hanya spawn receipt monitor yang hasilnya tidak masuk database.
-- [ ] Tunggu atau monitor receipt secara persisten.
-- [ ] Tandai settlement sukses hanya jika `receipt.status == success`.
+- [x] Jangan hanya spawn receipt monitor yang hasilnya tidak masuk database.
+- [x] Tunggu receipt dan masukkan hasilnya ke lifecycle database.
+- [x] Tandai settlement sukses hanya jika `receipt.status == success`.
 - [ ] Terapkan confirmation threshold sesuai chain.
 - [ ] Tangani replacement transaction dan nonce conflict.
 - [ ] Ekspos status transaksi melalui endpoint API.
@@ -1575,6 +1583,12 @@ path.
 8. Harden KMS, database encryption, API authentication, dan TLS.
 9. Audit vault, DeFi/RWA, Polymarket, dan x402 setelah invariant pembayaran
    utama aman.
+
+## Roadmap Lanjutan
+
+Roadmap produk dan infrastruktur Phase 1-4 dipisahkan ke
+[`docs/roadmap.md`](docs/roadmap.md). Item roadmap tidak menggantikan P0,
+hard-test matrix, atau mainnet gate dalam dokumen ini.
 
 ## Mainnet Gate
 

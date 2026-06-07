@@ -6,7 +6,6 @@ use crate::{state::AppState, dto::HealthResponse};
 pub async fn health_check(
     axum::extract::State(state): axum::extract::State<AppState>,
 ) -> Json<HealthResponse> {
-    let queue = state.spend_queue.lock().await;
     let relayer_wallet_balance_eth = *state.relayer_wallet_balance_eth.lock().await;
     let relayer_accumulated_profit_usdc = *state.relayer_accumulated_profit_usdc.lock().await;
     
@@ -16,6 +15,14 @@ pub async fn health_check(
         Ok(stats) => stats.total_nullifiers as usize,
         Err(e) => {
             eprintln!("Health check: Failed to get database stats: {}", e);
+            db_ok = false;
+            0
+        }
+    };
+    let queued_transactions = match state.db.queued_spend_count().await {
+        Ok(count) => count,
+        Err(e) => {
+            eprintln!("Health check: Failed to count persistent queue: {}", e);
             db_ok = false;
             0
         }
@@ -38,7 +45,7 @@ pub async fn health_check(
     
     Json(HealthResponse {
         status,
-        queued_transactions: queue.len(),
+        queued_transactions,
         processed_nullifiers,
         relayer_wallet_balance_eth,
         relayer_accumulated_profit_usdc,

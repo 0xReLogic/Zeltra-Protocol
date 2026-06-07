@@ -5,7 +5,8 @@
 //! - ZK Rollup nullifier tracking patterns (Nullmask, Umbra, Anubis)
 //! - Rust async/blocking patterns (tokio spawn_blocking)
 
-use rusqlite::{Connection, OptionalExtension, params};
+use rusqlite::{Connection, OptionalExtension, TransactionBehavior, params};
+use serde_json;
 use std::path::Path;
 use tokio::task;
 use anyhow::{Result, Context};
@@ -15,6 +16,31 @@ use std::os::unix::fs::PermissionsExt;
 #[derive(Clone)]
 pub struct Database {
     path: String,
+}
+
+#[derive(Debug)]
+pub struct QueuedSpend {
+    pub id: i64,
+    pub request: crate::dto::SpendRequest,
+    pub retry_count: u32,
+}
+
+fn database_key() -> String {
+    std::env::var("NIMBUS_DB_KEY")
+        .unwrap_or_else(|_| "default-change-in-production".to_string())
+}
+
+fn open_connection(path: &str, key: &str) -> Result<Connection> {
+    let conn = Connection::open(path)?;
+    conn.pragma_update(None, "key", key)?;
+    conn.busy_timeout(std::time::Duration::from_secs(5))?;
+    Ok(conn)
+}
+
+fn unix_timestamp() -> Result<i64> {
+    Ok(std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)?
+        .as_secs() as i64)
 }
 
 impl Database {
@@ -112,6 +138,29 @@ impl Database {
             
             // Run migration for existing databases (fails silently if column already exists)
             let _ = conn.execute("ALTER TABLE sessions ADD COLUMN deposit_confirmed BOOLEAN NOT NULL DEFAULT 0", params![]);
+            let queue_migrations = [
+                "ALTER TABLE spend_queue ADD COLUMN request_json TEXT",
+                "ALTER TABLE spend_queue ADD COLUMN status TEXT NOT NULL DEFAULT 'queued'",
+                "ALTER TABLE spend_queue ADD COLUMN retry_count INTEGER NOT NULL DEFAULT 0",
+                "ALTER TABLE spend_queue ADD COLUMN last_error TEXT",
+                "ALTER TABLE spend_queue ADD COLUMN available_at INTEGER NOT NULL DEFAULT 0",
+                "ALTER TABLE spend_queue ADD COLUMN lease_until INTEGER",
+                "ALTER TABLE spend_queue ADD COLUMN updated_at INTEGER NOT NULL DEFAULT 0",
+                "ALTER TABLE spend_queue ADD COLUMN block_number INTEGER",
+            ];
+            for migration in queue_migrations {
+                let _ = conn.execute(migration, params![]);
+            }
+            conn.execute_batch("
+                CREATE INDEX IF NOT EXISTS idx_spend_queue_claim
+                ON spend_queue(status, available_at, lease_until, created_at);
+
+                UPDATE spend_queue
+                SET status = 'failed',
+                    last_error = 'legacy queue row has no canonical request payload',
+                    updated_at = CAST(strftime('%s','now') AS INTEGER)
+                WHERE request_json IS NULL AND status = 'queued';
+            ")?;
             
             Ok(())
         })
@@ -142,6 +191,258 @@ impl Database {
         }
         
         Ok(Self { path: path_str })
+    }
+
+    /// Persist a spend before acknowledging it to the caller.
+    /// Returns the queue id, or None when the nullifier already has an active
+    /// or confirmed settlement.
+    pub async fn enqueue_spend(
+        &self,
+        request: &crate::dto::SpendRequest,
+    ) -> Result<Option<i64>> {
+        let path = self.path.clone();
+        let request = request.clone();
+        let db_key = database_key();
+
+        task::spawn_blocking(move || -> Result<Option<i64>> {
+            let mut conn = open_connection(&path, &db_key)?;
+            let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+            let duplicate: Option<i64> = tx
+                .query_row(
+                    "SELECT id FROM spend_queue
+                     WHERE nullifier = ?
+                       AND status IN (
+                           'queued','retryable','broadcasting','submitted','confirmed'
+                       )
+                     LIMIT 1",
+                    params![request.nullifier],
+                    |row| row.get(0),
+                )
+                .optional()?;
+            if duplicate.is_some() {
+                tx.rollback()?;
+                return Ok(None);
+            }
+
+            let now = unix_timestamp()?;
+            let request_json = serde_json::to_string(&request)?;
+            tx.execute(
+                "INSERT INTO spend_queue
+                 (nullifier, sig_hex, recipient, amount, created_at, processed,
+                  request_json, status, retry_count, available_at, updated_at)
+                 VALUES (?, ?, ?, ?, ?, 0, ?, 'queued', 0, ?, ?)",
+                params![
+                    request.nullifier,
+                    request.sig_hex,
+                    request.recipient,
+                    request.amount as i64,
+                    now,
+                    request_json,
+                    now,
+                    now
+                ],
+            )?;
+            let id = tx.last_insert_rowid();
+            tx.commit()?;
+            Ok(Some(id))
+        })
+        .await?
+    }
+
+    /// Atomically lease queued work. Expired broadcasting leases are recovered
+    /// because their process may have died before persisting a tx hash.
+    pub async fn claim_spends(&self, limit: usize, lease_seconds: i64) -> Result<Vec<QueuedSpend>> {
+        let path = self.path.clone();
+        let db_key = database_key();
+
+        task::spawn_blocking(move || -> Result<Vec<QueuedSpend>> {
+            let mut conn = open_connection(&path, &db_key)?;
+            let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+            let now = unix_timestamp()?;
+            let lease_until = now + lease_seconds;
+
+            let ids = {
+                let mut stmt = tx.prepare(
+                    "SELECT id FROM spend_queue
+                     WHERE (
+                         status IN ('queued','retryable') AND available_at <= ?
+                     ) OR (
+                         status = 'broadcasting' AND lease_until IS NOT NULL AND lease_until <= ?
+                     )
+                     ORDER BY created_at, id
+                     LIMIT ?",
+                )?;
+                let rows = stmt
+                    .query_map(params![now, now, limit as i64], |row| {
+                        row.get::<_, i64>(0)
+                    })?
+                    .collect::<rusqlite::Result<Vec<_>>>()?;
+                rows
+            };
+
+            let mut claimed = Vec::with_capacity(ids.len());
+            for id in ids {
+                let changed = tx.execute(
+                    "UPDATE spend_queue
+                     SET status = 'broadcasting', lease_until = ?, updated_at = ?
+                     WHERE id = ?
+                       AND (
+                           (status IN ('queued','retryable') AND available_at <= ?)
+                           OR (status = 'broadcasting' AND lease_until <= ?)
+                       )",
+                    params![lease_until, now, id, now, now],
+                )?;
+                if changed == 0 {
+                    continue;
+                }
+                let row = tx.query_row(
+                    "SELECT id, request_json, retry_count
+                     FROM spend_queue WHERE id = ?",
+                    params![id],
+                    |row| {
+                        Ok((
+                            row.get::<_, i64>(0)?,
+                            row.get::<_, String>(1)?,
+                            row.get::<_, i64>(2)?,
+                        ))
+                    },
+                )?;
+                claimed.push(QueuedSpend {
+                    id: row.0,
+                    request: serde_json::from_str(&row.1)?,
+                    retry_count: row.2 as u32,
+                });
+            }
+            tx.commit()?;
+            Ok(claimed)
+        })
+        .await?
+    }
+
+    pub async fn mark_spend_submitted(&self, id: i64, tx_hash: &str) -> Result<()> {
+        self.update_queue(
+            id,
+            "UPDATE spend_queue
+             SET status = 'submitted', tx_hash = ?, lease_until = NULL, updated_at = ?
+             WHERE id = ? AND status = 'broadcasting'",
+            Some(tx_hash),
+            None,
+        )
+        .await
+    }
+
+    pub async fn mark_spend_confirmed(
+        &self,
+        id: i64,
+        nullifier: &str,
+        tx_hash: &str,
+        block_number: u64,
+    ) -> Result<()> {
+        let path = self.path.clone();
+        let db_key = database_key();
+        let nullifier = nullifier.to_string();
+        let tx_hash = tx_hash.to_string();
+
+        task::spawn_blocking(move || -> Result<()> {
+            let mut conn = open_connection(&path, &db_key)?;
+            let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+            let now = unix_timestamp()?;
+            tx.execute(
+                "INSERT OR IGNORE INTO nullifiers (nullifier, spent_at, tx_hash)
+                 VALUES (?, ?, ?)",
+                params![nullifier, now, tx_hash],
+            )?;
+            let changed = tx.execute(
+                "UPDATE spend_queue
+                 SET status = 'confirmed', processed = 1, tx_hash = ?,
+                     block_number = ?, lease_until = NULL, updated_at = ?
+                 WHERE id = ? AND status IN ('broadcasting','submitted')",
+                params![tx_hash, block_number as i64, now, id],
+            )?;
+            if changed != 1 {
+                anyhow::bail!("queue item {} was not in a confirmable state", id);
+            }
+            tx.commit()?;
+            Ok(())
+        })
+        .await?
+    }
+
+    pub async fn retry_spend(&self, id: i64, error: &str, retry_count: u32) -> Result<()> {
+        let delay = 2_i64.saturating_pow(retry_count.min(8)).min(300);
+        let path = self.path.clone();
+        let db_key = database_key();
+        let error = error.to_string();
+        task::spawn_blocking(move || -> Result<()> {
+            let conn = open_connection(&path, &db_key)?;
+            let now = unix_timestamp()?;
+            conn.execute(
+                "UPDATE spend_queue
+                 SET status = 'retryable', retry_count = retry_count + 1,
+                     last_error = ?, available_at = ?, lease_until = NULL,
+                     updated_at = ?
+                 WHERE id = ? AND status = 'broadcasting'",
+                params![error, now + delay, now, id],
+            )?;
+            Ok(())
+        })
+        .await?
+    }
+
+    pub async fn fail_spend(&self, id: i64, tx_hash: Option<&str>, error: &str) -> Result<()> {
+        self.update_queue(
+            id,
+            "UPDATE spend_queue
+             SET status = 'failed', processed = 1, tx_hash = COALESCE(?, tx_hash),
+                 last_error = ?, lease_until = NULL, updated_at = ?
+             WHERE id = ? AND status IN ('broadcasting','submitted')",
+            tx_hash,
+            Some(error),
+        )
+        .await
+    }
+
+    async fn update_queue(
+        &self,
+        id: i64,
+        sql: &'static str,
+        tx_hash: Option<&str>,
+        error: Option<&str>,
+    ) -> Result<()> {
+        let path = self.path.clone();
+        let db_key = database_key();
+        let tx_hash = tx_hash.map(str::to_string);
+        let error = error.map(str::to_string);
+        task::spawn_blocking(move || -> Result<()> {
+            let conn = open_connection(&path, &db_key)?;
+            let now = unix_timestamp()?;
+            let changed = if error.is_some() {
+                conn.execute(sql, params![tx_hash, error, now, id])?
+            } else {
+                conn.execute(sql, params![tx_hash, now, id])?
+            };
+            if changed != 1 {
+                anyhow::bail!("queue item {} transition rejected", id);
+            }
+            Ok(())
+        })
+        .await?
+    }
+
+    pub async fn queued_spend_count(&self) -> Result<usize> {
+        let path = self.path.clone();
+        let db_key = database_key();
+        task::spawn_blocking(move || -> Result<usize> {
+            let conn = open_connection(&path, &db_key)?;
+            let count = conn.query_row(
+                "SELECT COUNT(*) FROM spend_queue
+                 WHERE status IN ('queued','retryable','broadcasting','submitted')",
+                [],
+                |row| row.get::<_, i64>(0),
+            )?;
+            Ok(count as usize)
+        })
+        .await?
     }
     
     /// Insert session (deposit)
@@ -604,7 +905,111 @@ pub struct DbStats {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::dto::SpendRequest;
     use tempfile::TempDir;
+
+    fn sample_spend(nullifier: &str) -> SpendRequest {
+        SpendRequest {
+            nullifier: nullifier.to_string(),
+            sig_hex: "0xsig".to_string(),
+            recipient: "0x0000000000000000000000000000000000000001".to_string(),
+            amount: 10_000_000,
+            eip7702_auth: None,
+            cross_chain: None,
+            alpha_neg_hex: format!("0x{}", "11".repeat(128)),
+            hm_hex: format!("0x{}", "22".repeat(128)),
+            pk_iss_hex: format!("0x{}", "33".repeat(256)),
+            recipient_or_intent_hash_hex: Some(format!("0x{}", "44".repeat(32))),
+            expiry: Some(u64::MAX),
+            nonce_hex: Some(format!("0x{}", "55".repeat(32))),
+            min_payout: None,
+            deadline: None,
+            idempotency_key: Some(format!("idem-{}", nullifier)),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_persistent_spend_queue_lifecycle() {
+        std::env::set_var("NIMBUS_DB_KEY", "test-encryption-key");
+        let tmp = TempDir::new().unwrap();
+        let db_path = tmp.path().join("queue.db");
+        let request = sample_spend("0xqueue-lifecycle");
+
+        let db = Database::new(&db_path).await.unwrap();
+        let queue_id = db.enqueue_spend(&request).await.unwrap().unwrap();
+        assert_eq!(db.queued_spend_count().await.unwrap(), 1);
+        assert!(db.enqueue_spend(&request).await.unwrap().is_none());
+        drop(db);
+
+        let reopened = Database::new(&db_path).await.unwrap();
+        let claimed = reopened.claim_spends(10, 60).await.unwrap();
+        assert_eq!(claimed.len(), 1);
+        assert_eq!(claimed[0].id, queue_id);
+        assert_eq!(claimed[0].request.nullifier, request.nullifier);
+        assert!(reopened.claim_spends(10, 60).await.unwrap().is_empty());
+
+        reopened
+            .mark_spend_submitted(queue_id, "0xtx")
+            .await
+            .unwrap();
+        reopened
+            .mark_spend_confirmed(queue_id, &request.nullifier, "0xtx", 42)
+            .await
+            .unwrap();
+        assert!(reopened
+            .is_nullifier_spent(&request.nullifier)
+            .await
+            .unwrap());
+        assert_eq!(reopened.queued_spend_count().await.unwrap(), 0);
+    }
+
+    #[tokio::test]
+    async fn test_retry_requeues_without_confirming_nullifier() {
+        std::env::set_var("NIMBUS_DB_KEY", "test-encryption-key");
+        let tmp = TempDir::new().unwrap();
+        let db = Database::new(tmp.path().join("retry.db")).await.unwrap();
+        let request = sample_spend("0xretry");
+        let queue_id = db.enqueue_spend(&request).await.unwrap().unwrap();
+        let item = db.claim_spends(1, 60).await.unwrap().pop().unwrap();
+
+        db.retry_spend(item.id, "rpc unavailable", item.retry_count)
+            .await
+            .unwrap();
+        assert!(!db.is_nullifier_spent(&request.nullifier).await.unwrap());
+
+        // First retry uses a short backoff; force availability to avoid sleeping.
+        let conn = open_connection(&db.path, &database_key()).unwrap();
+        conn.execute(
+            "UPDATE spend_queue SET available_at = 0 WHERE id = ?",
+            params![queue_id],
+        )
+        .unwrap();
+        let retried = db.claim_spends(1, 60).await.unwrap();
+        assert_eq!(retried.len(), 1);
+        assert_eq!(retried[0].retry_count, 1);
+    }
+
+    #[tokio::test]
+    async fn test_concurrent_workers_claim_only_once() {
+        std::env::set_var("NIMBUS_DB_KEY", "test-encryption-key");
+        let tmp = TempDir::new().unwrap();
+        let db = Database::new(tmp.path().join("claim-race.db"))
+            .await
+            .unwrap();
+        db.enqueue_spend(&sample_spend("0xclaim-race"))
+            .await
+            .unwrap()
+            .unwrap();
+
+        let worker_a = db.clone();
+        let worker_b = db.clone();
+        let (claimed_a, claimed_b) = tokio::join!(
+            worker_a.claim_spends(1, 60),
+            worker_b.claim_spends(1, 60),
+        );
+        let total_claimed = claimed_a.unwrap().len() + claimed_b.unwrap().len();
+        assert_eq!(total_claimed, 1);
+    }
     
     #[tokio::test]
     async fn test_nullifier_double_spend_prevention() {
