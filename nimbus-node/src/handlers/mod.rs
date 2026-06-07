@@ -8,7 +8,8 @@ pub mod threshold;
 pub mod quote;
 
 pub use health::health_check;
-pub use deposit::{handle_deposit, handle_reveal};
+pub use health::signing_health;
+pub use deposit::{handle_deposit, handle_reveal, quorum_failure_monitor};
 pub use spend::{handle_spend, process_spend_batch};
 pub use x402::handle_x402_verify;
 pub use threshold::{handle_sign_share, handle_leader_sign};

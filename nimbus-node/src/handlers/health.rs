@@ -1,7 +1,7 @@
 //! Health check handler
 
 use axum::Json;
-use crate::{state::AppState, dto::HealthResponse};
+use crate::{state::AppState, dto::HealthResponse, dto::SigningHealthResponse, dto::StalledSessionDto};
 
 pub async fn health_check(
     axum::extract::State(state): axum::extract::State<AppState>,
@@ -51,3 +51,56 @@ pub async fn health_check(
         relayer_accumulated_profit_usdc,
     })
 }
+
+pub async fn signing_health(
+    axum::extract::State(state): axum::extract::State<AppState>,
+) -> Json<SigningHealthResponse> {
+    // Default threshold: 10 minutes (600 seconds) for signing stall detection
+    let threshold_seconds = std::env::var("NIMBUS_SIGNING_STALL_THRESHOLD")
+        .unwrap_or_else(|_| "600".to_string())
+        .parse()
+        .unwrap_or(600);
+
+    let stalled = match state.db.get_stalled_signing_sessions(threshold_seconds).await {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("Signing health: Failed to get stalled sessions: {}", e);
+            return Json(SigningHealthResponse {
+                stalled_sessions: vec![],
+                stalled_count: 0,
+                check_threshold_seconds: threshold_seconds,
+                message: format!("Error checking stalled sessions: {}", e),
+            });
+        }
+    };
+
+    let stalled_dtos: Vec<StalledSessionDto> = stalled
+        .into_iter()
+        .map(|s| StalledSessionDto {
+            session_id: s.session_id,
+            amount: s.amount as u64,
+            client_address: s.client_address,
+            created_at: s.created_at,
+            deposit_confirmed: s.deposit_confirmed == 1,
+            resolved: s.resolved == 1,
+        })
+        .collect();
+
+    let stalled_count = stalled_dtos.len();
+    let message = if stalled_count == 0 {
+        "No stalled signing sessions detected".to_string()
+    } else {
+        format!(
+            "Warning: {} stalled signing sessions detected (threshold: {}s)",
+            stalled_count, threshold_seconds
+        )
+    };
+
+    Json(SigningHealthResponse {
+        stalled_sessions: stalled_dtos,
+        stalled_count,
+        check_threshold_seconds: threshold_seconds,
+        message,
+    })
+}
+

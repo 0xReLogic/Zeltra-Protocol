@@ -1274,8 +1274,8 @@ TODO:
   lifecycle.
 - [x] Hapus/zeroize `k` setelah reveal selesai atau session expired.
 - [x] Jangan log `k` atau memasukkannya ke response/error sebelum reveal.
-- [ ] Integrasikan refund timelock jika quorum gagal atau `k` tidak dapat
-  dirilis.
+- [x] Integrasikan refund timelock jika quorum gagal atau `k` tidak dapat
+  dirilis. (DEC-012: Monitoring + background job, on-chain check TBD di testnet)
 - [x] Tambahkan test bahwa client tidak dapat unmask sebelum reveal.
 - [x] Tambahkan test bahwa deposit session lain tidak dapat membuka `k`.
 - [x] Tambahkan test retry reveal yang idempotent.

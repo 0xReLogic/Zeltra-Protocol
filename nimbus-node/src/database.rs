@@ -25,6 +25,16 @@ pub struct QueuedSpend {
     pub retry_count: u32,
 }
 
+#[derive(Debug, Clone)]
+pub struct StalledSessionInfo {
+    pub session_id: String,
+    pub amount: i64,
+    pub client_address: String,
+    pub created_at: i64,
+    pub deposit_confirmed: i64,
+    pub resolved: i64,
+}
+
 const DEFAULT_DB_KEY: &str = "default-change-in-production";
 
 fn database_key() -> Result<String> {
@@ -743,7 +753,50 @@ impl Database {
         })
         .await?
     }
-    
+
+    /// Get stalled signing sessions for monitoring (DEC-012)
+    /// Returns sessions that are deposit_confirmed but not resolved after threshold duration
+    pub async fn get_stalled_signing_sessions(
+        &self,
+        threshold_seconds: i64,
+    ) -> Result<Vec<StalledSessionInfo>> {
+        let path = self.path.clone();
+
+        let db_key = database_key()?;
+
+        task::spawn_blocking(move || -> Result<Vec<StalledSessionInfo>> {
+            let conn = open_connection(&path, &db_key)?;
+
+            let now = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)?
+                .as_secs() as i64;
+
+            let threshold = now - threshold_seconds;
+
+            // Get sessions that are deposit confirmed, not resolved, and created before threshold
+            let mut stmt = conn.prepare(
+                "SELECT session_id, amount, client_address, created_at, deposit_confirmed, resolved
+                 FROM sessions
+                 WHERE deposit_confirmed = 1 AND resolved = 0 AND created_at < ?",
+            )?;
+
+            let sessions = stmt.query_map(params![threshold], |row| {
+                Ok(StalledSessionInfo {
+                    session_id: row.get::<_, String>(0)?,
+                    amount: row.get::<_, i64>(1)?,
+                    client_address: row.get::<_, String>(2)?,
+                    created_at: row.get::<_, i64>(3)?,
+                    deposit_confirmed: row.get::<_, i64>(4)?,
+                    resolved: row.get::<_, i64>(5)?,
+                })
+            })?
+            .collect::<std::result::Result<Vec<_>, _>>()?;
+
+            Ok(sessions)
+        })
+        .await?
+    }
+
     /// Check and insert nullifier atomically (double-spend prevention)
     /// 
     /// Returns:

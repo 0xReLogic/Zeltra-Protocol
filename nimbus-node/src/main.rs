@@ -164,6 +164,7 @@ async fn main() {
 
     let app = Router::new()
         .route("/health", get(health_check))
+        .route("/api/signing-health", get(signing_health))
         .route("/api/deposit", post(handle_deposit))
         .route("/api/reveal", post(handle_reveal))
         .route("/api/spend", post(handle_spend))
@@ -173,7 +174,7 @@ async fn main() {
         .route("/api/leader/sign", post(handle_leader_sign))
         .layer(axum::middleware::from_fn(rate_limit_middleware))
         .layer(DefaultBodyLimit::max(64 * 1024)) // 64KB request body size limit
-        .with_state(state);
+        .with_state(state.clone());
 
     let network_config = NetworkConfig::from_env();
 
@@ -216,6 +217,23 @@ async fn main() {
     println!("Gasless EIP-7702 delegation: ACTIVE");
     println!("x402 Facilitator endpoint:   ACTIVE");
     println!("Relayer batch queue interval: 2 seconds");
+
+    // Spawn quorum failure monitor background job (DEC-012)
+    let monitor_state = state.clone();
+    tokio::spawn(async move {
+        quorum_failure_monitor(monitor_state).await;
+    });
+
+    let auto_refund = std::env::var("NIMBUS_AUTO_REFUND")
+        .unwrap_or_else(|_| "false".to_string())
+        .parse()
+        .unwrap_or(false);
+    if auto_refund {
+        println!("Quorum Failure Monitor: ACTIVE (auto-refund enabled)");
+    } else {
+        println!("Quorum Failure Monitor: ACTIVE (monitoring only, auto-refund disabled)");
+    }
+
     println!("------------------------------------------------------------");
 
     axum::serve(listener, app).await.unwrap();

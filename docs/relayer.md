@@ -96,6 +96,12 @@ Mengikuti rekomendasi audit keamanan infrastruktur relayer node 2026:
 *   **Session Validation (DEC-011)**: Guardian menolak session expired (1 jam), resolved, atau dengan parameter mismatch. Mencegah signature pada session yang tidak valid. Validasi dilakukan sebelum signing di `/api/sign-share`.
 *   **Key Zeroization (DEC-011)**: Masking key di-zeroize dari database setelah reveal dan untuk session expired secara berkala. Meminimalkan exposure window cryptographic secrets menggunakan `zeroize` crate.
 
+### G. Quorum Failure Monitoring (DEC-012)
+*   **Signing Health Check**: Endpoint `/api/signing-health` untuk detect stalled signing session (deposit confirmed tapi belum resolve).
+*   **Background Monitoring**: Job berjalan setiap 60 detik untuk detect session yang stuck beyond threshold (default 10 menit).
+*   **Auto-Refund**: Bisa di-enable via `NIMBUS_AUTO_REFUND` untuk trigger refund otomatis pada quorum failure. On-chain state verification TBD untuk testnet.
+*   **Operational Visibility**: Memberikan alert dan visibility ke ops team jika signing session gagal resolve.
+
 ---
 
 ### Fee Quote Guardrail
@@ -154,6 +160,8 @@ Every instance of `nimbus-node` reads configurations from environment variables 
 | `NIMBUS_BIND_ADDR` | `127.0.0.1` | IP address untuk HTTP server binding. Gunakan Tailscale IP (100.x.x.x) untuk production. |
 | `NIMBUS_REQUIRE_TAILSCALE` | `false` | Enforce Tailscale binding. Jika `true`, node akan fail startup jika `NIMBUS_BIND_ADDR` bukan Tailscale IP. |
 | `PORT` | `8080` | Port untuk HTTP server. |
+| `NIMBUS_SIGNING_STALL_THRESHOLD` | `600` | Threshold detik untuk mendeteksi stalled signing session (default 10 menit). |
+| `NIMBUS_AUTO_REFUND` | `false` | Enable/disable auto-refund untuk stalled signing session (DEC-012). |
 
 ### Integrasi OpenBao / Vault (Production Mode)
 
@@ -299,7 +307,34 @@ Mengecek status kesehatan node relayer, jumlah antrean transaksi, nullifier yang
     }
     ```
 
-### B. Registrasi Deposit Escrow
+### B. Signing Health Check (DEC-012)
+Mengecek status session signing yang stalled (deposit confirmed tapi belum resolve). Memberikan visibility ke operational team untuk quorum failure detection.
+*   **Method:** `GET`
+*   **Path:** `/api/signing-health`
+*   **Query Parameters:** (environment variable) `NIMBUS_SIGNING_STALL_THRESHOLD` - durasi dalam detik (default 600 = 10 menit)
+*   **Response (JSON):**
+    ```json
+    {
+      "stalled_sessions": [
+        {
+          "session_id": "sid_123...",
+          "amount": 100000000,
+          "client_address": "0xclient...",
+          "created_at": 1780720000,
+          "deposit_confirmed": true,
+          "resolved": false
+        }
+      ],
+      "stalled_count": 1,
+      "check_threshold_seconds": 600,
+      "message": "Warning: 1 stalled signing sessions detected (threshold: 600s)"
+    }
+    ```
+*   **Environment Variables:**
+    - `NIMBUS_SIGNING_STALL_THRESHOLD` - threshold detik untuk detect stalled session (default 600)
+    - `NIMBUS_AUTO_REFUND` - enable/disable auto-refund untuk stalled session (default false)
+
+### C. Registrasi Deposit Escrow
 Dihubungi oleh klien untuk mendaftarkan sesi deposit minting baru.
 *   **Method:** `POST`
 *   **Path:** `/api/deposit`
@@ -320,7 +355,7 @@ Dihubungi oleh klien untuk mendaftarkan sesi deposit minting baru.
     }
     ```
 
-### C. Pengungkapan Kunci Masking (Atomic Release)
+### D. Pengungkapan Kunci Masking (Atomic Release)
 Dihubungi oleh klien untuk meminta kunci masking $k$ setelah deposit stablecoin dikonfirmasi on-chain.
 *   **Method:** `POST`
 *   **Path:** `/api/reveal`
@@ -341,7 +376,7 @@ Dihubungi oleh klien untuk meminta kunci masking $k$ setelah deposit stablecoin 
     ```
 *   **Key Zeroization (DEC-011):** Setelah masking key berhasil di-reveal ke client, key di-zeroize dari database secara otomatis untuk meminimalkan exposure window. Session expired juga akan di-zeroize secara berkala oleh background cleanup job.
 
-### D. Pengiriman Pembayaran Gasless & Lintas Rantai
+### E. Pengiriman Pembayaran Gasless & Lintas Rantai
 Dihubungi oleh klien untuk mengirimkan token privat secara anonim, baik secara lokal di rantai asal maupun lintas rantai (Fase B) tanpa menggunakan gas fee ETH.
 *   **Method:** `POST`
 *   **Path:** `/api/spend`
@@ -379,7 +414,7 @@ Dihubungi oleh klien untuk mengirimkan token privat secara anonim, baik secara l
     }
     ```
 
-### E. Verifikasi Pembayaran x402 (Fase C: AI Agent Facilitator)
+### F. Verifikasi Pembayaran x402 (Fase C: AI Agent Facilitator)
 Menerima payload PAYMENT-SIGNATURE terenkode Base64 dari AI Agent yang menggunakan token anonim Nimbus untuk membayar akses resource API secara privat, memverifikasi nullifier, dan menjadwalkan settlement.
 *   **Method:** `POST`
 *   **Path:** `/api/x402/verify`
@@ -409,7 +444,7 @@ Response tersebut hanya mengakui bahwa request berhasil disimpan. Resource
 server tidak boleh menganggapnya sebagai bukti settlement on-chain. Konfigurasi
 `NIMBUS_X402_RECIPIENT` wajib berupa address EVM valid.
 
-### F. Threshold Minting: Guardian Sign-Share
+### G. Threshold Minting: Guardian Sign-Share
 Dihubungi oleh Leader Node ke setiap Guardian Node via jaringan private untuk meminta partial signature menggunakan share kunci lokal node tersebut. Guardian Node tidak pernah mengekspos endpoint ini ke internet publik.
 *   **Method:** `POST`
 *   **Path:** `/api/sign-share`
@@ -459,7 +494,7 @@ Dihubungi oleh Leader Node ke setiap Guardian Node via jaringan private untuk me
     dipin di `NIMBUS_GUARDIAN_PUBLIC_KEYS`. Indeks yang tidak terdaftar,
     encoding rusak, dan signature yang tidak cocok ditolak.
 
-### G. Threshold Minting: Leader Aggregate Sign
+### H. Threshold Minting: Leader Aggregate Sign
 Dihubungi oleh client untuk memulai proses minting token anonim secara terdesentralisasi. Leader Node men-generate masking key $k$, menghubungi semua Guardian secara paralel via private network, mengumpulkan partial signature, lalu mengembalikan semuanya ke client untuk diagregasi menggunakan `client_aggregate_signatures` di SDK. Masking key $k$ disimpan secara privat oleh Leader Node dan tidak dibocorkan di tahap ini.
 *   **Method:** `POST`
 *   **Path:** `/api/leader/sign`

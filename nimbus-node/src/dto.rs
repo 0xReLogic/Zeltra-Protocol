@@ -135,6 +135,24 @@ pub struct HealthResponse {
     pub relayer_accumulated_profit_usdc: f64,
 }
 
+#[derive(Serialize)]
+pub struct StalledSessionDto {
+    pub session_id: String,
+    pub amount: u64,
+    pub client_address: String,
+    pub created_at: i64,
+    pub deposit_confirmed: bool,
+    pub resolved: bool,
+}
+
+#[derive(Serialize)]
+pub struct SigningHealthResponse {
+    pub stalled_sessions: Vec<StalledSessionDto>,
+    pub stalled_count: usize,
+    pub check_threshold_seconds: i64,
+    pub message: String,
+}
+
 // x402 Protocol DTOs
 #[derive(Deserialize)]
 pub struct X402VerifyRequest {

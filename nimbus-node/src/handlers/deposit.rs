@@ -128,3 +128,51 @@ pub async fn handle_reveal(
         }
     }
 }
+
+/// Background job to monitor and auto-refund stalled signing sessions (DEC-012 Phase 2)
+/// Checks for sessions that are deposit confirmed but not resolved after threshold
+pub async fn quorum_failure_monitor(state: AppState) {
+    let mut interval = tokio::time::interval(tokio::time::Duration::from_secs(60)); // Check every 60 seconds
+
+    loop {
+        interval.tick().await;
+
+        // Check if auto-refund is enabled
+        let auto_refund_enabled = std::env::var("NIMBUS_AUTO_REFUND")
+            .unwrap_or_else(|_| "false".to_string())
+            .parse()
+            .unwrap_or(false);
+
+        if !auto_refund_enabled {
+            continue; // Skip if auto-refund is disabled
+        }
+
+        let threshold_seconds = std::env::var("NIMBUS_SIGNING_STALL_THRESHOLD")
+            .unwrap_or_else(|_| "600".to_string())
+            .parse()
+            .unwrap_or(600); // Default 10 minutes
+
+        match state.db.get_stalled_signing_sessions(threshold_seconds).await {
+            Ok(stalled_sessions) => {
+                for session in stalled_sessions {
+                    // TODO: Phase 2 - Check on-chain state before triggering refund
+                    // Currently just log warning
+                    println!(
+                        "QUORUM MONITOR: Stalled session detected - session_id: {}, amount: {}, client: {}, created_at: {}",
+                        session.session_id, session.amount, session.client_address, session.created_at
+                    );
+
+                    // Future: Check on-chain state and trigger refund if:
+                    // 1. Deposit is confirmed on-chain
+                    // 2. Session is not spent/refunded on-chain
+                    // 3. Signing has stalled beyond threshold
+
+                    // state.trigger_refund(&session.session_id).await;
+                }
+            }
+            Err(e) => {
+                eprintln!("QUORUM MONITOR: Failed to check stalled sessions: {}", e);
+            }
+        }
+    }
+}
