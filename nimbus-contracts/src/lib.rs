@@ -299,6 +299,28 @@ impl Nimbus {
         Ok(self.trusted_issuer_keys.get(keccak256(&pk_iss_bytes)))
     }
 
+    // --- Liability Invariant Check ---
+
+    /// Verifies the invariant: contract_assets >= outstanding_liabilities
+    /// This ensures the contract can always cover its obligations
+    fn check_liability_invariant(&self) -> Result<(), Vec<u8>> {
+        #[cfg(not(test))]
+        {
+            let stablecoin_address = self.stablecoin.get();
+            let contract_address = stylus_sdk::contract::address();
+            let erc20 = IErc20::new(stablecoin_address);
+            let contract_balance = erc20.balance_of(&*self, contract_address).map_err(|_| b"INVARIANT_BALANCE_CHECK_FAILED".to_vec())?;
+
+            let outstanding_liabilities = self.total_deposited_principal.get();
+
+            if contract_balance < outstanding_liabilities {
+                return Err(b"INVARIANT_VIOLATED_CONTRACT_ASSETS_LESS_THAN_LIABILITIES".to_vec());
+            }
+        }
+
+        Ok(())
+    }
+
     // --- EVM Public Delegates to Modular Component Implementations ---
 
     pub fn deposit(&mut self, sid: FixedBytes<32>, com_k_bytes: Bytes, amount: U256) -> Result<(), Vec<u8>> {
@@ -1505,5 +1527,143 @@ mod tests {
             ),
             Err(b"BATCH_LENGTH_MISMATCH".to_vec())
         );
+    }
+
+    #[test]
+    fn test_single_deposit_single_payout_no_double_payout() {
+        reset_test_state();
+        let owner = address!("1111111111111111111111111111111111111111");
+        let client = address!("2222222222222222222222222222222222222222");
+        let recipient = address!("3333333333333333333333333333333333333333");
+
+        set_msg_sender(owner);
+        let mut contract = Nimbus::default();
+        contract.init(owner, Address::ZERO, Address::ZERO).unwrap();
+
+        let sid = FixedBytes::repeat_byte(0xde);
+        let commitment = vec![0x99; 256];
+        let deposit_amount = U256::from(10_000_000); // 10 USDC
+
+        // 1. Deposit - principal should increase
+        set_msg_sender(client);
+        let initial_principal = contract.total_deposited_principal().unwrap();
+        contract
+            .deposit(sid, commitment.clone().into(), deposit_amount)
+            .unwrap();
+        let after_deposit_principal = contract.total_deposited_principal().unwrap();
+        // Fee is 0.1%, so net amount = 10_000_000 - 10_000 = 9_990_000
+        assert!(after_deposit_principal > initial_principal);
+        let net_amount = after_deposit_principal - initial_principal;
+        assert_eq!(net_amount, U256::from(9_990_000));
+
+        // 2. Reveal - principal should NOT decrease (DEC-001)
+        set_msg_sender(owner);
+        let before_reveal_principal = contract.total_deposited_principal().unwrap();
+        assert!(contract
+            .reveal_mask_key(
+                sid,
+                vec![0x11; 32].into(),
+                vec![0x22; 256].into(),
+                commitment.into(),
+            )
+            .unwrap());
+        let after_reveal_principal = contract.total_deposited_principal().unwrap();
+        assert_eq!(before_reveal_principal, after_reveal_principal, "Reveal must not decrease principal");
+        assert!(contract.session_resolved.get(sid));
+
+        // 3. Register issuer key and perform spend - principal should decrease exactly once
+        let (alpha_neg, hm, pk_iss, nullifier) = register_mock_issuer(&mut contract, owner, net_amount, FixedBytes::ZERO);
+        let before_spend_principal = contract.total_deposited_principal().unwrap();
+        
+        assert!(contract.spend(
+            nullifier,
+            alpha_neg.clone().into(),
+            pk_iss.clone().into(),
+            recipient,
+            net_amount,
+            FixedBytes::ZERO,
+            U256::ZERO,
+            FixedBytes::ZERO,
+        ).unwrap());
+
+        let after_spend_principal = contract.total_deposited_principal().unwrap();
+        assert_eq!(after_spend_principal, before_spend_principal - net_amount, "Spend must decrease principal by net amount");
+
+        // 4. Verify cannot spend again with same nullifier (replay protection)
+        assert_eq!(
+            contract.spend(
+                nullifier,
+                alpha_neg.clone().into(),
+                pk_iss.clone().into(),
+                recipient,
+                net_amount,
+                FixedBytes::ZERO,
+                U256::ZERO,
+                FixedBytes::ZERO,
+            ),
+            Ok(false), // spend returns false when nullifier already used
+            "Double spend with same nullifier must fail"
+        );
+        // Principal should remain unchanged after failed double spend
+        assert_eq!(contract.total_deposited_principal().unwrap(), after_spend_principal);
+
+        // 5. Verify cannot refund after spend
+        set_msg_sender(client);
+        assert_eq!(
+            contract.claim_refund(sid),
+            Err(b"SESSION_ALREADY_RESOLVED".to_vec()),
+            "Refund must fail after session resolved"
+        );
+        // Principal should remain unchanged
+        assert_eq!(contract.total_deposited_principal().unwrap(), after_spend_principal);
+
+        // 6. Invariant check: principal should be back to initial state
+        assert_eq!(contract.total_deposited_principal().unwrap(), initial_principal);
+    }
+
+    #[test]
+    fn test_refund_decreases_principal_once_prevents_spend() {
+        reset_test_state();
+        let owner = address!("1111111111111111111111111111111111111111");
+        let client = address!("2222222222222222222222222222222222222222");
+
+        set_msg_sender(owner);
+        let mut contract = Nimbus::default();
+        contract.init(owner, Address::ZERO, Address::ZERO).unwrap();
+
+        let sid = FixedBytes::repeat_byte(0xef);
+        let commitment = vec![0xaa; 256];
+        let deposit_amount = U256::from(10_000_000);
+
+        // 1. Deposit
+        set_msg_sender(client);
+        let initial_principal = contract.total_deposited_principal().unwrap();
+        contract
+            .deposit(sid, commitment.into(), deposit_amount)
+            .unwrap();
+        let after_deposit_principal = contract.total_deposited_principal().unwrap();
+        let net_amount = after_deposit_principal - initial_principal;
+
+        // 2. Wait for timelock (24 hours)
+        set_block_timestamp(86400 + 1000);
+
+        // 3. Refund - principal should decrease
+        let before_refund_principal = contract.total_deposited_principal().unwrap();
+        contract.claim_refund(sid).unwrap();
+        let after_refund_principal = contract.total_deposited_principal().unwrap();
+        assert_eq!(after_refund_principal, before_refund_principal - net_amount, "Refund must decrease principal");
+
+        // 4. Verify cannot refund again
+        assert_eq!(
+            contract.claim_refund(sid),
+            Err(b"SESSION_ALREADY_RESOLVED".to_vec()),
+            "Double refund must fail"
+        );
+
+        // 5. Principal should remain unchanged after failed double refund
+        assert_eq!(contract.total_deposited_principal().unwrap(), after_refund_principal);
+
+        // 6. Invariant check: principal should be back to initial state
+        assert_eq!(contract.total_deposited_principal().unwrap(), initial_principal);
     }
 }

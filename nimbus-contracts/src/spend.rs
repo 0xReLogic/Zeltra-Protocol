@@ -143,9 +143,13 @@ impl Nimbus {
             // 2. EFFECTS
             self.total_deposited_principal.set(new_principal);
             self.nullifiers.insert(nullifier, true);
-            
+
             // Track epoch volume for dynamic rebalancing
             self.update_epoch_and_rebalance_ratio(amount)?;
+
+            // Enforce invariant: contract_assets >= outstanding_liabilities
+            self.check_liability_invariant()?;
+
             Ok(true)
         }
 
@@ -182,6 +186,9 @@ impl Nimbus {
                     return Err(b"SPEND_FEE_TRANSFER_FAILED".to_vec());
                 }
             }
+
+            // Enforce invariant: contract_assets >= outstanding_liabilities
+            self.check_liability_invariant()?;
 
             Ok(true)
         }
@@ -334,6 +341,9 @@ impl Nimbus {
             if !success {
                 return Err(b"REFUND_TRANSFER_FAILED".to_vec());
             }
+
+            // Enforce invariant: contract_assets >= outstanding_liabilities
+            self.check_liability_invariant()?;
 
             Ok(true)
         }

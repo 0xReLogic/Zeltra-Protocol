@@ -224,14 +224,14 @@ payout saat reveal + payout saat spend
 
 Ini merupakan business-logic blocker paling kritis.
 
-- [ ] Buat hard test yang membuktikan satu deposit tidak dapat menghasilkan
+- [x] Buat hard test yang membuktikan satu deposit tidak dapat menghasilkan
   dua payout.
 - [x] Hapus transfer USDC dari reveal untuk model collateral-backed.
 - [x] Reveal hanya mengubah signing-session state; distribusi `k` tetap tugas
   leader/off-chain.
 - [x] Liability tidak turun saat reveal.
-- [ ] Liability turun tepat satu kali saat spend atau refund.
-- [ ] Tambahkan invariant global setelah setiap transaksi:
+- [x] Liability turun tepat satu kali saat spend atau refund.
+- [x] Tambahkan invariant global setelah setiap transaksi:
   `contract_assets >= outstanding_liabilities`.
 
 Acceptance criteria:

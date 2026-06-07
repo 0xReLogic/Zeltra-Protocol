@@ -40,10 +40,13 @@ mencegah satu deposit dibayar saat reveal lalu dibayar kembali saat spend.
 - Refund dan spend mengurangi principal tepat satu kali.
 - Commitment reveal harus sama dengan commitment saat deposit.
 - Nullifier spend hanya dapat digunakan sekali.
-- Target solvency: `total_assets >= outstanding_liabilities`.
+- **Invariant check otomatis**: setiap state-changing transaction memverifikasi
+  `contract_assets >= outstanding_liabilities` dan revert jika violated.
 
 Keputusan lifecycle ini dicatat dalam
 [`DEC-001`](../research/decisions/DEC-001-deposit-reveal-collateral-lifecycle.md).
+Invariant check otomatis dicatat dalam
+[`DEC-009`](../research/decisions/DEC-009-liability-invariant-check.md).
 
 ## 2. Struktur Modul
 

@@ -54,6 +54,9 @@ impl Nimbus {
             }
         }
 
+        // Enforce invariant: contract_assets >= outstanding_liabilities
+        self.check_liability_invariant()?;
+
         Ok(())
     }
 
@@ -134,6 +137,9 @@ impl Nimbus {
         }
 
         self.allocate_reserves(net_amount)?;
+
+        // Enforce invariant: contract_assets >= outstanding_liabilities
+        self.check_liability_invariant()?;
 
         Ok(())
     }
