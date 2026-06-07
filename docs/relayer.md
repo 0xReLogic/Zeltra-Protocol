@@ -535,7 +535,20 @@ cargo run
 - Request tetap berada di persistent queue dengan status `retryable`.
 - Worker tidak menghasilkan mock tx hash.
 - Production dan hard-test tetap wajib fail closed jika konfigurasi EVM tidak
-  tersedia; enforcement startup khusus mode tersebut masih TODO.
+  tersedia. Strict mode aktif saat `NIMBUS_ENV=production`, `mainnet`, atau
+  `hard-test`.
+
+**Runtime mode:**
+
+| `NIMBUS_ENV` | Perilaku |
+|---|---|
+| unset / `development` | Dev mode; EVM client boleh tidak tersedia, queue tetap retryable. |
+| `test` | Test mode; beberapa bypass test-only tetap aktif. |
+| `hard-test` | Fail startup jika EVM client atau DB key production tidak valid. |
+| `production` / `mainnet` | Fail startup jika EVM client atau DB key production tidak valid. |
+
+Pada strict mode, `NIMBUS_DB_KEY` wajib diset dan tidak boleh memakai default
+`default-change-in-production`.
 
 ### C. RPC Fallback Mechanism
 

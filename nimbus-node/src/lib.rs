@@ -11,3 +11,4 @@ pub mod http;
 pub mod evm_client;
 pub mod circuit_breaker;
 pub mod key_rotation;
+pub mod config;

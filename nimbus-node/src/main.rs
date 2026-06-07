@@ -7,6 +7,7 @@ mod database;
 mod evm_client;
 mod circuit_breaker;
 mod key_rotation;
+mod config;
 
 use axum::{
     routing::{post, get},
@@ -31,6 +32,9 @@ use evm_client::EvmClient;
 
 #[tokio::main]
 async fn main() {
+    let runtime_mode = config::runtime_mode();
+    println!("Nimbus runtime mode: {}", runtime_mode.label());
+
     // Initialize persistent SQLite database
     let db_path = std::env::var("NIMBUS_DB_PATH")
         .unwrap_or_else(|_| "./nimbus-relayer.db".to_string());
@@ -59,15 +63,30 @@ async fn main() {
                 Some(Arc::new(client))
             }
             Err(e) => {
+                if runtime_mode.is_strict() {
+                    eprintln!("CRITICAL: Failed to initialize EVM client: {}", e);
+                    eprintln!(
+                        "          {} mode requires working RPC, relayer key, and contract address",
+                        runtime_mode.label()
+                    );
+                    std::process::exit(1);
+                }
                 eprintln!("WARNING: Failed to initialize EVM client: {}", e);
-                eprintln!("         Relayer will use MOCK transaction hashes (dev mode)");
+                eprintln!("         Settlement worker will keep spends retryable (dev mode)");
                 None
             }
         }
     } else {
+        if runtime_mode.is_strict() {
+            eprintln!(
+                "CRITICAL: {} mode requires NIMBUS_RPC_URL, NIMBUS_RELAYER_PRIVATE_KEY, and NIMBUS_CONTRACT_ADDRESS",
+                runtime_mode.label()
+            );
+            std::process::exit(1);
+        }
         println!("WARNING: EVM client not configured");
         println!("         Set NIMBUS_RPC_URL, NIMBUS_RELAYER_PRIVATE_KEY, NIMBUS_CONTRACT_ADDRESS");
-        println!("         Relayer will use MOCK transaction hashes (dev mode)");
+        println!("         Settlement worker will keep spends retryable (dev mode)");
         None
     };
     

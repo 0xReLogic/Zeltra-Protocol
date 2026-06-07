@@ -617,15 +617,15 @@ cepat, tetapi tidak boleh menjadi satu-satunya bukti bahwa fitur selesai.
 
 ### Mode Runtime Khusus Hard Test
 
-- [ ] Tambahkan `NIMBUS_ENV=hard-test`.
-- [ ] Pada `hard-test`, node harus fail startup jika RPC tidak tersedia.
-- [ ] Pada `hard-test`, node harus fail startup jika contract address invalid.
-- [ ] Pada `hard-test`, node harus fail startup jika signer key tidak tersedia.
+- [x] Tambahkan `NIMBUS_ENV=hard-test`.
+- [x] Pada `hard-test`, node harus fail startup jika RPC tidak tersedia.
+- [x] Pada `hard-test`, node harus fail startup jika contract address invalid.
+- [x] Pada `hard-test`, node harus fail startup jika signer key tidak tersedia.
 - [ ] Pada `hard-test`, guardian harus fail startup jika share key tidak dapat
   diambil.
 - [ ] Pada `hard-test`, semua mock tx hash dan fallback insecure harus
   dinonaktifkan.
-- [ ] Pada `hard-test`, default DB key harus ditolak.
+- [x] Pada `hard-test`, default DB key harus ditolak.
 - [ ] Pada `hard-test`, chain ID dan deployed bytecode harus diverifikasi saat
   startup.
 - [ ] Log startup harus mencetak mode, chain ID, signer address, contract
@@ -1524,8 +1524,8 @@ Lokasi: `nimbus-node/src/handlers/x402.rs`
 
 ### Database
 
-- [ ] Hapus default key `"default-change-in-production"`.
-- [ ] Fail startup jika `NIMBUS_DB_KEY` tidak tersedia di non-development mode.
+- [x] Tolak default key `"default-change-in-production"` pada strict mode.
+- [x] Fail startup jika `NIMBUS_DB_KEY` tidak tersedia di non-development mode.
 - [ ] Pastikan build benar-benar memakai SQLCipher dan verifikasi cipher aktif.
 - [ ] Ambil database key dari KMS/OpenBao.
 - [ ] Perbaiki permission path WAL/SHM agar sesuai nama file SQLite sebenarnya.
@@ -1553,8 +1553,8 @@ Lokasi: `nimbus-node/src/handlers/x402.rs`
 - [ ] Terapkan timeout pada guardian, Vault, dan RPC requests.
 - [ ] Tambahkan structured logging dan request correlation ID.
 - [ ] Jangan log secret, private RPC credential, atau full payload.
-- [ ] Pisahkan development dan production config secara eksplisit.
-- [ ] Production mode harus fail closed jika EVM client tidak tersedia.
+- [x] Pisahkan development dan production config secara eksplisit.
+- [x] Production mode harus fail closed jika EVM client tidak tersedia.
 - [ ] Bind address harus configurable; saat ini hanya `127.0.0.1`.
 - [ ] Tambahkan readiness dan liveness endpoint terpisah.
 

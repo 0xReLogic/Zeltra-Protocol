@@ -25,9 +25,20 @@ pub struct QueuedSpend {
     pub retry_count: u32,
 }
 
-fn database_key() -> String {
-    std::env::var("NIMBUS_DB_KEY")
-        .unwrap_or_else(|_| "default-change-in-production".to_string())
+const DEFAULT_DB_KEY: &str = "default-change-in-production";
+
+fn database_key() -> Result<String> {
+    match std::env::var("NIMBUS_DB_KEY") {
+        Ok(value) if !value.trim().is_empty() && value != DEFAULT_DB_KEY => Ok(value),
+        Ok(_) | Err(_) if crate::config::runtime_mode().is_strict() => {
+            anyhow::bail!(
+                "NIMBUS_DB_KEY must be explicitly configured in {} mode",
+                crate::config::runtime_mode().label()
+            )
+        }
+        Ok(value) => Ok(value),
+        Err(_) => Ok(DEFAULT_DB_KEY.to_string()),
+    }
 }
 
 fn open_connection(path: &str, key: &str) -> Result<Connection> {
@@ -52,8 +63,7 @@ impl Database {
         // Get encryption key from environment variable
         // TODO: In production, integrate with KMS (OpenBao/Vault) instead of environment variables
         // See kms.rs for KMS integration pattern
-        let db_key = std::env::var("NIMBUS_DB_KEY")
-            .unwrap_or_else(|_| "default-change-in-production".to_string());
+        let db_key = database_key()?;
         let db_key_clone = db_key.clone();
         
         // Initialize schema and PRAGMAs in blocking context
@@ -202,7 +212,7 @@ impl Database {
     ) -> Result<Option<i64>> {
         let path = self.path.clone();
         let request = request.clone();
-        let db_key = database_key();
+        let db_key = database_key()?;
 
         task::spawn_blocking(move || -> Result<Option<i64>> {
             let mut conn = open_connection(&path, &db_key)?;
@@ -253,7 +263,7 @@ impl Database {
     /// because their process may have died before persisting a tx hash.
     pub async fn claim_spends(&self, limit: usize, lease_seconds: i64) -> Result<Vec<QueuedSpend>> {
         let path = self.path.clone();
-        let db_key = database_key();
+        let db_key = database_key()?;
 
         task::spawn_blocking(move || -> Result<Vec<QueuedSpend>> {
             let mut conn = open_connection(&path, &db_key)?;
@@ -339,7 +349,7 @@ impl Database {
         block_number: u64,
     ) -> Result<()> {
         let path = self.path.clone();
-        let db_key = database_key();
+        let db_key = database_key()?;
         let nullifier = nullifier.to_string();
         let tx_hash = tx_hash.to_string();
 
@@ -371,7 +381,7 @@ impl Database {
     pub async fn retry_spend(&self, id: i64, error: &str, retry_count: u32) -> Result<()> {
         let delay = 2_i64.saturating_pow(retry_count.min(8)).min(300);
         let path = self.path.clone();
-        let db_key = database_key();
+        let db_key = database_key()?;
         let error = error.to_string();
         task::spawn_blocking(move || -> Result<()> {
             let conn = open_connection(&path, &db_key)?;
@@ -410,7 +420,7 @@ impl Database {
         error: Option<&str>,
     ) -> Result<()> {
         let path = self.path.clone();
-        let db_key = database_key();
+        let db_key = database_key()?;
         let tx_hash = tx_hash.map(str::to_string);
         let error = error.map(str::to_string);
         task::spawn_blocking(move || -> Result<()> {
@@ -431,7 +441,7 @@ impl Database {
 
     pub async fn queued_spend_count(&self) -> Result<usize> {
         let path = self.path.clone();
-        let db_key = database_key();
+        let db_key = database_key()?;
         task::spawn_blocking(move || -> Result<usize> {
             let conn = open_connection(&path, &db_key)?;
             let count = conn.query_row(
@@ -460,12 +470,10 @@ impl Database {
         let client_address = client_address.to_string();
         
         // Get encryption key - TODO: Integrate with KMS (OpenBao/Vault) for production
-        let db_key = std::env::var("NIMBUS_DB_KEY")
-            .unwrap_or_else(|_| "default-change-in-production".to_string());
+        let db_key = database_key()?;
         
         task::spawn_blocking(move || -> Result<bool> {
-            let conn = Connection::open(&path)?;
-            conn.pragma_update(None, "key", &db_key)?;
+            let conn = open_connection(&path, &db_key)?;
             let now = std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)?
                 .as_secs() as i64;
@@ -495,12 +503,10 @@ impl Database {
         let masking_key_hex = masking_key_hex.to_string();
         
         // Get encryption key - TODO: Integrate with KMS (OpenBao/Vault) for production
-        let db_key = std::env::var("NIMBUS_DB_KEY")
-            .unwrap_or_else(|_| "default-change-in-production".to_string());
+        let db_key = database_key()?;
         
         task::spawn_blocking(move || -> Result<bool> {
-            let conn = Connection::open(&path)?;
-            conn.pragma_update(None, "key", &db_key)?;
+            let conn = open_connection(&path, &db_key)?;
             let now = std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)?
                 .as_secs() as i64;
@@ -533,12 +539,10 @@ impl Database {
         let client_address = client_address.to_string();
         let masking_key_hex = masking_key_hex.to_string();
         
-        let db_key = std::env::var("NIMBUS_DB_KEY")
-            .unwrap_or_else(|_| "default-change-in-production".to_string());
+        let db_key = database_key()?;
         
         task::spawn_blocking(move || -> Result<bool> {
-            let conn = Connection::open(&path)?;
-            conn.pragma_update(None, "key", &db_key)?;
+            let conn = open_connection(&path, &db_key)?;
             let now = std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)?
                 .as_secs() as i64;
@@ -568,12 +572,10 @@ impl Database {
         let session_id = session_id.to_string();
         let com_k_hex = com_k_hex.to_string();
         
-        let db_key = std::env::var("NIMBUS_DB_KEY")
-            .unwrap_or_else(|_| "default-change-in-production".to_string());
+        let db_key = database_key()?;
         
         task::spawn_blocking(move || -> Result<bool> {
-            let conn = Connection::open(&path)?;
-            conn.pragma_update(None, "key", &db_key)?;
+            let conn = open_connection(&path, &db_key)?;
             
             let changes = conn.execute(
                 "UPDATE sessions 
@@ -597,12 +599,10 @@ impl Database {
         let path = self.path.clone();
         let session_id = session_id.to_string();
         
-        let db_key = std::env::var("NIMBUS_DB_KEY")
-            .unwrap_or_else(|_| "default-change-in-production".to_string());
+        let db_key = database_key()?;
         
         task::spawn_blocking(move || -> Result<Option<String>> {
-            let conn = Connection::open(&path)?;
-            conn.pragma_update(None, "key", &db_key)?;
+            let conn = open_connection(&path, &db_key)?;
             
             // First check if the session is confirmed and not resolved
             let session_info: Option<(String, i64, i64)> = conn
@@ -657,12 +657,10 @@ impl Database {
         let tx_hash = tx_hash.map(|s| s.to_string());
         
         // Get encryption key - TODO: Integrate with KMS (OpenBao/Vault) for production
-        let db_key = std::env::var("NIMBUS_DB_KEY")
-            .unwrap_or_else(|_| "default-change-in-production".to_string());
+        let db_key = database_key()?;
         
         task::spawn_blocking(move || -> Result<bool> {
-            let conn = Connection::open(&path)?;
-            conn.pragma_update(None, "key", &db_key)?;
+            let conn = open_connection(&path, &db_key)?;
             let now = std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)?
                 .as_secs() as i64;
@@ -687,12 +685,10 @@ impl Database {
         let nullifier = nullifier.to_string();
         
         // Get encryption key - TODO: Integrate with KMS (OpenBao/Vault) for production
-        let db_key = std::env::var("NIMBUS_DB_KEY")
-            .unwrap_or_else(|_| "default-change-in-production".to_string());
+        let db_key = database_key()?;
         
         task::spawn_blocking(move || -> Result<bool> {
-            let conn = Connection::open(&path)?;
-            conn.pragma_update(None, "key", &db_key)?;
+            let conn = open_connection(&path, &db_key)?;
             let exists: Option<i64> = conn
                 .query_row(
                     "SELECT 1 FROM nullifiers WHERE nullifier = ?",
@@ -711,12 +707,10 @@ impl Database {
         let path = self.path.clone();
         
         // Get encryption key - TODO: Integrate with KMS (OpenBao/Vault) for production
-        let db_key = std::env::var("NIMBUS_DB_KEY")
-            .unwrap_or_else(|_| "default-change-in-production".to_string());
+        let db_key = database_key()?;
         
         task::spawn_blocking(move || -> Result<DbStats> {
-            let conn = Connection::open(&path)?;
-            conn.pragma_update(None, "key", &db_key)?;
+            let conn = open_connection(&path, &db_key)?;
             
             let total_sessions: i64 = conn.query_row(
                 "SELECT COUNT(*) FROM sessions",
@@ -758,12 +752,10 @@ impl Database {
         let path = self.path.clone();
         
         // Get encryption key - TODO: Integrate with KMS (OpenBao/Vault) for production
-        let db_key = std::env::var("NIMBUS_DB_KEY")
-            .unwrap_or_else(|_| "default-change-in-production".to_string());
+        let db_key = database_key()?;
         
         task::spawn_blocking(move || -> Result<usize> {
-            let conn = Connection::open(&path)?;
-            conn.pragma_update(None, "key", &db_key)?;
+            let conn = open_connection(&path, &db_key)?;
             let cutoff_timestamp = std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)?
                 .as_secs() as i64 - (days_old as i64 * 86400);
@@ -794,12 +786,10 @@ impl Database {
         let path = self.path.clone();
         
         // Get encryption key - TODO: Integrate with KMS (OpenBao/Vault) for production
-        let db_key = std::env::var("NIMBUS_DB_KEY")
-            .unwrap_or_else(|_| "default-change-in-production".to_string());
+        let db_key = database_key()?;
         
         task::spawn_blocking(move || -> Result<()> {
-            let conn = Connection::open(&path)?;
-            conn.pragma_update(None, "key", &db_key)?;
+            let conn = open_connection(&path, &db_key)?;
             conn.execute_batch("VACUUM;")?;
             Ok(())
         })
@@ -812,12 +802,10 @@ impl Database {
         let key = key.to_string();
         let endpoint = endpoint.to_string();
         
-        let db_key = std::env::var("NIMBUS_DB_KEY")
-            .unwrap_or_else(|_| "default-change-in-production".to_string());
+        let db_key = database_key()?;
         
         task::spawn_blocking(move || -> Result<Option<String>> {
-            let conn = Connection::open(&path)?;
-            conn.pragma_update(None, "key", &db_key)?;
+            let conn = open_connection(&path, &db_key)?;
             
             // Check with 24h TTL (86400 seconds)
             let now = std::time::SystemTime::now()
@@ -846,12 +834,10 @@ impl Database {
         let endpoint = endpoint.to_string();
         let response_json = response_json.to_string();
         
-        let db_key = std::env::var("NIMBUS_DB_KEY")
-            .unwrap_or_else(|_| "default-change-in-production".to_string());
+        let db_key = database_key()?;
         
         task::spawn_blocking(move || -> Result<()> {
-            let conn = Connection::open(&path)?;
-            conn.pragma_update(None, "key", &db_key)?;
+            let conn = open_connection(&path, &db_key)?;
             let now = std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)?
                 .as_secs() as i64;
@@ -872,12 +858,10 @@ impl Database {
     pub async fn cleanup_idempotency_cache(&self) -> Result<usize> {
         let path = self.path.clone();
         
-        let db_key = std::env::var("NIMBUS_DB_KEY")
-            .unwrap_or_else(|_| "default-change-in-production".to_string());
+        let db_key = database_key()?;
         
         task::spawn_blocking(move || -> Result<usize> {
-            let conn = Connection::open(&path)?;
-            conn.pragma_update(None, "key", &db_key)?;
+            let conn = open_connection(&path, &db_key)?;
             let cutoff = std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)?
                 .as_secs() as i64 - 86400;
@@ -978,7 +962,7 @@ mod tests {
         assert!(!db.is_nullifier_spent(&request.nullifier).await.unwrap());
 
         // First retry uses a short backoff; force availability to avoid sleeping.
-        let conn = open_connection(&db.path, &database_key()).unwrap();
+        let conn = open_connection(&db.path, &database_key().unwrap()).unwrap();
         conn.execute(
             "UPDATE spend_queue SET available_at = 0 WHERE id = ?",
             params![queue_id],
