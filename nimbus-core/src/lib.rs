@@ -33,7 +33,10 @@ pub use blind_sign::{
 };
 
 // Re-export threshold cryptography
-pub use threshold::{aggregate_shares, compute_lagrange_coefficient, sign_share, split_secret_key};
+pub use threshold::{
+    aggregate_shares, compute_lagrange_coefficient, public_key_for_share, sign_share,
+    split_secret_key, verify_partial_signature,
+};
 
 // Re-export compliance circuit
 pub use compliance_circuit::{generate_compliance_keys, generate_compliance_proof, verify_compliance_proof, ComplianceKeys};

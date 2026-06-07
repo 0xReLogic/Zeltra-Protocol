@@ -101,6 +101,9 @@ Every instance of `nimbus-node` reads configurations from environment variables 
 | :--- | :--- | :--- |
 | `NIMBUS_SHARE_INDEX` | `1` | Index share node ini dalam skema Shamir (1 hingga n). Digunakan sebagai fallback jika key share yang diload berupa scalar raw 32-byte. |
 | `NIMBUS_SHARE_KEY` | `Fr(12345)` | **(Fallback / Dev Mode Only)** Hex-encoded scalar BLS12-381 Fr (32-byte) atau tuple `(usize, Fr)` (40-byte). Jika data 40-byte terdeteksi, node secara otomatis mengekstrak share index dari kunci tersebut dan mengesampingkan `NIMBUS_SHARE_INDEX`. |
+| `NIMBUS_ISSUER_PUBLIC_KEY` | `None` | Canonical compressed `IssuerPublicKey` hasil ceremony threshold. Nilai yang sama wajib dipasang pada leader dan seluruh guardian. Wajib untuk distributed signing; fallback dari local key hanya diizinkan pada test atau `NIMBUS_THRESHOLD=1`. |
+| `NIMBUS_THRESHOLD` | `3` | Jumlah minimum share unik yang wajib tersedia sebelum leader mengembalikan hasil signing. |
+| `NIMBUS_GUARDIAN_PUBLIC_KEYS` | `None` | Registry JSON public share guardian hasil ceremony, misalnya `{"2":"<hex>","3":"<hex>"}`. Jangan masukkan indeks share leader lokal. Wajib jika threshold lebih dari `1`; leader menggunakan registry ini untuk memverifikasi pairing setiap partial signature. |
 | `NIMBUS_VAULT_TOKEN` | `None` | Token otentikasi OpenBao / HashiCorp Vault. Mengaktifkan penarikan kunci otomatis via KMS. |
 | `NIMBUS_VAULT_ADDR` | `http://127.0.0.1:8200` | URL/Port server OpenBao / HashiCorp Vault. |
 | `NIMBUS_VAULT_PATH` | `v1/secret/data/nimbus` | Endpoint API path untuk mengambil rahasia (KV v2 engine). |
@@ -122,6 +125,8 @@ Untuk deployment di tingkat produksi (production-ready), kunci rahasia pembagian
 2. Jalankan relayer dengan mengaitkan token dan alamat Vault:
    ```bash
    NIMBUS_SHARE_INDEX=1 \
+   NIMBUS_ISSUER_PUBLIC_KEY="<ceremony_public_key_hex>" \
+   NIMBUS_GUARDIAN_PUBLIC_KEYS='{"2":"<guardian_2_public_share_hex>","3":"<guardian_3_public_share_hex>"}' \
    NIMBUS_VAULT_ADDR="http://127.0.0.1:8200" \
    NIMBUS_VAULT_TOKEN="hvs.xxxxxxxxxxxxxxxxxxxx" \
    NIMBUS_VAULT_PATH="v1/secret/data/nimbus" \
@@ -380,8 +385,10 @@ Dihubungi oleh Leader Node ke setiap Guardian Node via jaringan private untuk me
     `share_index` berasal dari `KeyManager` guardian, bukan dari urutan URL
     guardian pada konfigurasi leader. Leader hanya menghitung indeks non-zero
     yang unik dan mengembalikan error jika jumlah share belum mencapai
-    `NIMBUS_THRESHOLD` (default `3`). Pemeriksaan ini belum menggantikan
-    verifikasi kriptografis setiap partial signature sebelum agregasi.
+    `NIMBUS_THRESHOLD` (default `3`). Sebelum menghitung share ke quorum,
+    leader memverifikasi pairing partial signature terhadap public share yang
+    dipin di `NIMBUS_GUARDIAN_PUBLIC_KEYS`. Indeks yang tidak terdaftar,
+    encoding rusak, dan signature yang tidak cocok ditolak.
 
 ### G. Threshold Minting: Leader Aggregate Sign
 Dihubungi oleh client untuk memulai proses minting token anonim secara terdesentralisasi. Leader Node men-generate masking key $k$, menghubungi semua Guardian secara paralel via private network, mengumpulkan partial signature, lalu mengembalikan semuanya ke client untuk diagregasi menggunakan `client_aggregate_signatures` di SDK. Masking key $k$ disimpan secara privat oleh Leader Node dan tidak dibocorkan di tahap ini.

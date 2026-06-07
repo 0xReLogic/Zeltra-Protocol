@@ -41,6 +41,8 @@ async fn main() {
     
     // Load threshold signature share from KMS
     let (mut share_sk, share_index) = kms::load_share_key().await;
+    let issuer_public_key = kms::load_issuer_public_key(&share_sk);
+    let guardian_public_keys = kms::load_guardian_public_keys(share_index);
     
     // Initialize EVM client for real transaction broadcasting (optional for dev mode)
     let evm_client = if let (Ok(rpc_url), Ok(private_key), Ok(contract_addr)) = (
@@ -70,7 +72,16 @@ async fn main() {
     };
     
     // Initialize application state with persistent database
-    let state = AppState::new(db, share_sk, share_index, evm_client).await;
+    let state =
+        AppState::new(
+            db,
+            share_sk,
+            share_index,
+            issuer_public_key,
+            guardian_public_keys,
+            evm_client,
+        )
+        .await;
     
     // Securely zero out the key in the main stack frame immediately
     unsafe {
@@ -254,7 +265,17 @@ mod node_tests {
         // Generate keys
         let share_sk = Fr::from(1u64);
         let share_index = 1;
-        let state = AppState::new(db, share_sk, share_index, None).await;
+        let issuer_public_key = IssuerSecretKey(share_sk).public_key();
+        let state =
+            AppState::new(
+                db,
+                share_sk,
+                share_index,
+                issuer_public_key,
+                std::collections::HashMap::new(),
+                None,
+            )
+            .await;
         
         // Create leader identity
         let leader_signer = PrivateKeySigner::random();

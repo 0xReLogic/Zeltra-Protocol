@@ -27,7 +27,10 @@ pub fn split_key<R: Rng>(sk: String, threshold: usize, total: usize, rng: &mut R
     println!("------------------------------------------------------------");
     for (i, share) in shares.iter().enumerate() {
         let share_hex = hex::encode(serialize_to_bytes(share));
+        let public_share_hex =
+            hex::encode(serialize_to_bytes(&public_key_for_share(&share.1)));
         println!("Share {} (Index {}):\n{}", i + 1, i + 1, share_hex);
+        println!("Public Share {}:\n{}", i + 1, public_share_hex);
     }
     println!("------------------------------------------------------------");
 }

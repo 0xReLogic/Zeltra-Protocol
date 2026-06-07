@@ -9,6 +9,10 @@ use std::collections::HashSet;
 
 fn append_guardian_share(
     response: SignShareResponse,
+    blinded: &nimbus_core::BlindedMessage,
+    k: &nimbus_core::Fr,
+    guardian_public_keys:
+        &std::collections::HashMap<u32, nimbus_core::IssuerPublicKey>,
     seen_indices: &mut HashSet<u32>,
     partial_signatures: &mut Vec<PartialSignatureInfo>,
 ) -> Result<(), &'static str> {
@@ -19,6 +23,19 @@ fn append_guardian_share(
     let index = response.share_index.ok_or("guardian omitted share index")?;
     if index == 0 {
         return Err("guardian returned invalid share index 0");
+    }
+    let public_share = guardian_public_keys
+        .get(&index)
+        .ok_or("guardian share index is not registered")?;
+    let signature_bytes = hex::decode(&response.signature_share_hex)
+        .map_err(|_| "guardian returned invalid signature hex")?;
+    let signature =
+        nimbus_core::deserialize_from_bytes::<nimbus_core::PartialBlindSignature>(
+            &signature_bytes,
+        )
+        .ok_or("guardian returned invalid partial signature encoding")?;
+    if !nimbus_core::verify_partial_signature(blinded, k, &signature, public_share) {
+        return Err("guardian partial signature failed cryptographic verification");
     }
     if !seen_indices.insert(index) {
         return Err("guardian returned duplicate share index");
@@ -33,6 +50,26 @@ fn append_guardian_share(
 
 fn has_signing_quorum(partial_signatures: &[PartialSignatureInfo], threshold: usize) -> bool {
     threshold > 0 && partial_signatures.len() >= threshold
+}
+
+fn issuer_public_key_matches(
+    configured: &nimbus_core::IssuerPublicKey,
+    requested_hex: Option<&str>,
+) -> bool {
+    let Some(requested_hex) = requested_hex else {
+        return true;
+    };
+    let Ok(bytes) = hex::decode(requested_hex.trim_start_matches("0x")) else {
+        return false;
+    };
+    let Some(requested) =
+        nimbus_core::deserialize_from_bytes::<nimbus_core::IssuerPublicKey>(&bytes)
+    else {
+        return false;
+    };
+
+    nimbus_core::serialize_to_bytes(configured)
+        == nimbus_core::serialize_to_bytes(&requested)
 }
 
 pub async fn handle_sign_share(
@@ -266,19 +303,16 @@ pub async fn handle_leader_sign(
 
     let k = Fr::rand(&mut rand::thread_rng());
 
-    let pk_iss = if let Some(pk_hex) = &payload.pk_iss_hex {
-        if let Ok(bytes) = hex::decode(pk_hex) {
-            deserialize_from_bytes(&bytes).unwrap_or_else(|| {
-                // We reconstruct synchronously or block_on if inside closure
-                let rt = tokio::runtime::Handle::current();
-                rt.block_on(state.key_manager.get_issuer_public_key())
-            })
-        } else {
-            state.key_manager.get_issuer_public_key().await
-        }
-    } else {
-        state.key_manager.get_issuer_public_key().await
-    };
+    let pk_iss = state.key_manager.get_issuer_public_key().await;
+    if !issuer_public_key_matches(&pk_iss, payload.pk_iss_hex.as_deref()) {
+        return Json(LeaderSignResponse {
+            status: "ERROR: Requested issuer public key does not match configured ceremony key"
+                .to_string(),
+            session_id: payload.session_id,
+            com_k_hex: String::new(),
+            partial_signatures: vec![],
+        });
+    }
 
     let com_k = pk_iss.0 * k;
     let leader_share_sig = state.sign_share_masked(&blinded, &k).await;
@@ -376,7 +410,14 @@ pub async fn handle_leader_sign(
             Ok(response_body) => {
                 if let Ok(res) = serde_json::from_str::<SignShareResponse>(&response_body) {
                     if let Err(error) =
-                        append_guardian_share(res, &mut seen_indices, &mut partial_signatures)
+                        append_guardian_share(
+                            res,
+                            &blinded,
+                            &k,
+                            state.guardian_public_keys.as_ref(),
+                            &mut seen_indices,
+                            &mut partial_signatures,
+                        )
                     {
                         println!("RELAYER: Guardian {} rejected: {}", url, error);
                     }
@@ -443,16 +484,35 @@ pub async fn handle_leader_sign(
 mod tests {
     use super::*;
 
-    fn response(share_index: Option<u32>) -> SignShareResponse {
+    fn response(
+        share_index: Option<u32>,
+        signature: nimbus_core::PartialBlindSignature,
+    ) -> SignShareResponse {
         SignShareResponse {
             status: "SUCCESS".to_string(),
             share_index,
-            signature_share_hex: "partial-signature".to_string(),
+            signature_share_hex: hex::encode(
+                nimbus_core::serialize_to_bytes(&signature),
+            ),
         }
     }
 
     #[test]
     fn guardian_share_requires_unique_non_zero_index() {
+        use nimbus_core::{
+            client_blind, public_key_for_share, sign_share, Fr,
+        };
+
+        let (blinded, _) =
+            client_blind(b"guardian-share-test", &mut rand::thread_rng());
+        let k = Fr::from(9u64);
+        let guardian_sk = Fr::from(13u64);
+        let signature = sign_share(&guardian_sk, &blinded, &k);
+        let guardian_public_keys =
+            std::collections::HashMap::from([(
+                2,
+                public_key_for_share(&guardian_sk),
+            )]);
         let mut seen_indices = HashSet::from([1]);
         let mut partial_signatures = vec![PartialSignatureInfo {
             index: 1,
@@ -460,7 +520,10 @@ mod tests {
         }];
 
         assert!(append_guardian_share(
-            response(Some(2)),
+            response(Some(2), signature.clone()),
+            &blinded,
+            &k,
+            &guardian_public_keys,
             &mut seen_indices,
             &mut partial_signatures,
         )
@@ -468,24 +531,72 @@ mod tests {
         assert_eq!(partial_signatures.len(), 2);
 
         assert!(append_guardian_share(
-            response(Some(2)),
+            response(Some(2), signature.clone()),
+            &blinded,
+            &k,
+            &guardian_public_keys,
             &mut seen_indices,
             &mut partial_signatures,
         )
         .is_err());
         assert!(append_guardian_share(
-            response(Some(0)),
+            response(Some(0), signature.clone()),
+            &blinded,
+            &k,
+            &guardian_public_keys,
             &mut seen_indices,
             &mut partial_signatures,
         )
         .is_err());
         assert!(append_guardian_share(
-            response(None),
+            response(None, signature),
+            &blinded,
+            &k,
+            &guardian_public_keys,
             &mut seen_indices,
             &mut partial_signatures,
         )
         .is_err());
         assert_eq!(partial_signatures.len(), 2);
+    }
+
+    #[test]
+    fn guardian_share_rejects_unknown_index_and_corrupt_signature() {
+        use nimbus_core::{
+            client_blind, public_key_for_share, sign_share, Fr,
+        };
+
+        let (blinded, _) =
+            client_blind(b"guardian-corruption-test", &mut rand::thread_rng());
+        let k = Fr::from(5u64);
+        let guardian_sk = Fr::from(19u64);
+        let other_sk = Fr::from(23u64);
+        let registry = std::collections::HashMap::from([(
+            2,
+            public_key_for_share(&guardian_sk),
+        )]);
+        let mut seen = HashSet::from([1]);
+        let mut partials = Vec::new();
+
+        assert!(append_guardian_share(
+            response(Some(9), sign_share(&guardian_sk, &blinded, &k)),
+            &blinded,
+            &k,
+            &registry,
+            &mut seen,
+            &mut partials,
+        )
+        .is_err());
+        assert!(append_guardian_share(
+            response(Some(2), sign_share(&other_sk, &blinded, &k)),
+            &blinded,
+            &k,
+            &registry,
+            &mut seen,
+            &mut partials,
+        )
+        .is_err());
+        assert!(partials.is_empty());
     }
 
     #[test]
@@ -504,5 +615,27 @@ mod tests {
         assert!(!has_signing_quorum(&partial_signatures, 3));
         assert!(has_signing_quorum(&partial_signatures, 2));
         assert!(!has_signing_quorum(&partial_signatures, 0));
+    }
+
+    #[test]
+    fn requested_issuer_key_must_match_configured_ceremony_key() {
+        use nimbus_core::{IssuerSecretKey, Fr};
+
+        let configured = IssuerSecretKey(Fr::from(7u64)).public_key();
+        let matching_hex = hex::encode(nimbus_core::serialize_to_bytes(&configured));
+        let different =
+            IssuerSecretKey(Fr::from(11u64)).public_key();
+        let different_hex = hex::encode(nimbus_core::serialize_to_bytes(&different));
+
+        assert!(issuer_public_key_matches(&configured, None));
+        assert!(issuer_public_key_matches(
+            &configured,
+            Some(&matching_hex),
+        ));
+        assert!(!issuer_public_key_matches(
+            &configured,
+            Some(&different_hex),
+        ));
+        assert!(!issuer_public_key_matches(&configured, Some("invalid")));
     }
 }

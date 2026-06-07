@@ -53,13 +53,19 @@ pub struct VersionedKey {
 #[derive(Clone)]
 pub struct KeyManager {
     current_key: Arc<RwLock<VersionedKey>>,
+    issuer_public_key: nimbus_core::IssuerPublicKey,
     config: KeyRotationConfig,
     pub vault_circuit_breaker: CircuitBreaker,
 }
 
 impl KeyManager {
     /// Create a new key manager with the initial key
-    pub fn new(share_sk: nimbus_core::Fr, share_index: u32, config: KeyRotationConfig) -> Self {
+    pub fn new(
+        share_sk: nimbus_core::Fr,
+        share_index: u32,
+        issuer_public_key: nimbus_core::IssuerPublicKey,
+        config: KeyRotationConfig,
+    ) -> Self {
         use nimbus_core::UniformRand;
         
         let mut rng = rand::thread_rng();
@@ -81,6 +87,7 @@ impl KeyManager {
                 loaded_at: std::time::Instant::now(),
                 share_index,
             })),
+            issuer_public_key,
             config,
             vault_circuit_breaker,
         }
@@ -106,20 +113,9 @@ impl KeyManager {
         sig
     }
     
-    /// Get the issuer public key from the current key
+    /// Get the aggregate issuer public key produced by the threshold ceremony.
     pub async fn get_issuer_public_key(&self) -> nimbus_core::IssuerPublicKey {
-        use nimbus_core::IssuerSecretKey;
-        
-        let key = self.current_key.read().await;
-        let mut sk = key.part1 + key.part2;
-        let sk_iss = IssuerSecretKey(sk);
-        let pk = sk_iss.public_key();
-        
-        unsafe {
-            std::ptr::write_volatile(&mut sk, nimbus_core::Fr::from(0u64));
-        }
-        
-        pk
+        self.issuer_public_key.clone()
     }
     
     /// Get current key version and share index
@@ -289,5 +285,50 @@ impl KeyManager {
                 }
             }
         }))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use nimbus_core::{serialize_to_bytes, split_secret_key, IssuerSecretKey};
+
+    #[tokio::test]
+    async fn different_shares_use_the_same_ceremony_public_key() {
+        let issuer_secret = IssuerSecretKey(nimbus_core::Fr::from(17u64));
+        let issuer_public = issuer_secret.public_key();
+        let shares = split_secret_key(
+            &issuer_secret,
+            2,
+            3,
+            &mut rand::thread_rng(),
+        );
+        let config = KeyRotationConfig {
+            enabled: false,
+            ..KeyRotationConfig::default()
+        };
+
+        let first = KeyManager::new(
+            shares[0].1,
+            shares[0].0 as u32,
+            issuer_public.clone(),
+            config.clone(),
+        );
+        let second = KeyManager::new(
+            shares[1].1,
+            shares[1].0 as u32,
+            issuer_public.clone(),
+            config,
+        );
+
+        assert_ne!(shares[0].1, shares[1].1);
+        assert_eq!(
+            serialize_to_bytes(&first.get_issuer_public_key().await),
+            serialize_to_bytes(&issuer_public),
+        );
+        assert_eq!(
+            serialize_to_bytes(&second.get_issuer_public_key().await),
+            serialize_to_bytes(&issuer_public),
+        );
     }
 }

@@ -748,12 +748,16 @@ dikembalikan, dan final verification hanya dilakukan oleh CLI.
 - [ ] Guardian mengambil share lokal dan mengembalikan partial signature.
 - [x] Response guardian menyertakan share index asli dari `KeyManager`.
 - [ ] Response guardian menyertakan key version, session ID, dan request digest.
-- [ ] Leader memverifikasi partial signature sebelum agregasi.
+- [x] Leader dan guardian memakai issuer public key hasil ceremony yang sama,
+  bukan public key yang diturunkan dari share lokal.
+- [x] Client tidak dapat mengganti issuer public key pada request leader.
+- [x] Leader memverifikasi pairing partial signature terhadap public share
+  yang dipin sebelum menghitungnya ke quorum.
 - [ ] Aggregate minimal threshold menghasilkan masked signature valid.
 - [x] Leader menolak hasil signing saat jumlah share unik masih sub-threshold.
 - [x] Duplicate guardian index ditolak dan tidak dihitung ke quorum.
-- [ ] Guardian index palsu ditolak.
-- [ ] Partial signature corrupt ditolak.
+- [x] Guardian index palsu/tidak terdaftar ditolak.
+- [x] Partial signature corrupt atau tidak cocok dengan public share ditolak.
 - [ ] Guardian timeout tidak membuat leader menganggap ceremony sukses.
 - [ ] Guardian offline menghasilkan retry/failure yang terukur.
 - [ ] Guardian lama dengan key version berbeda ditolak.
@@ -776,7 +780,7 @@ dikembalikan, dan final verification hanya dilakukan oleh CLI.
 - [ ] Caller lain mencoba reveal dan gagal mengambil dana.
 - [ ] Commitment berbeda ditolak.
 - [ ] `k` berbeda ditolak.
-- [ ] Issuer public key berbeda ditolak.
+- [ ] Issuer public key berbeda ditolak sepanjang alur deposit dan reveal.
 - [ ] Session ID duplicate ditolak tanpa mengubah deposit awal.
 - [ ] Reveal kedua idempotent atau ditolak dengan state konsisten.
 - [ ] Restart leader antara deposit dan reveal tidak kehilangan `k`.

@@ -1,5 +1,9 @@
-use crate::types::{BlindedMessage, IssuerSecretKey, MaskedBlindSignature, PartialBlindSignature};
-use ark_bls12_381::{Fr, G1Projective};
+use crate::types::{
+    BlindedMessage, IssuerPublicKey, IssuerSecretKey, MaskedBlindSignature,
+    PartialBlindSignature,
+};
+use ark_bls12_381::{Bls12_381, Fr, G1Projective, G2Projective};
+use ark_ec::pairing::Pairing;
 use ark_ec::PrimeGroup;
 use ark_ff::{Field, UniformRand};
 use rand::Rng;
@@ -82,6 +86,27 @@ pub fn sign_share(
 ) -> PartialBlindSignature {
     let scalar = (*k) * (*share_sk);
     PartialBlindSignature(x.0 * scalar)
+}
+
+/// Derives the public commitment for one Shamir share.
+pub fn public_key_for_share(share_sk: &Fr) -> IssuerPublicKey {
+    IssuerPublicKey(G2Projective::generator() * share_sk)
+}
+
+/// Verifies one masked partial signature against its pinned public share.
+pub fn verify_partial_signature(
+    x: &BlindedMessage,
+    k: &Fr,
+    partial_sig: &PartialBlindSignature,
+    public_share: &IssuerPublicKey,
+) -> bool {
+    if partial_sig.0.is_zero() || public_share.0.is_zero() || k.is_zero() {
+        return false;
+    }
+
+    let lhs = Bls12_381::pairing(partial_sig.0, G2Projective::generator());
+    let rhs = Bls12_381::pairing(x.0, public_share.0 * k);
+    lhs == rhs
 }
 
 /// Client: aggregates partial blind signatures from a subset of validators using Lagrange interpolation.

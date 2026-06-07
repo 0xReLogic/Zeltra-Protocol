@@ -7,6 +7,7 @@ use crate::evm_client::EvmClient;
 use crate::circuit_breaker::{CircuitBreaker, CircuitBreakerConfig};
 use crate::key_rotation::{KeyManager, KeyRotationConfig};
 use std::time::Duration;
+use std::collections::HashMap;
 
 /// Minimum relayer ETH balance required to process batches.
 /// If balance drops below this, batch processing is halted to prevent insolvency.
@@ -20,6 +21,10 @@ pub struct AppState {
     
     /// Key manager with rotation and re-masking support
     pub key_manager: KeyManager,
+
+    /// Public commitments for guardian shares, pinned by ceremony index.
+    pub guardian_public_keys:
+        Arc<HashMap<u32, nimbus_core::IssuerPublicKey>>,
     
     /// Relayer wallet balance in ETH (for gas fee tracking)
     pub relayer_wallet_balance_eth: Arc<Mutex<f64>>,
@@ -47,6 +52,8 @@ impl AppState {
         db: Database,
         share_sk: nimbus_core::Fr,
         share_index: u32,
+        issuer_public_key: nimbus_core::IssuerPublicKey,
+        guardian_public_keys: HashMap<u32, nimbus_core::IssuerPublicKey>,
         evm_client: Option<Arc<EvmClient>>,
     ) -> Self {
         // Key rotation config from environment
@@ -65,12 +72,14 @@ impl AppState {
             enabled: rotation_enabled,
         };
         
-        let key_manager = KeyManager::new(share_sk, share_index, key_config);
+        let key_manager =
+            KeyManager::new(share_sk, share_index, issuer_public_key, key_config);
         let vault_circuit_breaker = key_manager.vault_circuit_breaker.clone();
         
         Self {
             db,
             key_manager,
+            guardian_public_keys: Arc::new(guardian_public_keys),
             relayer_wallet_balance_eth: Arc::new(Mutex::new(10.0)),
             relayer_accumulated_profit_usdc: Arc::new(Mutex::new(0.0)),
             evm_client,
