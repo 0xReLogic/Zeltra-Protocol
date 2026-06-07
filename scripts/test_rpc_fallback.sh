@@ -1,35 +1,33 @@
 #!/bin/bash
+set -euo pipefail
 
 # Test RPC Fallback Mechanism
-# Testing dengan 2 WebSocket endpoints: Chainstack (primary) + Infura (fallback)
+# Testing dengan primary RPC + fallback RPC dari environment.
+
+require_env() {
+    local name="$1"
+    if [ -z "${!name:-}" ]; then
+        echo "ERROR: missing required environment variable: ${name}"
+        exit 2
+    fi
+}
 
 echo "=========================================="
 echo "Testing RPC Fallback Mechanism"
 echo "=========================================="
 echo ""
 
-# Contract testnet yang sudah di-deploy
-CONTRACT_ADDR="0x7cdc38331f302be1c2fe6c882495ad81ff0d8228"
+require_env NIMBUS_CONTRACT_ADDRESS
+require_env NIMBUS_RPC_URL
+require_env NIMBUS_RPC_FALLBACK_URL
+require_env NIMBUS_RELAYER_PRIVATE_KEY
 
-# Primary RPC (Chainstack)
-PRIMARY_RPC="https://arbitrum-sepolia.core.chainstack.com/d18e11a2327c1a17c030975e3e0c8e24"
-
-# Fallback RPC (Infura)
-FALLBACK_RPC="https://arbitrum-sepolia.infura.io/v3/e0442523234742288f49543cb9e16da9"
-
-echo "Contract Address: $CONTRACT_ADDR"
-echo "Primary RPC     : $PRIMARY_RPC"
-echo "Fallback RPC    : $FALLBACK_RPC"
+echo "Contract Address: $NIMBUS_CONTRACT_ADDRESS"
+echo "Primary RPC     : $NIMBUS_RPC_URL"
+echo "Fallback RPC    : $NIMBUS_RPC_FALLBACK_URL"
 echo ""
 
-# Private key testnet (saldo testnet tersedia)
-TESTNET_KEY="0xb89bc61712cfa0c890c0967f186c23afdf0b770743bc4f5505300100e8c7226e"
-
-echo "Testing RPC connection dengan real key..."
-export NIMBUS_RPC_URL="$PRIMARY_RPC"
-export NIMBUS_RPC_FALLBACK_URL="$FALLBACK_RPC"
-export NIMBUS_RELAYER_PRIVATE_KEY="$TESTNET_KEY"
-export NIMBUS_CONTRACT_ADDRESS="$CONTRACT_ADDR"
+echo "Testing RPC connection dengan key dari environment..."
 
 # Quick compilation check (cargo check lebih cepat dari cargo build)
 echo ""
@@ -53,7 +51,7 @@ echo ""
 echo "Environment variables configured:"
 echo "  NIMBUS_RPC_URL=$NIMBUS_RPC_URL"
 echo "  NIMBUS_RPC_FALLBACK_URL=$NIMBUS_RPC_FALLBACK_URL"
-echo "  NIMBUS_CONTRACT_ADDRESS=$CONTRACT_ADDR"
+echo "  NIMBUS_CONTRACT_ADDRESS=$NIMBUS_CONTRACT_ADDRESS"
 echo ""
 echo "RPC Fallback Mechanism Ready:"
 echo "  1. Primary   -> Chainstack (try first)"

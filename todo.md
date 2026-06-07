@@ -663,7 +663,7 @@ Saat ini belum valid sebagai hard test karena:
 TODO:
 
 - [ ] Ganti seluruh dummy cryptography dengan output protocol nyata.
-- [ ] Ambil konfigurasi hanya dari environment.
+- [x] Ambil konfigurasi hanya dari environment.
 - [ ] Tunggu receipt source dan verifikasi status.
 - [ ] Parse event CCIP dan message ID.
 - [ ] Tunggu destination receipt.
@@ -678,7 +678,7 @@ yang baru diambil untuk menghasilkan signature protocol.
 
 TODO:
 
-- [ ] Hapus Vault token, private key, dan RPC credential hardcoded.
+- [x] Hapus Vault token, private key, dan RPC credential hardcoded.
 - [ ] Panggil endpoint signing sehingga share Vault benar-benar digunakan.
 - [ ] Verifikasi partial signature terhadap share index/public commitment.
 - [ ] Lanjutkan sampai aggregate, unmask, spend, dan receipt on-chain.
@@ -715,11 +715,11 @@ dikembalikan, dan final verification hanya dilakukan oleh CLI.
 
 #### Script Lain
 
-- [ ] `scripts/check_balance.py` harus mengambil RPC/address dari environment.
+- [x] `scripts/check_balance.py` harus mengambil RPC/address dari environment.
 - [ ] `scripts/test_rpc_fallback.sh` harus benar-benar mematikan primary route
   atau memakai endpoint invalid dan membuktikan transaksi masuk via fallback.
 - [x] `scripts/deploy_testnet.sh` harus menyimpan deployment manifest.
-- [ ] Semua private key/RPC token hardcoded harus dihapus dari script.
+- [x] Semua private key/RPC token hardcoded harus dihapus dari script.
 - [ ] Tambahkan lint/scan yang menggagalkan commit jika pola private key atau
   Vault token ditemukan.
 
@@ -1047,7 +1047,7 @@ Report tidak boleh berisi:
 
 ### Campaign A - Harness Trustworthy
 
-- [ ] Hapus secret hardcoded dari seluruh script.
+- [x] Hapus secret hardcoded dari seluruh script.
 - [ ] Perbaiki generator BLS dan ABI generation.
 - [ ] Implementasikan hard-test mode tanpa fallback mock.
 - [x] Implementasikan deployment manifest.

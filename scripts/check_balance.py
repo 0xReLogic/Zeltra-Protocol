@@ -1,15 +1,25 @@
 from web3 import Web3
+import os
+import sys
 
-RPC_URL = "https://arbitrum-sepolia.infura.io/v3/e0442523234742288f49543cb9e16da9"
-USDC_ADDRESS = "0x75faf114eafb1bdbe2f0316df893fd58ce46aa4d"
-RELAYER_ADDRESS = "0x23e32d309c575a3d5e7cd2867be12b00efa44bb1"
+RPC_URL = os.environ.get("RPC_URL")
+USDC_ADDRESS = os.environ.get("USDC_ADDRESS", "0x75faf114eafb1bdbe2f0316df893fd58ce46aa4d")
+ADDRESS = os.environ.get("ADDRESS") or os.environ.get("NIMBUS_RELAYER_ADDRESS")
+
+if not RPC_URL:
+    print("Error: missing required environment variable: RPC_URL")
+    sys.exit(2)
+
+if not ADDRESS:
+    print("Error: missing required environment variable: ADDRESS or NIMBUS_RELAYER_ADDRESS")
+    sys.exit(2)
 
 w3 = Web3(Web3.HTTPProvider(RPC_URL))
 if not w3.is_connected():
     print("Error: Failed to connect to RPC")
     exit(1)
 
-checksum_addr = w3.to_checksum_address(RELAYER_ADDRESS)
+checksum_addr = w3.to_checksum_address(ADDRESS)
 eth_bal = w3.eth.get_balance(checksum_addr)
 print(f"Address: {checksum_addr}")
 print(f"ETH Balance: {w3.from_wei(eth_bal, 'ether')} ETH")

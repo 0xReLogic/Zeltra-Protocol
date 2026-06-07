@@ -8,6 +8,14 @@ import urllib.parse
 import json
 import sqlite3
 
+def env_required(name):
+    value = os.environ.get(name)
+    if not value:
+        print(f"Error: missing required environment variable: {name}")
+        sys.exit(2)
+    return value
+
+
 print("==========================================================")
 print("NIMBUS END-TO-END VAULT KMS INTEGRATION TESTER")
 print("==========================================================")
@@ -25,13 +33,14 @@ print("\n[Step 2] Setting up relayer node configuration with Vault KMS...")
 env = os.environ.copy()
 env["PORT"] = "8099"
 env["NIMBUS_ENV"] = "test"
-env["NIMBUS_VAULT_ADDR"] = "http://100.115.234.97:8200"
-env["NIMBUS_VAULT_TOKEN"] = "hvs.8CC0ZjsVsV4Dt77IU985SEo0"
-env["NIMBUS_VAULT_PATH"] = "v1/secret/data/nimbus"
-env["NIMBUS_RPC_URL"] = "https://arbitrum-sepolia.core.chainstack.com/d18e11a2327c1a17c030975e3e0c8e24"
-env["NIMBUS_RPC_FALLBACK_URL"] = "https://arbitrum-sepolia.infura.io/v3/e0442523234742288f49543cb9e16da9"
-env["NIMBUS_RELAYER_PRIVATE_KEY"] = "b89bc61712cfa0c890c0967f186c23afdf0b770743bc4f5505300100e8c7226e"
-env["NIMBUS_CONTRACT_ADDRESS"] = "0x208f0e4390f59e3052c557bf23a47b2ab4697a10"
+env["NIMBUS_VAULT_ADDR"] = env_required("NIMBUS_VAULT_ADDR")
+env["NIMBUS_VAULT_TOKEN"] = env_required("NIMBUS_VAULT_TOKEN")
+env["NIMBUS_VAULT_PATH"] = env_required("NIMBUS_VAULT_PATH")
+env["NIMBUS_RPC_URL"] = env_required("NIMBUS_RPC_URL")
+if os.environ.get("NIMBUS_RPC_FALLBACK_URL"):
+    env["NIMBUS_RPC_FALLBACK_URL"] = os.environ["NIMBUS_RPC_FALLBACK_URL"]
+env["NIMBUS_RELAYER_PRIVATE_KEY"] = env_required("NIMBUS_RELAYER_PRIVATE_KEY")
+env["NIMBUS_CONTRACT_ADDRESS"] = env_required("NIMBUS_CONTRACT_ADDRESS")
 env["NIMBUS_DB_PATH"] = "nimbus_vault_e2e_test.db"
 
 # Remove old test DB if exists

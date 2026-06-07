@@ -4,11 +4,34 @@ import os
 from web3 import Web3
 from eth_account import Account
 
-# Arbitrum Sepolia network settings
-RPC_URL = "https://sepolia-rollup.arbitrum.io/rpc"
-CONTRACT_ADDRESS = "0x208f0e4390f59e3052c557bf23a47b2ab4697a10"
-PRIVATE_KEY = "b89bc61712cfa0c890c0967f186c23afdf0b770743bc4f5505300100e8c7226e"
-USDC_ADDRESS = "0x75faf114eafb1bdbe2f0316df893fd58ce46aa4d"
+def env_required(*names):
+    for name in names:
+        value = os.environ.get(name)
+        if value:
+            return value
+    joined = " or ".join(names)
+    print(f"Error: missing required environment variable: {joined}")
+    sys.exit(2)
+
+
+def env_bool(name, default=False):
+    value = os.environ.get(name)
+    if value is None:
+        return default
+    return value.lower() in {"1", "true", "yes", "on"}
+
+
+# Arbitrum Sepolia network settings. Secrets and deployment-specific addresses
+# must come from the environment so this script can be committed safely.
+RPC_URL = os.environ.get("RPC_URL", "https://sepolia-rollup.arbitrum.io/rpc")
+CHAIN_ID = int(os.environ.get("CHAIN_ID", "421614"))
+CONTRACT_ADDRESS = env_required("NIMBUS_CONTRACT_ADDRESS", "CONTRACT_ADDRESS")
+PRIVATE_KEY = env_required("NIMBUS_RELAYER_PRIVATE_KEY", "PRIVATE_KEY")
+USDC_ADDRESS = os.environ.get(
+    "NIMBUS_USDC_ADDRESS",
+    os.environ.get("USDC_ADDRESS", "0x75faf114eafb1bdbe2f0316df893fd58ce46aa4d"),
+)
+INIT_IF_NEEDED = env_bool("NIMBUS_INIT_IF_NEEDED", False)
 
 # Solidity ABI matching our cargo stylus export-abi CamelCase output
 NIMBUS_ABI = [
@@ -151,6 +174,10 @@ def main():
         print("Error: Failed to connect to RPC endpoint.")
         sys.exit(1)
     print(f"Connected to Arbitrum Sepolia L2 (Block: {w3.eth.block_number})")
+    print(f"RPC URL         : {RPC_URL}")
+    print(f"Chain ID        : {CHAIN_ID}")
+    print(f"Contract Address: {CONTRACT_ADDRESS}")
+    print(f"USDC Address    : {USDC_ADDRESS}")
 
     # 2. Setup account
     account = Account.from_key(PRIVATE_KEY)
@@ -175,6 +202,11 @@ def main():
     print(f"Contract Deployed Stablecoin Address: {stablecoin_addr}")
 
     if stablecoin_addr == "0x0000000000000000000000000000000000000000":
+        if not INIT_IF_NEEDED:
+            print("\nError: contract is not initialized.")
+            print("Set NIMBUS_INIT_IF_NEEDED=true to allow this script to send init(...).")
+            sys.exit(3)
+
         print("\n[Action] Contract is NOT initialized. Initializing now...")
         
         # Build transaction
@@ -185,7 +217,7 @@ def main():
             'gas': 4000000,
             'maxFeePerGas': w3.to_wei(1, 'gwei'),
             'maxPriorityFeePerGas': w3.to_wei(1, 'gwei'),
-            'chainId': 421614
+            'chainId': CHAIN_ID
         })
         
         signed_tx = w3.eth.account.sign_transaction(tx, private_key=PRIVATE_KEY)
