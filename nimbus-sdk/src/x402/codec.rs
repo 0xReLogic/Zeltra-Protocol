@@ -84,6 +84,9 @@ pub fn build_nimbus_payment_signature(
     amount: u64,
     scheme: &str,
     network: &str,
+    recipient_or_intent_hash_hex: Option<String>,
+    expiry: Option<u64>,
+    nonce_hex: Option<String>,
 ) -> X402PaymentSignature {
     X402PaymentSignature {
         x402_version: 2,
@@ -95,6 +98,9 @@ pub fn build_nimbus_payment_signature(
             hm_hex: hm_hex.to_string(),
             pk_iss_hex: pk_iss_hex.to_string(),
             amount,
+            recipient_or_intent_hash_hex,
+            expiry,
+            nonce_hex,
         },
     }
 }

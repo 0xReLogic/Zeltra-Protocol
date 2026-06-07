@@ -75,6 +75,9 @@ pub async fn handle_x402_verify(
         alpha_neg_hex: sig.payment.alpha_neg_hex.clone(),
         hm_hex: sig.payment.hm_hex.clone(),
         pk_iss_hex: sig.payment.pk_iss_hex.clone(),
+        recipient_or_intent_hash_hex: sig.payment.recipient_or_intent_hash_hex.clone(),
+        expiry: sig.payment.expiry,
+        nonce_hex: sig.payment.nonce_hex.clone(),
         min_payout: None,
         deadline: None,
         idempotency_key: None,
@@ -99,10 +102,12 @@ pub async fn handle_x402_verify(
         match evm_client.broadcast_spend_transaction(
             &sig.payment.nullifier,
             &sig.payment.alpha_neg_hex,
-            &sig.payment.hm_hex,
             &sig.payment.pk_iss_hex,
             "x402-facilitator-pool",
             sig.payment.amount,
+            sig.payment.recipient_or_intent_hash_hex.as_deref().unwrap_or("0x0000000000000000000000000000000000000000000000000000000000000000"),
+            sig.payment.expiry.unwrap_or(0),
+            sig.payment.nonce_hex.as_deref().unwrap_or("0x0000000000000000000000000000000000000000000000000000000000000000"),
         ).await {
             Ok(hash) => hash,
             Err(e) => {

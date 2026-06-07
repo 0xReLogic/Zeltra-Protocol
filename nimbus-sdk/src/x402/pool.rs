@@ -246,6 +246,9 @@ impl AgentTokenPool {
         scheme: &str,
         network: &str,
         pk_iss_hex: &str,
+        recipient_or_intent_hash_hex: Option<String>,
+        expiry: Option<u64>,
+        nonce_hex: Option<String>,
     ) -> Result<String, JsValue> {
         // Find index of first token with matching amount
         let index = self.ready_tokens.iter().position(|t| t.amount == amount)
@@ -278,6 +281,9 @@ impl AgentTokenPool {
             amount,
             scheme,
             network,
+            recipient_or_intent_hash_hex,
+            expiry,
+            nonce_hex,
         );
         
         let header_value = encode_payment_signature(&sig)

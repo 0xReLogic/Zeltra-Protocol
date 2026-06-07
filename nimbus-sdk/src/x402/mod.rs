@@ -106,6 +106,9 @@ mod tests {
             1000,
             "exact",
             "eip155:42161",
+            None,
+            None,
+            None,
         );
 
         assert_eq!(sig.x402_version, 2);
@@ -174,7 +177,7 @@ mod tests {
         assert_eq!(pool.get_ready_token_count(1000), 1);
         
         // 5. Spend token (x402 header generation)
-        let header_val = pool.spend_any_token(1000, "exact", "eip155:42161", &pk_iss_hex).unwrap();
+        let header_val = pool.spend_any_token(1000, "exact", "eip155:42161", &pk_iss_hex, None, None, None).unwrap();
         assert!(!header_val.is_empty());
         assert_eq!(pool.get_ready_token_count(1000), 0);
     }

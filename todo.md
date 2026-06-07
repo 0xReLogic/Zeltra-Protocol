@@ -1142,14 +1142,14 @@ belum dapat membuktikan bahwa `H(m)` mengandung parameter transaksi.
 - [x] Tambahkan revoke issuer key.
 - [x] Ikat nullifier ke `keccak256(hm_bytes)`.
 - [x] Tolak spend jika principal tidak cukup tanpa membakar nullifier.
-- [ ] Definisikan canonical `NIMBUS_SPEND_V1` message.
-- [ ] Ikat `chain_id` dan contract address sebagai domain separation.
-- [ ] Ikat action, amount, recipient/intent hash, expiry, dan credential nonce.
-- [ ] Tentukan cara contract merekonstruksi RFC 9380 `H(m)` dari canonical
+- [x] Definisikan canonical `NIMBUS_SPEND_V1` message.
+- [x] Ikat `chain_id` dan contract address sebagai domain separation.
+- [x] Ikat action, amount, recipient/intent hash, expiry, dan credential nonce.
+- [x] Tentukan cara contract merekonstruksi RFC 9380 `H(m)` dari canonical
   message, bukan menerima `hm_bytes` tanpa pembuktian.
-- [ ] Update core, SDK, node, x402, CCIP payload, dan contract ABI secara
+- [x] Update core, SDK, node, x402, CCIP payload, dan contract ABI secara
   atomik.
-- [ ] Tambahkan cross-chain replay dan wrong-contract negative tests.
+- [x] Tambahkan cross-chain replay dan wrong-contract negative tests.
 
 Acceptance criteria:
 
@@ -1198,8 +1198,8 @@ Lokasi:
 - `nimbus-node/src/dto.rs`
 - `nimbus-node/src/handlers/threshold.rs`
 
-- [ ] Hapus `share_sk_hex` dari request publik.
-- [ ] Guardian harus selalu menggunakan share dari `KeyManager`.
+- [x] Hapus `share_sk_hex` dari request publik.
+- [x] Guardian harus selalu menggunakan share dari `KeyManager`.
 - [ ] Untuk testnet, bind endpoint guardian hanya ke IP/interface Tailscale.
 - [ ] Terapkan Tailscale ACL agar hanya node leader yang dapat mengakses port
   guardian.

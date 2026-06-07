@@ -44,19 +44,7 @@ pub async fn handle_sign_share(
         }),
     };
 
-    let sig_share = if let Some(override_hex) = &payload.share_sk_hex {
-        if let Ok(bytes) = hex::decode(override_hex) {
-            if let Some(override_sk) = deserialize_from_bytes::<Fr>(&bytes) {
-                sign_share(&override_sk, &blinded, &k)
-            } else {
-                state.sign_share_masked(&blinded, &k).await
-            }
-        } else {
-            state.sign_share_masked(&blinded, &k).await
-        }
-    } else {
-        state.sign_share_masked(&blinded, &k).await
-    };
+    let sig_share = state.sign_share_masked(&blinded, &k).await;
     let sig_share_hex = hex::encode(serialize_to_bytes(&sig_share));
 
     Json(SignShareResponse {
@@ -119,7 +107,6 @@ pub async fn handle_leader_sign(
     let client_body = serde_json::to_string(&SignShareRequest {
         blinded_hex: payload.blinded_hex.clone(),
         k_hex: hex::encode(serialize_to_bytes(&k)),
-        share_sk_hex: None,
     }).unwrap();
 
     // Call guardians with circuit breaker (Finding #15)

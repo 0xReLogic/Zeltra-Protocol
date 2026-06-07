@@ -14,10 +14,12 @@ sol! {
     function spend(
         bytes32 nullifier,
         bytes calldata alpha_neg_bytes,
-        bytes calldata hm_bytes,
         bytes calldata pk_iss_bytes,
         address recipient,
-        uint256 amount
+        uint256 amount,
+        bytes32 recipient_or_intent_hash,
+        uint256 expiry,
+        bytes32 nonce
     ) external returns (bool);
 
     struct EVMTokenAmount {
@@ -197,10 +199,12 @@ impl EvmClient {
         &self,
         nullifier: &str,
         alpha_neg_hex: &str,
-        hm_hex: &str,
         pk_iss_hex: &str,
         recipient: &str,
         amount: u64,
+        recipient_or_intent_hash_hex: &str,
+        expiry: u64,
+        nonce_hex: &str,
     ) -> Result<String> {
         println!("RELAYER: Broadcasting spend transaction");
         println!("  Nullifier   : {}...", &nullifier[..core::cmp::min(8, nullifier.len())]);
@@ -228,11 +232,6 @@ impl EvmClient {
                 alpha_neg_bytes.len()
             );
         }
-        let hm_bytes = hex::decode(hm_hex.trim_start_matches("0x"))
-            .context("Invalid hm hex")?;
-        if hm_bytes.len() != 128 {
-            anyhow::bail!("Invalid hm length: expected 128, got {}", hm_bytes.len());
-        }
         let pk_iss_bytes = hex::decode(pk_iss_hex.trim_start_matches("0x"))
             .context("Invalid pk_iss hex")?;
         if pk_iss_bytes.len() != 256 {
@@ -253,14 +252,34 @@ impl EvmClient {
 
         let amount_u256 = U256::from(amount);
 
+        // Parse recipient_or_intent_hash to FixedBytes<32>
+        let recipient_or_intent_hash_bytes = hex::decode(recipient_or_intent_hash_hex.trim_start_matches("0x"))
+            .context("Invalid recipient_or_intent_hash hex")?;
+        if recipient_or_intent_hash_bytes.len() != 32 {
+            anyhow::bail!("Invalid recipient_or_intent_hash length");
+        }
+        let mut recipient_or_intent_hash_fixed = [0u8; 32];
+        recipient_or_intent_hash_fixed.copy_from_slice(&recipient_or_intent_hash_bytes);
+
+        // Parse nonce to FixedBytes<32>
+        let nonce_bytes = hex::decode(nonce_hex.trim_start_matches("0x"))
+            .context("Invalid nonce hex")?;
+        if nonce_bytes.len() != 32 {
+            anyhow::bail!("Invalid nonce length");
+        }
+        let mut nonce_fixed = [0u8; 32];
+        nonce_fixed.copy_from_slice(&nonce_bytes);
+
         // Encode calldata using alloy's sol! macro type-safely
         let call_data = spendCall {
             nullifier: nullifier_fixed.into(),
             alpha_neg_bytes: alpha_neg_bytes.into(),
-            hm_bytes: hm_bytes.into(),
             pk_iss_bytes: pk_iss_bytes.into(),
             recipient: recipient_addr,
             amount: amount_u256,
+            recipient_or_intent_hash: recipient_or_intent_hash_fixed.into(),
+            expiry: U256::from(expiry),
+            nonce: nonce_fixed.into(),
         }.abi_encode();
 
         let gas_price = self.get_gas_price().await.unwrap_or(20_000_000);
@@ -288,20 +307,21 @@ impl EvmClient {
         destination_contract: &str,
         nullifier_hex: &str,
         alpha_neg_hex: &str,
-        hm_hex: &str,
         pk_iss_hex: &str,
         recipient_hex: &str,
         collateral_token_hex: &str,
         condition_id_hex: Option<&str>,
         amount: u64,
+        expiry: u64,
+        nonce_hex: &str,
     ) -> Result<String> {
         println!("RELAYER: Preparing CCIP Transaction");
         println!("  Destination Chain    : {}", destination_chain_selector);
         println!("  Destination Contract : {}", destination_contract);
         println!("  Nullifier            : {}...", &nullifier_hex[..core::cmp::min(8, nullifier_hex.len())]);
 
-        // 1. Construct the 648-byte payload
-        let mut payload = vec![0u8; 648];
+        // 1. Construct the 584-byte payload
+        let mut payload = vec![0u8; 584];
         
         let nullifier_bytes = hex::decode(nullifier_hex.trim_start_matches("0x"))
             .context("Invalid nullifier hex")?;
@@ -317,27 +337,20 @@ impl EvmClient {
         }
         payload[32..160].copy_from_slice(&alpha_neg_bytes);
 
-        let hm_bytes = hex::decode(hm_hex.trim_start_matches("0x"))
-            .context("Invalid hm hex")?;
-        if hm_bytes.len() != 128 {
-            anyhow::bail!("Invalid hm length: expected 128, got {}", hm_bytes.len());
-        }
-        payload[160..288].copy_from_slice(&hm_bytes);
-
         let pk_iss_bytes = hex::decode(pk_iss_hex.trim_start_matches("0x"))
             .context("Invalid pk_iss hex")?;
         if pk_iss_bytes.len() != 256 {
             anyhow::bail!("Invalid pk_iss length: expected 256, got {}", pk_iss_bytes.len());
         }
-        payload[288..544].copy_from_slice(&pk_iss_bytes);
+        payload[160..416].copy_from_slice(&pk_iss_bytes);
 
         let recipient_addr = Address::from_str(recipient_hex)
             .map_err(|e| anyhow::anyhow!("Invalid recipient address '{}': {}", recipient_hex, e))?;
-        payload[544..564].copy_from_slice(recipient_addr.as_slice());
+        payload[416..436].copy_from_slice(recipient_addr.as_slice());
 
         let collateral_addr = Address::from_str(collateral_token_hex)
             .map_err(|e| anyhow::anyhow!("Invalid collateral token address '{}': {}", collateral_token_hex, e))?;
-        payload[564..584].copy_from_slice(collateral_addr.as_slice());
+        payload[436..456].copy_from_slice(collateral_addr.as_slice());
 
         if let Some(cond_hex) = condition_id_hex {
             let cond_bytes = hex::decode(cond_hex.trim_start_matches("0x"))
@@ -345,12 +358,23 @@ impl EvmClient {
             if cond_bytes.len() != 32 {
                 anyhow::bail!("Invalid condition_id length");
             }
-            payload[584..616].copy_from_slice(&cond_bytes);
+            payload[456..488].copy_from_slice(&cond_bytes);
         }
 
         let amount_u256 = U256::from(amount);
         let amount_bytes = amount_u256.to_be_bytes::<32>();
-        payload[616..648].copy_from_slice(&amount_bytes);
+        payload[488..520].copy_from_slice(&amount_bytes);
+
+        let expiry_u256 = U256::from(expiry);
+        let expiry_bytes = expiry_u256.to_be_bytes::<32>();
+        payload[520..552].copy_from_slice(&expiry_bytes);
+
+        let nonce_bytes = hex::decode(nonce_hex.trim_start_matches("0x"))
+            .context("Invalid nonce hex")?;
+        if nonce_bytes.len() != 32 {
+            anyhow::bail!("Invalid nonce length");
+        }
+        payload[552..584].copy_from_slice(&nonce_bytes);
 
         // 2. Encode EVMExtraArgsV2 with allowOutOfOrderExecution = true (Aha! Moment - Cyfrin/Chainlink 2026 Audit)
         // Tag bytes: 0x181dcf10

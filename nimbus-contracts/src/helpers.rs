@@ -29,6 +29,30 @@ impl Nimbus {
         }
     }
 
+    #[inline(always)]
+    pub(crate) fn env_chain_id(&self) -> u64 {
+        #[cfg(test)]
+        {
+            1337
+        }
+        #[cfg(not(test))]
+        {
+            stylus_sdk::block::chainid()
+        }
+    }
+
+    #[inline(always)]
+    pub(crate) fn env_contract_address(&self) -> Address {
+        #[cfg(test)]
+        {
+            Address::ZERO
+        }
+        #[cfg(not(test))]
+        {
+            stylus_sdk::contract::address()
+        }
+    }
+
     pub(crate) fn check_owner(&self) -> Result<(), Vec<u8>> {
         if self.owner.get() != self.msg_sender() {
             return Err(b"NOT_OWNER".to_vec());
@@ -42,4 +66,45 @@ impl Nimbus {
         }
         Ok(())
     }
+}
+
+use sha2::Sha256;
+use ark_bls12_381::{G1Affine, G1Projective, g1::Config as G1Config};
+use ark_ec::hashing::curve_maps::wb::WBMap;
+use ark_ec::hashing::map_to_curve_hasher::MapToCurveBasedHasher;
+use ark_ff::fields::field_hashers::DefaultFieldHasher;
+use ark_ec::hashing::HashToCurve;
+
+pub fn hash_to_g1(message: &[u8]) -> G1Affine {
+    let hasher = MapToCurveBasedHasher::<
+        G1Projective,
+        DefaultFieldHasher<Sha256, 128>,
+        WBMap<G1Config>,
+    >::new(b"BLS_SIG_BLS12381G1_XMD:SHA-256_SSWU_RO_NUL_")
+    .unwrap();
+    
+    hasher.hash(message).unwrap()
+}
+
+use alloy_primitives::FixedBytes;
+use alloy_primitives::U256;
+
+pub fn compute_spend_hash(
+    chain_id: U256,
+    contract_address: Address,
+    amount: U256,
+    recipient_or_intent_hash: FixedBytes<32>,
+    expiry: U256,
+    nonce: FixedBytes<32>,
+) -> [u8; 32] {
+    let mut msg_bytes = Vec::with_capacity(5 + 32 + 20 + 32 + 32 + 32 + 32);
+    msg_bytes.extend_from_slice(b"SPEND");
+    msg_bytes.extend_from_slice(&chain_id.to_be_bytes::<32>());
+    msg_bytes.extend_from_slice(contract_address.as_slice());
+    msg_bytes.extend_from_slice(&amount.to_be_bytes::<32>());
+    msg_bytes.extend_from_slice(recipient_or_intent_hash.as_slice());
+    msg_bytes.extend_from_slice(&expiry.to_be_bytes::<32>());
+    msg_bytes.extend_from_slice(nonce.as_slice());
+    
+    alloy_primitives::keccak256(&msg_bytes).0
 }

@@ -72,6 +72,12 @@ pub struct NimbusPaymentPayload {
     pub pk_iss_hex: String,
     /// The payment amount.
     pub amount: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub recipient_or_intent_hash_hex: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub expiry: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub nonce_hex: Option<String>,
 }
 
 /// The PAYMENT-SIGNATURE header payload for Nimbus x402 transactions.

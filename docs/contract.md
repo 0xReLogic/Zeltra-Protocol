@@ -199,7 +199,7 @@ Reveal valid dan refund bersifat saling eksklusif.
 
 ## 5. Lifecycle Spend
 
-### `spend(nullifier, alphaNegBytes, hmBytes, pkIssBytes, recipient, amount)`
+### `spend(nullifier, alphaNegBytes, pkIssBytes, recipient, amount, recipientOrIntentHash, expiry, nonce)`
 
 Desain verifikasi BLS:
 
@@ -210,8 +210,12 @@ e(-alpha, G2) * e(H(m), pk_iss) == 1
 Input EVM:
 
 - `alphaNegBytes`: G1, 128 byte;
-- `hmBytes`: G1, 128 byte;
 - `pkIssBytes`: G2, 256 byte;
+- `recipient`: address;
+- `amount`: uint256;
+- `recipientOrIntentHash`: bytes32;
+- `expiry`: uint256;
+- `nonce`: bytes32;
 - pairing payload: 768 byte untuk dua pasangan.
 
 Validasi:
@@ -219,7 +223,7 @@ Validasi:
 - kontrak tidak paused;
 - minimum spend 5 USDC;
 - nullifier belum digunakan;
-- nullifier sama dengan `keccak256(hmBytes)`;
+- nullifier sama dengan `keccak256(hmBytes)` (di mana `hmBytes` direkonstruksi secara on-chain dari parameter melalui RFC 9380 SSWU);
 - issuer public key sudah didaftarkan owner;
 - panjang G1/G2 tepat dan bukan point at infinity;
 - output pairing tepat 32 byte dan canonical;
@@ -292,7 +296,7 @@ Receiver:
 
 1. Memeriksa kontrak tidak paused.
 2. Jika `ccip_router` dikonfigurasi, mensyaratkan caller sama dengan router.
-3. Mensyaratkan payload tepat 648 byte.
+3. Mensyaratkan payload tepat 584 byte (di mana H(m) tidak lagi dikirim secara eksplisit tetapi direkonstruksi on-chain).
 4. Mendekode parameter spend dan destination action.
 5. Menjalankan `spendAndBuyShares`.
 
@@ -513,13 +517,12 @@ eksplisit. Deployment baru harus mendaftarkan issuer key sebelum hard test spend
 - nullifier terikat ke `keccak256(H(m))`;
 - malformed input dan point-at-infinity rejection;
 - checked principal subtraction;
-- checks-effects-interactions pada beberapa transfer;
-- unit/regression test lifecycle deposit dan reveal.
+- unit/regression test lifecycle deposit dan reveal;
+- ikat credential ke amount, recipient/action, expiry, chain, dan contract (selesai secara end-to-end pada kontrak, SDK, dan relayer).
 
 ### Blocker sebelum dana nyata
 
-1. Ikat credential ke amount, recipient/action, expiry, chain, dan contract.
-2. Ganti mock compliance VK dengan artifact circuit production.
+1. Ganti mock compliance VK dengan artifact circuit production.
 3. Hard test deposit, reveal, refund, dan spend pada Stylus testnet.
 4. Uji precompile EIP-2537 dengan test vector valid dan invalid.
 5. Audit liability, fee, rounding, dan solvency pada seluruh state transition.

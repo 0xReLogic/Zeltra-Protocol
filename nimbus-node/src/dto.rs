@@ -34,6 +34,12 @@ pub struct SpendRequest {
     pub hm_hex: String,
     #[serde(default)]
     pub pk_iss_hex: String,
+    #[serde(default)]
+    pub recipient_or_intent_hash_hex: Option<String>,
+    #[serde(default)]
+    pub expiry: Option<u64>,
+    #[serde(default)]
+    pub nonce_hex: Option<String>,
     /// Slippage protection: minimum acceptable payout in USDC base units (6 decimals).
     /// If net_payout < min_payout after gas deduction, the transaction is rejected.
     #[serde(default)]
@@ -122,6 +128,12 @@ pub struct X402NimbusPayment {
     pub pk_iss_hex: String,
     #[serde(default)]
     pub amount: u64,
+    #[serde(default)]
+    pub recipient_or_intent_hash_hex: Option<String>,
+    #[serde(default)]
+    pub expiry: Option<u64>,
+    #[serde(default)]
+    pub nonce_hex: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -144,7 +156,6 @@ pub struct X402VerifyResponse {
 pub struct SignShareRequest {
     pub blinded_hex: String,
     pub k_hex: String,
-    pub share_sk_hex: Option<String>,
 }
 
 #[derive(Serialize, Deserialize)]

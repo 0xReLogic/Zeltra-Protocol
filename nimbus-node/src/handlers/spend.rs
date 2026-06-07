@@ -292,12 +292,13 @@ pub async fn process_spend_batch(state: &AppState) {
                     &cc.destination_contract,
                     &request.nullifier,
                     &request.alpha_neg_hex,
-                    &request.hm_hex,
                     &request.pk_iss_hex,
                     &request.recipient,
                     &stablecoin_addr,
                     None, // Default to standard cross-chain spend (no condition_id)
                     request.amount,
+                    request.expiry.unwrap_or(0),
+                    request.nonce_hex.as_deref().unwrap_or("0x0000000000000000000000000000000000000000000000000000000000000000"),
                 ).await {
                     Ok(message_id) => message_id,
                     Err(e) => {
@@ -317,10 +318,12 @@ pub async fn process_spend_batch(state: &AppState) {
                 match evm_client.broadcast_spend_transaction(
                     &request.nullifier,
                     &request.alpha_neg_hex,
-                    &request.hm_hex,
                     &request.pk_iss_hex,
                     &request.recipient,
                     net_payout,
+                    request.recipient_or_intent_hash_hex.as_deref().unwrap_or("0x0000000000000000000000000000000000000000000000000000000000000000"),
+                    request.expiry.unwrap_or(0),
+                    request.nonce_hex.as_deref().unwrap_or("0x0000000000000000000000000000000000000000000000000000000000000000"),
                 ).await {
                     Ok(tx_hash) => {
                         println!("    [SPEND] Transaction broadcasted successfully");

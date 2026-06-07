@@ -323,34 +323,47 @@ impl Nimbus {
         &mut self,
         nullifier: FixedBytes<32>,
         alpha_neg_bytes: Bytes,
-        hm_bytes: Bytes,
         pk_iss_bytes: Bytes,
         recipient: Address,
         amount: U256,
+        recipient_or_intent_hash: FixedBytes<32>,
+        expiry: U256,
+        nonce: FixedBytes<32>,
     ) -> Result<bool, Vec<u8>> {
-        self._spend(nullifier, alpha_neg_bytes, hm_bytes, pk_iss_bytes, recipient, amount)
+        self._spend(
+            nullifier,
+            alpha_neg_bytes,
+            pk_iss_bytes,
+            recipient,
+            amount,
+            recipient_or_intent_hash,
+            expiry,
+            nonce,
+        )
     }
 
     pub fn spend_and_buy_shares(
         &mut self,
         nullifier: FixedBytes<32>,
         alpha_neg_bytes: Bytes,
-        hm_bytes: Bytes,
         pk_iss_bytes: Bytes,
         polymarket_ctf: Address,
         collateral_token: Address,
         condition_id: FixedBytes<32>,
         amount: U256,
+        expiry: U256,
+        nonce: FixedBytes<32>,
     ) -> Result<bool, Vec<u8>> {
         self._spend_and_buy_shares(
             nullifier,
             alpha_neg_bytes,
-            hm_bytes,
             pk_iss_bytes,
             polymarket_ctf,
             collateral_token,
             condition_id,
             amount,
+            expiry,
+            nonce,
         )
     }
 
@@ -475,14 +488,32 @@ mod tests {
     fn register_mock_issuer(
         contract: &mut Nimbus,
         owner: Address,
+        amount: U256,
+        recipient_or_intent_hash: FixedBytes<32>,
     ) -> (Vec<u8>, Vec<u8>, Vec<u8>, FixedBytes<32>) {
         let alpha_neg = vec![0x11; 128];
-        let hm = vec![0x22; 128];
         let pk_iss = vec![0x33; 256];
         set_msg_sender(owner);
         contract.register_issuer_key(pk_iss.clone().into()).unwrap();
-        let nullifier = keccak256(&hm);
-        (alpha_neg, hm, pk_iss, nullifier)
+
+        let chain_id = U256::from(1337);
+        let contract_address = Address::ZERO;
+        let expiry = U256::ZERO;
+        let nonce = FixedBytes::ZERO;
+
+        let m_hash = helpers::compute_spend_hash(
+            chain_id,
+            contract_address,
+            amount,
+            recipient_or_intent_hash,
+            expiry,
+            nonce,
+        );
+        let hm_affine = helpers::hash_to_g1(&m_hash);
+        let hm_evm_bytes = types::to_evm_g1(&hm_affine);
+        let nullifier = keccak256(&hm_evm_bytes);
+
+        (alpha_neg, hm_evm_bytes.to_vec(), pk_iss, nullifier)
     }
 
     #[no_mangle]
@@ -699,16 +730,20 @@ mod tests {
                 U256::from(20_000_000),
             )
             .unwrap();
-        let (alpha_neg, hm, pk_iss, nullifier) =
-            register_mock_issuer(&mut nimbus_contract, owner);
-
-        let mut payload = vec![0u8; 648];
         let amount = U256::from(10_000_000);
+        let (alpha_neg, hm_evm_bytes, pk_iss, nullifier) =
+            register_mock_issuer(&mut nimbus_contract, owner, amount, FixedBytes::ZERO);
+
+        let mut payload = vec![0u8; 584];
         payload[0..32].copy_from_slice(nullifier.as_slice());
         payload[32..160].copy_from_slice(&alpha_neg);
-        payload[160..288].copy_from_slice(&hm);
-        payload[288..544].copy_from_slice(&pk_iss);
-        payload[616..648].copy_from_slice(&amount.to_be_bytes::<32>());
+        payload[160..416].copy_from_slice(&pk_iss);
+        // payload[416..436] is polymarket_ctf (zeros)
+        // payload[436..456] is collateral_token (zeros)
+        // payload[456..488] is condition_id (zeros)
+        payload[488..520].copy_from_slice(&amount.to_be_bytes::<32>());
+        // payload[520..552] is expiry (zeros)
+        // payload[552..584] is nonce (zeros)
 
         let result = nimbus_contract.ccip_receive(
             FixedBytes::ZERO,
@@ -791,11 +826,30 @@ mod tests {
             Err(b"CONTRACT_PAUSED".to_vec())
         );
         assert_eq!(
-            contract.spend(sid, vec![].into(), vec![].into(), vec![].into(), Address::ZERO, U256::ZERO),
+            contract.spend(
+                sid,
+                vec![].into(),
+                vec![].into(),
+                Address::ZERO,
+                U256::ZERO,
+                FixedBytes::ZERO,
+                U256::ZERO,
+                FixedBytes::ZERO,
+            ),
             Err(b"CONTRACT_PAUSED".to_vec())
         );
         assert_eq!(
-            contract.spend_and_buy_shares(sid, vec![].into(), vec![].into(), vec![].into(), Address::ZERO, Address::ZERO, FixedBytes::ZERO, U256::ZERO),
+            contract.spend_and_buy_shares(
+                sid,
+                vec![].into(),
+                vec![].into(),
+                Address::ZERO,
+                Address::ZERO,
+                FixedBytes::ZERO,
+                U256::ZERO,
+                U256::ZERO,
+                FixedBytes::ZERO,
+            ),
             Err(b"CONTRACT_PAUSED".to_vec())
         );
 
@@ -991,18 +1045,38 @@ mod tests {
         contract.init(owner, Address::ZERO, Address::ZERO).unwrap();
 
         let alpha_neg = vec![0x11; 128];
-        let hm = vec![0x22; 128];
         let pk_iss = vec![0x33; 256];
-        let nullifier = keccak256(&hm);
+        
+        let amount = U256::from(5_000_000);
+        let recipient_or_intent_hash = FixedBytes::ZERO;
+        let expiry = U256::ZERO;
+        let nonce = FixedBytes::ZERO;
+        
+        let chain_id = U256::from(1337);
+        let contract_address = Address::ZERO;
+        
+        let m_hash = helpers::compute_spend_hash(
+            chain_id,
+            contract_address,
+            amount,
+            recipient_or_intent_hash,
+            expiry,
+            nonce,
+        );
+        let hm_affine = helpers::hash_to_g1(&m_hash);
+        let hm_evm_bytes = types::to_evm_g1(&hm_affine);
+        let nullifier = keccak256(&hm_evm_bytes);
 
         assert_eq!(
             contract.spend(
                 nullifier,
                 alpha_neg.clone().into(),
-                hm.clone().into(),
                 pk_iss.clone().into(),
                 Address::ZERO,
-                U256::from(5_000_000),
+                amount,
+                recipient_or_intent_hash,
+                expiry,
+                nonce,
             ),
             Err(b"UNTRUSTED_ISSUER_KEY".to_vec())
         );
@@ -1012,10 +1086,12 @@ mod tests {
             contract.spend(
                 FixedBytes::repeat_byte(0x99),
                 alpha_neg.into(),
-                hm.into(),
                 pk_iss.into(),
                 Address::ZERO,
-                U256::from(5_000_000),
+                amount,
+                recipient_or_intent_hash,
+                expiry,
+                nonce,
             ),
             Err(b"NULLIFIER_MESSAGE_MISMATCH".to_vec())
         );
@@ -1029,29 +1105,33 @@ mod tests {
         set_msg_sender(owner);
         let mut contract = Nimbus::default();
         contract.init(owner, Address::ZERO, Address::ZERO).unwrap();
-        let (alpha_neg, hm, pk_iss, nullifier) = register_mock_issuer(&mut contract, owner);
+        let (alpha_neg, hm, pk_iss, nullifier) = register_mock_issuer(&mut contract, owner, U256::from(5_000_000), FixedBytes::ZERO);
 
         assert_eq!(
             contract.spend(
                 nullifier,
                 vec![0x11; 127].into(),
-                hm.clone().into(),
                 pk_iss.clone().into(),
                 Address::ZERO,
                 U256::from(5_000_000),
+                FixedBytes::ZERO,
+                U256::ZERO,
+                FixedBytes::ZERO,
             ),
             Err(b"INVALID_G1_INPUT_LENGTH".to_vec())
         );
 
-        let infinity_hm = vec![0; 128];
+        let infinity_alpha = vec![0; 128];
         assert_eq!(
             contract.spend(
-                keccak256(&infinity_hm),
-                alpha_neg.clone().into(),
-                infinity_hm.into(),
+                nullifier,
+                infinity_alpha.into(),
                 pk_iss.clone().into(),
                 Address::ZERO,
                 U256::from(5_000_000),
+                FixedBytes::ZERO,
+                U256::ZERO,
+                FixedBytes::ZERO,
             ),
             Err(b"POINT_AT_INFINITY_NOT_ALLOWED".to_vec())
         );
@@ -1061,10 +1141,12 @@ mod tests {
             .spend(
                 nullifier,
                 alpha_neg.into(),
-                hm.into(),
                 pk_iss.into(),
                 Address::ZERO,
                 U256::from(5_000_000),
+                FixedBytes::ZERO,
+                U256::ZERO,
+                FixedBytes::ZERO,
             )
             .unwrap());
         assert!(!contract.nullifiers.get(nullifier));
@@ -1078,16 +1160,18 @@ mod tests {
         set_msg_sender(owner);
         let mut contract = Nimbus::default();
         contract.init(owner, Address::ZERO, Address::ZERO).unwrap();
-        let (alpha_neg, hm, pk_iss, nullifier) = register_mock_issuer(&mut contract, owner);
+        let (alpha_neg, hm, pk_iss, nullifier) = register_mock_issuer(&mut contract, owner, U256::from(5_000_000), FixedBytes::ZERO);
 
         assert_eq!(
             contract.spend(
                 nullifier,
                 alpha_neg.clone().into(),
-                hm.clone().into(),
                 pk_iss.clone().into(),
                 Address::ZERO,
                 U256::from(5_000_000),
+                FixedBytes::ZERO,
+                U256::ZERO,
+                FixedBytes::ZERO,
             ),
             Err(b"INSUFFICIENT_PRINCIPAL".to_vec())
         );
@@ -1104,10 +1188,12 @@ mod tests {
             .spend(
                 nullifier,
                 alpha_neg.clone().into(),
-                hm.clone().into(),
                 pk_iss.clone().into(),
                 Address::ZERO,
                 U256::from(5_000_000),
+                FixedBytes::ZERO,
+                U256::ZERO,
+                FixedBytes::ZERO,
             )
             .unwrap());
         let principal = contract.total_deposited_principal().unwrap();
@@ -1115,10 +1201,12 @@ mod tests {
             .spend(
                 nullifier,
                 alpha_neg.into(),
-                hm.into(),
                 pk_iss.into(),
                 Address::ZERO,
                 U256::from(5_000_000),
+                FixedBytes::ZERO,
+                U256::ZERO,
+                FixedBytes::ZERO,
             )
             .unwrap());
         assert_eq!(contract.total_deposited_principal().unwrap(), principal);
@@ -1218,14 +1306,16 @@ mod tests {
         assert_eq!(contract.total_deposited_principal().unwrap(), U256::from(19_980_000));
         
         // Test spend decreases principal
-        let (alpha_neg, hm, pk_iss, nullifier) = register_mock_issuer(&mut contract, owner);
+        let (alpha_neg, hm, pk_iss, nullifier) = register_mock_issuer(&mut contract, owner, U256::from(10_000_000), FixedBytes::ZERO);
         let is_valid = contract.spend(
             nullifier,
             alpha_neg.into(),
-            hm.into(),
             pk_iss.into(),
             Address::ZERO,
             U256::from(10_000_000),
+            FixedBytes::ZERO,
+            U256::ZERO,
+            FixedBytes::ZERO,
         ).unwrap();
         
         assert!(is_valid);
@@ -1250,18 +1340,19 @@ mod tests {
             vec![0x42; 256].into(),
             U256::from(20_000_000),
         ).unwrap();
-        let (alpha_neg, hm, pk_iss, nullifier) = register_mock_issuer(&mut contract, owner);
+        let (alpha_neg, hm, pk_iss, nullifier) = register_mock_issuer(&mut contract, owner, U256::from(10_000_000), FixedBytes::ZERO);
         
         // Call spend_and_buy_shares with polymarket_ctf = Address::ZERO (which triggers mock fallback in tests)
         let success = contract.spend_and_buy_shares(
             nullifier,
             alpha_neg.into(),
-            hm.into(),
             pk_iss.into(),
             Address::ZERO, // triggers fallback simulation in test block
             Address::ZERO,
             FixedBytes::ZERO,
             U256::from(10_000_000),
+            U256::ZERO,
+            FixedBytes::ZERO,
         ).unwrap();
         
         // Under our mock try-catch, it should return true (gracefully handled)

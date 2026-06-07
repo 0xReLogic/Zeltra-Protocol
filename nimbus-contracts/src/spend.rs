@@ -64,13 +64,21 @@ impl Nimbus {
         &mut self,
         nullifier: FixedBytes<32>,
         alpha_neg_bytes: Bytes,
-        hm_bytes: Bytes,
         pk_iss_bytes: Bytes,
         recipient: Address,
         amount: U256,
+        recipient_or_intent_hash: FixedBytes<32>,
+        expiry: U256,
+        nonce: FixedBytes<32>,
     ) -> Result<bool, Vec<u8>> {
         // 1. CHECKS
         self.check_not_paused()?;
+        
+        // Expiry check
+        let current_time = U256::from(self.block_timestamp());
+        if expiry != U256::ZERO && current_time > expiry {
+            return Err(b"TRANSACTION_EXPIRED".to_vec());
+        }
         
         // Enforce minimum transaction size of 5 USDC/stablecoin (5,000,000 units)
         let min_amount = U256::from(5_000_000);
@@ -82,6 +90,23 @@ impl Nimbus {
         if self.nullifiers.get(nullifier) {
             return Ok(false);
         }
+
+        // Reconstruct message hash and G1 curve point H(m) on-chain
+        let chain_id = U256::from(self.env_chain_id());
+        let contract_address = self.env_contract_address();
+
+        let m_hash = crate::helpers::compute_spend_hash(
+            chain_id,
+            contract_address,
+            amount,
+            recipient_or_intent_hash,
+            expiry,
+            nonce,
+        );
+        let hm_affine = crate::helpers::hash_to_g1(&m_hash);
+        let hm_evm_bytes = crate::types::to_evm_g1(&hm_affine);
+        let hm_bytes = Bytes::from(hm_evm_bytes.to_vec());
+
         if nullifier != keccak256(&hm_bytes) {
             return Err(b"NULLIFIER_MESSAGE_MISMATCH".to_vec());
         }
@@ -168,16 +193,45 @@ impl Nimbus {
         &mut self,
         nullifier: FixedBytes<32>,
         alpha_neg_bytes: Bytes,
-        hm_bytes: Bytes,
         pk_iss_bytes: Bytes,
         polymarket_ctf: Address,
         collateral_token: Address,
         condition_id: FixedBytes<32>,
         amount: U256,
+        expiry: U256,
+        nonce: FixedBytes<32>,
     ) -> Result<bool, Vec<u8>> {
         self.check_not_paused()?;
+
+        let recipient_or_intent_hash = if condition_id == FixedBytes::ZERO {
+            let mut buf = [0u8; 32];
+            buf[12..].copy_from_slice(polymarket_ctf.as_slice());
+            FixedBytes::from(buf)
+        } else {
+            let mut buf = Vec::with_capacity(20 + 20 + 32);
+            buf.extend_from_slice(polymarket_ctf.as_slice());
+            buf.extend_from_slice(collateral_token.as_slice());
+            buf.extend_from_slice(condition_id.as_slice());
+            keccak256(&buf)
+        };
+
+        let transfer_recipient = if condition_id == FixedBytes::ZERO {
+            polymarket_ctf
+        } else {
+            Address::ZERO
+        };
+
         // 1. Verify and invalidate the signature (same as spend)
-        let is_valid = self._spend(nullifier, alpha_neg_bytes, hm_bytes, pk_iss_bytes, Address::ZERO, amount)?;
+        let is_valid = self._spend(
+            nullifier,
+            alpha_neg_bytes,
+            pk_iss_bytes,
+            transfer_recipient,
+            amount,
+            recipient_or_intent_hash,
+            expiry,
+            nonce,
+        )?;
         if !is_valid {
             return Ok(false);
         }
@@ -300,34 +354,38 @@ impl Nimbus {
             return Err(b"ONLY_CCIP_ROUTER_ALLOWED".to_vec());
         }
 
-        if payload.len() != 648 {
+        if payload.len() != 584 {
             return Err(b"INVALID_CCIP_PAYLOAD_LENGTH".to_vec());
         }
         let mut nullifier = [0u8; 32];
         nullifier.copy_from_slice(&payload[0..32]);
         
         let alpha_neg_bytes = payload[32..160].to_vec();
-        let hm_bytes = payload[160..288].to_vec();
-        let pk_iss_bytes = payload[288..544].to_vec();
+        let pk_iss_bytes = payload[160..416].to_vec();
         
-        let polymarket_ctf = Address::from_slice(&payload[544..564]);
-        let collateral_token = Address::from_slice(&payload[564..584]);
+        let polymarket_ctf = Address::from_slice(&payload[416..436]);
+        let collateral_token = Address::from_slice(&payload[436..456]);
         
         let mut condition_id = [0u8; 32];
-        condition_id.copy_from_slice(&payload[584..616]);
+        condition_id.copy_from_slice(&payload[456..488]);
         
-        let amount = U256::from_be_slice(&payload[616..648]);
+        let amount = U256::from_be_slice(&payload[488..520]);
+        let expiry = U256::from_be_slice(&payload[520..552]);
+        
+        let mut nonce = [0u8; 32];
+        nonce.copy_from_slice(&payload[552..584]);
         
         // Execute spend and buy shares on destination chain
         let success = self._spend_and_buy_shares(
             nullifier.into(),
             Bytes::from(alpha_neg_bytes),
-            Bytes::from(hm_bytes),
             Bytes::from(pk_iss_bytes),
             polymarket_ctf,
             collateral_token,
             condition_id.into(),
             amount,
+            expiry,
+            nonce.into(),
         )?;
         
         if !success {
