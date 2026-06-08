@@ -13,6 +13,7 @@ Date: 2026-06-07
 | Component | Nimbus Version | Latest 2026 | Gap | Release Date |
 |-----------|----------------|-------------|-----|--------------|
 | **Stylus SDK** | 0.6.0 (Aug 2024) | **0.10.0** (Jan 2026) | **4 versions** | 18 months |
+| **Stylus Audit** | N/A | **OpenZeppelin audit complete** (Dec 2025) | - | Security milestone |
 | **ark-bls12-381** | 0.5.0 (nimbus-core) | **0.6.0** (Apr 2026) | **1 version** | 6 months |
 | **alloy-primitives** | 0.7.6 / 1.0 | **1.6.0** (May 2026) | **Major version** | 1 year |
 | **arkworks stack** | 0.5.0 | **0.6.0** | **1 version** | Apr 2026 |
@@ -44,7 +45,23 @@ Date: 2026-06-07
 stylus-sdk = "0.6.0"
 
 // Stylus 0.10.0 (latest) - ADVANCED features
-stylus-sdk = "0.10.0"  // + EIP-7702, better caching, etc
+stylus-sdk = "0.10.0"  // + EIP-7702, better caching, + OpenZeppelin audit (Dec 2025)
+```
+
+### 2. **EIP-2537 (BLS12-381 Precompile) - SOTA 2026 Formula**
+```
+Current understanding: General "cheaper"
+SOTA 2026 formula: Gas cost = 37,700 + 32,600 × k
+
+Comparison:
+- Old (BN254): 45,000 + 34,000 × k
+- New (BLS12-381): 37,700 + 32,600 × k
+- Savings: Significant per pairing operation
+
+L2 Adoption:
+- Arbitrum (ArbOS 51 Dia): Native activation
+- Etherlink: Native activation
+- Performance: Major improvement vs BN254
 ```
 
 **Impact:** Missing 18 months of improvements!

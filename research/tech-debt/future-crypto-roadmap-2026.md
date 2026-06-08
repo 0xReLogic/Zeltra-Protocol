@@ -11,21 +11,27 @@ Based on 2026 state-of-the-art cryptographic research, this document outlines po
 ## Priority 1: FROST (Flexible Round-Optimized Schnorr Threshold)
 
 ### Status
-- **Standard:** IETF RFC 9591 (Draft 2025, stabilization ongoing)
+- **Standard:** IETF RFC 9591 (Draft 2025), FROST2 (2026 SOTA with security enhancements)
 - **Maturity:** Draft standard, limited Rust ecosystem
-- **Security:** Less audited than BLS12-381, still in standardization
+- **Security:** FROST2 adds static corruption vulnerability handling without performance impact
+- **Adoption:** Standard for institutional wallets 2026
 
 ### Benefits over Current BLS Threshold
 ```rust
 // Current (BLS Threshold):
 - Verification: Pairing via EIP-2537 precompile
-- Gas cost: ~100-200k per signature
-- Rounds: 1 round (simpler)
+- Gas cost: 37,700 + 32,600 × k (SOTA 2026 formula)
+- Rounds: 1 round (simple)
 
 // FROST (Schnorr Threshold):
 - Verification: Schnorr (lighter, no pairing)
 - Gas cost: ~30-50k per signature (60-70% savings!)
-- Rounds: 2-3 rounds (slightly more complex)
+- Rounds: 2 rounds (bisa di-optimasi jadi 1 round dengan pre-processing)
+
+// FROST2 (2026 SOTA):
+- Security Enhancements: Handle static corruption vulnerabilities
+- Performance: Tidak bebani computational cost
+- Use case: Institutional wallets standard
 ```
 
 ### Implementation Challenges
@@ -81,6 +87,53 @@ Total timeline: 8-12 months
 
 ---
 
+## Priority 1b: dWallet Labs (Ika Network) - 2PC-MPC Threshold
+
+### Status
+- **Standard:** 2PC-MPC (2-Party ECDSA) for native multi-chain signatures
+- **Maturity:** Production in Ika Network, published REFHE research at Eurocrypt 2026
+- **Security:** Zero-trust threshold signature, client-independent presigns
+- **Adoption:** Sui, Aptos networks
+
+### What it does
+```rust
+// 2PC-MPC (dWallet Labs):
+- Zero-trust threshold signature
+- Native multi-chain signature generation
+- Asynchronous (non-blocking)
+- No client-independent presigns required
+- REFHE (Ring-Enhanced Fully Homomorphic Encryption) integration
+
+// Use case:
+- Smart contracts generate signatures natively
+- Cross-chain without manual coordination
+- Privacy-preserving with FHE
+```
+
+### Relevance to Nimbus
+```
+Alternative to BLS threshold:
+- More advanced security model (zero-trust)
+- Better for cross-chain (native multi-chain)
+- Asynchronous signature generation
+- FHE integration (privacy-preserving)
+
+Challenges:
+- Different security model (2-party vs multi-party)
+- Implementation complexity
+- Limited to Sui/Aptos initially
+- Research phase (Eurocrypt 2026 publication)
+```
+
+### Verdict
+**RESEARCH for future roadmap**
+- More advanced than FROST (zero-trust + FHE)
+- Still research phase (Eurocrypt 2026)
+- Alternative architecture (evaluate compatibility)
+- **Priority:** MEDIUM (research when production-ready)
+
+---
+
 ## Priority 2: ZK Halo2/STARKs for Batch Aggregation
 
 ### Status
@@ -94,14 +147,17 @@ Total timeline: 8-12 months
 - Single verification: ~100-200k gas
 - Batch verification: 100 signatures = 200 signatures × 100k = 20M gas
 
-// ZK Halo2/STARKs:
-- Batch aggregation: 1000 proofs = cost of 1 proof verification
-- No trusted setup (unlike Groth16)
-- Quantum-resistant (STARKs)
+// Nova Folding Schemes (SOTA 2026):
+- Folding Scheme: Fold R1CS instances into one accumulator
+- BEATS performance: 48-240x speedup for large batches (up to 2^11 signatures)
+- Memory usage: < 1 GB
+- Gas cost: O(1) constant per batch (independent of batch size)
+- L2 optimization: Cuts aggregation gas to constant
 
-Use case: Batch spend operations
-- Kalau banyak user spend sekaligus
-- ZK aggregation jauh lebih efisien
+// Halo2 (PLONKish):
+- No trusted setup (unlike Groth16)
+- Batch verification efficient
+- Quantum-resistant (STARKs)
 ```
 
 ### Implementation Approach (Hybrid)
@@ -355,7 +411,104 @@ Migration phase: 2030+ (conditional)
 
 ---
 
-## Priority 4: MPC Garbled Circuits (Social Recovery)
+## Priority 5: Threshold Signing Bridges (2026 SOTA)
+
+### Status
+- **Requirement:** Modern cross-chain bridges MANDATORY threshold cryptography
+- **Adoption:** Standard for 2026 bridge security
+- **Standard:** FROST or MPC-based (dWallet Labs 2PC-MPC)
+- **Use case:** Anti-hacking bridge protection
+
+### What it does
+```rust
+// Traditional Bridge:
+- Private key di single server
+- Single point failure
+- Bridge hacking risk HIGH
+
+// Threshold Signing Bridge (SOTA 2026):
+- Keys distributed across validator network
+- Dynamic validator participation
+- No single point failure
+- FROST or 2PC-MPC based
+- Anti-hacking by design
+
+// Bridge security:
+- Cross-chain modern bridges wajib threshold crypto
+- No keys in single server
+- Distributed trust
+```
+
+### Relevance to Nimbus
+```
+Nimbus current:
+- CCIP integration (Chainlink)
+- Threshold signing for credentials (internal)
+- Bridge security: TBD
+
+Future requirement:
+- Nimbus cross-chain: Wajib threshold signing bridges
+- Evaluate CCIP vs Wormhole privacy (2026 competition)
+- Integration with threshold signing infrastructure
+
+Chainlink CCIP vs Wormhole Privacy (2026):
+- CCIP: Privacy-Preserving Bilateral Networks (institutional)
+- Wormhole: Zero-Knowledge Light Clients (decentralized)
+- Both integrate ZK for private cross-chain verification
+```
+
+### Verdict
+**MANDATORY for future cross-chain bridges**
+- Modern bridge security requirement
+- Nimbus cross-chain: Must adopt threshold signing bridges
+- **Priority:** HIGH (when implementing cross-chain features)
+- **Timeline:** Research 2026-2027, implement with cross-chain features
+
+---
+
+## Priority 6: Cross-Chain Privacy & Identity Protocols
+
+### Status
+- **Focus:** Identity & credential issuance cross-chain (2026 shift)
+- **Standard:** LACChain ID Framework (zkVoter, ZK-proof cross-chain)
+- **Use case:** Private credential issuance across chains
+
+### What it does
+```rust
+// Cross-chain identity:
+- zkVoter mathematics
+- ZK-proof between networks
+- Private credential issuance
+- Identity verification without revealing data
+
+// LACChain ID Framework:
+- Production implementation
+- Cross-chain identity verification
+- Privacy-preserving
+```
+
+### Relevance to Nimbus
+```
+Nimbus current:
+- Credential issuance (single-chain)
+- CCIP for cross-chain (planned)
+- Identity verification TBD
+
+Future:
+- Consider cross-chain credential issuance
+- ZK-proof between chains
+- Private identity verification
+```
+
+### Verdict
+**Consider for identity roadmap**
+- Relevant for credential issuance cross-chain
+- **Priority:** LOW (identity-specific feature)
+- **Timeline:** Research 2027-2028
+
+---
+
+## Priority 7: MPC Garbled Circuits (Social Recovery)
 
 ### Status
 - **Standard:** Yao's Garbled Circuits + Oblivious Transfer
@@ -513,16 +666,16 @@ Recommendation: Not applicable to current Nimbus use case
 
 | Technology | Priority | Timeline | Benefit | Risk | Recommended |
 |------------|----------|----------|---------|------|-------------|
-| **FROST** | 1 | 2027-2028 | 70% gas savings | Medium (draft) | WAIT 1-2 years |
-| **ZK Halo2/STARKs** | 2 | 2029-2030 | Batch aggregation | High (complex) | Consider future |
+| **FROST2** | 1 | 2027-2028 | 70% gas savings + security | Medium (draft) | WAIT 1-2 years |
+| **dWallet Labs 2PC-MPC** | 1b | Research | Zero-trust + multi-chain | High (research) | Research when ready |
+| **ZK Halo2/STARKs** | 2 | 2029-2030 | Batch aggregation (48-240x) | High (complex) | Consider future |
+| **Threshold Signing Bridges** | 5 | Research | Anti-hacking bridges | Low | MANDATORY for cross-chain |
+| **Cross-Chain Identity** | 6 | Research | Credential cross-chain | Low | Consider roadmap |
 | **PQC on-chain** | 3 | 2030+ | Quantum-proof | High (immature) | Monitor 3-5 years |
-| **MPC Garbled Circuits** | 4 | Future | Social recovery | Medium (complex) | Optional feature |
+| **MPC Garbled Circuits** | 7 | Future | Social recovery | Medium (complex) | Optional feature |
 | **Lattice** | - | - | Post-quantum | High (not feasible) | NOT feasible |
 | **FHE** | - | - | Compute encrypted | High (gas) | NOT relevant |
 | **Isogeny** | - | - | Small keys | High (security) | NOT recommended |
-| **Folding Schemes** | - | - | Zero proving | N/A | Not applicable |
-| **Verkle Trees** | - | - | Statelessness | N/A | Passive benefit |
-| **Sumcheck/zkVM** | - | - | Complex compute | N/A | Not applicable |
 
 ---
 
@@ -531,26 +684,30 @@ Recommendation: Not applicable to current Nimbus use case
 ### Immediate (2026)
 1. ✅ Keep current BLS threshold (still state-of-art)
 2. ✅ Upgrade dependencies (security patches)
-3. ✅ Monitor FROST RFC finalization
+3. ✅ Monitor FROST2 RFC finalization
 4. ✅ Monitor ZK ecosystem developments
 5. ✅ Monitor PQC developments (quantum threat)
+6. ✅ Research dWallet Labs 2PC-MPC (Ika Network)
 
 ### Short-term (6-12 months)
-6. 📊 Research FROST implementation
-7. 📊 Benchmark FROST vs BLS
-8. 📊 Research ZK aggregation use cases
-9. 📊 Research PQC migration path (WOTS/STARK)
-10. 📊 Monitor Ethereum Verkle migration (passive)
+7. 📊 Research FROST2 implementation (security enhancements)
+8. 📊 Benchmark FROST2 vs BLS
+9. 📊 Research ZK aggregation use cases (Nova BEATS 48-240x)
+10. 📊 Research PQC migration path (WOTS/STARK)
+11. 📊 Research threshold signing bridges (FROST vs 2PC-MPC)
+12. 📊 Evaluate CCIP vs Wormhole privacy (2026 landscape)
 
 ### Medium-term (1-3 years)
-11. 🚀 Evaluate FROST production readiness
-12. 🚀 Consider FROST migration if stable
-13. 🚀 Consider ZK aggregation for batch ops
-14. 🚀 Evaluate quantum threat urgency
+13. 🚀 Evaluate FROST2 production readiness
+14. 🚀 Consider FROST2 migration if stable
+15. 🚀 Consider ZK aggregation for batch ops
+16. 🚀 Evaluate quantum threat urgency
+17. 🚀 Research cross-chain identity (LACChain ID Framework)
 
 ### Long-term (3-5 years)
-15. 🚀 Evaluate PQC threshold signing (if quantum imminent)
-16. 🚀 Consider MPC Garbled Circuits for social recovery (optional)
+18. 🚀 Evaluate PQC threshold signing (if quantum imminent)
+19. 🚀 Consider MPC Garbled Circuits for social recovery (optional)
+20. 🚀 Implement threshold signing bridges (for cross-chain features)
 
 ---
 
