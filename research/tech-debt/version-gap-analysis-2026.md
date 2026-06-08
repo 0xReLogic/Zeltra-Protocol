@@ -16,26 +16,23 @@ field bytes sempat di-reverse dan G2/Fp2 perlu block remapping.
 
 | Component | Nimbus Version | Latest 2026 | Gap | Release Date |
 |-----------|----------------|-------------|-----|--------------|
-| **Stylus SDK** | 0.6.0 (Aug 2024) | **0.10.0** (Jan 2026) | **4 versions** | 18 months |
+| **Stylus SDK** | **0.10.7** | **0.10.7** | ✅ Closed | 2026-06-08 |
 | **Stylus Audit** | N/A | **OpenZeppelin audit complete** (Dec 2025) | - | Security milestone |
-| **ark-bls12-381** | 0.5.0 (nimbus-core) | **0.6.0** (Apr 2026) | **1 version** | 6 months |
-| **alloy-primitives** | 0.7.6 / 1.0 | **1.6.0** (May 2026) | **Major version** | 1 year |
-| **arkworks stack** | 0.5.0 | **0.6.0** | **1 version** | Apr 2026 |
+| **ark-bls12-381** | **0.6.0** | **0.6.0** | ✅ Closed | 2026-06-08 |
+| **alloy-primitives** | **1.6.0** | **1.6.0** | ✅ Closed | 2026-06-08 |
+| **arkworks stack** | **0.6.0** | **0.6.0** | ✅ Closed | 2026-06-08 |
 | **Tokio** | 1.52 manifest / 1.52.3 resolved | **Aligned in batch 1** | ✅ Done | 2026-06-08 |
 | **Axum** | 0.8 manifest / 0.8.9 resolved | **Aligned in batch 1** | ✅ Done | 2026-06-08 |
-| **Alloy node stack** | 1.8 manifest / 1.8.3 resolved | **Aligned in batch 1** | ✅ Done | 2026-06-08 |
+| **Alloy node stack** | **2.0.5** | **2.0.5** | ✅ Closed | 2026-06-08 |
 | **zeroize** | 1.8 | **1.8** | ✅ Current | - |
 
 ---
 
-## 🔴 CRITICAL: Stylus SDK Gap (4 versions)
+## ✅ RESOLVED: Stylus SDK Gap
 
-### Current: 0.6.0 (August 2024)
-- Initial stable release
-- Basic features
-- Limited optimizations
+### Previous: 0.6.0 (August 2024)
 
-### Latest: 0.10.0 (January 2026)
+### Current: 0.10.7 (2026)
 - EIP-7702 support (Smart Wallets)
 - Better caching strategies
 - Advanced storage handling
@@ -44,13 +41,11 @@ field bytes sempat di-reverse dan G2/Fp2 perlu block remapping.
 - Performance optimizations
 - Memory optimizations
 
-### What We're Missing:
+### Migration completed:
 ```rust
-// Stylus 0.6.0 (current) - BASIC features
-stylus-sdk = "0.6.0"
-
-// Stylus 0.10.0 (latest) - ADVANCED features
-stylus-sdk = "0.10.0"  // + EIP-7702, better caching, + OpenZeppelin audit (Dec 2025)
+stylus-sdk = "0.10.7"
+alloy-primitives = "1.6.0"
+alloy-sol-types = "1.6.0"
 ```
 
 ### 2. **EIP-2537 (BLS12-381 Precompile) - SOTA 2026 Formula**
@@ -70,9 +65,10 @@ L2 Adoption:
 - Performance: Major improvement vs BN254
 ```
 
-**Impact:** Missing 18 months of improvements. Encoding BLS12-381 EIP-2537
-sudah dibetulkan pada 2026-06-08, tetapi upgrade dependency tetap perlu
-dikerjakan terpisah sebelum mainnet.
+**Impact:** Gap 18 bulan sudah ditutup di manifest dan API contract sudah
+dimigrasi. Encoding BLS12-381 EIP-2537 sudah dibetulkan pada 2026-06-08.
+Sisa pekerjaan sebelum mainnet adalah hard-test deploy ulang dengan artifact
+baru, bukan lagi compile-level dependency gap.
 
 ### 3. **Resolved: EIP-2537 Hard-Test Finding (2026-06-08)**
 
@@ -135,10 +131,9 @@ Sources:
 
 ---
 
-## 🟡 SIGNIFICANT: alloy-primitives Gap (Major Version)
+## ✅ RESOLVED: alloy-primitives Gap
 
-### Current: 0.7.6 / 1.0
-### Latest: 1.6.0
+### Current: 1.6.0
 
 **What changed in 1.x:**
 - New API surface (breaking changes)
@@ -148,17 +143,28 @@ Sources:
 
 ---
 
-## 🟡 MODERATE: Crypto Stack Gap
+## ✅ RESOLVED: Crypto Stack Gap
 
-### ark-bls12-381: 0.5.0 → 0.6.0
+### ark-bls12-381: 0.6.0
 - 0.6.0 released April 2026
 - Minor improvements, bug fixes
 - Better documentation
 
-### arkworks stack: 0.5.0 → 0.6.0
+### arkworks stack: 0.6.0
 - Consistent version upgrade across all ark libraries
 - Better performance
 - Better security audits
+
+Compatibility note:
+
+- `rand` intentionally stays on the 0.8 line because arkworks 0.6 still uses
+  the rand 0.8 ecosystem.
+- `sha2`/`sha3` intentionally stay on the 0.10 line because arkworks hash-to-
+  curve expects the digest 0.10 traits. Moving direct Nimbus code to digest
+  0.11 breaks compatibility.
+- `rusqlite` is pinned at 0.39.0. `rusqlite` 0.40.1 pulls
+  `libsqlite3-sys` 0.38.1, whose build script currently fails on Rust 1.92.0
+  due unstable `cfg_select`.
 
 ---
 
@@ -174,7 +180,7 @@ Sources:
 - Better middleware ecosystem
 
 ### Other aligned node/CLI dependencies
-- `nimbus-node`: `serde` 1.0.228, `serde_json` 1.0.150, `alloy` 1.8,
+- `nimbus-node`: `serde` 1.0.228, `serde_json` 1.0.150, `alloy` 2.0.5,
   `tempfile` 3.27.
 - `nimbus-cli`: `clap` 4.6, `tokio` 1.52.
 
@@ -183,9 +189,11 @@ Verification:
 ```text
 cargo test --package nimbus-node handlers::quote
 cargo check --workspace --all-targets
+cargo test --package nimbus-core
+cargo test --package nimbus_contracts
 ```
 
-Both passed on 2026-06-08.
+All passed on 2026-06-08 after the dependency migration.
 
 ---
 
@@ -244,19 +252,16 @@ Router trait supports fallback and receive methods
 
 ## Action Plan: Upgrade to 2026 State of the Art
 
-### Priority 1: Stylus SDK Upgrade (CRITICAL)
+### Priority 1: Stylus SDK Upgrade (DONE)
 ```toml
-# Current
-stylus-sdk = "0.6.0"
-
-# Latest (2026)
-stylus-sdk = "0.10.0"
+stylus-sdk = "0.10.7"
 ```
 
-**Risk:**
-- Breaking changes between 0.6 → 0.10
-- API surface changes
-- Need migration guide
+**Migration notes:**
+- Environment helpers moved from old `stylus_sdk::msg/block/contract` accessors
+  to host access traits.
+- External contract calls now use explicit host + `Call`.
+- Raw precompile calls now pass host into `RawCall::new_static`.
 
 **Benefit:**
 - Access to EIP-7702 (smart wallets)
@@ -264,33 +269,31 @@ stylus-sdk = "0.10.0"
 - Security patches
 - 18 months of improvements
 
-### Priority 2: Crypto Stack Upgrade
+### Priority 2: Crypto Stack Upgrade (DONE)
 ```toml
 # nimbus-core
-ark-bls12-381 = "0.5.0"  # → 0.6.0
-ark-ec = "0.5.0"            # → 0.6.0
-ark-ff = "0.5.0"            # → 0.6.0
-ark-std = "0.5.0"           # → 0.6.0
-ark-serialize = "0.5.0"    # → 0.6.0
+ark-bls12-381 = "0.6.0"
+ark-ec = "0.6.0"
+ark-ff = "0.6.0"
+ark-std = "0.6.0"
+ark-serialize = "0.6.0"
 ```
 
-**Risk:** Minor, should be compatible
+**Risk:** Arkworks 0.6 renames R1CS APIs under `gr1cs`.
 **Benefit:** Security patches, performance
 
-### Priority 3: Web Framework Upgrade
+### Priority 3: Web Framework Upgrade (DONE)
 ```toml
 # nimbus-contracts
-alloy-primitives = "0.7.6"  # → 1.6.0
+alloy-primitives = "1.6.0"
 
 # nimbus-node / nimbus-cli
 tokio = "1.52"              # done
 axum = "0.8"                # done
-alloy = "1.8"               # node stack done
+alloy = "2.0.5"             # node stack done
 ```
 
-**Status:** Node/CLI runtime part done. Contract-side `alloy-primitives` remains
-separate because it affects Stylus/WASM compatibility and should be migrated in
-the same guarded lane as contract dependency work.
+**Status:** Node/CLI runtime and contract-side Alloy primitives are migrated.
 
 ---
 
@@ -298,41 +301,37 @@ the same guarded lane as contract dependency work.
 
 ### Testnet (Current)
 ```
-✅ Keep Stylus/contract crypto stable while testnet hard-tests continue.
-✅ Node/CLI runtime dependencies have been aligned in batch 1.
+✅ Compile/test dependency migration is done.
+✅ Next hard-test should deploy the new Stylus artifact on testnet.
 ```
 
 ### Production Upgrade (Required)
 ```
-⚠️  Upgrade to latest versions BEFORE mainnet
-  - Stylus 0.10.0 (4 versions behind)
-  - ark-bls12-381 0.6.0
-  - alloy-primitives 1.6.0
-  - Tokio/Axum node runtime: done in batch 1
-
-Reason: Production should use latest stable versions
-Security patches, performance improvements, EIP-7702 support
+⚠️  Do not treat this as mainnet-ready until:
+  - new Stylus artifact is deployed and activated on testnet;
+  - spend/deposit/withdraw paths are replayed against real RPC;
+  - gas snapshot is compared against previous deployed artifact.
 ```
 
 ---
 
 ## Migration Strategy
 
-### Phase 1: Dependency Update (1-2 days)
-1. Update nimbus-contracts/Cargo.toml
-2. Update nimbus-core/Cargo.toml  
-3. Update nimbus-node/Cargo.toml ✅ batch 1 done
-4. Fix compilation errors from API changes
-5. Run cargo test to verify
+### Phase 1: Dependency Update (DONE)
+1. Update nimbus-contracts/Cargo.toml ✅
+2. Update nimbus-core/Cargo.toml ✅
+3. Update nimbus-node/Cargo.toml ✅
+4. Fix compilation errors from API changes ✅
+5. Run cargo test to verify ✅
 
-### Phase 2: Code Migration (2-3 days)
-1. Update Stylus-specific APIs (0.6 → 0.10)
-2. Update alloy APIs (0.7 → 1.6)
-3. Add EIP-7702 support if desired
-4. Update caching strategy
-5. Test all functionality
+### Phase 2: Code Migration (DONE)
+1. Update Stylus-specific APIs (0.6 → 0.10.7) ✅
+2. Update alloy APIs (0.7/1.x → 1.6/2.0.5) ✅
+3. Add EIP-7702 support if desired ⏳ optional, not launch blocker
+4. Update caching strategy ⏳ optional, not launch blocker
+5. Test all functionality ✅ unit/check level
 
-### Phase 3: Hard Test (3-5 days)
+### Phase 3: Hard Test (NEXT)
 1. Run all unit tests
 2. Deploy to testnet
 3. E2E integration test
@@ -343,16 +342,18 @@ Security patches, performance improvements, EIP-7702 support
 
 ## Conclusion
 
-**Verdict:** YES, Nimbus tech stack BEHIND 2026 state of the art by 1-2 years
+**Verdict:** The compile-level 2026 dependency gap is closed.
 
-**Critical Gap:**
-- **Stylus 0.6.0 → 0.10.0** (18 months behind, 4 versions)
-- **alloy-primitives** (major version behind)
-- **crypto stack** (6 months behind)
-- **node/CLI runtime gap** resolved in batch 1 on 2026-06-08
+**Closed Gap:**
+- **Stylus 0.6.0 → 0.10.7**
+- **alloy-primitives 0.7/1.x → 1.6.0**
+- **arkworks 0.5.0 → 0.6.0**
+- **alloy node stack 1.8.x → 2.0.5**
+- **node/CLI runtime gap** resolved on 2026-06-08
 
-**Recommendation:** Upgrade sebelum mainnet deployment untuk:
-- Security patches
-- Performance improvements  
-- EIP-7702 support (smart wallets)
-- Future-proofing
+**Recommendation:** Sebelum mainnet, fokus bukan lagi "update versi", tapi
+hard-test artifact baru:
+- deploy/activate contract baru;
+- replay deposit, spend, withdrawal, and fee path;
+- capture gas diff;
+- only then mark the dependency upgrade production-safe.

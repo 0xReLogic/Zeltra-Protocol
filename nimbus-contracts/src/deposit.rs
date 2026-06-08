@@ -6,6 +6,7 @@ use alloc::vec::Vec;
 use alloy_primitives::{keccak256, FixedBytes, U256};
 use stylus_sdk::abi::Bytes;
 use stylus_sdk::call::RawCall;
+use stylus_sdk::prelude::Call;
 
 use crate::constants::BLS12_G2_MSM;
 use crate::interfaces::IErc20;
@@ -47,7 +48,10 @@ impl Nimbus {
             {
                 let stablecoin_address = self.stablecoin.get();
                 let erc20 = IErc20::new(stablecoin_address);
-                let success = erc20.transfer(&mut *self, client, amount).map_err(|e| e)?;
+                let host = Self::runtime_host();
+                let success = erc20
+                    .transfer(&host, Call::new_mutating(self), client, amount)
+                    .map_err(|e| e)?;
                 if !success {
                     return Err(b"REFUND_TRANSFER_FAILED".to_vec());
                 }
@@ -116,11 +120,18 @@ impl Nimbus {
             // Transfer full amount from client to this contract
             let stablecoin_address = self.stablecoin.get();
             let erc20 = IErc20::new(stablecoin_address);
-            let this_address = stylus_sdk::contract::address();
+            let this_address = self.env_contract_address();
+            let host = Self::runtime_host();
 
             // Call transferFrom to transfer the collateral from user to this contract
             let success = erc20
-                .transfer_from(&mut *self, client, this_address, amount)
+                .transfer_from(
+                    &host,
+                    Call::new_mutating(self),
+                    client,
+                    this_address,
+                    amount,
+                )
                 .map_err(|e| e)?;
             if !success {
                 return Err(b"TRANSFER_FROM_FAILED".to_vec());
@@ -129,7 +140,9 @@ impl Nimbus {
             // Send 0.1% fee to fee_recipient
             if fee > U256::ZERO {
                 let recipient = self.fee_recipient.get();
-                let fee_success = erc20.transfer(&mut *self, recipient, fee).map_err(|e| e)?;
+                let fee_success = erc20
+                    .transfer(&host, Call::new_mutating(self), recipient, fee)
+                    .map_err(|e| e)?;
                 if !fee_success {
                     return Err(b"FEE_TRANSFER_FAILED".to_vec());
                 }
@@ -182,8 +195,11 @@ impl Nimbus {
         // Call EIP-2537 precompile at 0x0e. Unit tests isolate the state
         // transition; the real precompile is covered by the testnet hard test.
         #[cfg(not(test))]
-        let result = unsafe { RawCall::new_static().call(BLS12_G2_MSM, &input) }
-            .map_err(|_| b"MSM_PRECOMPILE_CALL_FAILED".to_vec())?;
+        let result = {
+            let host = Self::runtime_host();
+            unsafe { RawCall::new_static(&host).call(BLS12_G2_MSM, &input) }
+                .map_err(|_| b"MSM_PRECOMPILE_CALL_FAILED".to_vec())?
+        };
 
         #[cfg(test)]
         let result = com_k_bytes.to_vec();

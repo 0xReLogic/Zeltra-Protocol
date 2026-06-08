@@ -275,15 +275,16 @@ Recommendation: Avoid due to security concerns
 Action: None, current approach still state-of-art
 ```
 
-### Phase 1: Dependencies Upgrade (2026 Q3)
+### Phase 1: Dependencies Upgrade (DONE 2026-06-08)
 ```
-⚠️  Upgrade to latest versions (not algorithm change)
-- Stylus 0.6.0 → 0.10.0
+✅ Upgrade to current compatible versions (not algorithm change)
+- Stylus 0.6.0 → 0.10.7
 - ark-bls12-381 0.5.0 → 0.6.0
 - alloy-primitives → 1.6.0
-- Tokio, Axum latest
+- alloy node stack → 2.0.5
+- Tokio, Axum latest compatible
 
-Action: Tech debt management, security patches
+Action: Hard-test the new Stylus artifact on testnet before mainnet
 ```
 
 ### Phase 2: Monitor & Research (2026-2027)

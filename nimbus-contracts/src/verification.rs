@@ -86,7 +86,8 @@ impl Nimbus {
             }
 
             // Call G1 MSM precompile (0x0c)
-            let msm_result = unsafe { RawCall::new_static().call(BLS12_G1_MSM, &msm_input) }
+            let host = Self::runtime_host();
+            let msm_result = unsafe { RawCall::new_static(&host).call(BLS12_G1_MSM, &msm_input) }
                 .map_err(|_| b"G1_MSM_PRECOMPILE_FAILED".to_vec())?;
 
             if msm_result.len() != 128 {
@@ -99,7 +100,7 @@ impl Nimbus {
             add_input.extend_from_slice(&vk_ic[0]);
             add_input.extend_from_slice(&msm_result);
 
-            let add_result = unsafe { RawCall::new_static().call(BLS12_G1_ADD, &add_input) }
+            let add_result = unsafe { RawCall::new_static(&host).call(BLS12_G1_ADD, &add_input) }
                 .map_err(|_| b"G1_ADD_PRECOMPILE_FAILED".to_vec())?;
 
             if add_result.len() != 128 {
@@ -160,7 +161,8 @@ impl Nimbus {
             input.extend_from_slice(&vk_beta_bytes);
 
             // Call EIP-2537 pairing precompile at 0x0f
-            let output = unsafe { RawCall::new_static().call(BLS12_PAIRING_CHECK, &input) }
+            let host = Self::runtime_host();
+            let output = unsafe { RawCall::new_static(&host).call(BLS12_PAIRING_CHECK, &input) }
                 .map_err(|_| b"ZK_PAIRING_PRECOMPILE_CALL_FAILED".to_vec())?;
 
             // Output is 32 bytes, last byte is 1 if pairing check passes

@@ -6,6 +6,11 @@ use alloy_primitives::Address;
 
 impl Nimbus {
     #[inline(always)]
+    pub(crate) fn runtime_host() -> stylus_sdk::host::WasmVM {
+        stylus_sdk::host::WasmVM {}
+    }
+
+    #[inline(always)]
     pub(crate) fn msg_sender(&self) -> Address {
         #[cfg(test)]
         {
@@ -13,7 +18,8 @@ impl Nimbus {
         }
         #[cfg(not(test))]
         {
-            stylus_sdk::msg::sender()
+            use stylus_sdk::stylus_core::host::MessageAccess;
+            Self::runtime_host().msg_sender()
         }
     }
 
@@ -25,7 +31,8 @@ impl Nimbus {
         }
         #[cfg(not(test))]
         {
-            stylus_sdk::block::timestamp()
+            use stylus_sdk::stylus_core::host::BlockAccess;
+            Self::runtime_host().block_timestamp()
         }
     }
 
@@ -37,7 +44,8 @@ impl Nimbus {
         }
         #[cfg(not(test))]
         {
-            stylus_sdk::block::chainid()
+            use stylus_sdk::stylus_core::host::ChainAccess;
+            Self::runtime_host().chain_id()
         }
     }
 
@@ -49,7 +57,8 @@ impl Nimbus {
         }
         #[cfg(not(test))]
         {
-            stylus_sdk::contract::address()
+            use stylus_sdk::stylus_core::host::AccountAccess;
+            Self::runtime_host().contract_address()
         }
     }
 

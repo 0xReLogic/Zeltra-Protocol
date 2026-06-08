@@ -5,6 +5,7 @@
 
 use alloc::vec::Vec;
 use alloy_primitives::{Address, U256};
+use stylus_sdk::prelude::Call;
 
 use crate::interfaces::{IAavePool, IErc20, IRwaToken};
 use crate::storage::Nimbus;
@@ -148,7 +149,8 @@ impl Nimbus {
         {
             let stablecoin_address = self.stablecoin.get();
             let erc20 = IErc20::new(stablecoin_address);
-            let this_address = stylus_sdk::contract::address();
+            let this_address = self.env_contract_address();
+            let host = Self::runtime_host();
 
             // Read dynamic cash percentage (default 30, range 15-45)
             let cash_pct = self.target_cash_pct.get();
@@ -174,11 +176,18 @@ impl Nimbus {
             if aave_pool_addr != Address::ZERO && aave_share > U256::ZERO {
                 let aave = IAavePool::new(aave_pool_addr);
                 let success = erc20
-                    .approve(&mut *self, aave_pool_addr, aave_share)
+                    .approve(&host, Call::new_mutating(self), aave_pool_addr, aave_share)
                     .map_err(|e| e)?;
                 if success {
-                    aave.supply(&mut *self, stablecoin_address, aave_share, this_address, 0)
-                        .map_err(|e| e)?;
+                    aave.supply(
+                        &host,
+                        Call::new_mutating(self),
+                        stablecoin_address,
+                        aave_share,
+                        this_address,
+                        0,
+                    )
+                    .map_err(|e| e)?;
                 }
             }
 
@@ -187,10 +196,11 @@ impl Nimbus {
             if rwa_token_addr != Address::ZERO && rwa_share > U256::ZERO {
                 let rwa = IRwaToken::new(rwa_token_addr);
                 let success = erc20
-                    .approve(&mut *self, rwa_token_addr, rwa_share)
+                    .approve(&host, Call::new_mutating(self), rwa_token_addr, rwa_share)
                     .map_err(|e| e)?;
                 if success {
-                    rwa.deposit(&mut *self, rwa_share).map_err(|e| e)?;
+                    rwa.deposit(&host, Call::new_mutating(self), rwa_share)
+                        .map_err(|e| e)?;
                 }
             }
         }
@@ -207,9 +217,12 @@ impl Nimbus {
         {
             let stablecoin_address = self.stablecoin.get();
             let erc20 = IErc20::new(stablecoin_address);
+            let host = Self::runtime_host();
 
-            let this_address = stylus_sdk::contract::address();
-            let mut cash_balance = erc20.balance_of(&mut *self, this_address).map_err(|e| e)?;
+            let this_address = self.env_contract_address();
+            let mut cash_balance = erc20
+                .balance_of(&host, Call::new(), this_address)
+                .map_err(|e| e)?;
 
             if cash_balance >= required_amount {
                 return Ok(());
@@ -224,10 +237,18 @@ impl Nimbus {
             if aave_pool_addr != Address::ZERO {
                 let aave = IAavePool::new(aave_pool_addr);
                 let _withdrawn = aave
-                    .withdraw(&mut *self, stablecoin_address, shortfall, this_address)
+                    .withdraw(
+                        &host,
+                        Call::new_mutating(self),
+                        stablecoin_address,
+                        shortfall,
+                        this_address,
+                    )
                     .map_err(|e| e)?;
 
-                cash_balance = erc20.balance_of(&mut *self, this_address).map_err(|e| e)?;
+                cash_balance = erc20
+                    .balance_of(&host, Call::new(), this_address)
+                    .map_err(|e| e)?;
                 if cash_balance >= required_amount {
                     return Ok(());
                 }
@@ -241,10 +262,12 @@ impl Nimbus {
             if rwa_token_addr != Address::ZERO && shortfall > U256::ZERO {
                 let rwa = IRwaToken::new(rwa_token_addr);
                 let _redeemed = rwa
-                    .redeem(&mut *self, shortfall, shortfall)
+                    .redeem(&host, Call::new_mutating(self), shortfall, shortfall)
                     .map_err(|e| e)?;
 
-                cash_balance = erc20.balance_of(&mut *self, this_address).map_err(|e| e)?;
+                cash_balance = erc20
+                    .balance_of(&host, Call::new(), this_address)
+                    .map_err(|e| e)?;
                 if cash_balance < required_amount {
                     return Err(b"INSUFFICIENT_TOTAL_LIQUIDITY_IN_VAULT_BUFFERS".to_vec());
                 }
@@ -264,16 +287,17 @@ impl Nimbus {
         {
             let stablecoin_address = self.stablecoin.get();
             let erc20 = IErc20::new(stablecoin_address);
-            let this_address = stylus_sdk::contract::address();
+            let this_address = self.env_contract_address();
+            let host = Self::runtime_host();
             let cash = erc20
-                .balance_of(&mut *self, this_address)
+                .balance_of(&host, Call::new(), this_address)
                 .unwrap_or(U256::ZERO);
 
             let a_token_addr = self.a_token.get();
             let aave_assets = if a_token_addr != Address::ZERO {
                 let a_token = IErc20::new(a_token_addr);
                 a_token
-                    .balance_of(&mut *self, this_address)
+                    .balance_of(&host, Call::new(), this_address)
                     .unwrap_or(U256::ZERO)
             } else {
                 U256::ZERO
@@ -282,7 +306,7 @@ impl Nimbus {
             let rwa_token_addr = self.rwa_token.get();
             let rwa_assets = if rwa_token_addr != Address::ZERO {
                 let rwa = IErc20::new(rwa_token_addr);
-                rwa.balance_of(&mut *self, this_address)
+                rwa.balance_of(&host, Call::new(), this_address)
                     .unwrap_or(U256::ZERO)
             } else {
                 U256::ZERO
@@ -308,8 +332,9 @@ impl Nimbus {
             let stablecoin_address = self.stablecoin.get();
             let erc20 = IErc20::new(stablecoin_address);
             let recipient = self.fee_recipient.get();
+            let host = Self::runtime_host();
             let success = erc20
-                .transfer(&mut *self, recipient, yield_amount)
+                .transfer(&host, Call::new_mutating(self), recipient, yield_amount)
                 .map_err(|e| e)?;
             if !success {
                 return Err(b"YIELD_TRANSFER_FAILED".to_vec());

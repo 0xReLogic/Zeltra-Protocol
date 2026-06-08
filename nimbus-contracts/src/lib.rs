@@ -318,11 +318,14 @@ impl Nimbus {
     fn check_liability_invariant(&self) -> Result<(), Vec<u8>> {
         #[cfg(not(test))]
         {
+            use stylus_sdk::prelude::Call;
+
             let stablecoin_address = self.stablecoin.get();
-            let contract_address = stylus_sdk::contract::address();
+            let contract_address = self.env_contract_address();
             let erc20 = IErc20::new(stablecoin_address);
+            let host = Self::runtime_host();
             let contract_balance = erc20
-                .balance_of(&*self, contract_address)
+                .balance_of(&host, Call::new(), contract_address)
                 .map_err(|_| b"INVARIANT_BALANCE_CHECK_FAILED".to_vec())?;
 
             let outstanding_liabilities = self.total_deposited_principal.get();

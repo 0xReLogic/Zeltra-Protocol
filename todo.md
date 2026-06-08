@@ -1110,7 +1110,8 @@ Report tidak boleh berisi:
 ### Campaign A - Harness Trustworthy
 
 - [x] Hapus secret hardcoded dari seluruh script.
-- [ ] Perbaiki generator BLS dan ABI generation.
+- [x] Perbaiki generator BLS.
+- [ ] Perbaiki/validasi ABI generation setelah upgrade Stylus 0.10.7.
 - [ ] Implementasikan hard-test mode tanpa fallback mock.
 - [x] Implementasikan deployment manifest.
 - [ ] Implementasikan receipt/event/state assertion helpers.
@@ -1728,7 +1729,7 @@ python3 scripts/testnet_integration.py
 
 Sebelum menjalankan:
 
-- [ ] Perbaiki generator BLS sesuai checklist P0.
+- [x] Perbaiki generator BLS sesuai checklist P0.
 - [x] Pastikan `.env.test` menunjuk ke contract deployment terbaru.
 - [ ] Pastikan contract terbaru telah diaktifkan dan di-cache di Stylus.
 - [ ] Pastikan `NIMBUS_CCIP_ROUTER` dikonfigurasi pada relayer dan contract.

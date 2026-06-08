@@ -12,8 +12,8 @@
 
 use ark_bls12_381::{Bls12_381, Fr};
 use ark_ff::{One, UniformRand};
-use ark_relations::r1cs::{
-    ConstraintSynthesizer, ConstraintSystemRef, LinearCombination, SynthesisError,
+use ark_relations::gr1cs::{
+    ConstraintSynthesizer, ConstraintSystemRef, LinearCombination, SynthesisError, Variable,
 };
 use ark_snark::SNARK;
 
@@ -57,8 +57,8 @@ impl ConstraintSynthesizer<Fr> for ComplianceCircuit {
         let computed_nullifier = secret_lc + randomness_lc;
 
         // Enforce: computed_nullifier * 1 = nullifier
-        let one_lc = (Fr::one(), ark_relations::r1cs::Variable::One).into();
-        cs.enforce_constraint(computed_nullifier, one_lc, nullifier.into())?;
+        let one_lc = (Fr::one(), Variable::One).into();
+        cs.enforce_r1cs_constraint(|| computed_nullifier, || one_lc, || nullifier.into())?;
 
         Ok(())
     }

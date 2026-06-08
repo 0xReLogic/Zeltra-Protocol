@@ -9,6 +9,7 @@ use ark_bls12_381::G2Affine;
 use ark_ec::AffineRepr;
 use stylus_sdk::abi::Bytes;
 use stylus_sdk::call::RawCall;
+use stylus_sdk::prelude::Call;
 
 use crate::constants::BLS12_PAIRING_CHECK;
 use crate::interfaces::{IConditionalTokens, IErc20};
@@ -47,8 +48,9 @@ impl Nimbus {
         input.extend_from_slice(hm_bytes);
         input.extend_from_slice(pk_iss_bytes);
 
+        let host = Self::runtime_host();
         let output = unsafe {
-            RawCall::new_static()
+            RawCall::new_static(&host)
                 .limit_return_data(0, 32)
                 .call(BLS12_PAIRING_CHECK, &input)
         }
@@ -178,11 +180,12 @@ impl Nimbus {
 
             let stablecoin_address = self.stablecoin.get();
             let erc20 = IErc20::new(stablecoin_address);
+            let host = Self::runtime_host();
 
             // Transfer payout to recipient (if not zero address)
             if recipient != Address::ZERO && payout > U256::ZERO {
                 let success = erc20
-                    .transfer(&mut *self, recipient, payout)
+                    .transfer(&host, Call::new_mutating(self), recipient, payout)
                     .map_err(|e| e)?;
                 if !success {
                     return Err(b"SPEND_TRANSFER_FAILED".to_vec());
@@ -193,7 +196,12 @@ impl Nimbus {
             if protocol_share > U256::ZERO {
                 let recipient_fee = self.fee_recipient.get();
                 let fee_success = erc20
-                    .transfer(&mut *self, recipient_fee, protocol_share)
+                    .transfer(
+                        &host,
+                        Call::new_mutating(self),
+                        recipient_fee,
+                        protocol_share,
+                    )
                     .map_err(|e| e)?;
                 if !fee_success {
                     return Err(b"SPEND_FEE_TRANSFER_FAILED".to_vec());
@@ -271,6 +279,7 @@ impl Nimbus {
         #[cfg(not(test))]
         {
             let erc20 = IErc20::new(collateral_token);
+            let host = Self::runtime_host();
 
             // If condition_id is zero, this is a standard cross-chain transfer (not Polymarket).
             // In this case, _spend() already transferred the exact payout to polymarket_ctf.
@@ -280,7 +289,7 @@ impl Nimbus {
 
             // Approve Polymarket CTF to spend payout amount of collateral token
             let approve_success = erc20
-                .approve(&mut *self, polymarket_ctf, payout)
+                .approve(&host, Call::new_mutating(self), polymarket_ctf, payout)
                 .map_err(|e| e)?;
             if !approve_success {
                 return Err(b"POLYMARKET_APPROVE_FAILED".to_vec());
@@ -293,7 +302,8 @@ impl Nimbus {
             let partition = vec![U256::from(1), U256::from(2)];
 
             match ctf.split_position(
-                &mut *self,
+                &host,
+                Call::new_mutating(self),
                 collateral_token,
                 FixedBytes::ZERO,
                 condition_id,
@@ -339,8 +349,9 @@ impl Nimbus {
         {
             let stablecoin_address = self.stablecoin.get();
             let erc20 = IErc20::new(stablecoin_address);
+            let host = Self::runtime_host();
             let success = erc20
-                .transfer(&mut *self, recipient, amount)
+                .transfer(&host, Call::new_mutating(self), recipient, amount)
                 .map_err(|e| e)?;
             if !success {
                 return Err(b"REFUND_TRANSFER_FAILED".to_vec());

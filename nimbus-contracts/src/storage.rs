@@ -81,6 +81,9 @@ sol_storage! {
 
 impl Default for Nimbus {
     fn default() -> Self {
-        unsafe { Self::new(stylus_sdk::alloy_primitives::U256::ZERO, 0) }
+        let host = stylus_sdk::host::VM {
+            host: stylus_sdk::host::WasmVM {},
+        };
+        unsafe { Self::new(stylus_sdk::alloy_primitives::U256::ZERO, 0, host) }
     }
 }
