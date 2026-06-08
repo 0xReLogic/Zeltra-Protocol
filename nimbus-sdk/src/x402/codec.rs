@@ -1,8 +1,8 @@
 //! Codec helpers for x402 protocol (base64 <-> JSON conversion)
 
 use super::types::*;
-use base64::Engine;
 use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
+use base64::Engine;
 
 /// Decodes a base64-encoded PAYMENT-REQUIRED header value into the structured
 /// payment requirements.
@@ -26,15 +26,13 @@ pub fn decode_payment_required_secure(
     let bytes = BASE64_STANDARD
         .decode(header_value.trim())
         .map_err(|e| format!("Base64 decode error: {}", e))?;
-    serde_json::from_slice(&bytes)
-        .map_err(|e| format!("JSON parse error: {}", e))
+    serde_json::from_slice(&bytes).map_err(|e| format!("JSON parse error: {}", e))
 }
 
 /// Encodes a PAYMENT-SIGNATURE payload into a base64 string suitable for the
 /// HTTP header.
 pub fn encode_payment_signature(sig: &X402PaymentSignature) -> Result<String, String> {
-    let json = serde_json::to_vec(sig)
-        .map_err(|e| format!("JSON serialize error: {}", e))?;
+    let json = serde_json::to_vec(sig).map_err(|e| format!("JSON serialize error: {}", e))?;
     Ok(BASE64_STANDARD.encode(&json))
 }
 
@@ -59,15 +57,13 @@ pub fn decode_payment_response_secure(
     let bytes = BASE64_STANDARD
         .decode(header_value.trim())
         .map_err(|e| format!("Base64 decode error: {}", e))?;
-    serde_json::from_slice(&bytes)
-        .map_err(|e| format!("JSON parse error: {}", e))
+    serde_json::from_slice(&bytes).map_err(|e| format!("JSON parse error: {}", e))
 }
 
 /// Encodes a PAYMENT-REQUIRED payload into a base64 string (used by the
 /// Nimbus relayer when acting as a resource server / facilitator).
 pub fn encode_payment_required(req: &X402PaymentRequired) -> Result<String, String> {
-    let json = serde_json::to_vec(req)
-        .map_err(|e| format!("JSON serialize error: {}", e))?;
+    let json = serde_json::to_vec(req).map_err(|e| format!("JSON serialize error: {}", e))?;
     Ok(BASE64_STANDARD.encode(&json))
 }
 

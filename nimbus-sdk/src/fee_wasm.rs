@@ -55,9 +55,8 @@ pub fn quote_private_spend_for_merchant_amount(
     gas_cost: u64,
     relayer_markup_bps: u64,
 ) -> Result<PrivateSpendQuote, JsValue> {
-    let quote =
-        nimbus_core::quote_private_spend(merchant_amount, gas_cost, relayer_markup_bps)
-            .ok_or_else(|| JsValue::from_str("Invalid input data"))?;
+    let quote = nimbus_core::quote_private_spend(merchant_amount, gas_cost, relayer_markup_bps)
+        .ok_or_else(|| JsValue::from_str("Invalid input data"))?;
 
     Ok(PrivateSpendQuote {
         merchant_amount: quote.merchant_amount,

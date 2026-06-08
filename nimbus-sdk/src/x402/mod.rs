@@ -12,13 +12,13 @@
 //!    signature, and retries with `PAYMENT-SIGNATURE` header.
 //! 4. Server/Facilitator verifies the Nimbus token and settles payment.
 
-mod types;
 mod codec;
 mod pool;
+mod types;
 
-pub use types::*;
 pub use codec::*;
 pub use pool::*;
+pub use types::*;
 
 // ---------------------------------------------------------------------------
 // Unit tests
@@ -27,9 +27,9 @@ pub use pool::*;
 #[cfg(test)]
 mod tests {
     use super::*;
-    use nimbus_core::*;
-    use base64::Engine;
     use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
+    use base64::Engine;
+    use nimbus_core::*;
 
     #[test]
     fn test_decode_payment_required_roundtrip() {
@@ -80,7 +80,7 @@ mod tests {
         };
 
         let encoded = encode_payment_required(&original).unwrap();
-        
+
         let secret = b"my_secure_shared_hmac_secret_key";
         let hmac_bytes = crate::hmac_sha256(secret, encoded.as_bytes());
         let hmac_hex = hex::encode(hmac_bytes);
@@ -144,40 +144,46 @@ mod tests {
     #[test]
     fn test_agent_token_pool_flow() {
         let mut pool = AgentTokenPool::new();
-        
+
         // 1. Prepare token
-        let session_id = pool.prepare_blind_token(1000, "agent_secret_payment_id_1").unwrap();
+        let session_id = pool
+            .prepare_blind_token(1000, "agent_secret_payment_id_1")
+            .unwrap();
         assert_eq!(pool.get_pending_token_count(), 1);
         assert_eq!(pool.get_ready_token_count(1000), 0);
-        
+
         // 2. Issuer signs blinded message
         let blinded_hex = pool.get_blinded_message(&session_id).unwrap();
         let blinded_bytes = hex::decode(blinded_hex).unwrap();
         let x: BlindedMessage = deserialize_from_bytes(&blinded_bytes).unwrap();
-        
+
         let mut rng = rand::thread_rng();
         let sk_iss = IssuerSecretKey::generate(&mut rng);
         let pk_iss = sk_iss.public_key();
-        
+
         let (masked_sig, k, com_k) = issuer_sign_blinded(&sk_iss, &x, &mut rng);
         let masked_sig_hex = hex::encode(serialize_to_bytes(&masked_sig));
         let com_k_hex = hex::encode(serialize_to_bytes(&com_k));
         let pk_iss_hex = hex::encode(serialize_to_bytes(&pk_iss));
-        
+
         // 3. Register signature result in pool
-        let is_valid = pool.register_signing_result(&session_id, &masked_sig_hex, &com_k_hex, None, None).unwrap();
+        let is_valid = pool
+            .register_signing_result(&session_id, &masked_sig_hex, &com_k_hex, None, None)
+            .unwrap();
         assert!(is_valid);
-        
+
         // 4. Unmask token (once masking key revealed)
         let k_hex = hex::encode(serialize_to_bytes(&k));
         let success = pool.unmask_token(&session_id, &k_hex).unwrap();
         assert!(success);
-        
+
         assert_eq!(pool.get_pending_token_count(), 0);
         assert_eq!(pool.get_ready_token_count(1000), 1);
-        
+
         // 5. Spend token (x402 header generation)
-        let header_val = pool.spend_any_token(1000, "exact", "eip155:42161", &pk_iss_hex, None, None, None).unwrap();
+        let header_val = pool
+            .spend_any_token(1000, "exact", "eip155:42161", &pk_iss_hex, None, None, None)
+            .unwrap();
         assert!(!header_val.is_empty());
         assert_eq!(pool.get_ready_token_count(1000), 0);
     }
@@ -200,10 +206,7 @@ mod tests {
 
         assert_eq!(sig.payment.amount, 100_150_226);
         assert_eq!(
-            nimbus_core::net_after_fee(
-                sig.payment.amount,
-                nimbus_core::PRIVATE_SPEND_FEE_BPS,
-            ),
+            nimbus_core::net_after_fee(sig.payment.amount, nimbus_core::PRIVATE_SPEND_FEE_BPS,),
             Some(100_000_000),
         );
     }

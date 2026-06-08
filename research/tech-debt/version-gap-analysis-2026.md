@@ -21,8 +21,9 @@ field bytes sempat di-reverse dan G2/Fp2 perlu block remapping.
 | **ark-bls12-381** | 0.5.0 (nimbus-core) | **0.6.0** (Apr 2026) | **1 version** | 6 months |
 | **alloy-primitives** | 0.7.6 / 1.0 | **1.6.0** (May 2026) | **Major version** | 1 year |
 | **arkworks stack** | 0.5.0 | **0.6.0** | **1 version** | Apr 2026 |
-| **Tokio** | 1.36.0 | **1.41.0** (May 2026) | **5 versions** | Ongoing |
-| **Axum** | 0.7.5 | **0.8.0** (Dec 2025) | **1 version** | 6 months |
+| **Tokio** | 1.52 manifest / 1.52.3 resolved | **Aligned in batch 1** | ✅ Done | 2026-06-08 |
+| **Axum** | 0.8 manifest / 0.8.9 resolved | **Aligned in batch 1** | ✅ Done | 2026-06-08 |
+| **Alloy node stack** | 1.8 manifest / 1.8.3 resolved | **Aligned in batch 1** | ✅ Done | 2026-06-08 |
 | **zeroize** | 1.8 | **1.8** | ✅ Current | - |
 
 ---
@@ -161,16 +162,30 @@ Sources:
 
 ---
 
-## 🟢 MINOR: Web Framework Gap
+## ✅ RESOLVED BATCH 1: Web Framework / Node Runtime Gap
 
-### Tokio: 1.36.0 → 1.41.0
+### Tokio: 1.36.0/1.35 manifest → 1.52 manifest
 - Performance improvements
 - Better async runtime
 - Better diagnostics
 
-### Axum: 0.7.5 → 0.8.0
+### Axum: 0.7.5 manifest → 0.8 manifest / 0.8.9 resolved
 - Minor API changes
 - Better middleware ecosystem
+
+### Other aligned node/CLI dependencies
+- `nimbus-node`: `serde` 1.0.228, `serde_json` 1.0.150, `alloy` 1.8,
+  `tempfile` 3.27.
+- `nimbus-cli`: `clap` 4.6, `tokio` 1.52.
+
+Verification:
+
+```text
+cargo test --package nimbus-node handlers::quote
+cargo check --workspace --all-targets
+```
+
+Both passed on 2026-06-08.
 
 ---
 
@@ -267,13 +282,15 @@ ark-serialize = "0.5.0"    # → 0.6.0
 # nimbus-contracts
 alloy-primitives = "0.7.6"  # → 1.6.0
 
-# nimbus-node
-tokio = "1.36.0"            # → 1.41.0
-axum = "0.7.5"               # → 0.8.0
+# nimbus-node / nimbus-cli
+tokio = "1.52"              # done
+axum = "0.8"                # done
+alloy = "1.8"               # node stack done
 ```
 
-**Risk:** Breaking changes in alloy 1.x
-**Benefit:** Performance, modern APIs
+**Status:** Node/CLI runtime part done. Contract-side `alloy-primitives` remains
+separate because it affects Stylus/WASM compatibility and should be migrated in
+the same guarded lane as contract dependency work.
 
 ---
 
@@ -281,8 +298,8 @@ axum = "0.7.5"               # → 0.8.0
 
 ### Testnet (Current)
 ```
-✅ Keep current versions (0.6.0 Stylus, 0.5.0 crypto)
-Reason: Stability for testing
+✅ Keep Stylus/contract crypto stable while testnet hard-tests continue.
+✅ Node/CLI runtime dependencies have been aligned in batch 1.
 ```
 
 ### Production Upgrade (Required)
@@ -291,8 +308,7 @@ Reason: Stability for testing
   - Stylus 0.10.0 (4 versions behind)
   - ark-bls12-381 0.6.0
   - alloy-primitives 1.6.0
-  - Tokio 1.41.0
-  - Axum 0.8.0
+  - Tokio/Axum node runtime: done in batch 1
 
 Reason: Production should use latest stable versions
 Security patches, performance improvements, EIP-7702 support
@@ -305,7 +321,7 @@ Security patches, performance improvements, EIP-7702 support
 ### Phase 1: Dependency Update (1-2 days)
 1. Update nimbus-contracts/Cargo.toml
 2. Update nimbus-core/Cargo.toml  
-3. Update nimbus-node/Cargo.toml
+3. Update nimbus-node/Cargo.toml ✅ batch 1 done
 4. Fix compilation errors from API changes
 5. Run cargo test to verify
 
@@ -333,11 +349,10 @@ Security patches, performance improvements, EIP-7702 support
 - **Stylus 0.6.0 → 0.10.0** (18 months behind, 4 versions)
 - **alloy-primitives** (major version behind)
 - **crypto stack** (6 months behind)
+- **node/CLI runtime gap** resolved in batch 1 on 2026-06-08
 
 **Recommendation:** Upgrade sebelum mainnet deployment untuk:
 - Security patches
 - Performance improvements  
 - EIP-7702 support (smart wallets)
 - Future-proofing
-
-**Question:** Mau aku upgrade sekarang atau keep current untuk testnet, upgrade pas mau mainnet?

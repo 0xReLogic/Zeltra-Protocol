@@ -1,10 +1,9 @@
 //! WASM bindings for ZK compliance proof generation
 
 use crate::wasm_types::ZkComplianceProof;
-use wasm_bindgen::prelude::*;
 use nimbus_core::*;
 use rand::rngs::OsRng;
-
+use wasm_bindgen::prelude::*;
 
 #[cfg(target_arch = "wasm32")]
 #[wasm_bindgen]
@@ -27,7 +26,7 @@ static VERIFYING_KEY: OnceLock<ark_groth16::VerifyingKey<Bls12_381>> = OnceLock:
 pub fn init_compliance_keys() -> Result<(), JsValue> {
     #[cfg(target_arch = "wasm32")]
     log("ZK Prover: Initializing compliance circuit keys...");
-    
+
     // Generate keys (in production, these would be loaded from a trusted setup)
     match generate_compliance_keys() {
         Ok(keys) => {
@@ -41,7 +40,7 @@ pub fn init_compliance_keys() -> Result<(), JsValue> {
             log("ZK Prover: Failed to initialize keys");
         }
     }
-    
+
     Ok(())
 }
 
@@ -64,15 +63,15 @@ pub fn client_generate_compliance_proof(
 ) -> Result<ZkComplianceProof, JsValue> {
     // Ensure keys are initialized
     init_compliance_keys()?;
-    
-    let mut root_bytes = hex::decode(root_hex)
-        .map_err(|_| JsValue::from_str("Invalid input data"))?;
-    let mut nullifier_bytes = hex::decode(nullifier_hex)
-        .map_err(|_| JsValue::from_str("Invalid input data"))?;
-    let mut recipient_bytes_decoded = hex::decode(recipient_hex)
-        .map_err(|_| JsValue::from_str("Invalid input data"))?;
-    let mut amount_bytes = hex::decode(amount_hex)
-        .map_err(|_| JsValue::from_str("Invalid input data"))?;
+
+    let mut root_bytes =
+        hex::decode(root_hex).map_err(|_| JsValue::from_str("Invalid input data"))?;
+    let mut nullifier_bytes =
+        hex::decode(nullifier_hex).map_err(|_| JsValue::from_str("Invalid input data"))?;
+    let mut recipient_bytes_decoded =
+        hex::decode(recipient_hex).map_err(|_| JsValue::from_str("Invalid input data"))?;
+    let mut amount_bytes =
+        hex::decode(amount_hex).map_err(|_| JsValue::from_str("Invalid input data"))?;
 
     if root_bytes.len() != 32 || nullifier_bytes.len() != 32 || amount_bytes.len() != 32 {
         crate::secure_zeroize_vec(&mut root_bytes);
@@ -107,7 +106,8 @@ pub fn client_generate_compliance_proof(
     let mut randomness = nullifier_fr - secret;
 
     // Get the proving key
-    let pk = PROVING_KEY.get()
+    let pk = PROVING_KEY
+        .get()
         .ok_or_else(|| JsValue::from_str("Proving key not initialized"))?;
 
     // Generate the compliance proof
@@ -120,7 +120,8 @@ pub fn client_generate_compliance_proof(
         secret,
         randomness,
         pk,
-    ).map_err(|_| JsValue::from_str("Proof generation failed"))?;
+    )
+    .map_err(|_| JsValue::from_str("Proof generation failed"))?;
 
     // Compute public inputs for verification before zeroizing the inputs
     let g1 = G1Projective::generator();
@@ -154,4 +155,3 @@ pub fn client_generate_compliance_proof(
         hex::encode(pub_inputs_evm),
     ))
 }
-
