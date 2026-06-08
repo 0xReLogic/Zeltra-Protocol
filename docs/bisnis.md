@@ -77,18 +77,21 @@ harga yang diminta.
 Harga merchant + Network Fee = total yang dibayar pengguna
 ```
 
-Merchant tidak dipaksa menanggung biaya privasi milik pengirim.
-
-Kontrak saat ini memotong protocol fee dari `amount`. Karena itu, SDK harus
-melakukan gross-up saat merchant meminta nominal pasti:
+Merchant tidak dipaksa menanggung biaya privasi milik pengirim. Contract
+memperlakukan `amount` sebagai nominal invoice yang harus diterima merchant
+secara penuh. Protocol fee didebit di atas `amount` dari saldo pengirim:
 
 ```text
-contract amount = harga merchant / (1 - 0,0015)
+merchant payout = harga merchant
+protocol fee    = ceil(harga merchant * 0,15%)
+total debit     = harga merchant + protocol fee + execution fee
 ```
 
-Dengan cara ini, fee tetap berasal dari pengirim dan merchant menerima harga yang
-diminta. Pembulatan final harus mengikuti integer stablecoin dan diverifikasi
-terhadap quote kontrak.
+Dengan cara ini, fee tetap berasal dari pengirim dan merchant menerima harga
+yang diminta. Jika saldo pengirim hanya cukup untuk harga merchant tetapi tidak
+cukup untuk fee, transaksi harus gagal sebagai `INSUFFICIENT_PRINCIPAL`.
+Pembulatan final harus mengikuti integer stablecoin dan diverifikasi terhadap
+quote kontrak.
 
 ### 4.3 Unshield
 
@@ -127,11 +130,11 @@ Contoh ilustratif, bukan harga tetap:
 
 ```text
 Harga merchant                  100,0000 USDC
-Gross-up protocol fee            ~0,1502 USDC
+Protocol fee 0,15%                0,1500 USDC
 Gas quote                         0,0200 USDC
 Relayer markup 15% gas            0,0030 USDC
                                 -------------
-Total pengguna                 ~100,1732 USDC
+Total pengguna                  100,1730 USDC
 Merchant menerima              100,0000 USDC
 ```
 
@@ -324,9 +327,9 @@ yang sudah aktif.
 Implementasi saat ini sudah:
 
 - memotong `0,1%` saat deposit;
-- memotong `0,15%` saat spend/redemption.
-- memiliki helper fee terpusat di `nimbus-core` dan SDK untuk menghitung
-  gross-up private spend agar merchant menerima nominal exact;
+- mendebit `0,15%` di atas nominal merchant saat spend/redemption;
+- memiliki helper fee terpusat di `nimbus-core` dan SDK agar merchant menerima
+  nominal exact tanpa short-pay;
 - memiliki helper quote execution fee untuk memisahkan gas reimbursement dan
   markup relayer.
 

@@ -26,8 +26,8 @@ impl Default for NetworkConfig {
 
 impl NetworkConfig {
     pub fn from_env() -> Self {
-        let bind_addr = std::env::var("NIMBUS_BIND_ADDR")
-            .unwrap_or_else(|_| "127.0.0.1".to_string());
+        let bind_addr =
+            std::env::var("NIMBUS_BIND_ADDR").unwrap_or_else(|_| "127.0.0.1".to_string());
 
         let port = std::env::var("PORT")
             .unwrap_or_else(|_| "8080".to_string())
@@ -47,7 +47,9 @@ impl NetworkConfig {
     }
 
     pub fn is_tailscale_bind(&self) -> bool {
-        self.require_tailscale || self.bind_addr.starts_with("100.") || self.bind_addr.starts_with("fd7a:")
+        self.require_tailscale
+            || self.bind_addr.starts_with("100.")
+            || self.bind_addr.starts_with("fd7a:")
     }
 
     pub fn listener_addr(&self) -> String {

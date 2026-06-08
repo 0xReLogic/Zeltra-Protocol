@@ -118,7 +118,7 @@ impl Nimbus {
             return Ok(false);
         }
 
-        // Calculate standard redemption/withdrawal fee of 0.15% (amount * 15 / 10000, round up)
+        // `amount` is the exact merchant/recipient payout. Fees are debited on top.
         let base_fee = (amount
             .checked_mul(U256::from(15))
             .ok_or_else(|| b"BASE_FEE_MUL_OVERFLOW".to_vec())?
@@ -139,16 +139,14 @@ impl Nimbus {
             .checked_add(premium_share)
             .ok_or_else(|| b"PROTOCOL_SHARE_OVERFLOW".to_vec())?;
 
-        if amount < protocol_share {
-            return Err(b"AMOUNT_LESS_THAN_FEES".to_vec());
-        }
-        let payout = amount
-            .checked_sub(protocol_share)
-            .ok_or_else(|| b"PAYOUT_UNDERFLOW".to_vec())?;
+        let payout = amount;
+        let total_debit = payout
+            .checked_add(protocol_share)
+            .ok_or_else(|| b"TOTAL_DEBIT_OVERFLOW".to_vec())?;
 
         let principal = self.total_deposited_principal.get();
         let new_principal = principal
-            .checked_sub(amount)
+            .checked_sub(total_debit)
             .ok_or_else(|| b"INSUFFICIENT_PRINCIPAL".to_vec())?;
 
         #[cfg(test)]
@@ -158,7 +156,7 @@ impl Nimbus {
             self.nullifiers.insert(nullifier, true);
 
             // Track epoch volume for dynamic rebalancing
-            self.update_epoch_and_rebalance_ratio(amount)?;
+            self.update_epoch_and_rebalance_ratio(total_debit)?;
 
             // Enforce invariant: contract_assets >= outstanding_liabilities
             self.check_liability_invariant()?;
@@ -173,10 +171,10 @@ impl Nimbus {
             self.total_deposited_principal.set(new_principal);
 
             // Track epoch volume for dynamic rebalancing
-            self.update_epoch_and_rebalance_ratio(amount)?;
+            self.update_epoch_and_rebalance_ratio(total_debit)?;
 
             // 3. INTERACTIONS
-            self.ensure_liquidity(amount)?;
+            self.ensure_liquidity(total_debit)?;
 
             let stablecoin_address = self.stablecoin.get();
             let erc20 = IErc20::new(stablecoin_address);
@@ -258,24 +256,7 @@ impl Nimbus {
             return Ok(false);
         }
 
-        // Calculate payout (net after fees) using the same safe round-up math as spend()
-        let base_fee = (amount
-            .checked_mul(U256::from(15))
-            .ok_or_else(|| b"BASE_FEE_MUL_OVERFLOW".to_vec())?
-            + U256::from(9999))
-            / U256::from(10000);
-        let premium = self._calculate_fast_path_premium(amount)?;
-        let premium_share = (premium
-            .checked_mul(U256::from(20))
-            .ok_or_else(|| b"PREMIUM_SHARE_MUL_OVERFLOW".to_vec())?
-            + U256::from(99))
-            / U256::from(100);
-        let protocol_share = base_fee
-            .checked_add(premium_share)
-            .ok_or_else(|| b"PROTOCOL_SHARE_OVERFLOW".to_vec())?;
-        let payout = amount
-            .checked_sub(protocol_share)
-            .ok_or_else(|| b"PAYOUT_UNDERFLOW".to_vec())?;
+        let payout = amount;
 
         #[cfg(test)]
         {
@@ -292,16 +273,8 @@ impl Nimbus {
             let erc20 = IErc20::new(collateral_token);
 
             // If condition_id is zero, this is a standard cross-chain transfer (not Polymarket).
-            // In this case, polymarket_ctf acts as the recipient's wallet address.
+            // In this case, _spend() already transferred the exact payout to polymarket_ctf.
             if condition_id == FixedBytes::ZERO {
-                if polymarket_ctf != Address::ZERO && payout > U256::ZERO {
-                    let success = erc20
-                        .transfer(&mut *self, polymarket_ctf, payout)
-                        .map_err(|e| e)?;
-                    if !success {
-                        return Err(b"CCIP_TRANSFER_FAILED".to_vec());
-                    }
-                }
                 return Ok(true);
             }
 

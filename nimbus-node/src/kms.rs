@@ -1,21 +1,17 @@
 //! Key Management System integration for loading BLS share keys
 
-use serde::Deserialize;
 use crate::http;
+use serde::Deserialize;
 use std::collections::HashMap;
 
-pub fn load_issuer_public_key(
-    share_sk: &nimbus_core::Fr,
-) -> nimbus_core::IssuerPublicKey {
+pub fn load_issuer_public_key(share_sk: &nimbus_core::Fr) -> nimbus_core::IssuerPublicKey {
     if let Ok(hex_str) = std::env::var("NIMBUS_ISSUER_PUBLIC_KEY") {
         let normalized = hex_str.trim_start_matches("0x");
         let bytes = hex::decode(normalized)
             .unwrap_or_else(|_| fatal_issuer_public_key("must be valid hex"));
         return nimbus_core::deserialize_from_bytes::<nimbus_core::IssuerPublicKey>(&bytes)
             .unwrap_or_else(|| {
-                fatal_issuer_public_key(
-                    "must be a canonical compressed Nimbus IssuerPublicKey",
-                )
+                fatal_issuer_public_key("must be a canonical compressed Nimbus IssuerPublicKey")
             });
     }
 
@@ -91,7 +87,9 @@ pub fn load_guardian_public_keys(
     }
 
     if registry.len().saturating_add(1) < threshold {
-        fatal_guardian_registry("does not contain enough guardian keys for the configured threshold");
+        fatal_guardian_registry(
+            "does not contain enough guardian keys for the configured threshold",
+        );
     }
     registry
 }
@@ -113,10 +111,13 @@ pub async fn load_share_key() -> (nimbus_core::Fr, u32) {
             .unwrap_or_else(|_| "http://127.0.0.1:8200".to_string());
         let vault_path = std::env::var("NIMBUS_VAULT_PATH")
             .unwrap_or_else(|_| "v1/secret/data/nimbus".to_string());
-        
+
         let url = format!("{}/{}", vault_addr.trim_end_matches('/'), vault_path);
-        println!("KMS INTEGRATION: Fetching BLS share key from OpenBao/Vault at {}...", url);
-        
+        println!(
+            "KMS INTEGRATION: Fetching BLS share key from OpenBao/Vault at {}...",
+            url
+        );
+
         match http::get_http_with_headers(&url, &[("X-Vault-Token", &vault_token)]).await {
             Ok(body) => {
                 #[derive(Deserialize)]
@@ -131,17 +132,23 @@ pub async fn load_share_key() -> (nimbus_core::Fr, u32) {
                 struct VaultSecretResponse {
                     data: VaultSecretInner,
                 }
-                
+
                 match serde_json::from_str::<VaultSecretResponse>(&body) {
                     Ok(res) => {
                         let hex_str = res.data.data.share_key;
                         if let Ok(bytes) = hex::decode(&hex_str) {
                             if bytes.len() == 40 {
-                                if let Some((idx, fr)) = nimbus_core::deserialize_from_bytes::<(usize, nimbus_core::Fr)>(&bytes) {
+                                if let Some((idx, fr)) = nimbus_core::deserialize_from_bytes::<(
+                                    usize,
+                                    nimbus_core::Fr,
+                                )>(&bytes)
+                                {
                                     println!("KMS INTEGRATION: Successfully loaded BLS share key (index {}) from OpenBao/Vault.", idx);
                                     return (fr, idx as u32);
                                 }
-                            } else if let Some(fr) = nimbus_core::deserialize_from_bytes::<nimbus_core::Fr>(&bytes) {
+                            } else if let Some(fr) =
+                                nimbus_core::deserialize_from_bytes::<nimbus_core::Fr>(&bytes)
+                            {
                                 println!("KMS INTEGRATION: Successfully loaded BLS share key from OpenBao/Vault.");
                                 return (fr, env_index);
                             }
@@ -149,12 +156,18 @@ pub async fn load_share_key() -> (nimbus_core::Fr, u32) {
                         println!("KMS INTEGRATION: Error parsing/deserializing share key bytes from Vault.");
                     }
                     Err(e) => {
-                        println!("KMS INTEGRATION: Error parsing Vault response JSON: {}. Response: {}", e, body);
+                        println!(
+                            "KMS INTEGRATION: Error parsing Vault response JSON: {}. Response: {}",
+                            e, body
+                        );
                     }
                 }
             }
             Err(e) => {
-                println!("KMS INTEGRATION: Failed to fetch secret from OpenBao/Vault: {}", e);
+                println!(
+                    "KMS INTEGRATION: Failed to fetch secret from OpenBao/Vault: {}",
+                    e
+                );
             }
         }
     }
@@ -162,13 +175,18 @@ pub async fn load_share_key() -> (nimbus_core::Fr, u32) {
     // 2. Fallback to NIMBUS_SHARE_KEY for local development / backward compatibility
     if let Ok(hex_str) = std::env::var("NIMBUS_SHARE_KEY") {
         println!("WARNING: Raw plain text 'NIMBUS_SHARE_KEY' env variable detected.");
-        println!("         This is unsafe for production. Use OpenBao/Vault KMS integration instead.");
+        println!(
+            "         This is unsafe for production. Use OpenBao/Vault KMS integration instead."
+        );
         if let Ok(bytes) = hex::decode(&hex_str) {
             if bytes.len() == 40 {
-                if let Some((idx, fr)) = nimbus_core::deserialize_from_bytes::<(usize, nimbus_core::Fr)>(&bytes) {
+                if let Some((idx, fr)) =
+                    nimbus_core::deserialize_from_bytes::<(usize, nimbus_core::Fr)>(&bytes)
+                {
                     return (fr, idx as u32);
                 }
-            } else if let Some(fr) = nimbus_core::deserialize_from_bytes::<nimbus_core::Fr>(&bytes) {
+            } else if let Some(fr) = nimbus_core::deserialize_from_bytes::<nimbus_core::Fr>(&bytes)
+            {
                 return (fr, env_index);
             }
         }

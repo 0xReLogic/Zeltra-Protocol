@@ -237,20 +237,22 @@ Validasi:
 Setelah validasi:
 
 - fee dihitung dengan pembulatan ke atas;
-- principal dikurangi sebesar `amount`;
+- principal dikurangi sebesar `amount + protocol_share`;
 - nullifier ditandai sudah digunakan;
 - liquidity disiapkan sebelum transfer;
-- payout dikirim ke recipient;
+- `amount` dikirim penuh ke recipient sebagai exact payout/invoice amount;
 - protocol share dikirim ke `fee_recipient`.
 
 Perhitungan:
 
 ```text
-base_fee       = ceil(amount * 15 / 10_000)     // 0.15%
-premium        = fast_path_premium(amount)
+merchant_due   = amount                         // exact recipient payout
+base_fee       = ceil(merchant_due * 15 / 10_000) // 0.15%
+premium        = fast_path_premium(merchant_due)
 premium_share  = ceil(premium * 20 / 100)
 protocol_share = base_fee + premium_share
-payout         = amount - protocol_share
+total_debit    = merchant_due + protocol_share
+payout         = merchant_due
 ```
 
 Issuer key dikelola melalui:
@@ -275,7 +277,7 @@ spend ditolak.
 Flow yang dituju:
 
 1. Jalankan spend dan invalidasi nullifier.
-2. Hitung payout setelah fee.
+2. Pakai `amount` sebagai exact payout dan debit fee di atas amount.
 3. Approve collateral kepada Conditional Tokens contract.
 4. Panggil `splitPosition` untuk mencetak outcome shares.
 

@@ -1,16 +1,16 @@
 //! HTTP request handlers
 
-pub mod health;
 pub mod deposit;
-pub mod spend;
-pub mod x402;
-pub mod threshold;
+pub mod health;
 pub mod quote;
+pub mod spend;
+pub mod threshold;
+pub mod x402;
 
+pub use deposit::{handle_deposit, handle_reveal, quorum_failure_monitor};
 pub use health::health_check;
 pub use health::signing_health;
-pub use deposit::{handle_deposit, handle_reveal, quorum_failure_monitor};
-pub use spend::{handle_spend, process_spend_batch};
-pub use x402::handle_x402_verify;
-pub use threshold::{handle_sign_share, handle_leader_sign};
 pub use quote::handle_private_spend_quote;
+pub use spend::{handle_spend, process_spend_batch};
+pub use threshold::{handle_leader_sign, handle_sign_share};
+pub use x402::handle_x402_verify;

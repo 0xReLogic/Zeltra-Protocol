@@ -860,11 +860,20 @@ dikembalikan, dan final verification hanya dilakukan oleh CLI.
 - [x] Verifikasi recipient menerima payout tepat.
   - Recipient naik dari `82.141446` ke `87.133946` USDC: payout `4.9925`
     USDC untuk spend amount `5 USDC` setelah fee `0.0075`.
+  - Resolusi exact-payout 2026-06-08:
+    contract `0x7853df45be072977082d2872e199ac2e405c6d22`,
+    spend tx `0xa947fccc674c816a3cbc5f9297fc3f4a570656da46af25766de13fafd17e668a`.
+    Recipient naik dari `87.133946` ke `92.133946` USDC, tepat `+5.0`
+    USDC untuk invoice `5 USDC`.
 - [x] Verifikasi fee recipient menerima fee tepat.
   - Fee recipient sama dengan owner test wallet; net wallet movement sesuai
     deposit net `-9.99` USDC plus spend fee `+0.0075` USDC.
+  - Exact-payout test: owner/fee recipient net `-9.9825` USDC setelah deposit
+    10 USDC, deposit fee balik `0.01`, dan spend fee balik `0.0075`.
 - [x] Verifikasi principal turun tepat.
   - Principal setelah deposit `9.99` USDC, setelah spend `4.99` USDC.
+  - Exact-payout test: principal setelah deposit `9.99` USDC, setelah spend
+    invoice `5 USDC` turun ke `4.9825` USDC (`5 + 0.0075` debit).
 - [ ] Verifikasi nullifier tercatat on-chain.
 - [ ] Ubah satu byte `alpha_neg`: transaksi harus revert/fail.
 - [ ] Ubah satu byte `hm`: transaksi harus revert/fail.
@@ -1485,11 +1494,14 @@ Sisa implementasi wajib:
 - [ ] Benchmark gas receipt single versus batch 2/4/8; jangan memakai asumsi
   persentase penghematan.
 - [ ] Ukur latency API-to-broadcast dan API-to-confirmed p50/p95/p99.
-- [x] Tambahkan fee helper terpusat untuk menghitung gross-up supaya merchant
-  menerima nominal exact setelah protocol fee contract.
+- [x] Tambahkan fee helper terpusat agar merchant menerima nominal exact dan
+  protocol fee didebit di atas invoice.
 - [x] Pisahkan gas reimbursement dan markup relayer dalam quote informasional.
-- [ ] Buktikan total debit user = merchant payout + protocol fee + execution
+- [x] Buktikan total debit user = merchant payout + protocol fee + execution
   quote, tanpa hidden fee.
+  - Core quote sekarang: `contract_amount = merchant_amount`,
+    `protocol_fee = ceil(merchant_amount * 15 / 10_000)`,
+    `user_total_debit = merchant_amount + protocol_fee + execution_fee`.
 - [ ] Buktikan margin batch positif setelah gas, RPC, retry, dan transaksi
   revert diperhitungkan.
 - [ ] Tambahkan integration test signed quote sampai settlement accounting.

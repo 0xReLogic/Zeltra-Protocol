@@ -69,10 +69,12 @@ pub fn quote_private_spend(
     gas_cost: u64,
     relayer_markup_bps: u64,
 ) -> Option<SpendQuote> {
-    let contract_amount = gross_up_private_spend_amount(merchant_amount)?;
-    let protocol_fee = contract_amount.checked_sub(merchant_amount)?;
+    let contract_amount = merchant_amount;
+    let protocol_fee = private_spend_fee(merchant_amount)?;
     let (relayer_markup, execution_fee) = quote_execution_fee(gas_cost, relayer_markup_bps)?;
-    let user_total_debit = contract_amount.checked_add(execution_fee)?;
+    let user_total_debit = contract_amount
+        .checked_add(protocol_fee)?
+        .checked_add(execution_fee)?;
 
     Some(SpendQuote {
         merchant_amount,
@@ -105,20 +107,16 @@ mod tests {
     }
 
     #[test]
-    fn gross_up_preserves_exact_merchant_payout() {
+    fn quote_preserves_exact_merchant_payout() {
         let quote = quote_private_spend(100_000_000, 20_000, 1_500).unwrap();
 
         assert_eq!(quote.merchant_amount, 100_000_000);
-        assert_eq!(quote.contract_amount, 100_150_226);
-        assert_eq!(quote.protocol_fee, 150_226);
+        assert_eq!(quote.contract_amount, 100_000_000);
+        assert_eq!(quote.protocol_fee, 150_000);
         assert_eq!(quote.gas_cost, 20_000);
         assert_eq!(quote.relayer_markup, 3_000);
         assert_eq!(quote.execution_fee, 23_000);
-        assert_eq!(quote.user_total_debit, 100_173_226);
-        assert_eq!(
-            net_after_fee(quote.contract_amount, PRIVATE_SPEND_FEE_BPS),
-            Some(100_000_000),
-        );
+        assert_eq!(quote.user_total_debit, 100_173_000);
     }
 
     #[test]

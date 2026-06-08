@@ -1478,7 +1478,7 @@ mod tests {
         assert!(is_valid);
         assert_eq!(
             contract.total_deposited_principal().unwrap(),
-            U256::from(9_980_000)
+            U256::from(9_965_000)
         );
 
         // Test yield claim under test (where total assets = principal, so yield is 0)
@@ -1527,9 +1527,8 @@ mod tests {
         // Under our mock try-catch, it should return true (gracefully handled)
         assert!(success);
 
-        // The net payout should be calculated:
-        // 10,000,000 - base_fee = 10,000,000 - 15000 = 9,985,000
-        let expected_payout = U256::from(9_985_000);
+        // The refund records the exact payout; protocol fees are debited separately.
+        let expected_payout = U256::from(10_000_000);
         assert_eq!(
             contract.get_failed_intent_refund(nullifier).unwrap(),
             expected_payout
@@ -1696,8 +1695,11 @@ mod tests {
         let mut recipient_hash = [0u8; 32];
         recipient_hash[12..].copy_from_slice(recipient.as_slice());
         let recipient_hash = FixedBytes::from(recipient_hash);
+        let spend_amount = U256::from(5_000_000);
+        let spend_fee = U256::from(7_500);
+        let total_spend_debit = spend_amount + spend_fee;
         let (alpha_neg, hm, pk_iss, nullifier) =
-            register_mock_issuer(&mut contract, owner, net_amount, recipient_hash);
+            register_mock_issuer(&mut contract, owner, spend_amount, recipient_hash);
         let before_spend_principal = contract.total_deposited_principal().unwrap();
 
         assert!(contract
@@ -1706,7 +1708,7 @@ mod tests {
                 alpha_neg.clone().into(),
                 pk_iss.clone().into(),
                 recipient,
-                net_amount,
+                spend_amount,
                 recipient_hash,
                 U256::ZERO,
                 FixedBytes::ZERO,
@@ -1716,8 +1718,8 @@ mod tests {
         let after_spend_principal = contract.total_deposited_principal().unwrap();
         assert_eq!(
             after_spend_principal,
-            before_spend_principal - net_amount,
-            "Spend must decrease principal by net amount"
+            before_spend_principal - total_spend_debit,
+            "Spend must decrease principal by payout plus fee"
         );
 
         // 4. Verify cannot spend again with same nullifier (replay protection)
@@ -1727,7 +1729,7 @@ mod tests {
                 alpha_neg.clone().into(),
                 pk_iss.clone().into(),
                 recipient,
-                net_amount,
+                spend_amount,
                 recipient_hash,
                 U256::ZERO,
                 FixedBytes::ZERO,
@@ -1754,10 +1756,10 @@ mod tests {
             after_spend_principal
         );
 
-        // 6. Invariant check: principal should be back to initial state
+        // 6. Invariant check: partial spend keeps the remaining principal as liability.
         assert_eq!(
             contract.total_deposited_principal().unwrap(),
-            initial_principal
+            after_deposit_principal - total_spend_debit
         );
     }
 

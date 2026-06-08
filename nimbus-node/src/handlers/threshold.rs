@@ -3,16 +3,15 @@
 //! Uses circuit breaker pattern (Finding #15) for guardian RPC calls
 //! to prevent cascading failures when guardians are unreachable.
 
+use crate::{dto::*, http, state::AppState};
 use axum::Json;
-use crate::{state::AppState, dto::*, http};
 use std::collections::HashSet;
 
 fn append_guardian_share(
     response: SignShareResponse,
     blinded: &nimbus_core::BlindedMessage,
     k: &nimbus_core::Fr,
-    guardian_public_keys:
-        &std::collections::HashMap<u32, nimbus_core::IssuerPublicKey>,
+    guardian_public_keys: &std::collections::HashMap<u32, nimbus_core::IssuerPublicKey>,
     seen_indices: &mut HashSet<u32>,
     partial_signatures: &mut Vec<PartialSignatureInfo>,
 ) -> Result<(), &'static str> {
@@ -30,10 +29,8 @@ fn append_guardian_share(
     let signature_bytes = hex::decode(&response.signature_share_hex)
         .map_err(|_| "guardian returned invalid signature hex")?;
     let signature =
-        nimbus_core::deserialize_from_bytes::<nimbus_core::PartialBlindSignature>(
-            &signature_bytes,
-        )
-        .ok_or("guardian returned invalid partial signature encoding")?;
+        nimbus_core::deserialize_from_bytes::<nimbus_core::PartialBlindSignature>(&signature_bytes)
+            .ok_or("guardian returned invalid partial signature encoding")?;
     if !nimbus_core::verify_partial_signature(blinded, k, &signature, public_share) {
         return Err("guardian partial signature failed cryptographic verification");
     }
@@ -68,8 +65,7 @@ fn issuer_public_key_matches(
         return false;
     };
 
-    nimbus_core::serialize_to_bytes(configured)
-        == nimbus_core::serialize_to_bytes(&requested)
+    nimbus_core::serialize_to_bytes(configured) == nimbus_core::serialize_to_bytes(&requested)
 }
 
 pub async fn handle_sign_share(
@@ -80,7 +76,10 @@ pub async fn handle_sign_share(
     use std::str::FromStr;
 
     // 1. Verify the timestamp is within 60 seconds (unless in test mode).
-    let is_test_env = cfg!(test) || std::env::var("NIMBUS_ENV").map(|v| v == "test").unwrap_or(false);
+    let is_test_env = cfg!(test)
+        || std::env::var("NIMBUS_ENV")
+            .map(|v| v == "test")
+            .unwrap_or(false);
     if !is_test_env {
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -108,38 +107,47 @@ pub async fn handle_sign_share(
     );
     let sig_bytes = match hex::decode(&payload.signature_hex) {
         Ok(b) => b,
-        Err(e) => return Json(SignShareResponse {
-            status: "ERROR".to_string(),
-            share_index: None,
-            signature_share_hex: format!("Invalid signature hex: {}", e),
-        }),
+        Err(e) => {
+            return Json(SignShareResponse {
+                status: "ERROR".to_string(),
+                share_index: None,
+                signature_share_hex: format!("Invalid signature hex: {}", e),
+            })
+        }
     };
     let parsed_sig = match alloy::primitives::Signature::try_from(sig_bytes.as_slice()) {
         Ok(sig) => sig,
-        Err(e) => return Json(SignShareResponse {
-            status: "ERROR".to_string(),
-            share_index: None,
-            signature_share_hex: format!("Failed to parse signature: {}", e),
-        }),
+        Err(e) => {
+            return Json(SignShareResponse {
+                status: "ERROR".to_string(),
+                share_index: None,
+                signature_share_hex: format!("Failed to parse signature: {}", e),
+            })
+        }
     };
     let recovered_address = match parsed_sig.recover_address_from_msg(msg.as_bytes()) {
         Ok(addr) => addr,
-        Err(e) => return Json(SignShareResponse {
-            status: "ERROR".to_string(),
-            share_index: None,
-            signature_share_hex: format!("Failed to recover address: {}", e),
-        }),
+        Err(e) => {
+            return Json(SignShareResponse {
+                status: "ERROR".to_string(),
+                share_index: None,
+                signature_share_hex: format!("Failed to recover address: {}", e),
+            })
+        }
     };
 
     // 3. Verify the recovered address matches leader_address.
-    let expected_leader_address = match alloy::primitives::Address::from_str(&payload.leader_address) {
-        Ok(addr) => addr,
-        Err(e) => return Json(SignShareResponse {
-            status: "ERROR".to_string(),
-            share_index: None,
-            signature_share_hex: format!("Invalid leader address: {}", e),
-        }),
-    };
+    let expected_leader_address =
+        match alloy::primitives::Address::from_str(&payload.leader_address) {
+            Ok(addr) => addr,
+            Err(e) => {
+                return Json(SignShareResponse {
+                    status: "ERROR".to_string(),
+                    share_index: None,
+                    signature_share_hex: format!("Invalid leader address: {}", e),
+                })
+            }
+        };
     if recovered_address != expected_leader_address {
         return Json(SignShareResponse {
             status: "ERROR".to_string(),
@@ -162,12 +170,16 @@ pub async fn handle_sign_share(
             });
         }
     } else {
-        let is_dev_or_test = cfg!(test) || std::env::var("NIMBUS_ENV").map(|v| v == "test" || v == "dev" || v == "development").unwrap_or(true);
+        let is_dev_or_test = cfg!(test)
+            || std::env::var("NIMBUS_ENV")
+                .map(|v| v == "test" || v == "dev" || v == "development")
+                .unwrap_or(true);
         if !is_dev_or_test {
             return Json(SignShareResponse {
                 status: "ERROR".to_string(),
                 share_index: None,
-                signature_share_hex: "NIMBUS_TRUSTED_LEADERS is not configured in production".to_string(),
+                signature_share_hex: "NIMBUS_TRUSTED_LEADERS is not configured in production"
+                    .to_string(),
             });
         }
     }
@@ -175,39 +187,47 @@ pub async fn handle_sign_share(
     // Decode blinded hex
     let blinded_bytes = match hex::decode(&payload.blinded_hex) {
         Ok(b) => b,
-        Err(e) => return Json(SignShareResponse {
-            status: "ERROR".to_string(),
-            share_index: None,
-            signature_share_hex: format!("Invalid blinded hex: {}", e),
-        }),
+        Err(e) => {
+            return Json(SignShareResponse {
+                status: "ERROR".to_string(),
+                share_index: None,
+                signature_share_hex: format!("Invalid blinded hex: {}", e),
+            })
+        }
     };
 
     // Decode k hex
     let k_bytes = match hex::decode(&payload.k_hex) {
         Ok(b) => b,
-        Err(e) => return Json(SignShareResponse {
-            status: "ERROR".to_string(),
-            share_index: None,
-            signature_share_hex: format!("Invalid k hex: {}", e),
-        }),
+        Err(e) => {
+            return Json(SignShareResponse {
+                status: "ERROR".to_string(),
+                share_index: None,
+                signature_share_hex: format!("Invalid k hex: {}", e),
+            })
+        }
     };
 
     let blinded: BlindedMessage = match deserialize_from_bytes(&blinded_bytes) {
         Some(x) => x,
-        None => return Json(SignShareResponse {
-            status: "ERROR".to_string(),
-            share_index: None,
-            signature_share_hex: "Failed to deserialize blinded message".to_string(),
-        }),
+        None => {
+            return Json(SignShareResponse {
+                status: "ERROR".to_string(),
+                share_index: None,
+                signature_share_hex: "Failed to deserialize blinded message".to_string(),
+            })
+        }
     };
 
     let k: Fr = match deserialize_from_bytes(&k_bytes) {
         Some(val) => val,
-        None => return Json(SignShareResponse {
-            status: "ERROR".to_string(),
-            share_index: None,
-            signature_share_hex: "Failed to deserialize masking key k".to_string(),
-        }),
+        None => {
+            return Json(SignShareResponse {
+                status: "ERROR".to_string(),
+                share_index: None,
+                signature_share_hex: "Failed to deserialize masking key k".to_string(),
+            })
+        }
     };
 
     // 5. Verify that com_k = pk_iss * k
@@ -216,11 +236,13 @@ pub async fn handle_sign_share(
     let expected_com_k_bytes = serialize_to_bytes(&MaskingKeyCommitment(expected_com_k));
     let com_k_bytes = match hex::decode(&payload.com_k_hex) {
         Ok(b) => b,
-        Err(e) => return Json(SignShareResponse {
-            status: "ERROR".to_string(),
-            share_index: None,
-            signature_share_hex: format!("Invalid com_k hex: {}", e),
-        }),
+        Err(e) => {
+            return Json(SignShareResponse {
+                status: "ERROR".to_string(),
+                share_index: None,
+                signature_share_hex: format!("Invalid com_k hex: {}", e),
+            })
+        }
     };
     if com_k_bytes != expected_com_k_bytes {
         return Json(SignShareResponse {
@@ -232,38 +254,50 @@ pub async fn handle_sign_share(
 
     // 5.5. Validate that the session is valid for signing (DEC-011)
     // Check: session exists, not expired, not resolved, amount/com_k match
-    let session_valid = state.db.validate_signing_session(
-        &payload.session_id,
-        payload.amount,
-        &payload.com_k_hex,
-    ).await;
+    let session_valid = state
+        .db
+        .validate_signing_session(&payload.session_id, payload.amount, &payload.com_k_hex)
+        .await;
 
-    let is_test_env = cfg!(test) || std::env::var("NIMBUS_ENV").map(|v| v == "test").unwrap_or(false);
-    
+    let is_test_env = cfg!(test)
+        || std::env::var("NIMBUS_ENV")
+            .map(|v| v == "test")
+            .unwrap_or(false);
+
     if !is_test_env {
         match session_valid {
-            Ok(false) => return Json(SignShareResponse {
-                status: "ERROR".to_string(),
-                share_index: None,
-                signature_share_hex: "Session not found, already resolved, expired, or parameters mismatch".to_string(),
-            }),
-            Err(e) => return Json(SignShareResponse {
-                status: "ERROR".to_string(),
-                share_index: None,
-                signature_share_hex: format!("Database validation error: {}", e),
-            }),
+            Ok(false) => {
+                return Json(SignShareResponse {
+                    status: "ERROR".to_string(),
+                    share_index: None,
+                    signature_share_hex:
+                        "Session not found, already resolved, expired, or parameters mismatch"
+                            .to_string(),
+                })
+            }
+            Err(e) => {
+                return Json(SignShareResponse {
+                    status: "ERROR".to_string(),
+                    share_index: None,
+                    signature_share_hex: format!("Database validation error: {}", e),
+                })
+            }
             _ => {} // Session is valid, continue
         }
     }
 
     // 6. Call state.db.insert_signing_session to store the parameters. If it returns false, reject with a duplicate session error (replay/extraction protection).
-    match state.db.insert_signing_session(
-        &payload.session_id,
-        &payload.com_k_hex,
-        payload.amount,
-        &payload.client_address,
-        &payload.k_hex,
-    ).await {
+    match state
+        .db
+        .insert_signing_session(
+            &payload.session_id,
+            &payload.com_k_hex,
+            payload.amount,
+            &payload.client_address,
+            &payload.k_hex,
+        )
+        .await
+    {
         Ok(true) => {
             // Success
         }
@@ -271,7 +305,8 @@ pub async fn handle_sign_share(
             return Json(SignShareResponse {
                 status: "ERROR".to_string(),
                 share_index: None,
-                signature_share_hex: "Session ID already exists or double sign attempt detected".to_string(),
+                signature_share_hex: "Session ID already exists or double sign attempt detected"
+                    .to_string(),
             });
         }
         Err(e) => {
@@ -309,22 +344,26 @@ pub async fn handle_leader_sign(
 
     let blinded_bytes = match hex::decode(&payload.blinded_hex) {
         Ok(b) => b,
-        Err(e) => return Json(LeaderSignResponse {
-            status: format!("ERROR: Invalid blinded hex: {}", e),
-            session_id: payload.session_id,
-            com_k_hex: String::new(),
-            partial_signatures: vec![],
-        }),
+        Err(e) => {
+            return Json(LeaderSignResponse {
+                status: format!("ERROR: Invalid blinded hex: {}", e),
+                session_id: payload.session_id,
+                com_k_hex: String::new(),
+                partial_signatures: vec![],
+            })
+        }
     };
 
     let blinded: BlindedMessage = match deserialize_from_bytes(&blinded_bytes) {
         Some(x) => x,
-        None => return Json(LeaderSignResponse {
-            status: "ERROR: Failed to deserialize blinded message".to_string(),
-            session_id: payload.session_id,
-            com_k_hex: String::new(),
-            partial_signatures: vec![],
-        }),
+        None => {
+            return Json(LeaderSignResponse {
+                status: "ERROR: Failed to deserialize blinded message".to_string(),
+                session_id: payload.session_id,
+                com_k_hex: String::new(),
+                partial_signatures: vec![],
+            })
+        }
     };
 
     let k = Fr::rand(&mut rand::thread_rng());
@@ -352,12 +391,10 @@ pub async fn handle_leader_sign(
             partial_signatures: vec![],
         });
     }
-    let mut partial_signatures = vec![
-        PartialSignatureInfo {
-            index: share_index,
-            signature_hex: hex::encode(serialize_to_bytes(&leader_share_sig)),
-        }
-    ];
+    let mut partial_signatures = vec![PartialSignatureInfo {
+        index: share_index,
+        signature_hex: hex::encode(serialize_to_bytes(&leader_share_sig)),
+    }];
 
     let com_k_hex = hex::encode(serialize_to_bytes(&MaskingKeyCommitment(com_k)));
     let k_hex = hex::encode(serialize_to_bytes(&MaskingKey(k)));
@@ -369,10 +406,16 @@ pub async fn handle_leader_sign(
         use std::str::FromStr;
         if let Ok(pk_str) = std::env::var("NIMBUS_RELAYER_PRIVATE_KEY") {
             PrivateKeySigner::from_str(&pk_str).unwrap_or_else(|_| {
-                PrivateKeySigner::from_str("0000000000000000000000000000000000000000000000000000000000000001").unwrap()
+                PrivateKeySigner::from_str(
+                    "0000000000000000000000000000000000000000000000000000000000000001",
+                )
+                .unwrap()
             })
         } else {
-            PrivateKeySigner::from_str("0000000000000000000000000000000000000000000000000000000000000001").unwrap()
+            PrivateKeySigner::from_str(
+                "0000000000000000000000000000000000000000000000000000000000000001",
+            )
+            .unwrap()
         }
     };
     let leader_address = format!("0x{:x}", leader_signer.address());
@@ -395,12 +438,14 @@ pub async fn handle_leader_sign(
     );
     let signature_hex = match leader_signer.sign_message(message.as_bytes()).await {
         Ok(sig) => hex::encode(sig.as_bytes()),
-        Err(e) => return Json(LeaderSignResponse {
-            status: format!("ERROR: Failed to sign leader payload: {}", e),
-            session_id: payload.session_id,
-            com_k_hex: String::new(),
-            partial_signatures: vec![],
-        }),
+        Err(e) => {
+            return Json(LeaderSignResponse {
+                status: format!("ERROR: Failed to sign leader payload: {}", e),
+                session_id: payload.session_id,
+                com_k_hex: String::new(),
+                partial_signatures: vec![],
+            })
+        }
     };
 
     let client_body = serde_json::to_string(&SignShareRequest {
@@ -413,7 +458,8 @@ pub async fn handle_leader_sign(
         leader_address,
         timestamp,
         signature_hex,
-    }).unwrap();
+    })
+    .unwrap();
 
     // Call guardians with circuit breaker (Finding #15)
     let required_threshold = std::env::var("NIMBUS_THRESHOLD")
@@ -429,22 +475,21 @@ pub async fn handle_leader_sign(
         let body = client_body.clone();
         let url_clone = target_url.clone();
         let cb = state.guardian_circuit_breaker.clone();
-        
-        match cb.call(|| async {
-            http::post_http(&url_clone, &body).await
-        }).await {
+
+        match cb
+            .call(|| async { http::post_http(&url_clone, &body).await })
+            .await
+        {
             Ok(response_body) => {
                 if let Ok(res) = serde_json::from_str::<SignShareResponse>(&response_body) {
-                    if let Err(error) =
-                        append_guardian_share(
-                            res,
-                            &blinded,
-                            &k,
-                            state.guardian_public_keys.as_ref(),
-                            &mut seen_indices,
-                            &mut partial_signatures,
-                        )
-                    {
+                    if let Err(error) = append_guardian_share(
+                        res,
+                        &blinded,
+                        &k,
+                        state.guardian_public_keys.as_ref(),
+                        &mut seen_indices,
+                        &mut partial_signatures,
+                    ) {
                         println!("RELAYER: Guardian {} rejected: {}", url, error);
                     }
                 } else {
@@ -471,15 +516,22 @@ pub async fn handle_leader_sign(
     }
 
     // Insert signing session into database
-    match state.db.insert_signing_session(
-        &payload.session_id,
-        &com_k_hex,
-        payload.amount,
-        &payload.client_address,
-        &k_hex,
-    ).await {
+    match state
+        .db
+        .insert_signing_session(
+            &payload.session_id,
+            &com_k_hex,
+            payload.amount,
+            &payload.client_address,
+            &k_hex,
+        )
+        .await
+    {
         Ok(true) => {
-            println!("RELAYER: Signing session registered for Session ID: {}", payload.session_id);
+            println!(
+                "RELAYER: Signing session registered for Session ID: {}",
+                payload.session_id
+            );
             Json(LeaderSignResponse {
                 status: "SUCCESS".to_string(),
                 session_id: payload.session_id,
@@ -487,22 +539,18 @@ pub async fn handle_leader_sign(
                 partial_signatures,
             })
         }
-        Ok(false) => {
-            Json(LeaderSignResponse {
-                status: "ERROR: Session ID already exists".to_string(),
-                session_id: payload.session_id,
-                com_k_hex: String::new(),
-                partial_signatures: vec![],
-            })
-        }
-        Err(e) => {
-            Json(LeaderSignResponse {
-                status: format!("ERROR: Database error: {}", e),
-                session_id: payload.session_id,
-                com_k_hex: String::new(),
-                partial_signatures: vec![],
-            })
-        }
+        Ok(false) => Json(LeaderSignResponse {
+            status: "ERROR: Session ID already exists".to_string(),
+            session_id: payload.session_id,
+            com_k_hex: String::new(),
+            partial_signatures: vec![],
+        }),
+        Err(e) => Json(LeaderSignResponse {
+            status: format!("ERROR: Database error: {}", e),
+            session_id: payload.session_id,
+            com_k_hex: String::new(),
+            partial_signatures: vec![],
+        }),
     }
 }
 
@@ -517,28 +565,20 @@ mod tests {
         SignShareResponse {
             status: "SUCCESS".to_string(),
             share_index,
-            signature_share_hex: hex::encode(
-                nimbus_core::serialize_to_bytes(&signature),
-            ),
+            signature_share_hex: hex::encode(nimbus_core::serialize_to_bytes(&signature)),
         }
     }
 
     #[test]
     fn guardian_share_requires_unique_non_zero_index() {
-        use nimbus_core::{
-            client_blind, public_key_for_share, sign_share, Fr,
-        };
+        use nimbus_core::{client_blind, public_key_for_share, sign_share, Fr};
 
-        let (blinded, _) =
-            client_blind(b"guardian-share-test", &mut rand::thread_rng());
+        let (blinded, _) = client_blind(b"guardian-share-test", &mut rand::thread_rng());
         let k = Fr::from(9u64);
         let guardian_sk = Fr::from(13u64);
         let signature = sign_share(&guardian_sk, &blinded, &k);
         let guardian_public_keys =
-            std::collections::HashMap::from([(
-                2,
-                public_key_for_share(&guardian_sk),
-            )]);
+            std::collections::HashMap::from([(2, public_key_for_share(&guardian_sk))]);
         let mut seen_indices = HashSet::from([1]);
         let mut partial_signatures = vec![PartialSignatureInfo {
             index: 1,
@@ -588,19 +628,13 @@ mod tests {
 
     #[test]
     fn guardian_share_rejects_unknown_index_and_corrupt_signature() {
-        use nimbus_core::{
-            client_blind, public_key_for_share, sign_share, Fr,
-        };
+        use nimbus_core::{client_blind, public_key_for_share, sign_share, Fr};
 
-        let (blinded, _) =
-            client_blind(b"guardian-corruption-test", &mut rand::thread_rng());
+        let (blinded, _) = client_blind(b"guardian-corruption-test", &mut rand::thread_rng());
         let k = Fr::from(5u64);
         let guardian_sk = Fr::from(19u64);
         let other_sk = Fr::from(23u64);
-        let registry = std::collections::HashMap::from([(
-            2,
-            public_key_for_share(&guardian_sk),
-        )]);
+        let registry = std::collections::HashMap::from([(2, public_key_for_share(&guardian_sk))]);
         let mut seen = HashSet::from([1]);
         let mut partials = Vec::new();
 
@@ -645,19 +679,15 @@ mod tests {
 
     #[test]
     fn requested_issuer_key_must_match_configured_ceremony_key() {
-        use nimbus_core::{IssuerSecretKey, Fr};
+        use nimbus_core::{Fr, IssuerSecretKey};
 
         let configured = IssuerSecretKey(Fr::from(7u64)).public_key();
         let matching_hex = hex::encode(nimbus_core::serialize_to_bytes(&configured));
-        let different =
-            IssuerSecretKey(Fr::from(11u64)).public_key();
+        let different = IssuerSecretKey(Fr::from(11u64)).public_key();
         let different_hex = hex::encode(nimbus_core::serialize_to_bytes(&different));
 
         assert!(issuer_public_key_matches(&configured, None));
-        assert!(issuer_public_key_matches(
-            &configured,
-            Some(&matching_hex),
-        ));
+        assert!(issuer_public_key_matches(&configured, Some(&matching_hex),));
         assert!(!issuer_public_key_matches(
             &configured,
             Some(&different_hex),

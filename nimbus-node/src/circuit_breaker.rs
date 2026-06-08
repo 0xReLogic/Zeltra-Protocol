@@ -298,11 +298,15 @@ mod tests {
         tokio::time::sleep(Duration::from_millis(60)).await;
 
         // First success transitions to half-open, then closed after threshold
-        let r1 = cb.call(|| async { Ok::<_, String>("ok".to_string()) }).await;
+        let r1 = cb
+            .call(|| async { Ok::<_, String>("ok".to_string()) })
+            .await;
         assert!(r1.is_ok());
         assert_eq!(cb.state().await, CircuitState::HalfOpen);
 
-        let r2 = cb.call(|| async { Ok::<_, String>("ok".to_string()) }).await;
+        let r2 = cb
+            .call(|| async { Ok::<_, String>("ok".to_string()) })
+            .await;
         assert!(r2.is_ok());
         assert_eq!(cb.state().await, CircuitState::Closed);
     }

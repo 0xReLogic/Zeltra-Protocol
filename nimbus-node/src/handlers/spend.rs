@@ -5,10 +5,10 @@
 //! - Minimum balance checks before batch processing -- Finding #10
 //! - Idempotency key support for request deduplication -- Finding #16
 
-use axum::Json;
-use crate::{state::AppState, dto::*};
 use crate::database::QueuedSpend;
 use crate::evm_client::BatchSpendItem;
+use crate::{dto::*, state::AppState};
+use axum::Json;
 
 pub async fn handle_spend(
     axum::extract::State(state): axum::extract::State<AppState>,
@@ -19,7 +19,10 @@ pub async fn handle_spend(
         match state.db.check_idempotency(idem_key, "spend").await {
             Ok(Some(cached_json)) => {
                 if let Ok(cached_resp) = serde_json::from_str::<SpendResponse>(&cached_json) {
-                    println!("IDEMPOTENCY: Returning cached response for key {}...", &idem_key[..8.min(idem_key.len())]);
+                    println!(
+                        "IDEMPOTENCY: Returning cached response for key {}...",
+                        &idem_key[..8.min(idem_key.len())]
+                    );
                     return Json(cached_resp);
                 }
             }
@@ -153,11 +156,10 @@ pub async fn process_spend_batch(state: &AppState) {
 
     for item in items {
         if item.request.deadline.is_some_and(|deadline| now > deadline) {
-            let _ = state.db.fail_spend(
-                item.id,
-                None,
-                "deadline expired before broadcast",
-            ).await;
+            let _ = state
+                .db
+                .fail_spend(item.id, None, "deadline expired before broadcast")
+                .await;
         } else if item.request.cross_chain.is_some() {
             direct.push(item);
         } else {
@@ -182,18 +184,23 @@ pub async fn process_spend_batch(state: &AppState) {
 }
 
 fn batch_item(item: &QueuedSpend) -> BatchSpendItem {
-    const ZERO_WORD: &str =
-        "0x0000000000000000000000000000000000000000000000000000000000000000";
+    const ZERO_WORD: &str = "0x0000000000000000000000000000000000000000000000000000000000000000";
     BatchSpendItem {
         nullifier: item.request.nullifier.clone(),
         alpha_neg_hex: item.request.alpha_neg_hex.clone(),
         pk_iss_hex: item.request.pk_iss_hex.clone(),
         recipient: item.request.recipient.clone(),
         amount: item.request.amount,
-        recipient_or_intent_hash_hex: item.request.recipient_or_intent_hash_hex
-            .clone().unwrap_or_else(|| ZERO_WORD.to_string()),
+        recipient_or_intent_hash_hex: item
+            .request
+            .recipient_or_intent_hash_hex
+            .clone()
+            .unwrap_or_else(|| ZERO_WORD.to_string()),
         expiry: item.request.expiry.unwrap_or(0),
-        nonce_hex: item.request.nonce_hex.clone()
+        nonce_hex: item
+            .request
+            .nonce_hex
+            .clone()
             .unwrap_or_else(|| ZERO_WORD.to_string()),
     }
 }
@@ -201,9 +208,10 @@ fn batch_item(item: &QueuedSpend) -> BatchSpendItem {
 async fn process_same_chain_batch(state: &AppState, items: Vec<QueuedSpend>) {
     let Some(ref evm_client) = state.evm_client else {
         for item in items {
-            let _ = state.db.retry_spend(
-                item.id, "EVM client unavailable", item.retry_count,
-            ).await;
+            let _ = state
+                .db
+                .retry_spend(item.id, "EVM client unavailable", item.retry_count)
+                .await;
         }
         return;
     };
@@ -211,25 +219,39 @@ async fn process_same_chain_batch(state: &AppState, items: Vec<QueuedSpend>) {
     match evm_client.broadcast_spend_batch(&payload).await {
         Ok(outcome) if outcome.success => {
             for item in items {
-                if state.db.mark_spend_submitted(item.id, &outcome.tx_hash).await.is_err() {
+                if state
+                    .db
+                    .mark_spend_submitted(item.id, &outcome.tx_hash)
+                    .await
+                    .is_err()
+                {
                     continue;
                 }
-                let _ = state.db.mark_spend_confirmed(
-                    item.id,
-                    &item.request.nullifier,
-                    &outcome.tx_hash,
-                    outcome.block_number,
-                ).await;
+                let _ = state
+                    .db
+                    .mark_spend_confirmed(
+                        item.id,
+                        &item.request.nullifier,
+                        &outcome.tx_hash,
+                        outcome.block_number,
+                    )
+                    .await;
             }
         }
         Ok(outcome) => {
             for item in items {
-                let _ = state.db.mark_spend_submitted(item.id, &outcome.tx_hash).await;
-                let _ = state.db.fail_spend(
-                    item.id,
-                    Some(&outcome.tx_hash),
-                    "batch transaction receipt status was reverted",
-                ).await;
+                let _ = state
+                    .db
+                    .mark_spend_submitted(item.id, &outcome.tx_hash)
+                    .await;
+                let _ = state
+                    .db
+                    .fail_spend(
+                        item.id,
+                        Some(&outcome.tx_hash),
+                        "batch transaction receipt status was reverted",
+                    )
+                    .await;
             }
         }
         Err(error) => {
@@ -238,9 +260,10 @@ async fn process_same_chain_batch(state: &AppState, items: Vec<QueuedSpend>) {
                 if item.retry_count >= 7 {
                     let _ = state.db.fail_spend(item.id, None, &message).await;
                 } else {
-                    let _ = state.db.retry_spend(
-                        item.id, &message, item.retry_count,
-                    ).await;
+                    let _ = state
+                        .db
+                        .retry_spend(item.id, &message, item.retry_count)
+                        .await;
                 }
             }
         }
@@ -248,70 +271,92 @@ async fn process_same_chain_batch(state: &AppState, items: Vec<QueuedSpend>) {
 }
 
 async fn process_single_spend(state: &AppState, item: QueuedSpend) {
-    const ZERO_WORD: &str =
-        "0x0000000000000000000000000000000000000000000000000000000000000000";
+    const ZERO_WORD: &str = "0x0000000000000000000000000000000000000000000000000000000000000000";
     let Some(ref evm_client) = state.evm_client else {
-        let _ = state.db.retry_spend(
-            item.id, "EVM client unavailable", item.retry_count,
-        ).await;
+        let _ = state
+            .db
+            .retry_spend(item.id, "EVM client unavailable", item.retry_count)
+            .await;
         return;
     };
     let request = &item.request;
     let result = if let Some(cc) = &request.cross_chain {
         let stablecoin_addr = std::env::var("NIMBUS_STABLECOIN_ADDRESS")
             .unwrap_or_else(|_| "0x75faf114eafb1bdbe2f0316df893fd58ce46aa4d".to_string());
-        evm_client.broadcast_ccip_transaction(
-            cc.destination_chain_selector,
-            &cc.destination_contract,
-            &request.nullifier,
-            &request.alpha_neg_hex,
-            &request.pk_iss_hex,
-            &request.recipient,
-            &stablecoin_addr,
-            None,
-            request.amount,
-            request.expiry.unwrap_or(0),
-            request.nonce_hex.as_deref().unwrap_or(ZERO_WORD),
-        ).await
+        evm_client
+            .broadcast_ccip_transaction(
+                cc.destination_chain_selector,
+                &cc.destination_contract,
+                &request.nullifier,
+                &request.alpha_neg_hex,
+                &request.pk_iss_hex,
+                &request.recipient,
+                &stablecoin_addr,
+                None,
+                request.amount,
+                request.expiry.unwrap_or(0),
+                request.nonce_hex.as_deref().unwrap_or(ZERO_WORD),
+            )
+            .await
     } else {
-        evm_client.broadcast_spend_transaction(
-            &request.nullifier,
-            &request.alpha_neg_hex,
-            &request.pk_iss_hex,
-            &request.recipient,
-            request.amount,
-            request.recipient_or_intent_hash_hex.as_deref().unwrap_or(ZERO_WORD),
-            request.expiry.unwrap_or(0),
-            request.nonce_hex.as_deref().unwrap_or(ZERO_WORD),
-        ).await
+        evm_client
+            .broadcast_spend_transaction(
+                &request.nullifier,
+                &request.alpha_neg_hex,
+                &request.pk_iss_hex,
+                &request.recipient,
+                request.amount,
+                request
+                    .recipient_or_intent_hash_hex
+                    .as_deref()
+                    .unwrap_or(ZERO_WORD),
+                request.expiry.unwrap_or(0),
+                request.nonce_hex.as_deref().unwrap_or(ZERO_WORD),
+            )
+            .await
     };
 
     match result {
         Ok(outcome) if outcome.success => {
-            if state.db.mark_spend_submitted(item.id, &outcome.tx_hash).await.is_ok() {
-                let _ = state.db.mark_spend_confirmed(
-                    item.id,
-                    &request.nullifier,
-                    &outcome.tx_hash,
-                    outcome.block_number,
-                ).await;
+            if state
+                .db
+                .mark_spend_submitted(item.id, &outcome.tx_hash)
+                .await
+                .is_ok()
+            {
+                let _ = state
+                    .db
+                    .mark_spend_confirmed(
+                        item.id,
+                        &request.nullifier,
+                        &outcome.tx_hash,
+                        outcome.block_number,
+                    )
+                    .await;
             }
         }
         Ok(outcome) => {
-            let _ = state.db.mark_spend_submitted(item.id, &outcome.tx_hash).await;
-            let _ = state.db.fail_spend(
-                item.id,
-                Some(&outcome.tx_hash),
-                "transaction receipt status was reverted",
-            ).await;
+            let _ = state
+                .db
+                .mark_spend_submitted(item.id, &outcome.tx_hash)
+                .await;
+            let _ = state
+                .db
+                .fail_spend(
+                    item.id,
+                    Some(&outcome.tx_hash),
+                    "transaction receipt status was reverted",
+                )
+                .await;
         }
         Err(error) if item.retry_count >= 7 => {
             let _ = state.db.fail_spend(item.id, None, &error.to_string()).await;
         }
         Err(error) => {
-            let _ = state.db.retry_spend(
-                item.id, &error.to_string(), item.retry_count,
-            ).await;
+            let _ = state
+                .db
+                .retry_spend(item.id, &error.to_string(), item.retry_count)
+                .await;
         }
     }
 }

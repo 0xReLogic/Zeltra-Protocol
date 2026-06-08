@@ -1,14 +1,16 @@
 //! Health check handler
 
+use crate::{
+    dto::HealthResponse, dto::SigningHealthResponse, dto::StalledSessionDto, state::AppState,
+};
 use axum::Json;
-use crate::{state::AppState, dto::HealthResponse, dto::SigningHealthResponse, dto::StalledSessionDto};
 
 pub async fn health_check(
     axum::extract::State(state): axum::extract::State<AppState>,
 ) -> Json<HealthResponse> {
     let relayer_wallet_balance_eth = *state.relayer_wallet_balance_eth.lock().await;
     let relayer_accumulated_profit_usdc = *state.relayer_accumulated_profit_usdc.lock().await;
-    
+
     // 1. Verify database connectivity
     let mut db_ok = true;
     let processed_nullifiers = match state.db.get_stats().await {
@@ -27,14 +29,14 @@ pub async fn health_check(
             0
         }
     };
-    
+
     // 2. Verify blockchain RPC connectivity
     let rpc_ok = if let Some(ref evm_client) = state.evm_client {
         evm_client.get_gas_price().await.is_ok()
     } else {
         true
     };
-    
+
     let status = if !db_ok {
         "ERROR_DATABASE_DOWN".to_string()
     } else if !rpc_ok {
@@ -42,7 +44,7 @@ pub async fn health_check(
     } else {
         "OK".to_string()
     };
-    
+
     Json(HealthResponse {
         status,
         queued_transactions,
@@ -61,7 +63,11 @@ pub async fn signing_health(
         .parse()
         .unwrap_or(600);
 
-    let stalled = match state.db.get_stalled_signing_sessions(threshold_seconds).await {
+    let stalled = match state
+        .db
+        .get_stalled_signing_sessions(threshold_seconds)
+        .await
+    {
         Ok(s) => s,
         Err(e) => {
             eprintln!("Signing health: Failed to get stalled sessions: {}", e);
@@ -103,4 +109,3 @@ pub async fn signing_health(
         message,
     })
 }
-

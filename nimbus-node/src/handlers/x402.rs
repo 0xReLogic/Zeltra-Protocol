@@ -1,9 +1,9 @@
 //! x402 protocol facilitator handler
 
+use crate::{dto::*, state::AppState};
 use axum::Json;
-use base64::Engine;
 use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
-use crate::{state::AppState, dto::*};
+use base64::Engine;
 
 // x402 Facilitator handler
 pub async fn handle_x402_verify(
@@ -112,11 +112,16 @@ pub async fn handle_x402_verify(
     };
     let position = state.db.queued_spend_count().await.unwrap_or(1);
 
-    let resource_info = payload.resource_uri.unwrap_or_else(|| "<unknown>".to_string());
+    let resource_info = payload
+        .resource_uri
+        .unwrap_or_else(|| "<unknown>".to_string());
     println!("X402 FACILITATOR: Verified anonymous payment");
     println!("  Scheme     : {}", sig.scheme);
     println!("  Network    : {}", sig.network);
-    println!("  Nullifier  : {}...", &sig.payment.nullifier[..core::cmp::min(8, sig.payment.nullifier.len())]);
+    println!(
+        "  Nullifier  : {}...",
+        &sig.payment.nullifier[..core::cmp::min(8, sig.payment.nullifier.len())]
+    );
     println!("  Resource   : {}", resource_info);
     println!("  Queue Pos  : {}", position);
 
