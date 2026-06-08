@@ -16,7 +16,7 @@ pub fn to_evm_g1(point: &G1Affine) -> Vec<u8> {
     let mut evm_buf = vec![0u8; 128];
     for i in 0..2 {
         for j in 0..48 {
-            evm_buf[i * 64 + 16 + j] = buf[i * 48 + (47 - j)];
+            evm_buf[i * 64 + 16 + j] = buf[i * 48 + j];
         }
     }
     evm_buf
@@ -32,11 +32,12 @@ pub fn to_evm_g2(point: &G2Affine) -> Vec<u8> {
         return vec![0u8; 256];
     }
     let mut evm_buf = vec![0u8; 256];
+    // Arkworks serializes G2 Fp2 limbs as c1 || c0, while EIP-2537 expects c0 || c1.
     let src_indices = [1, 0, 3, 2];
     for i in 0..4 {
         let src_idx = src_indices[i];
         for j in 0..48 {
-            evm_buf[i * 64 + 16 + j] = buf[src_idx * 48 + (47 - j)];
+            evm_buf[i * 64 + 16 + j] = buf[src_idx * 48 + j];
         }
     }
     evm_buf

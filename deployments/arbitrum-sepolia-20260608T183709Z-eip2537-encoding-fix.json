@@ -1,0 +1,41 @@
+{
+  "network": "arbitrum-sepolia",
+  "chain_id": 421614,
+  "contract_address": "0xd9f1f8f53a8e0b5b8bc6361946119de02cf5c159",
+  "deployment_tx": "0x8c97211eb0617723cbf5a3d4b24c822f0e7bf93b36a6d282fbda99c6afc7be7e",
+  "activation_tx": "0x92e482c90464997eb3053e93267bdd95bf619c1d6e828d637985a55d68da4b16",
+  "deployer": "0x23e32D309c575A3D5E7CD2867BE12B00efa44Bb1",
+  "stablecoin": "0x75faf114eafb1BDbe2F0316DF893fd58CE46AA4d",
+  "fee_recipient": "0x23e32D309c575A3D5E7CD2867BE12B00efa44Bb1",
+  "deployment_profile": {
+    "command": "cargo stylus deploy",
+    "no_verify": true,
+    "max_fee_per_gas_gwei": 0.1,
+    "metadata_hash": "44b81a5bb1639caaaa3e3c1cbac1c0412b2f9cab8084678872aabae76cf74694",
+    "contract_size_bytes": 65998,
+    "fragments": 3
+  },
+  "eip2537_conformance": {
+    "g1add_0x0b_known_vector": "passed",
+    "g2add_0x0d_known_vector": "passed",
+    "pairing_0x0f_generated_vector": "passed",
+    "encoding_fix": "Do not reverse 48-byte field limbs; map Arkworks G2 raw blocks to EIP-2537 with [1,0,3,2]."
+  },
+  "post_deploy_transactions": {
+    "init_tx": "0xe6d9a485d2535a66865778d9a75aae42342e6e62953877b3bf07b9729d12ec82",
+    "register_issuer_tx": "0x74b97258d49e4a995c071a5d63fb8dcd3af51888869a480440886278d4376e1d",
+    "approve_tx": "0x3c58c2256fb632099b91b1568b64a396b768560b794fb980e18fd2d3951d6e09",
+    "deposit_tx": "0x662d142f8d6b3dc7dbb9995d1077ac75e65f98a79fc5e2f4a40df433bfb5d24c",
+    "spend_tx": "0x39dd200a6205295f190d2bed47ecb74ee6b8f61689d93535d2b715a3a5741498"
+  },
+  "hard_test_status": {
+    "spend_call_result": true,
+    "spend_receipt_status": 1,
+    "spend_gas_used": 1048765,
+    "deposit_principal_usdc": "9.99",
+    "principal_after_spend_usdc": "4.99",
+    "recipient_payout_usdc": "4.9925",
+    "protocol_fee_usdc": "0.0075",
+    "nullifier": "0x42097372c977132afea1c59f3a7420449ed9c149e0686be3a65d76075c5ac95a"
+  }
+}

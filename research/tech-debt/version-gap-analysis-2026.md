@@ -1,10 +1,14 @@
 # Version Gap Analysis: Nimbus Tech Stack vs 2026 State of the Art
 
-Date: 2026-06-07
+Date: 2026-06-08
 
 ## Critical Finding
 
-**BENER! BENER!** Kalau setting 2026 sekarang, Nimbus tech stack **SUDAH 1-2 TAHUN KETINGGALAN!**
+Nimbus masih punya version gap, tetapi hard-test 2026-06-07/08 memperjelas satu
+hal penting: blocker BLS **bukan** karena Arbitrum tidak mendukung EIP-2537.
+Arbitrum sudah mengaktifkan BLS12-381 precompile melalui jalur ArbOS
+Callisto/Dia. Kegagalan Nimbus berasal dari encoding EIP-2537 Arkworks:
+field bytes sempat di-reverse dan G2/Fp2 perlu block remapping.
 
 ---
 
@@ -59,12 +63,74 @@ Comparison:
 - Savings: Significant per pairing operation
 
 L2 Adoption:
-- Arbitrum (ArbOS 51 Dia): Native activation
+- Arbitrum: EIP-2537 tersedia melalui ArbOS Callisto/Dia. Jangan treat ini
+  sebagai chain-support blocker sebelum test vector precompile langsung gagal.
 - Etherlink: Native activation
 - Performance: Major improvement vs BN254
 ```
 
-**Impact:** Missing 18 months of improvements!
+**Impact:** Missing 18 months of improvements. Encoding BLS12-381 EIP-2537
+sudah dibetulkan pada 2026-06-08, tetapi upgrade dependency tetap perlu
+dikerjakan terpisah sebelum mainnet.
+
+### 3. **Resolved: EIP-2537 Hard-Test Finding (2026-06-08)**
+
+Hard-test terakhir sempat disimpulkan terlalu cepat sebagai "Arbitrum belum
+support EIP-2537". Itu perlu dikoreksi.
+
+Fakta terbaru:
+
+- Arbitrum Sepolia RPC `chain_id=421614` menerima direct call ke precompile
+  `0x0b` (`BLS12_G1ADD`) dengan vector generator EIP-2537 dan mengembalikan
+  output benar.
+- Direct tests juga lolos untuk `0x0d` (`BLS12_G2ADD`) dan `0x0f`
+  (`BLS12_PAIRING_CHECK`) setelah encoding fix.
+- Contract fixed berhasil deploy dan activate:
+  `0xd9f1f8f53a8e0b5b8bc6361946119de02cf5c159`.
+- `spend` valid sukses tanpa mock/bypass:
+  `0x39dd200a6205295f190d2bed47ecb74ee6b8f61689d93535d2b715a3a5741498`.
+
+Root cause:
+
+```text
+Arkworks G1/G2 field bytes:
+  already big-endian for EIP-2537 field encoding; do not reverse bytes.
+
+Arkworks G2 raw block order:
+  X1 || X0 || Y1 || Y0
+
+EIP-2537 expected G2 block order:
+  X0 || X1 || Y0 || Y1
+
+Correct mapping from Arkworks raw to EIP-2537:
+  [1, 0, 3, 2], without byte reversal inside each 48-byte field.
+```
+
+Analogi sederhana:
+
+```text
+Precompile itu seperti mesin ATM yang sudah aktif.
+Kartu kita masuk ke mesin, tapi format chip/PIN yang kita kirim kebalik.
+Mesinnya bukan mati; input kita yang tidak sesuai standar mesin. Setelah format
+dibetulkan, transaksi diterima.
+```
+
+Completed action:
+
+1. Perbaiki `to_evm_g1()` agar tidak reverse field bytes.
+2. Perbaiki `to_evm_g2()` agar memakai `[1, 0, 3, 2]` tanpa reverse field bytes.
+3. Jalankan direct RPC test untuk:
+   - `0x0b` G1ADD known vector;
+   - `0x0d` G2ADD known vector;
+   - `0x0f` pairing known vector.
+4. Deploy ulang dan ulangi hard-test `spend` nyata.
+
+Sources:
+
+- EIP-2537 official spec: https://eips.ethereum.org/EIPS/eip-2537
+- Arbitrum ArbOS 50 Dia proposal: https://forum.arbitrum.foundation/t/constitutional-aip-arbos-version-50-dia/29835/1
+- Arbitrum EIP-7702/Callisto blog mentioning EIP-2537 live:
+  https://blog.arbitrum.foundation/the-smartest-wallet-you-already-own-is-on-arbitrum/
 
 ---
 

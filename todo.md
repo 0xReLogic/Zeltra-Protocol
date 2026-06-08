@@ -837,20 +837,34 @@ dikembalikan, dan final verification hanya dilakukan oleh CLI.
     `--spend-contract` untuk mengikat `chain_id`, `contract`, `amount`,
     `recipient_or_intent_hash`, `expiry`, dan `nonce`.
 - [ ] Generate signature melalui alur threshold nyata.
-- [ ] Kirim spend dengan EVM vector RFC 9380 yang valid.
+- [x] Kirim spend dengan EVM vector RFC 9380 yang valid.
   - 2026-06-07 hard-test Arbitrum Sepolia blocked:
     `spend` revert `BLS_PAIRING_PRECOMPILE_FAILED`.
-  - Riset cepat menemukan disclosure Arbitrum bahwa EIP-2537 BLS12-381
-    precompile belum supported/enabled pada Arbitrum chains. Jangan anggap
-    Arbitrum One/Sepolia siap untuk BLS on-chain sampai diverifikasi ulang.
-- [ ] Tunggu receipt sukses.
+  - Koreksi 2026-06-08: Arbitrum Sepolia direct call ke `0x0b`
+    (`BLS12_G1ADD`) berhasil dengan known vector EIP-2537. Jadi blocker
+    paling mungkin adalah encoding input pairing/G2 Nimbus, bukan chain support.
+  - Resolusi 2026-06-08: G1/G2 field bytes tidak boleh di-reverse; Arkworks G2
+    raw order dipetakan ke EIP-2537 dengan block order `[1, 0, 3, 2]`.
+- [x] Tunggu receipt sukses.
+  - Patched EIP-2537 deployment:
+    `0xd9f1f8f53a8e0b5b8bc6361946119de02cf5c159`
+  - Spend tx:
+    `0x39dd200a6205295f190d2bed47ecb74ee6b8f61689d93535d2b715a3a5741498`
+  - `spend_call_result = true`, receipt status `1`, gas used `1,048,765`.
 - [x] Verifikasi pairing benar-benar dipanggil pada build deployed.
   - Patched contract masuk jalur precompile dan gagal di call
-    `BLS12_PAIRING_CHECK`, membuktikan branch pairing aktif tetapi target chain
-    belum mendukung precompile.
-- [ ] Verifikasi recipient menerima payout tepat.
-- [ ] Verifikasi fee recipient menerima fee tepat.
-- [ ] Verifikasi principal turun tepat.
+    `BLS12_PAIRING_CHECK`, membuktikan branch pairing aktif tetapi input
+    pairing masih ditolak precompile.
+- [x] Verifikasi pairing benar-benar sukses pada build deployed.
+  - Setelah encoding fix, spend valid diterima on-chain tanpa mock/bypass.
+- [x] Verifikasi recipient menerima payout tepat.
+  - Recipient naik dari `82.141446` ke `87.133946` USDC: payout `4.9925`
+    USDC untuk spend amount `5 USDC` setelah fee `0.0075`.
+- [x] Verifikasi fee recipient menerima fee tepat.
+  - Fee recipient sama dengan owner test wallet; net wallet movement sesuai
+    deposit net `-9.99` USDC plus spend fee `+0.0075` USDC.
+- [x] Verifikasi principal turun tepat.
+  - Principal setelah deposit `9.99` USDC, setelah spend `4.99` USDC.
 - [ ] Verifikasi nullifier tercatat on-chain.
 - [ ] Ubah satu byte `alpha_neg`: transaksi harus revert/fail.
 - [ ] Ubah satu byte `hm`: transaksi harus revert/fail.
@@ -1175,12 +1189,15 @@ Lokasi: `nimbus-contracts/src/spend.rs`
   tidak valid.
 - [x] Tambahkan host negative tests untuk pairing false, malformed input,
   infinity, issuer key tidak dipercaya, nullifier mismatch, dan replay.
-- [ ] Jalankan test pada Stylus-compatible environment atau testnet, bukan
+- [x] Jalankan test pada Stylus-compatible environment atau testnet, bukan
   hanya host mock.
   - 2026-06-07 Arbitrum Sepolia: deployed Stylus path mencapai
     `BLS12_PAIRING_CHECK`, tetapi chain mengembalikan
     `BLS_PAIRING_PRECOMPILE_FAILED`.
-  - Blocker eksternal: EIP-2537 belum enabled/supported pada Arbitrum target.
+  - Koreksi 2026-06-08: direct `0x0b` EIP-2537 test sukses di Arbitrum
+    Sepolia. Blocker sekarang dipersempit ke encoding `0x0f` pairing/G2.
+  - Resolusi 2026-06-08: direct `0x0b`, `0x0d`, dan `0x0f` known-vector
+    tests lolos; deployed `spend` valid sukses di Arbitrum Sepolia.
 - [x] Perbaiki `nimbus-core/examples/generate_bls_test_data.rs` agar memakai
   primitive yang sama dengan production:
   `hash_to_g1`, `IssuerSecretKey`, `UnmaskedSignature`,
@@ -1672,10 +1689,10 @@ Lokasi: `nimbus-node/src/handlers/x402.rs`
 
 - [ ] Tambahkan production-path tests tanpa `#[cfg(test)]` bypass.
 - [ ] Jalankan Stylus contract dalam local dev node atau supported test harness.
-- [ ] Test precompile EIP-2537 menggunakan known vectors.
-  - Jangan jalankan di Arbitrum sampai support EIP-2537 dikonfirmasi.
-  - Perlu target chain/harness yang benar-benar mengaktifkan Prague/Pectra
-    EIP-2537.
+- [x] Test precompile EIP-2537 menggunakan known vectors.
+  - `0x0b` G1ADD known vector sudah lolos di Arbitrum Sepolia.
+  - `0x0d` G2ADD dan `0x0f` pairing known vector sudah lolos di Arbitrum
+    Sepolia setelah encoding fix.
 - [ ] Test invalid BLS signature tidak mengubah state.
 - [ ] Test unauthorized reveal.
 - [ ] Test duplicate session.
@@ -1754,8 +1771,8 @@ path.
 - [ ] Jangan menyebut relayer atau contract production-ready sebelum seluruh P0
   selesai.
 - [ ] Catat bahwa unit tests contract menggunakan mocked HostIO/precompile paths.
-- [x] Catat hard-test Arbitrum Sepolia EIP-2537 gagal karena precompile tidak
-  tersedia/aktif.
+- [x] Catat hard-test Arbitrum Sepolia EIP-2537 gagal pada jalur pairing karena
+  input Nimbus belum diterima precompile.
 
 ## Urutan Implementasi yang Disarankan
 

@@ -5,9 +5,9 @@ smart contract Nimbus. Targetnya adalah pembaca dapat memahami perilaku kontrak
 tanpa harus membaca source code.
 
 > **Status:** testnet/development. Pairing BLS pada jalur `spend` sudah aktif
-> di kode, dan direct recipient binding sudah diterapkan. Hard-test 2026-06-07
-> di Arbitrum Sepolia masih gagal pada `BLS12_PAIRING_CHECK` karena target chain
-> belum mengaktifkan/mendukung EIP-2537. Verifying key ZK masih mock.
+> di kode, direct recipient binding sudah diterapkan, dan hard-test 2026-06-08
+> di Arbitrum Sepolia berhasil mengeksekusi `spend` BLS valid tanpa mock/bypass.
+> Verifying key ZK masih mock.
 
 ## 1. Gambaran Sistem
 
@@ -346,14 +346,21 @@ Arkworks. Helper di `types.rs` mengubah field element ke representasi EVM:
 Jangan mengasumsikan semua L2 mendukung precompile pada address dan behavior
 yang sama. Deployment harus diuji langsung pada target chain.
 
-Catatan hard-test 2026-06-07:
+Catatan hard-test EIP-2537:
 
 - Contract Stylus patched berhasil deploy dan activate di Arbitrum Sepolia:
   `0x3a814eb65b442890abe3f666acac2d4f9ff6ad9c`.
 - Jalur `spend` mencapai `BLS12_PAIRING_CHECK`, tetapi call revert
   `BLS_PAIRING_PRECOMPILE_FAILED`.
-- Rilis mainnet di Arbitrum tidak boleh mengandalkan EIP-2537 sampai support
-  chain dikonfirmasi ulang atau desain fallback dipilih.
+- Direct RPC call ke `0x0b` (`BLS12_G1ADD`) berhasil dengan known vector
+  EIP-2537, jadi Arbitrum Sepolia memiliki precompile EIP-2537 aktif.
+- Resolusi 2026-06-08: field bytes Arkworks tidak boleh di-reverse; G2 harus
+  dipetakan dari raw Arkworks ke EIP-2537 dengan block order `[1, 0, 3, 2]`.
+- Contract fixed berhasil deploy dan activate:
+  `0xd9f1f8f53a8e0b5b8bc6361946119de02cf5c159`.
+- Direct precompile tests `0x0b`, `0x0d`, dan `0x0f` lolos.
+- `spend` valid sukses:
+  `0x39dd200a6205295f190d2bed47ecb74ee6b8f61689d93535d2b715a3a5741498`.
 
 ## 9. ZK Compliance
 
@@ -536,10 +543,10 @@ eksplisit. Deployment baru harus mendaftarkan issuer key sebelum hard test spend
 ### Blocker sebelum dana nyata
 
 1. Ganti mock compliance VK dengan artifact circuit production.
-3. Hard test deposit, reveal, refund, dan spend pada chain/harness yang
-   benar-benar mendukung EIP-2537.
+3. Hard test deposit, reveal, refund, dan spend setelah encoding EIP-2537
+   diverifikasi dengan direct precompile vectors.
 4. Uji precompile EIP-2537 dengan test vector valid dan invalid di target
-   supported chain; Arbitrum Sepolia saat hard-test 2026-06-07 belum lolos.
+   chain; Arbitrum Sepolia `0x0b` sudah lolos, `0x0f` pairing Nimbus belum.
 5. Audit liability, fee, rounding, dan solvency pada seluruh state transition.
 6. Lengkapi authentication dan replay protection CCIP.
 7. Uji Aave, RWA, dan Polymarket tanpa mock.
