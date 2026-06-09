@@ -11,7 +11,7 @@ DEPLOYMENT_DIR="${NIMBUS_DEPLOYMENT_DIR:-${REPO_ROOT}/deployments}"
 CHECK_URL=${RPC_URL:-${NIMBUS_RPC_URL:-"https://sepolia-rollup.arbitrum.io/rpc"}}
 DEPLOY_PRIVATE_KEY="${PRIVATE_KEY:-${NIMBUS_RELAYER_PRIVATE_KEY:-}}"
 STYLUS_FEATURES="${NIMBUS_STYLUS_FEATURES:-}"
-STYLUS_NO_VERIFY="${NIMBUS_STYLUS_NO_VERIFY:-true}"
+STYLUS_NO_VERIFY="${NIMBUS_STYLUS_NO_VERIFY:-false}"
 CHAIN_ID_HINT="${CHAIN_ID:-421614}"
 TIMESTAMP_UTC="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
 TIMESTAMP_FILE="$(date -u +"%Y%m%dT%H%M%SZ")"
@@ -50,7 +50,7 @@ write_manifest() {
   "status": "${status}",
   "network": "arbitrum-sepolia",
   "chain_id_hint": ${CHAIN_ID_HINT},
-  "rpc_url": $(printf '%s' "${CHECK_URL}" | json_escape),
+  "rpc_configured": true,
   "contract_address": $(printf '%s' "${contract_address}" | json_escape),
   "deploy_log": $(printf '%s' "${deploy_log_path}" | json_escape),
   "git": {
@@ -69,7 +69,7 @@ write_manifest() {
     "stylus_check": "${status}"
   },
   "notes": [
-    "Manifest does not include private keys or secrets.",
+    "Manifest does not include private keys, RPC credentials, or secrets.",
     "Verify deployed bytecode, ABI selectors, init parameters, and receipt status before using this deployment for hard tests."
   ]
 }

@@ -1111,7 +1111,9 @@ Report tidak boleh berisi:
 
 - [x] Hapus secret hardcoded dari seluruh script.
 - [x] Perbaiki generator BLS.
-- [ ] Perbaiki/validasi ABI generation setelah upgrade Stylus 0.10.7.
+- [x] Perbaiki/validasi ABI generation setelah upgrade Stylus 0.10.7.
+  - 2026-06-09: exporter dimigrasi ke `print_from_args()` dan signature ABI
+    aktual berhasil diekspor dengan `cargo stylus export-abi`.
 - [ ] Implementasikan hard-test mode tanpa fallback mock.
 - [x] Implementasikan deployment manifest.
 - [ ] Implementasikan receipt/event/state assertion helpers.
