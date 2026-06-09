@@ -2,6 +2,16 @@
 #![allow(unused_variables, dead_code, unused_imports)]
 extern crate alloc;
 
+#[cfg(target_arch = "wasm32")]
+fn reject_runtime_randomness(_: &mut [u8]) -> Result<(), getrandom::Error> {
+    let code = core::num::NonZeroU32::new(getrandom::Error::CUSTOM_START)
+        .expect("getrandom custom error code must be non-zero");
+    Err(getrandom::Error::from(code))
+}
+
+#[cfg(target_arch = "wasm32")]
+getrandom::register_custom_getrandom!(reject_runtime_randomness);
+
 mod constants;
 mod deposit;
 mod helpers;
