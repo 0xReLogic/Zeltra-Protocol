@@ -1,10 +1,21 @@
 use nimbus_core::{
     client_blind, client_unmask, get_alpha_neg_evm, get_hm_evm, get_pk_iss_evm,
-    issuer_sign_blinded, verify_unmasked, IssuerSecretKey,
+    issuer_sign_blinded, verify_unmasked, IssuerSecretKey, to_evm_g2,
 };
 use rand::{rngs::StdRng, SeedableRng};
 use sha3::{Digest, Keccak256};
 use std::collections::HashMap;
+use ark_ec::CurveGroup;
+
+fn to_evm_scalar(scalar: &ark_bls12_381::Fr) -> [u8; 32] {
+    let mut buf = vec![];
+    ark_serialize::CanonicalSerialize::serialize_uncompressed(scalar, &mut buf).unwrap();
+    let mut evm_buf = [0u8; 32];
+    for j in 0..32 {
+        evm_buf[j] = buf[31 - j];
+    }
+    evm_buf
+}
 
 fn main() {
     let args: Vec<String> = std::env::args().collect();
@@ -22,7 +33,7 @@ fn main() {
     let sk_iss = IssuerSecretKey::generate(&mut rng);
     let pk_iss = sk_iss.public_key();
     let (blinded, blinding_factor) = client_blind(&message, &mut rng);
-    let (masked_sig, masking_key, _) = issuer_sign_blinded(&sk_iss, &blinded, &mut rng);
+    let (masked_sig, masking_key, com_k) = issuer_sign_blinded(&sk_iss, &blinded, &mut rng);
     let signature = client_unmask(&masked_sig, &blinding_factor, &masking_key)
         .expect("deterministic masking factors must be invertible");
 
@@ -32,6 +43,8 @@ fn main() {
     let hm = get_hm_evm(&message);
     let pk_iss_evm = get_pk_iss_evm(&pk_iss);
     let nullifier = Keccak256::digest(&hm);
+    let k_evm = to_evm_scalar(&masking_key.0);
+    let com_k_evm = to_evm_g2(&com_k.0.into_affine());
 
     if invalid {
         alpha_neg[127] ^= 0x01;
@@ -73,6 +86,8 @@ fn main() {
     println!("alpha_neg_hex: 0x{}", hex::encode(alpha_neg));
     println!("hm_hex: 0x{}", hex::encode(hm));
     println!("pk_iss_hex: 0x{}", hex::encode(pk_iss_evm));
+    println!("k_hex: 0x{}", hex::encode(k_evm));
+    println!("com_k_hex: 0x{}", hex::encode(com_k_evm));
 }
 
 fn parse_opts(args: &[String]) -> HashMap<String, String> {

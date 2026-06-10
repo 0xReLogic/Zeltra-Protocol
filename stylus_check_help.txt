@@ -1,0 +1,43 @@
+Check a contract
+
+Usage: cargo stylus check [OPTIONS]
+
+Options:
+      --wasm-file <WASM_FILE>
+          The WASM to check (defaults to any found in the current directory)
+
+      --wasm-file-address <WASM_FILE_ADDRESS>
+          Where to deploy and activate the contract for wasm file (defaults to a random address)
+
+      --contract-address <CONTRACT_ADDRESS>
+          Where to deploy and activate the contract (defaults to a random address)
+
+      --data-fee-bump-percent <DATA_FEE_BUMP_PERCENT>
+          Percent to bump the estimated activation data fee by
+          
+          [default: 20]
+
+      --features <FEATURES>
+          Specifies the features to use when building the Stylus binary
+
+      --source-files-for-project-hash <SOURCE_FILES_FOR_PROJECT_HASH>
+          The path to source files to include in the project hash, which is included in the contract deployment init code transaction to be used for verification of deployment integrity.
+          
+          If not provided, all .rs files and Cargo.toml and Cargo.lock files in project's directory tree are included.
+
+      --contract <CONTRACT>
+          
+
+  -e, --endpoint <ENDPOINT>
+          Arbitrum RPC endpoint
+          
+          [default: http://localhost:8547]
+
+      --verbose
+          Whether to print debug info
+
+  -h, --help
+          Print help (see a summary with '-h')
+
+  -V, --version
+          Print version
