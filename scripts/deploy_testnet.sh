@@ -12,6 +12,7 @@ CHECK_URL=${RPC_URL:-${NIMBUS_RPC_URL:-"https://sepolia-rollup.arbitrum.io/rpc"}
 DEPLOY_PRIVATE_KEY="${PRIVATE_KEY:-${NIMBUS_RELAYER_PRIVATE_KEY:-}}"
 STYLUS_FEATURES="${NIMBUS_STYLUS_FEATURES:-}"
 STYLUS_NO_VERIFY="${NIMBUS_STYLUS_NO_VERIFY:-false}"
+STYLUS_MAX_FEE_PER_GAS_GWEI="${NIMBUS_MAX_FEE_PER_GAS_GWEI:-0.1}"
 CHAIN_ID_HINT="${CHAIN_ID:-421614}"
 TIMESTAMP_UTC="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
 TIMESTAMP_FILE="$(date -u +"%Y%m%dT%H%M%SZ")"
@@ -33,7 +34,7 @@ write_manifest() {
     local cargo_stylus_version="unknown"
 
     git_commit="$(git -C "${REPO_ROOT}" rev-parse HEAD 2>/dev/null || echo unknown)"
-    if [ -n "$(git -C "${REPO_ROOT}" status --porcelain 2>/dev/null || true)" ]; then
+    if [ -n "$(git -C "${REPO_ROOT}" status --porcelain --untracked-files=no 2>/dev/null || true)" ]; then
         git_dirty="true"
     else
         git_dirty="false"
@@ -63,7 +64,8 @@ write_manifest() {
   },
   "build": {
     "features": $(printf '%s' "${STYLUS_FEATURES}" | json_escape),
-    "no_verify": $(if [ "$STYLUS_NO_VERIFY" = "true" ]; then echo true; else echo false; fi)
+    "no_verify": $(if [ "$STYLUS_NO_VERIFY" = "true" ]; then echo true; else echo false; fi),
+    "max_fee_per_gas_gwei": $(printf '%s' "${STYLUS_MAX_FEE_PER_GAS_GWEI}" | json_escape)
   },
   "checks": {
     "stylus_check": "${status}"
@@ -81,8 +83,15 @@ echo "=========================================================="
 echo "NIMBUS SMART CONTRACT STYLUS DEPLOYMENT HELPERS"
 echo "=========================================================="
 
-STYLUS_CHECK_ARGS=(--endpoint="$CHECK_URL")
-STYLUS_DEPLOY_ARGS=(--endpoint="$CHECK_URL")
+STYLUS_CHECK_ARGS=(
+    --endpoint="$CHECK_URL"
+    --source-files-for-project-hash="$CONTRACT_DIR"
+)
+STYLUS_DEPLOY_ARGS=(
+    --endpoint="$CHECK_URL"
+    --source-files-for-project-hash="/source/nimbus-contracts"
+    --max-fee-per-gas-gwei="$STYLUS_MAX_FEE_PER_GAS_GWEI"
+)
 if [ -n "$STYLUS_FEATURES" ]; then
     STYLUS_CHECK_ARGS+=(--features="$STYLUS_FEATURES")
     STYLUS_DEPLOY_ARGS+=(--features="$STYLUS_FEATURES")
@@ -148,21 +157,29 @@ if [ -n "${DEPLOY_PRIVATE_KEY}" ]; then
     DEPLOY_STATUS=${PIPESTATUS[0]}
     set -e
 
+    NORMALIZED_DEPLOY_LOG="${DEPLOY_LOG}.normalized"
+    sed -E $'s/\x1B\\[[0-9;]*[[:alpha:]]//g' "${DEPLOY_LOG}" > "${NORMALIZED_DEPLOY_LOG}"
     CONTRACT_ADDRESS="$(
-        grep -Eo '0x[a-fA-F0-9]{40}' "${DEPLOY_LOG}" | tail -n 1 || true
+        sed -nE 's/.*deployed code at address: (0x[a-fA-F0-9]{40}).*/\1/p' \
+            "${NORMALIZED_DEPLOY_LOG}" | tail -n 1
     )"
+    LOG_HAS_FAILURE=false
+    if grep -Eqi '(^|[[:space:]])(error:|failed:|failed to|rpc error|panicked)([[:space:]]|$)' "${NORMALIZED_DEPLOY_LOG}"; then
+        LOG_HAS_FAILURE=true
+    fi
+    rm -f "${NORMALIZED_DEPLOY_LOG}"
     DEPLOY_MANIFEST="${DEPLOYMENT_DIR}/arbitrum-sepolia-${TIMESTAMP_FILE}-deploy.json"
 
     if [ "${DEPLOY_STATUS}" -eq 0 ]; then
-        if [ -z "${CONTRACT_ADDRESS}" ]; then
-            write_manifest "${DEPLOY_MANIFEST}" "deploy" "failed" "${CONTRACT_ADDRESS}" "${DEPLOY_LOG}"
-            echo "Deployment command exited successfully but no contract address was extracted."
+        if [ "${LOG_HAS_FAILURE}" = "true" ]; then
+            write_manifest "${DEPLOY_MANIFEST}" "deploy" "failed" "" "${DEPLOY_LOG}"
+            echo "Deployment log contains an error or failure."
             echo "Failure manifest written to: ${DEPLOY_MANIFEST}"
             exit 1
         fi
-        if grep -Eq '(^|[^[:alpha:]])error(:|\\[)' "${DEPLOY_LOG}"; then
+        if [ -z "${CONTRACT_ADDRESS}" ]; then
             write_manifest "${DEPLOY_MANIFEST}" "deploy" "failed" "${CONTRACT_ADDRESS}" "${DEPLOY_LOG}"
-            echo "Deployment log contains compiler or cargo-stylus errors."
+            echo "Deployment command exited successfully but no contract address was extracted."
             echo "Failure manifest written to: ${DEPLOY_MANIFEST}"
             exit 1
         fi
