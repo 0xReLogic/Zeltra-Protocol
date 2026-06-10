@@ -7,10 +7,10 @@ Dokumen ini mendokumentasikan desain teknis, endpoints, dan optimalisasi **Nimbu
 ## 0. Informasi Deployment Testnet L2
 
 Berikut adalah informasi deployment resmi kontrak Nimbus di testnet Arbitrum Sepolia untuk referensi integrasi relayer node:
-*   **Alamat Kontrak Nimbus (L2)**: `0x208f0e4390f59e3052c557bf23a47b2ab4697a10`
+*   **Alamat Kontrak Nimbus (L2)**: `0x62ca774e20b76431d189e1635400b91b03c2b031`
 *   **Jaringan**: Arbitrum Sepolia Testnet
 *   **Arbitrum RPC Endpoint**: `https://sepolia-rollup.arbitrum.io/rpc`
-*   **Explorer**: [Sepolia Arbiscan](https://sepolia.arbiscan.io/address/0x208f0e4390f59e3052c557bf23a47b2ab4697a10)
+*   **Explorer**: [Sepolia Arbiscan](https://sepolia.arbiscan.io/address/0x62ca774e20b76431d189e1635400b91b03c2b031)
 
 ---
 
@@ -598,7 +598,7 @@ Konfigurasi EVM client melalui environment variables berikut:
 export NIMBUS_RPC_URL="wss://arbitrum-sepolia.core.chainstack.com/d18e11a2327c1a17c030975e3e0c8e24"
 export NIMBUS_RPC_FALLBACK_URL="wss://arbitrum-sepolia.infura.io/ws/v3/e0442523234742288f49543cb9e16da9"
 export NIMBUS_RELAYER_PRIVATE_KEY="0xb89bc61712cfa0c890c0967f186c23afdf0b770743bc4f5505300100e8c7226e"
-export NIMBUS_CONTRACT_ADDRESS="0x208f0e4390f59e3052c557bf23a47b2ab4697a10"
+export NIMBUS_CONTRACT_ADDRESS="0x62ca774e20b76431d189e1635400b91b03c2b031"
 cargo run
 ```
 

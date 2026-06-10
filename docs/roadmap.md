@@ -283,9 +283,9 @@ dibuktikan dengan benchmark atau hard test sebelum menjadi acceptance criteria.
     *   Skrip integrasi pernah dijalankan, tetapi belum membuktikan seluruh
         lifecycle Deposit -> Reveal -> Spend -> destination CCIP -> Refund
         menggunakan contract terbaru tanpa mock.
-*   **Alamat Kontrak Terdeploy**: `0x208f0e4390f59e3052c557bf23a47b2ab4697a10` (Arbitrum Sepolia L2)
-*   **Tx Hash Deployment**: `0x8c8261d48c87a50095398f464558d2ebb36edafab1b5781798a2b5261523eea7`
-*   **Tx Hash Aktivasi Stylus**: `0xc59b972b3e9344d83aa5a51be46a9dc30a70a1139617e2033c526afbf4eac26c`
+*   **Alamat Kontrak Terdeploy**: `0x62ca774e20b76431d189e1635400b91b03c2b031` (Arbitrum Sepolia L2)
+*   **Tx Hash Deployment**: `0x15b036125a9891e791b8b07c9bf3495e9c03fbb3715d438f25a2db16b2c66e03`
+*   **Tx Hash Aktivasi Stylus**: `0xa8d824339e4941060196efb6c20a0275fe9e2aa25379599eae7e9624c6a3aaba`
 *   **Inovasi (Aha! Moment - Jurnal 2026)**: Kami merancang key loader dinamis yang dapat membedakan data share format `(usize, Fr)` 40-byte dan scalar `Fr` 32-byte untuk memastikan identitas dan share index dari validator (Leader & Guardians) terasosiasi secara otomatis tanpa konfigurasi manual yang rawan kesalahan. Hal ini mempermudah orkestrasi cluster dan mengurangi kegagalan verifikasi aggregate signature.
 
 ## 8. Migrasi Sirkuit ZK Utama & Verifikator On-Chain
@@ -363,7 +363,7 @@ dibuktikan dengan benchmark atau hard test sebelum menjadi acceptance criteria.
     ```bash
     export NIMBUS_RPC_URL=wss://arbitrum-sepolia.infura.io/ws/v3/YOUR_KEY
     export NIMBUS_RELAYER_PRIVATE_KEY=0x...
-    export NIMBUS_CONTRACT_ADDRESS=0x208f0e4390f59e3052c557bf23a47b2ab4697a10
+    export NIMBUS_CONTRACT_ADDRESS=0x62ca774e20b76431d189e1635400b91b03c2b031
     ```
 *   **Batas verifikasi**:
     *   Broadcast transaction sudah tersedia.

@@ -99,7 +99,7 @@ payload = {
     "pk_iss_hex": dummy_pk_iss,
     "cross_chain": {
         "destination_chain_selector": 10344971235874465080, # Base Sepolia
-        "destination_contract": "0x208f0e4390f59e3052c557bf23a47b2ab4697a10"
+        "destination_contract": "0x62ca774e20b76431d189e1635400b91b03c2b031"
     }
 }
 
