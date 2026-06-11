@@ -1756,8 +1756,10 @@ Sebelum menjalankan:
 - [x] Pastikan `.env.test` menunjuk ke contract deployment terbaru.
 - [ ] Pastikan contract terbaru telah diaktifkan dan di-cache di Stylus.
 - [ ] Pastikan `NIMBUS_CCIP_ROUTER` dikonfigurasi pada relayer dan contract.
-- [ ] Pastikan contract memiliki liquidity test secukupnya.
-- [ ] Gunakan wallet dan key khusus testnet, bukan credential production.
+- [x] Pastikan contract memiliki liquidity test secukupnya.
+  - 2026-06-11: Terbukti dari saldo test wallet (145.16 USDC) dan kesuksesan transaksi deposit/spend on-chain.
+- [x] Gunakan wallet dan key khusus testnet, bukan credential production.
+  - 2026-06-11: Menggunakan testnet-only wallet `0x23e32D309c575A3D5E7CD2867BE12B00efa44Bb1`.
 
 Test matrix minimum:
 
