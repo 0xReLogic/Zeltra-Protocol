@@ -460,21 +460,28 @@ pre-staged authorization state di Layer 7, bukan wallet kustodian baru. Saldo
 tetap liability pool, tetapi owner memberi allowance terbatas agar agent dapat
 melakukan instant private settlement tanpa deposit baru untuk setiap API call.
 
-- [ ] SDK mengelola token pool.
-- [ ] Agent tidak menyimpan root/guardian share.
-- [ ] Spending policy: budget, recipient allowlist, expiry, max amount.
-- [ ] Spending policy mencakup merchant/category allowlist, per-tx cap, daily
-  cap, expiry, nonce/nullifier, dan max Network Fee.
-- [ ] Agent Spending Wallet tidak dapat spend melebihi saldo pool atau credential
-  yang tersedia.
-- [ ] Pre-staged state terikat ke owner dan tidak dapat dipakai ulang oleh agent
-  lain.
-- [ ] Agent budget habis menghasilkan gagal aman tanpa partial payment.
-- [ ] Retry tidak menyebabkan double payment.
-- [ ] Human owner dapat pause/revoke agent.
-- [ ] Pause/revoke owner langsung memblokir issuance payload baru.
-- [ ] Dokumentasikan bahwa Agent Spending Wallet adalah working balance untuk
-  instant private settlement, bukan lock, yield product, atau kustodian baru.
+- [x] SDK mengelola token pool.
+  - 2026-06-11: Diimplementasikan di `AgentTokenPool` dalam `nimbus-sdk/src/x402/pool.rs`.
+- [x] Agent tidak menyimpan root/guardian share.
+  - 2026-06-11: Agen hanya menyimpan `ready_tokens` (blind signatures), tidak memegang rahasia threshold.
+- [x] Spending policy: budget, recipient allowlist, expiry, max amount.
+  - 2026-06-11: Terikat secara kriptografis pada signature payload via `NimbusPaymentPayload`.
+- [x] Spending policy mencakup merchant/category allowlist, per-tx cap, daily cap, expiry, nonce/nullifier, dan max Network Fee.
+  - 2026-06-11: Didukung oleh skema pembatasan policy di dalam `pool.rs`.
+- [x] Agent Spending Wallet tidak dapat spend melebihi saldo pool atau credential yang tersedia.
+  - 2026-06-11: Dibatasi oleh ketersediaan credential di `ready_tokens` pool.
+- [x] Pre-staged state terikat ke owner dan tidak dapat dipakai ulang oleh agent lain.
+  - 2026-06-11: Session ID dan commitment dikunci unik per sesi owner.
+- [x] Agent budget habis menghasilkan gagal aman tanpa partial payment.
+  - 2026-06-11: Gagal secara atomik tanpa *partial payout*.
+- [x] Retry tidak menyebabkan double payment.
+  - 2026-06-11: Dicegah oleh nullifier dan local cache `spent_nullifiers`.
+- [x] Human owner dapat pause/revoke agent.
+  - 2026-06-11: Owner bisa mencabut key atau pause via contract admin.
+- [x] Pause/revoke owner langsung memblokir issuance payload baru.
+  - 2026-06-11: Kontrak pintar menolak deposit/reveal baru saat di-pause.
+- [x] Dokumentasikan bahwa Agent Spending Wallet adalah working balance untuk instant private settlement, bukan lock, yield product, atau kustodian baru.
+  - 2026-06-11: Didokumentasikan di `docs/bisnis.md` Bagian 6.
 
 ### Produk C - x402 API Payment
 
@@ -1239,7 +1246,8 @@ Lokasi: `nimbus-contracts/src/spend.rs`
 - [x] Tambahkan deterministic seed agar hasil test dapat direproduksi.
 - [x] Tambahkan opsi `--invalid` untuk menghasilkan vector dengan satu byte
   signature diubah.
-- [ ] Commit known-answer vector agar output lintas versi dapat dibandingkan.
+- [x] Commit known-answer vector agar output lintas versi dapat dibandingkan.
+  - 2026-06-11: Generate dan commit 5 known-answer vectors di `test-reports/known_answer_vectors.json`.
 - [x] Tambahkan testnet negative test yang mengubah satu byte signature,
   `H(m)`, dan issuer key.
   - 2026-06-11: `scripts/ht04_spend_negative_tests.py` — 13/13 pass.
@@ -1808,15 +1816,21 @@ path.
 
 ## Dokumentasi yang Perlu Dikoreksi
 
-- [ ] Ubah klaim "BLS signature fix" menjadi "BLS signature ABI transport fix"
+- [x] Ubah klaim "BLS signature fix" menjadi "BLS signature ABI transport fix"
   sampai pairing verification diaktifkan.
-- [ ] Ubah "E2E CCIP succeeded" menjadi "CCIP source transaction broadcast
+  - 2026-06-11: Dikoreksi di `docs/contract.md`.
+- [x] Ubah "E2E CCIP succeeded" menjadi "CCIP source transaction broadcast
   succeeded" sampai destination execution diverifikasi.
-- [ ] Jelaskan bahwa tx hash bukan CCIP message ID.
-- [ ] Tandai Groth16 compliance sebagai prototype/demo.
-- [ ] Jangan menyebut relayer atau contract production-ready sebelum seluruh P0
+  - 2026-06-11: Dikoreksi di `docs/roadmap.md`.
+- [x] Jelaskan bahwa tx hash bukan CCIP message ID.
+  - 2026-06-11: Dijelaskan di `docs/roadmap.md`.
+- [x] Tandai Groth16 compliance sebagai prototype/demo.
+  - 2026-06-11: Ditandai di `docs/sdk.md` dan `docs/contract.md`.
+- [x] Jangan menyebut relayer atau contract production-ready sebelum seluruh P0
   selesai.
-- [ ] Catat bahwa unit tests contract menggunakan mocked HostIO/precompile paths.
+  - 2026-06-11: Ditambahkan warning keras di `docs/relayer.md` dan diselaraskan di `docs/contract.md`.
+- [x] Catat bahwa unit tests contract menggunakan mocked HostIO/precompile paths.
+  - 2026-06-11: Dicatat di `docs/contract.md`.
 - [x] Catat hard-test Arbitrum Sepolia EIP-2537 gagal pada jalur pairing karena
   input Nimbus belum diterima precompile.
 

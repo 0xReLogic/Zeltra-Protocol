@@ -2,6 +2,9 @@
 
 Dokumen ini mendokumentasikan desain teknis, endpoints, dan optimalisasi **Nimbus Node (Relayer API)** yang bertanggung jawab menjembatani wallet klien dengan smart contract L2 untuk transaksi privat secara instan dan tanpa gas fee (*gasless*).
 
+> [!WARNING]
+> **DEVELOPMENT ONLY**: Nimbus Node (Relayer) dan Smart Contract saat ini **TIDAK** berstatus *production-ready*. Seluruh pengerjaan P0 di [`todo.md`](../todo.md) harus diselesaikan dan audit penuh dilakukan sebelum deploy ke lingkungan mainnet produksi.
+
 ---
 
 ## 0. Informasi Deployment Testnet L2

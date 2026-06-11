@@ -45,14 +45,16 @@ nimbus-sdk/src/
 ## 2. Inovasi & Optimalisasi Performa (Riset Jurnal 2026)
 
 > [!NOTE]
-> **PRODUKSI / INTEGRASI ZK-PROOF**:
-> Pembuatan ZK-Proof di dalam SDK (`client_generate_compliance_proof`) telah diimplementasikan menggunakan **Groth16 zkSNARK riil** dari ekosistem **Arkworks 0.5.0**. Prover ini menghitung titik-titik kurva $A, B, C$ secara dinamis berdasarkan parameter publik transaksi (`root`, `nullifier`, `recipient`, `amount`) dan membuktikan kepatuhan yang memenuhi persamaan verifikasi pairing EIP-2537 secara on-chain secara instan.
+> **PROTOTYPE / DEMO INTEGRASI ZK-PROOF (BUKAN UNTUK PRODUKSI)**:
+> Pembuatan ZK-Proof di dalam SDK (`client_generate_compliance_proof`) telah diimplementasikan sebagai **prototype/demo** menggunakan **Groth16 zkSNARK** dari ekosistem **Arkworks 0.5.0**. Prover ini menghitung titik-titik kurva $A, B, C$ secara dinamis berdasarkan parameter publik transaksi (`root`, `nullifier`, `recipient`, `amount`) untuk demonstrasi alur integrasi compliance verification.
 > 
-> **Status Implementasi:**
+> Keamanan kriptografis sirkuit ini belum diaudit dan parameter setup-nya masih menggunakan generator pengembangan (development key). Jangan gunakan fitur ini di production sebelum sirkuit dan verifier-nya diaudit secara penuh.
+> 
+> **Status Implementasi (Prototype/Demo):**
 > - [Selesai] Upgrade ke arkworks 0.5.0 (API compatibility: Group → PrimeGroup)
-> - [Selesai] Implementasi real Groth16 compliance circuit dengan LinearCombination
-> - [Selesai] WASM bindings dengan real Groth16 ProvingKey/VerifyingKey types
-> - [Selesai] Testing: compliance circuit test valid
+> - [Selesai] Implementasi Groth16 compliance circuit dengan LinearCombination (Prototype)
+> - [Selesai] WASM bindings dengan Groth16 ProvingKey/VerifyingKey types (Demo)
+> - [Selesai] Testing: compliance circuit test valid (Mock verification)
 > 
 > Untuk paralelisasi penuh Pippenger MSM dengan WASM-SIMD dan pool Web Workers (Rayon) pada browser host, pastikan untuk mengaktifkan `wasm-bindgen-rayon::init_thread_pool` di sisi front-end.
 

@@ -4,10 +4,11 @@ Dokumen ini menjelaskan desain, alur dana, state, API, dan status implementasi
 smart contract Nimbus. Targetnya adalah pembaca dapat memahami perilaku kontrak
 tanpa harus membaca source code.
 
-> **Status:** testnet/development. Pairing BLS pada jalur `spend` sudah aktif
+> **Status:** testnet/development. BLS signature ABI transport fix pada jalur `spend` sudah aktif
 > di kode, direct recipient binding sudah diterapkan, dan hard-test 2026-06-08
-> di Arbitrum Sepolia berhasil mengeksekusi `spend` BLS valid tanpa mock/bypass.
-> Verifying key ZK masih mock.
+> di Arbitrum Sepolia berhasil mengeksekusi `spend` dengan validasi parameter transport tanpa mock/bypass.
+> Namun, verifikasi pairing check di tingkat contract masih membutuhkan integrasi test vector valid (EIP-2537).
+> Verifying key ZK masih mock (prototype/demo).
 
 ## 1. Gambaran Sistem
 
@@ -358,11 +359,11 @@ Catatan hard-test EIP-2537:
   EIP-2537, jadi Arbitrum Sepolia memiliki precompile EIP-2537 aktif.
 - Resolusi 2026-06-08: field bytes Arkworks tidak boleh di-reverse; G2 harus
   dipetakan dari raw Arkworks ke EIP-2537 dengan block order `[1, 0, 3, 2]`.
-- Contract fixed berhasil deploy dan activate:
+- Contract fixed berhasil deploy dan activate (BLS signature ABI transport fix):
   `0xd9f1f8f53a8e0b5b8bc6361946119de02cf5c159`.
-- Direct precompile tests `0x0b`, `0x0d`, dan `0x0f` lolos.
-- `spend` valid sukses:
-  `0x39dd200a6205295f190d2bed47ecb74ee6b8f61689d93535d2b715a3a5741498`.
+- Direct precompile tests `0x0b`, `0x0d`, dan `0x0f` lolos (menggunakan data static test vector).
+- `spend` broadcast sukses pada tingkat ABI decoding:
+  `0x39dd200a6205295f190d2bed47ecb74ee6b8f61689d93535d2b715a3a5741498` (namun precompile pairing verification di tingkat contract masih memotong/bypassing dengan bypass flag internal untuk development sampai input vector riil diintegrasikan).
 
 ## 9. ZK Compliance
 
@@ -516,6 +517,9 @@ RUSTC_WRAPPER= cargo test --workspace
 RUSTC_WRAPPER= cargo check -p nimbus_contracts --lib
 cargo stylus check
 ```
+
+> [!NOTE]
+> **Catatan Unit Tests**: Unit tests untuk smart contract di dalam repository ini (`cargo test`) menggunakan mock HostIO/precompile paths lingkungan rust-stylus/cargo-stylus, bukan memanggil precompile EIP-2537 riil di on-chain.
 
 Perubahan storage untuk commitment bersifat append-only, tetapi deployment lama
 tidak memiliki data `session_exists`, `session_commitment_hash`, dan

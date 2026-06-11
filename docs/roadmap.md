@@ -443,13 +443,11 @@ dibuktikan dengan benchmark atau hard test sebelum menjadi acceptance criteria.
 *   **Deskripsi Pekerjaan**:
     *   Menulis skrip integrasi end-to-end lengkap untuk mensimulasikan alur penuh secara otonom di testnet Arbitrum Sepolia.
     *   Menjalankan local node Relayer, melakukan splitting key share, dan mengirimkan spend request dengan payload CCIP cross-chain.
-    *   **Hasil yang sudah terbukti**: Relayer memproses request, membaca fee
-        router sebesar `0.000071 ETH`, dan source transaction berhasil
-        dikonfirmasi on-chain.
-    *   **Tx Hash CCIP**: `0x96687f14e6ee169a9211b4890cbd513a6e85b80bf1bc7b134c266049d81d42b8`
+    *   **Hasil yang sudah terbukti**: CCIP source transaction broadcast succeeded (transaksi pengiriman dari relayer ke router di source chain berhasil dikonfirmasi on-chain).
+    *   **Source Tx Hash**: `0x96687f14e6ee169a9211b4890cbd513a6e85b80bf1bc7b134c266049d81d42b8`
     *   **Confirm Block**: `274520525`
-    *   **Batas bukti**: Gas used `171,463` dan receipt source tidak membuktikan
-        CCIP destination success, valid BLS spend, payout, atau recovery.
+    *   **Catatan Kritis**: Transaksi hash di atas adalah source transaction hash, BUKAN CCIP message ID. Penerimaan di destination chain (destination execution) belum diverifikasi secara penuh.
+    *   **Batas bukti**: Gas used `171,463`. Receipt source ini hanya membuktikan keberhasilan broadcast di source chain, tidak membuktikan keberhasilan eksekusi di destination chain (payout atau recovery).
 
 
 ### Optional Items (Nice to have, can defer to v2)
