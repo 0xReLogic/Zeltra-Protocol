@@ -64,29 +64,16 @@ Mengacu pada publikasi ilmiah terbaru tahun 2025/2026 mengenai *DePIN Tokenomics
     *   **Ketika Transaksi Ramai (Demand Tinggi)**: Jumlah $NIMB yang dibakar dari biaya transaksi akan **jauh lebih besar** daripada jumlah koin baru yang dicetak untuk reward Guardian. Akibatnya, pasokan token deflasi drastis, meningkatkan harga $NIMB di pasar terbuka.
     *   **Ketika Transaksi Sepi (Demand Rendah)**: Jumlah koin yang dicetak melebihi koin yang dibakar. Koin baru memotivasi para pemilik STB baru untuk masuk karena "biaya modal" membeli token jaminan di pasar sedang murah. Ini secara otomatis merekrut infrastruktur fisik baru (STB) saat kapasitas jaringan sedang murah.
 
-### E. Adaptive Value Capture Engine (Inovasi Jurnal Bisnis 2026)
-Sebagai antisipasi terhadap risiko de-pegging stablecoin atau guncangan likuiditas di pasar L2, Nimbus merancang mesin bagi-hasil adaptif (*Adaptive Value Capture Engine*) yang diatur oleh parameter algoritma on-chain:
-*   Jika TVL (Total Value Locked) di Brankas Dinamis berada dalam zona aman dengan volatilitas rendah, **65% hasil yield** dibagikan langsung ke staker Safety Module dalam bentuk USDC.
-*   Jika terjadi volatilitas pasar ekstrem di DeFi (misal APY Aave jatuh di bawah 2% atau ada guncangan di stablecoin), kontrak secara dinamis mengalihkan porsi yield: **20% dialihkan ke kas darurat protokol**, **15% ke penambahan jaminan LP Uniswap**, dan sisa **30% ke staking dividends**. Ini memastikan dana investor dan pendiri terlindungi dari guncangan makro ekonomi kripto tanpa perlu campur tangan manual yang lambat.
+### E. Real-Yield Value Capture
 
-### F. Model Brankas Dinamis (Dynamic Vault Model)
-Untuk memaksimalkan efisiensi gas dan mengoptimalkan perolehan hasil yield secara aman, Nimbus tidak lagi menggunakan alokasi statis 30/50/20, melainkan beralih ke **Model Brankas Dinamis** berbasis volume transaksi historis:
-1.  **Penyesuaian Target Kas ($\beta_{\text{cash}}$) Secara Dinamis**: Target kas likuid berkisar antara **15% hingga 45%** dari TVL, disesuaikan secara otomatis di setiap pergantian epoch (24 jam) menggunakan rata-rata bergerak volume transaksi selama 7 epoch terakhir (*7-Epoch Moving Average Volume*).
-    *   **Ketika Volatilitas Tinggi (Volume > 100,000 USDC)**: Target kas likuid dinaikkan menjadi **45%** untuk memastikan penarikan besar-besaran (misalnya oleh whale) dapat dipenuhi secara instan tanpa memicu gas penarikan DeFi/RWA yang mahal.
-    *   **Ketika Volatilitas Rendah (Volume < 10,000 USDC)**: Target kas likuid diturunkan hingga **15%** untuk memaksimalkan modal produktif yang bekerja di Aave V3 dan Ondo RWA demi memperoleh APY yield optimal.
-    *   **Kondisi Normal (Volume Sedang)**: Target kas likuid disetel ke level bawaan **30%** (Rasio 30/50/20 asli).
-2.  **Alokasi Bagian Non-Kas**: Porsi dana non-kas (yaitu $100\% - \beta_{\text{cash}}$) secara otomatis dibagi menggunakan rasio **5:2 (≈71.4% ke Aave V3 dan ≈28.6% ke Ondo USDY / BlackRock BUIDL RWA)**.
-    *   Pada rasio normal (Kas 30%), ini menghasilkan pembagian persis: 30% Kas, 50% Aave, dan 20% Ondo RWA.
-    *   Pada rasio kas tinggi (Kas 45%), pembagian menjadi: 45% Kas, 39.3% Aave, dan 15.7% RWA.
-    *   Pada rasio kas rendah (Kas 15%), pembagian menjadi: 15% Kas, 60.7% Aave, dan 24.3% RWA.
-3.  **Hysteresis & Batch Rebalancing**: Sistem ini diatur untuk meminimalisir transaksi interaksi eksternal on-chain dari pengguna demi menghemat pengeluaran gas operasional platform secara keseluruhan hingga **90%-99%**.
-4.  **Proteksi "Whale Hijacking" & "MEV Vault Front-Running"**:
-    Meskipun model alokasi dinamis di atas sangat efisien, terdapat celah logika (*economic vector vulnerability*) yang bisa dieksploitasi jika brankas dinamis tidak diproteksi dari penarikan berskala besar:
-    *   **Skenario Serangan**: Saat pasar sepi, target kas likuid secara otomatis diturunkan ke level minimum (15%), sementara 85% sisanya dikunci secara produktif di Aave dan Ondo RWA. Tepat setelah epoch baru dimulai, seorang *Whale* jahat (atau kompetitor) melakukan penarikan dana mendadak (*flash withdrawal*) sebesar 30% dari total TVL.
-    *   **Dampak Kerugian**: Karena kas likuid hanya ada 15%, smart contract terpaksa mengeksekusi penarikan darurat (*forced liquidation*) dari Aave dan Ondo secara on-chain secara instan (dalam blok transaksi yang sama) untuk menutupi sisa 15% kekurangan dana si Whale. Hal ini akan memicu pengeluaran gas fee penarikan yang sangat mahal, memicu *slippage loss* pada kas Treasury, dan menurunkan performa *yield* staker jujur lainnya.
-    *   **Mitigasi Proteksi**:
-        *   **Masa Antrean Penarikan (Withdrawal Delay / Lock-up Period)**: Penarikan dana berskala besar (misalnya di atas ambang batas tertentu seperti >5% dari total TVL) tidak diperbolehkan terjadi secara instan dalam 1 detik. Penarikan skala besar ini diwajibkan masuk ke antrean penarikan (*withdrawal queue*) dengan masa penangguhan selama 24-48 jam.
-        *   **Biaya Penarikan Likuidasi Darurat (Emergency Dynamic Withdrawal Fee)**: Jika pengguna memaksakan penarikan instan saat kas likuid sedang berada di batas minimum (15%) dan penarikan tersebut melebihi kapasitas kas aktif saat itu, penarik dikenakan biaya penarikan ekstra (*slippage fee/penalty*). Biaya penalty ini digunakan untuk menutup biaya gas penarikan paksa dari Aave/Ondo, sehingga modal staker jujur lainnya tetap utuh dan terlindungi.
+Pendapatan real-yield untuk staker Safety Module diperoleh secara langsung dari biaya transaksi protokol (Deposit Fee `0,20%` dan Private Spend Fee `0,25%`), serta margin efisiensi dari relayer batching. Sebesar 50% dari Spend Fee (`0,125%` efektif) dialokasikan untuk buyback & burn token $NIMB secara otomatis guna menciptakan efek deflasi jangka panjang.
+
+### F. Full Reserve (100% Liquid) Model
+
+Untuk menjamin keamanan modal depositor dan menghemat limit ukuran WASM kontrak pintar pada Arbitrum Stylus, Nimbus menerapkan model **100% Liquid Reserve (Full Reserve)**:
+1. **0% Bank Run Risk**: Karena 100% dana pendukung tersimpan secara likuid di dalam kontrak pintar utama, tidak ada risiko kegagalan likuiditas atau forced liquidation. Antrean penarikan (*withdrawal queue*) dan penalty darurat dihapus demi mengoptimalkan kecepatan eksekusi.
+2. **Modular Yield Extension**: Alokasi modal ke Aave V3 dan Ondo RWA ditangguhkan dari level core pool. Modul yield eksternal hanya akan diintegrasikan di masa mendatang sebagai wrapper opsional di luar kontrak core.
+3. **Peningkatan Gas Efficiency**: Tanpa perlu melakukan pemantauan oracle harga atau rebalancing aset eksternal on-chain, biaya gas operasional terpangkas hingga 95% dibandingkan model vault dinamis.
 
 ### G. Circuit-Breaker Mechanism (Security Hardening 2026)
 Sebagai antisipasi terhadap volatilitas ekstrem dan serangan manipulasi pasar, Nimbus menerapkan **Circuit-Breaker Mechanism** dengan kontrol adaptif:

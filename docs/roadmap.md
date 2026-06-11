@@ -149,43 +149,26 @@ dibuktikan dengan benchmark atau hard test sebelum menjadi acceptance criteria.
 
 ---
 
-## 1. Integrasi Token ERC-20, Penanganan Fee, & Fast-Path Likuiditas
+## 1. Integrasi Token ERC-20, Penanganan Fee, & Kas Likuid (Full Reserve)
 *   **Target Modul**: [nimbus-contracts/src/lib.rs](file:///home/azureuser/crypto/nimbus-contracts/src/lib.rs)
-*   **Status**: Sebagian diimplementasikan, belum lulus hard test
+*   **Status**: Terintegrasi untuk core payment, biaya baru disesuaikan
 *   **File yang Diedit**:
     *   Smart Contract: [nimbus-contracts/src/lib.rs](file:///home/azureuser/crypto/nimbus-contracts/src/lib.rs)
     *   Dokumentasi: [docs/contract.md](file:///home/azureuser/crypto/docs/contract.md)
 *   **Deskripsi Pekerjaan**:
     *   Definisikan interface ERC-20 standar di dalam Stylus smart contract.
     *   Ubah fungsi `deposit()` agar melakukan `transferFrom` USDC dari wallet pengguna ke escrow kontrak.
-    *   Implementasikan pemotongan biaya deposit/minting sebesar **0.1%** secara on-chain.
+    *   Implementasikan pemotongan biaya deposit/minting sebesar **0.20%** secara on-chain.
     *   `reveal_mask_key()` hanya menyelesaikan issuance dan tidak mentransfer
         collateral. Transfer collateral hanya boleh terjadi melalui refund atau
         spend.
-    *   Implementasikan pemotongan biaya penarikan/redemption sebesar **0.15%** saat token privat dibelanjakan.
-    *   Implementasikan fitur **Fast-Path Liquidity Premium (0.05% - 0.10%)** secara bertahap sesuai 3 fase rilis:
-        1.  *Fase 1*: Dinonaktifkan (hanya CCIP lambat untuk menghilangkan modal awal).
-        2.  *Fase 2*: Diaktifkan menggunakan modal hasil yield kas Treasury internal secara mandiri.
-        3.  *Fase 3*: Membuka pool publik yang dilindungi batas maksimum dinamis (*Dynamic Pool Cap*).
-*   **Batas verifikasi**: Perhitungan Dynamic Pool Cap dan Congestion-Based
-    Pricing tersedia di kode, tetapi accounting utilization dan liquidity
-    settlement belum divalidasi end-to-end dengan pool nyata.
+    *   Implementasikan pemotongan biaya transaksi/spend sebesar **0.25%** saat token privat dibelanjakan (termasuk spend untuk penarikan/unshield).
+    *   Sistem penarikan cepat bertingkat (*Fast-Path Liquidity Premium*) dinonaktifkan karena pool core menggunakan 100% Liquid Reserve (seluruh transaksi diproses instan).
 
-## 2. Integrasi DeFi & RWA Yield (Brankas Dinamis / Dynamic Vault Model)
-*   **Target Modul**: [nimbus-contracts/src/lib.rs](file:///home/azureuser/crypto/nimbus-contracts/src/lib.rs)
-*   **Status**: Prototype, belum terverifikasi dengan Aave/RWA nyata
-*   **File yang Diedit**:
-    *   Smart Contract: [nimbus-contracts/src/lib.rs](file:///home/azureuser/crypto/nimbus-contracts/src/lib.rs)
-    *   Dokumentasi: [docs/contract.md](file:///home/azureuser/crypto/docs/contract.md)
+## 2. Integrasi DeFi & RWA Yield (Deprecated / Ditangguhkan)
+*   **Status**: DEPRECATED (Konsolidasi ke 100% Liquid Reserve)
 *   **Deskripsi Pekerjaan**:
-    *   Definisikan interface interaksi kontrak dengan Aave Pool V3 L2 dan tokenized RWA T-Bills (seperti BlackRock BUIDL atau Ondo USDY).
-    *   Terapkan pembagian alokasi otomatis:
-        *   **Target Kas Dinamis (15% - 45%)**: Disimpan di kontrak secara likuid, disesuaikan dinamis berdasarkan 7-Epoch Moving Average volume transaksi.
-        *   **Porsi Non-Kas (Rasio 5:2)**: Sisa non-kas dialokasikan otomatis ke Aave (≈71.4%) dan RWA T-Bills (≈28.6%).
-    *   Pastikan bunga (yield APY) yang terakumulasi dialokasikan secara otomatis ke kas protokol.
-*   **Batas verifikasi**: Cascading Liquidity Buffer tersedia sebagai desain
-    dan implementasi awal. Decimal, asset conversion, slippage, withdrawal
-    delay, insolvency, serta perilaku Aave/RWA belum diuji pada protocol nyata.
+    *   Model Dynamic Vault 30/50/20 via Aave V3 dan Ondo RWA dialihkan ke fase modular lanjutan ekosistem Nimbus untuk menjaga kesederhanaan kontrak core dan menghilangkan risiko kebangkrutan penarikan (Bank Run) secara on-chain. Core pool menjaga 100% Kas Likuid.
 
 ## 3. Perbaikan Format Panggilan Eksternal Polymarket CTF
 *   **Target Modul**: [nimbus-contracts/src/lib.rs](file:///home/azureuser/crypto/nimbus-contracts/src/lib.rs)
@@ -452,21 +435,14 @@ dibuktikan dengan benchmark atau hard test sebelum menjadi acceptance criteria.
 
 ### Optional Items (Nice to have, can defer to v2)
 
-#### 16. RWA KYC Integration
-*   **Status**: Dapat ditunda hanya jika jalur RWA dinonaktifkan
-*   **Target**: [nimbus-contracts/src/vault.rs:148](file:///home/azureuser/crypto/nimbus-contracts/src/vault.rs)
-*   **Note**: Phase 1 launch dapat skip KYC requirement
+#### 16. RWA KYC Integration (Deprecated)
+*   **Status**: DEPRECATED (Jalur RWA dinonaktifkan di core pool)
 
-#### 17. Chainlink Price Feeds Integration
-*   **Status**: Dapat ditunda hanya jika tidak ada accounting berbasis harga
-*   **Target**: [nimbus-contracts/src/vault.rs:200](file:///home/azureuser/crypto/nimbus-contracts/src/vault.rs)
-*   **Note**: Dapat menggunakan fixed price atau oracle eksternal sementara
+#### 17. Chainlink Price Feeds Integration (Deprecated)
+*   **Status**: DEPRECATED (Tidak diperlukan karena tidak ada rebalancing aset eksternal on-chain)
 
-#### 18. Fast-Path Phase Management
-*   **Status**: Phase 2/3 wajib tetap nonaktif sampai accounting teruji
-*   **Target**: [nimbus-contracts/src/lib.rs:70](file:///home/azureuser/crypto/nimbus-contracts/src/lib.rs)
-*   **Note**: Phase 1 mengurangi kompleksitas liquidity, tetapi belum dianggap
-    aman untuk launch sebelum seluruh P0 dan hard test selesai.
+#### 18. Fast-Path Phase Management (Deprecated)
+*   **Status**: DEPRECATED (Seluruh transaksi spend langsung diproses secara instan di core pool yang 100% liquid)
 
 ---
 

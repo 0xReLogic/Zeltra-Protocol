@@ -93,22 +93,17 @@ cukup untuk fee, transaksi harus gagal sebagai `INSUFFICIENT_PRINCIPAL`.
 Pembulatan final harus mengikuti integer stablecoin dan diverifikasi terhadap
 quote kontrak.
 
-### 4.3 Unshield
+### 4.3 Unshield / Withdrawal (Konsolidasi)
 
-Pengguna dapat mengeluarkan saldo dari privacy pool menuju alamat publik. Proses
-ini dikenai fee `0,10%`, simetris dengan deposit. Alasannya: unshield adalah
-perpindahan saldo keluar dari pool, bukan private payment ke merchant. Private
-spend tetap memakai fee transaksi yang lebih tinggi karena menggunakan jalur
-settlement, relayer, quote, dan merchant exact-payout.
+Pengguna dapat mengeluarkan saldo dari privacy pool menuju alamat publik. Untuk menjaga kesederhanaan arsitektur (Architectural Simplification) dan menghindari code bloat pada Arbitrum Stylus WASM, fungsi penarikan (`unshield`) terpisah telah **dihapus**. Penarikan dana dari pool kini sepenuhnya dilakukan dengan cara memanggil fungsi **Private Spend (Flow 4)** dengan memasukkan alamat dompet publik milik pengguna sendiri sebagai penerima. Transaksi ini dikenai fee transaksi standar yang sama dengan spend privat biasa.
 
 ## 5. Model Biaya Target
 
 | Aktivitas | Biaya target | Penerima |
 |---|---:|---|
-| Deposit/shield | 0,10% dari nominal | Protocol treasury |
-| Private spend/transaction | 0,15% dari nominal | Protocol treasury |
+| Deposit/shield | 0,20% dari nominal | Protocol treasury |
+| Private spend/transaction | 0,25% dari nominal | Protocol treasury |
 | Execution fee | Gas quote + markup relayer | Relayer |
-| Unshield tanpa pembayaran | 0,10% dari nominal | Protocol treasury |
 | Fast/cross-chain settlement | Quote dinamis | Relayer/LP, jaringan, treasury |
 | SDK dan integrasi | Gratis | N/A |
 
@@ -211,47 +206,27 @@ Mandat atau pre-staged state agent minimal harus mencakup:
 - status pause/revoke dari owner.
 
 Model ini menjadi alasan ekonomi agar user menyimpan working balance di pool
-tanpa dipaksa lock. User tetap dapat withdraw saldo yang tidak terpakai dengan
-fee unshield `0,10%`, tetapi agent hanya bisa spend sesuai policy yang sudah
+tanpa dipaksa lock. User tetap dapat menarik kembali saldo yang tidak terpakai (via spend ke dompet publik pribadi) dengan
+fee transaksi standar `0,25%`, tetapi agent hanya bisa spend sesuai policy yang sudah
 ditandatangani owner.
 
 Nanopayment tidak boleh mengirim satu transaksi on-chain untuk setiap API call.
 Saldo atau authorization kecil dikumpulkan dan diselesaikan secara batch agar
 biaya jaringan tidak lebih besar daripada nilai pembelian.
 
-## 7. Dynamic Vault: 30/50/20
+## 7. Liquid Reserve (Full Reserve) Model
 
-Rasio `30/50/20` mengatur collateral pengguna, bukan pembagian Network Fee:
+Untuk meminimalkan risiko keamanan smart contract, menghemat batas ukuran byte WASM di Arbitrum Stylus, dan meniadakan risiko Bank Run (kebangkrutan kas akibat penarikan massal), Nimbus mengadopsi **100% Liquid Reserve (Full Reserve)**. 
 
-| Alokasi normal | Porsi | Fungsi |
-|---|---:|---|
-| Kas likuid | 30% | Memenuhi spend dan withdrawal |
-| Aave | 50% | Menghasilkan yield likuid |
-| RWA | 20% | Diversifikasi yield dan reserve |
-
-Model aktual bersifat dinamis. Target kas dapat bergerak antara 15% dan 45%
-berdasarkan kebutuhan likuiditas. Sisa dana non-kas dibagi dengan rasio 5:2 antara
-DeFi dan RWA, sehingga kondisi normal menghasilkan 30/50/20.
-
-```text
-Principal pengguna  -> Dynamic Vault
-Network Fee         -> operator dan treasury
-```
-
-Principal, yield, dan pendapatan operator harus dicatat terpisah. Yield hanya
-pendapatan tambahan dan tidak boleh digunakan untuk menutupi unit economics
-relayer yang negatif. Sebelum mainnet, penggunaan collateral di DeFi/RWA harus
-melewati audit solvency, liquidity stress test, dan kajian hukum.
+Seluruh collateral stablecoin milik pengguna disimpan dalam kas likuid aktif langsung di dalam kontrak utama. Model dynamic vault dengan alokasi 30/50/20 via Aave V3 dan Ondo RWA telah didelegasikan ke fase pengembangan modular selanjutnya. Jika dibutuhkan yield native di masa depan, fitur tersebut akan dibangun secara modular sebagai wrapper terpisah (misalnya adaptor ERC-4626) daripada digabungkan langsung ke dalam core privacy pool.
 
 ## 8. Pendapatan dan Biaya Operasional
 
 ### Protocol treasury menerima
 
-- deposit/shield fee `0,10%`;
-- private spend fee `0,15%`;
-- withdraw/unshield fee `0,10%`;
+- deposit/shield fee `0,20%`;
+- private spend/transaction fee `0,25%` (termasuk spend untuk penarikan);
 - bagian yang transparan dari fast/cross-chain settlement;
-- yield vault jika model tersebut telah diaudit dan diizinkan.
 
 ### Protocol treasury membayar
 
@@ -284,11 +259,10 @@ dapat diukur sebelum operator eksternal dibuka.
 Contoh tahunan:
 
 ```text
-Deposit volume     100.000.000 USDC x 0,10% = 100.000 USDC
-Spend volume        80.000.000 USDC x 0,15% = 120.000 USDC
-Withdraw volume     20.000.000 USDC x 0,10% =  20.000 USDC
+Deposit volume     100.000.000 USDC x 0,20% = 200.000 USDC
+Spend volume       100.000.000 USDC x 0,25% = 250.000 USDC
                                              ------------
-Gross protocol revenue                       240.000 USDC
+Gross protocol revenue                       450.000 USDC
 ```
 
 Bagian execution quote yang mengganti gas bukan revenue bersih. Markup gas dan
@@ -335,8 +309,7 @@ Implementasi saat ini sudah:
 
 Implementasi saat ini masih:
 
-- belum memisahkan private spend fee `0,15%` dan dedicated withdraw/unshield fee
-  `0,10%` pada contract, SDK, dan quote API;
+- belum menyesuaikan konstanta deposit fee (`0,20%`) dan private spend/withdraw fee (`0,25%`) di level smart contract, SDK, dan relayer;
 - sudah memiliki entrypoint dan broadcaster batch untuk 2 sampai 8 same-chain
   spend, tetapi penghematan gas belum dibenchmark di testnet;
 - belum menagih fixed execution quote kepada pengguna;

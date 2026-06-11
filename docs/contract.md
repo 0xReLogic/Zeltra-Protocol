@@ -135,7 +135,7 @@ Validasi:
 Accounting:
 
 ```text
-deposit_fee = ceil(amount / 1000)       // 0.1%
+deposit_fee = ceil(amount * 20 / 10_000)   // 0.20%
 net_amount  = amount - deposit_fee
 principal   = principal + net_amount
 ```
@@ -149,7 +149,7 @@ Effects:
 5. Catat volume epoch.
 6. Tarik full amount melalui ERC-20 `transferFrom`.
 7. Kirim deposit fee ke `fee_recipient`.
-8. Alokasikan reserve sesuai konfigurasi vault.
+8. Simpan stablecoin di saldo kas kontrak (Full Reserve).
 
 Client harus melakukan `approve` stablecoin sebelum deposit.
 
@@ -240,20 +240,17 @@ Setelah validasi:
 - fee dihitung dengan pembulatan ke atas;
 - principal dikurangi sebesar `amount + protocol_share`;
 - nullifier ditandai sudah digunakan;
-- liquidity disiapkan sebelum transfer;
+- liquidity diambil dari saldo kas kontrak;
 - `amount` dikirim penuh ke recipient sebagai exact payout/invoice amount;
-- protocol share dikirim ke `fee_recipient`.
+- spend fee dikirim ke `fee_recipient`.
 
 Perhitungan:
 
 ```text
-merchant_due   = amount                         // exact recipient payout
-base_fee       = ceil(merchant_due * 15 / 10_000) // 0.15%
-premium        = fast_path_premium(merchant_due)
-premium_share  = ceil(premium * 20 / 100)
-protocol_share = base_fee + premium_share
-total_debit    = merchant_due + protocol_share
-payout         = merchant_due
+recipient_due  = amount                          // exact recipient payout
+spend_fee      = ceil(recipient_due * 25 / 10_000) // 0.25%
+total_debit    = recipient_due + spend_fee
+payout         = recipient_due
 ```
 
 Issuer key dikelola melalui:
@@ -388,102 +385,34 @@ API:
 > memberikan security guarantee sampai circuit, proving key, verifying key,
 > public-input ordering, dan test vector production dibekukan dan diaudit.
 
-## 10. Vault dan Liquidity
+## 10. Vault dan Liquidity (Full Reserve Model)
 
 ### Reserve Allocation
 
-Target cash default adalah 30%. Bagian non-cash dibagi dengan rasio 5:2 antara
-Aave dan RWA.
+Sebagai bagian dari penyederhanaan arsitektur untuk meminimalkan risiko eksploitasi smart contract dan menghemat limit WASM di Arbitrum Stylus, protokol Nimbus saat ini menggunakan **100% Liquid Reserve (Full Reserve)**. 
 
-| Kondisi moving average | Cash | Aave | RWA |
-|---|---:|---:|---:|
-| Di bawah 10.000 USDC/epoch | 15% | ~60.7% | ~24.3% |
-| Normal | 30% | 50% | 20% |
-| Di atas 100.000 USDC/epoch | 45% | ~39.3% | ~15.7% |
-
-Volume dihitung per epoch 24 jam menggunakan moving average hingga tujuh epoch.
-Deposit dan spend menambah volume. Public monitoring tersedia melalui:
-
-- `targetCashPct`;
-- `currentEpochId`;
-- `currentEpochVolume`;
-- `historicalEpochVolume`.
+Seluruh aset stablecoin disimpan secara langsung di dalam saldo kas kontrak pintar utama tanpa dialokasikan ke protokol eksternal. Model alokasi dynamic vault 30/50/20 via Aave V3 dan Ondo RWA ditangguhkan ke fase rilis ekosistem modular mendatang.
 
 ### Cascading Liquidity Buffer
 
-Saat refund, spend, atau yield withdrawal memerlukan stablecoin:
-
-1. gunakan cash contract;
-2. tarik shortfall dari Aave;
-3. redeem shortfall dari RWA.
-
-Jika seluruh tier tidak cukup, operasi gagal. `IRwaToken.redeem` menggunakan
-`min_receive = shortfall`.
+Karena protokol menggunakan model cadangan penuh (100% liquid reserve), alur penarikan bertingkat (*cascading liquidity buffer*) dari Aave dan RWA dinonaktifkan. Seluruh klaim refund dan spend dipenuhi secara instan langsung dari saldo kas kontrak pintar.
 
 ### Yield
 
-```text
-total_assets = cash + aToken balance + RWA token balance
-yield        = max(total_assets - principal, 0)
-```
+Seluruh yield/keuntungan protokol dihitung berdasarkan akumulasi biaya transaksi (deposit fee 0.20% dan spend fee 0.25%) yang dikirim langsung ke alamat `fee_recipient`.
 
-`claimAccumulatedYield` hanya dapat dipanggil owner dan mengirim yield ke
-`fee_recipient`. Principal user tidak boleh diklaim sebagai yield.
+### External Interfaces (Deprecated)
 
-Integrasi Aave/RWA masih memerlukan hard test terhadap contract dan token nyata,
-termasuk decimal, withdrawal delay, slippage, pause, dan insolvency behavior.
-
-### External Interfaces
-
-Kontrak berinteraksi dengan reserve provider melalui ABI berikut:
-
-```solidity
-interface IAavePool {
-    function supply(
-        address asset,
-        uint256 amount,
-        address onBehalfOf,
-        uint16 referralCode
-    ) external;
-
-    function withdraw(
-        address asset,
-        uint256 amount,
-        address to
-    ) external returns (uint256);
-}
-
-interface IRwaToken {
-    function deposit(uint256 amount) external returns (uint256);
-    function redeem(
-        uint256 amount,
-        uint256 minReceive
-    ) external returns (uint256);
-}
-```
+Interaksi kontrak dengan Aave Pool V3 dan RWA Token dinonaktifkan di core pool.
 
 ERC-20 digunakan untuk `transfer`, `transferFrom`, `approve`, dan `balanceOf`.
 Conditional Tokens digunakan untuk `splitPosition`.
 
-## 11. Fast-Path Premium
+## 11. Fast-Path Premium (Deprecated)
 
-| Phase | Model |
-|---|---|
-| 1 | Standard path, premium 0 |
-| 2 | Treasury-funded, premium tetap 0.05% |
-| 3 | Public LP, dynamic cap dan premium 0.05%-0.15% |
-
-Pada phase 3:
-
-```text
-new_utilized = utilized_lp_liquidity + amount
-```
-
-Transaksi ditolak jika `new_utilized > total_lp_liquidity`. Premium bertambah
-sesuai utilization. Sebesar 20% dari premium masuk protocol share.
-
-Phase 2 dan 3 tidak boleh diaktifkan sebelum treasury/LP benar-benar tersedia
-dan accounting utilization terhubung ke lifecycle settlement.
+> [!NOTE]
+> **Keputusan Arsitektur (Juni 2026)**:
+> Karena protokol saat ini beralih sepenuhnya ke model cadangan penuh (100% Liquid Reserve), pembagian fase penarikan cepat (Fast-Path Premium) ini dinonaktifkan. Seluruh eksekusi spend langsung diproses secara instan dan tanpa premium tambahan.
 
 ## 12. Admin dan Emergency Control
 
@@ -493,16 +422,12 @@ API utama:
 - `pause()` dan `unpause()`;
 - `proposeOwner()` dan `claimOwnership()`;
 - `proposeFeeRecipient()` dan `executeFeeRecipient()`;
-- `proposeFastPathPhase()` dan `executeFastPathPhase()`;
-- `proposeAaveParams()` dan `executeAaveParams()`;
-- `proposeRwaToken()` dan `executeRwaToken()`;
 - `registerIssuerKey()`, `revokeIssuerKey()`, dan `isIssuerKeyTrusted()`;
-- `setCcipRouter()`;
-- `setLpLiquidity()`.
+- `setCcipRouter()`.
 
 Perubahan parameter finansial memakai timelock 24 jam, kecuali
-`setCcipRouter` dan `setLpLiquidity` yang saat ini langsung berlaku setelah
-dipanggil owner. Keduanya perlu dipertimbangkan untuk timelock sebelum mainnet.
+`setCcipRouter` yang saat ini langsung berlaku setelah
+dipanggil owner. Hal ini perlu dipertimbangkan untuk timelock sebelum mainnet.
 
 ## 13. Build dan Deployment
 

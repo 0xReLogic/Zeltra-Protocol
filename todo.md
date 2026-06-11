@@ -25,7 +25,7 @@ yang sudah pernah terjadi.
 - Perubahan guardian, Vault/KMS, key rotation, signing API, atau quorum.
 - Perubahan storage layout, upgrade/migration, pause, governance, atau admin
   capability.
-- Integrasi token, Aave, RWA, Polymarket, x402, relayer, atau external protocol.
+- Integrasi token, Polymarket, x402, relayer, atau external protocol.
 
 ### Tool yang Digunakan
 
@@ -410,26 +410,6 @@ Checklist:
 - Jika contract pause: policy harus menentukan apakah refund tetap aktif.
 - Tidak ada recovery path yang membutuhkan admin mengambil custody user.
 
-### Flow 5 - Withdraw / Unshield
-
-1. Client memilih amount untuk di-unshield dari privacy pool ke alamat publik.
-2. Client/SDK menghasilkan parameter pembuktian ZK / spend credential untuk unshield.
-3. Relayer memvalidasi format, policy, dan status pool TVL.
-4. Contract memverifikasi pembuktian dan menghitung fee penarikan:
-   - **Standard Fee**: Flat fee sebesar 0.10% dari nominal unshield.
-   - **Withdrawal Queue (Lock-up Period)**: Untuk penarikan skala besar (>5% dari total TVL), penarikan diwajibkan masuk antrean dengan masa tunda 24-48 jam.
-   - **Emergency Dynamic Fee (Penalty)**: Jika user memaksa penarikan instan (bypassing the queue) saat kas likuid berada di level minimum (15%), contract akan mengenakan dynamic fee tambahan untuk menutup biaya gas/slippage likuidasi paksa posisi yield/RWA (Aave & Ondo).
-5. Contract memotong total liability pool, mentransfer nominal bersih ke recipient publik, dan menyalurkan fee ke protocol treasury.
-
-Checklist:
-
-- Unshield fee default 0.10% terpotong dengan benar dari total transfer.
-- Penarikan >5% TVL ditolak secara instan dan dimasukkan ke status pending queue.
-- Lock-up period 24-48 jam berjalan dengan benar sebelum dana queue dapat diklaim.
-- Penarikan instan saat kas di bawah batas aman memicu emergency dynamic penalty fee.
-- State update pool balance, total liability, dan total TVL terupdate secara atomic.
-
-
 ## Core MVP Gate
 
 Core dianggap berhasil hanya jika semua berikut lulus hard test nyata:
@@ -791,7 +771,6 @@ dikembalikan, dan final verification hanya dilakukan oleh CLI.
 - [x] Reveal setelah refund ditolak.
   - 2026-06-11: NT-04 membuktikan refund setelah reveal/resolved ditolak (revert).
 - [ ] Refund saat contract pause mengikuti policy yang ditentukan.
-- [ ] Vault/Aave/RWA liquidity shortfall menghasilkan state konsisten.
 - [ ] Saldo client kembali tepat setelah fee policy.
 
 ### HT-06 Relayer Queue, Crash, dan Recovery
@@ -860,20 +839,6 @@ dikembalikan, dan final verification hanya dilakukan oleh CLI.
 - [ ] Malicious collateral token diuji.
 - [ ] Reentrancy dari token/CTF diuji menggunakan deployed adversarial contract.
 - [ ] Allowance sisa setelah failure diperiksa.
-
-### HT-10 Vault DeFi/RWA
-
-- [ ] Deposit nyata mengalokasikan cash/Aave/RWA sesuai target.
-- [ ] Uji ketika Aave address belum dikonfigurasi.
-- [ ] Uji Aave supply/withdraw nyata pada testnet atau deployed protocol stub.
-- [ ] Uji RWA deposit/redeem dengan deployed adversarial and normal contracts.
-- [ ] Cash cukup: tidak melakukan unnecessary withdrawal.
-- [ ] Cash kurang: withdraw Aave tepat.
-- [ ] Aave kurang: redeem RWA tepat.
-- [ ] Semua tier kurang: transaksi gagal tanpa accounting corruption.
-- [ ] `total_assets >= liabilities` dicek setelah setiap scenario.
-- [ ] Yield claim tidak mengambil principal.
-- [ ] Token dengan fee-on-transfer/rebase ditolak atau ditangani eksplisit.
 
 ### HT-11 Governance dan Pause
 
@@ -951,14 +916,14 @@ selesai. Sebelum itu statusnya harus eksplisit `prototype`.
 ### HT-16 Economic and Accounting Invariants
 
 - [ ] Untuk setiap flow, hitung delta saldo client, contract, fee recipient,
-  relayer, Aave, RWA, dan destination.
+  relayer, dan destination.
 - [ ] Total debit sama dengan total credit plus explicit fee.
 - [ ] Principal tidak pernah underflow atau silently clamp ke zero.
 - [ ] Fee rounding diuji pada boundary amount.
 - [ ] Minimum amount tepat di bawah, tepat sama, dan tepat di atas batas.
-- [ ] Premium phase 1/2/3 diuji dengan transaksi nyata.
-- [ ] LP utilization tidak melebihi total liquidity.
-- [ ] Claim yield tidak mengurangi kemampuan memenuhi seluruh liability.
+- [ ] (Deprecated) Premium phase 1/2/3 diuji dengan transaksi nyata.
+- [ ] (Deprecated) LP utilization tidak melebihi total liquidity.
+- [ ] (Deprecated) Claim yield tidak mengurangi kemampuan memenuhi seluruh liability.
 - [ ] Failure/revert tidak menghasilkan profit atau kehilangan user yang tidak
   dijelaskan.
 
@@ -1297,39 +1262,31 @@ Sisa hard test: kill process pada setiap boundary broadcast/receipt, concurrent
 worker, disk full, corrupt DB, dan reconciliation sender+nonce tetap mengikuti
 HT-06.
 
-### Withdraw Fee dan Instant Agent Settlement
+### Private Spend Fee (Consolidated) dan Agent Settlement
 
 Target bisnis:
 
-- Deposit/shield fee: `0,10%`.
-- Private spend fee: `0,15%`.
-- Withdraw/unshield fee: `0,10%`.
+- Deposit/shield fee: `0,20%`.
+- Private spend / withdraw fee: `0,25%`.
 - Agent Spending Wallet memakai pre-staged state Layer 7 agar agent dapat
   melakukan instant private settlement tanpa funding ulang per request.
 
 Status:
 
-- [x] Dokumentasikan target withdraw fee `0,10%` dan Agent Spending Wallet di
-  `docs/bisnis.md`.
+- [x] Dokumentasikan target fee baru dan konsolidasi unshield ke `docs/bisnis.md`.
 
 Sisa implementasi wajib:
 
-- [ ] Pisahkan private spend fee `0,15%` dari dedicated withdraw/unshield fee
-  `0,10%` pada contract, SDK, relayer, dan quote API.
-- [ ] Tambahkan dedicated withdraw/unshield quote yang menampilkan gross amount,
-  fee, net payout, recipient, expiry, dan chain ID sebelum user tanda tangan.
-- [ ] Pastikan refund akibat gagal issuance/settlement tidak dikenai withdraw fee.
-- [ ] Pastikan withdraw tidak bisa melewati outstanding liability, pending spend,
+- [ ] Pastikan refund akibat gagal issuance/settlement tidak dikenai fee.
+- [ ] Pastikan spend/withdraw tidak bisa melewati outstanding liability, pending spend,
   atau locked/pre-staged agent allowance.
-- [ ] Tambahkan test rounding untuk withdraw fee `0,10%` pada decimal stablecoin
+- [ ] Tambahkan test rounding untuk deposit fee (0.20%) dan spend fee (0.25%) pada decimal stablecoin
   yang didukung.
-- [ ] Tambahkan event/accounting terpisah untuk deposit fee, spend fee, withdraw
-  fee, execution fee, relayer markup, dan batch margin.
+- [ ] Tambahkan event/accounting terpisah untuk deposit fee, spend fee, execution fee, relayer markup, dan batch margin.
 - [ ] Tambahkan hard test deposit -> Agent Spending Wallet -> private spend ->
-  pause/revoke -> withdraw sisa saldo.
-- [ ] Tambahkan hard test bahwa agent tidak dapat spend setelah owner withdraw
-  saldo yang sebelumnya pre-staged.
-- [ ] Tambahkan hard test bahwa pending agent spend dan withdraw bersamaan tidak
+  pause/revoke -> withdraw (via spend ke wallet owner) sisa saldo.
+- [ ] Tambahkan hard test bahwa agent tidak dapat spend setelah owner menarik kembali (via spend ke wallet owner) saldo yang sebelumnya pre-staged.
+- [ ] Tambahkan hard test bahwa pending agent spend dan spend penarikan bersamaan tidak
   menyebabkan double debit atau insolvency.
 
 ### Adaptive Private Spend Batching dan Monetisasi
@@ -1585,19 +1542,6 @@ Lokasi: `nimbus-node/src/handlers/x402.rs`
 - [ ] Bind address harus configurable; saat ini hanya `127.0.0.1`.
 - [ ] Tambahkan readiness dan liveness endpoint terpisah.
 
-## P2 - Vault dan DeFi/RWA
-
-- [ ] Verifikasi interface Aave dan RWA terhadap deployment target.
-- [ ] Tambahkan slippage/minimum-output pada redeem RWA.
-- [ ] Batasi token dan pool dengan allowlist governance.
-- [ ] Audit allowance lifecycle dan reset approval bila diperlukan.
-- [ ] Gunakan actual asset conversion untuk aToken/RWA, bukan asumsi saldo 1:1.
-- [ ] Tambahkan insolvency invariant:
-  `total_assets >= outstanding user liabilities`.
-- [ ] Bedakan principal deposit, issued liabilities, realized yield, dan fees.
-- [ ] Tambahkan emergency unwind.
-- [ ] Tambahkan tests dengan fork/testnet protocol nyata.
-
 ## P2 - Testing
 
 - [ ] Tambahkan production-path tests tanpa `#[cfg(test)]` bypass.
@@ -1713,7 +1657,7 @@ path.
 6. Perbaiki relayer deposit/reveal agar mengikuti state on-chain.
 7. Bangun ulang compliance circuit dan gunakan verifying key nyata.
 8. Harden KMS, database encryption, API authentication, dan TLS.
-9. Audit vault, DeFi/RWA, Polymarket, dan x402 setelah invariant pembayaran
+9. Audit vault, Polymarket, dan x402 setelah invariant pembayaran
    utama aman.
 
 ## Roadmap Lanjutan
