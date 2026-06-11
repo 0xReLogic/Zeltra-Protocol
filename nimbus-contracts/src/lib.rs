@@ -150,7 +150,8 @@ impl Nimbus {
     pub fn register_clean_root(&mut self, root: FixedBytes<32>) -> Result<(), Vec<u8>> {
         self.check_not_paused()?;
         self.check_owner()?;
-        self.clean_association_roots.insert(root, true);
+        let current_time = U256::from(self.block_timestamp());
+        self.clean_association_roots.insert(root, current_time);
         Ok(())
     }
 
@@ -238,6 +239,7 @@ impl Nimbus {
 
     pub fn spend(
         &mut self,
+        root: FixedBytes<32>,
         nullifier: FixedBytes<32>,
         alpha_neg_bytes: Bytes,
         pk_iss_bytes: Bytes,
@@ -248,6 +250,7 @@ impl Nimbus {
         nonce: FixedBytes<32>,
     ) -> Result<bool, Vec<u8>> {
         self._spend(
+            root,
             nullifier,
             alpha_neg_bytes,
             pk_iss_bytes,
@@ -261,6 +264,7 @@ impl Nimbus {
 
     pub fn batch_spend(
         &mut self,
+        roots: Vec<FixedBytes<32>>,
         nullifiers: Vec<FixedBytes<32>>,
         alpha_neg_items: Vec<Bytes>,
         pk_iss_items: Vec<Bytes>,
@@ -278,7 +282,8 @@ impl Nimbus {
         if len > MAX_BATCH_SIZE {
             return Err(b"BATCH_TOO_LARGE".to_vec());
         }
-        if alpha_neg_items.len() != len
+        if roots.len() != len
+            || alpha_neg_items.len() != len
             || pk_iss_items.len() != len
             || recipients.len() != len
             || amounts.len() != len
@@ -291,6 +296,7 @@ impl Nimbus {
 
         for i in 0..len {
             let valid = self._spend(
+                roots[i],
                 nullifiers[i],
                 alpha_neg_items[i].clone(),
                 pk_iss_items[i].clone(),
@@ -309,6 +315,7 @@ impl Nimbus {
 
     pub fn spend_and_buy_shares(
         &mut self,
+        root: FixedBytes<32>,
         nullifier: FixedBytes<32>,
         alpha_neg_bytes: Bytes,
         pk_iss_bytes: Bytes,
@@ -320,6 +327,7 @@ impl Nimbus {
         nonce: FixedBytes<32>,
     ) -> Result<bool, Vec<u8>> {
         self._spend_and_buy_shares(
+            root,
             nullifier,
             alpha_neg_bytes,
             pk_iss_bytes,
@@ -447,11 +455,12 @@ mod tests {
         PAIRING_RESULT.with(|value| *value.borrow_mut() = u8::from(result));
     }
 
-    fn register_mock_issuer(
+    fn register_mock_issuer_with_nonce(
         contract: &mut Nimbus,
         owner: Address,
         amount: U256,
         recipient_or_intent_hash: FixedBytes<32>,
+        nonce: FixedBytes<32>,
     ) -> (Vec<u8>, Vec<u8>, Vec<u8>, FixedBytes<32>) {
         let alpha_neg = vec![0x11; 128];
         let pk_iss = vec![0x33; 256];
@@ -461,7 +470,6 @@ mod tests {
         let chain_id = U256::from(1337);
         let contract_address = Address::ZERO;
         let expiry = U256::ZERO;
-        let nonce = FixedBytes::ZERO;
 
         let m_hash = helpers::compute_spend_hash(
             chain_id,
@@ -476,6 +484,21 @@ mod tests {
         let nullifier = keccak256(&hm_evm_bytes);
 
         (alpha_neg, hm_evm_bytes.to_vec(), pk_iss, nullifier)
+    }
+
+    fn register_mock_issuer(
+        contract: &mut Nimbus,
+        owner: Address,
+        amount: U256,
+        recipient_or_intent_hash: FixedBytes<32>,
+    ) -> (Vec<u8>, Vec<u8>, Vec<u8>, FixedBytes<32>) {
+        register_mock_issuer_with_nonce(
+            contract,
+            owner,
+            amount,
+            recipient_or_intent_hash,
+            FixedBytes::ZERO,
+        )
     }
 
     #[no_mangle]
@@ -786,6 +809,7 @@ mod tests {
         );
         assert_eq!(
             contract.spend(
+                FixedBytes::ZERO,
                 sid,
                 vec![].into(),
                 vec![].into(),
@@ -799,6 +823,7 @@ mod tests {
         );
         assert_eq!(
             contract.spend_and_buy_shares(
+                FixedBytes::ZERO,
                 sid,
                 vec![].into(),
                 vec![].into(),
@@ -1031,6 +1056,7 @@ mod tests {
 
         assert_eq!(
             contract.spend(
+                FixedBytes::ZERO,
                 nullifier,
                 alpha_neg.clone().into(),
                 pk_iss.clone().into(),
@@ -1046,6 +1072,7 @@ mod tests {
         contract.register_issuer_key(pk_iss.clone().into()).unwrap();
         assert_eq!(
             contract.spend(
+                FixedBytes::ZERO,
                 FixedBytes::repeat_byte(0x99),
                 alpha_neg.into(),
                 pk_iss.into(),
@@ -1076,6 +1103,7 @@ mod tests {
 
         assert_eq!(
             contract.spend(
+                FixedBytes::ZERO,
                 nullifier,
                 vec![0x11; 127].into(),
                 pk_iss.clone().into(),
@@ -1091,6 +1119,7 @@ mod tests {
         let infinity_alpha = vec![0; 128];
         assert_eq!(
             contract.spend(
+                FixedBytes::ZERO,
                 nullifier,
                 infinity_alpha.into(),
                 pk_iss.clone().into(),
@@ -1106,6 +1135,7 @@ mod tests {
         set_pairing_result(false);
         assert!(!contract
             .spend(
+                FixedBytes::ZERO,
                 nullifier,
                 alpha_neg.into(),
                 pk_iss.into(),
@@ -1138,6 +1168,7 @@ mod tests {
 
         assert_eq!(
             contract.spend(
+                FixedBytes::ZERO,
                 nullifier,
                 alpha_neg.into(),
                 pk_iss.into(),
@@ -1168,6 +1199,7 @@ mod tests {
 
         assert_eq!(
             contract.spend(
+                FixedBytes::ZERO,
                 nullifier,
                 alpha_neg.clone().into(),
                 pk_iss.clone().into(),
@@ -1190,6 +1222,7 @@ mod tests {
             .unwrap();
         assert!(contract
             .spend(
+                FixedBytes::ZERO,
                 nullifier,
                 alpha_neg.clone().into(),
                 pk_iss.clone().into(),
@@ -1203,6 +1236,7 @@ mod tests {
         let principal = contract.total_deposited_principal().unwrap();
         assert!(!contract
             .spend(
+                FixedBytes::ZERO,
                 nullifier,
                 alpha_neg.into(),
                 pk_iss.into(),
@@ -1249,6 +1283,7 @@ mod tests {
         );
         let is_valid = contract
             .spend(
+                FixedBytes::ZERO,
                 nullifier,
                 alpha_neg.into(),
                 pk_iss.into(),
@@ -1301,6 +1336,7 @@ mod tests {
         // Call spend_and_buy_shares with polymarket_ctf = Address::ZERO (which triggers mock fallback in tests)
         let success = contract
             .spend_and_buy_shares(
+                FixedBytes::ZERO,
                 nullifier,
                 alpha_neg.into(),
                 pk_iss.into(),
@@ -1370,7 +1406,7 @@ mod tests {
         assert!(!is_valid_unregistered);
 
         // Register clean root
-        contract.clean_association_roots.insert(root, true);
+        contract.clean_association_roots.insert(root, U256::from(1));
 
         // When root is registered, it calls get_compliance_vk, compute_public_inputs_g1, and verify_groth16_proof.
         // Under #[cfg(test)], these are mocked to succeed, so it should return Ok(true).
@@ -1401,6 +1437,7 @@ mod tests {
                 vec![],
                 vec![],
                 vec![],
+                vec![],
             ),
             Err(b"EMPTY_BATCH".to_vec())
         );
@@ -1408,6 +1445,7 @@ mod tests {
         let empty = || Bytes::from(Vec::<u8>::new());
         assert_eq!(
             contract.batch_spend(
+                vec![FixedBytes::ZERO; 9],
                 vec![FixedBytes::ZERO; 9],
                 (0..9).map(|_| empty()).collect(),
                 (0..9).map(|_| empty()).collect(),
@@ -1423,8 +1461,9 @@ mod tests {
         assert_eq!(
             contract.batch_spend(
                 vec![FixedBytes::ZERO; 2],
-                vec![empty()],
-                vec![empty(), empty()],
+                vec![FixedBytes::ZERO; 1],
+                vec![empty(); 2],
+                vec![empty(); 2],
                 vec![Address::ZERO; 2],
                 vec![U256::ZERO; 2],
                 vec![FixedBytes::ZERO; 2],
@@ -1494,6 +1533,7 @@ mod tests {
 
         assert!(contract
             .spend(
+                FixedBytes::ZERO,
                 nullifier,
                 alpha_neg.clone().into(),
                 pk_iss.clone().into(),
@@ -1515,6 +1555,7 @@ mod tests {
         // 4. Verify cannot spend again with same nullifier (replay protection)
         assert_eq!(
             contract.spend(
+                FixedBytes::ZERO,
                 nullifier,
                 alpha_neg.clone().into(),
                 pk_iss.clone().into(),
@@ -1607,5 +1648,123 @@ mod tests {
             contract.total_deposited_principal().unwrap(),
             initial_principal
         );
+    }
+
+    #[test]
+    fn test_holding_time_fee_discounts() {
+        reset_test_state();
+        let owner = address!("1111111111111111111111111111111111111111");
+        set_msg_sender(owner);
+
+        let mut contract = Nimbus::default();
+        contract.init(owner, Address::ZERO, Address::ZERO).unwrap();
+
+        // 1. Setup a deposit to get some principal
+        let sid = FixedBytes::repeat_byte(0x77);
+        contract
+            .deposit(sid, vec![0x42; 256].into(), U256::from(50_000_000)) // 50 USDC
+            .unwrap();
+
+        // 2. Register a mock root at block_timestamp = 1000
+        let root = FixedBytes::repeat_byte(0xcc);
+        set_block_timestamp(1000);
+        contract.register_clean_root(root).unwrap();
+
+        // Check registered timestamp
+        assert_eq!(contract.clean_association_roots.get(root), U256::from(1000));
+
+        let spend_amount = U256::from(10_000_000); // 10 USDC
+
+        // Scenario A: Spend using non-registered root -> should revert
+        let invalid_root = FixedBytes::repeat_byte(0xee);
+        let nonce_a = FixedBytes::repeat_byte(0x01);
+        let (alpha_neg, _hm, pk_iss, nullifier) =
+            register_mock_issuer_with_nonce(&mut contract, owner, spend_amount, FixedBytes::ZERO, nonce_a);
+        assert_eq!(
+            contract.spend(
+                invalid_root,
+                nullifier,
+                alpha_neg.clone().into(),
+                pk_iss.clone().into(),
+                Address::ZERO,
+                spend_amount,
+                FixedBytes::ZERO,
+                U256::ZERO,
+                nonce_a,
+            ),
+            Err(b"INVALID_ASSOCIATION_ROOT".to_vec())
+        );
+
+        // Scenario B: Spend using valid root but with delta_t < 7 days
+        // block_timestamp = 1000 + 100 = 1100 (delta_t = 100) -> 0.25% fee (25,000)
+        set_block_timestamp(1100);
+        let nonce_b = FixedBytes::repeat_byte(0x02);
+        let (alpha_neg2, _hm2, pk_iss2, nullifier2) =
+            register_mock_issuer_with_nonce(&mut contract, owner, spend_amount, FixedBytes::ZERO, nonce_b);
+        let initial_principal = contract.total_deposited_principal().unwrap();
+        assert!(contract
+            .spend(
+                root,
+                nullifier2,
+                alpha_neg2.into(),
+                pk_iss2.into(),
+                Address::ZERO,
+                spend_amount,
+                FixedBytes::ZERO,
+                U256::ZERO,
+                nonce_b,
+            )
+            .unwrap());
+        let after_spend_principal = contract.total_deposited_principal().unwrap();
+        // spend_fee = (10,000,000 * 25 + 9999) / 10000 = 25,000
+        assert_eq!(initial_principal - after_spend_principal, U256::from(10_025_000));
+
+        // Scenario C: Spend using valid root with delta_t = 8 days (>= 7 days, < 30 days)
+        // registration = 1000, current = 1000 + 8 * 86400 = 692200 (delta_t = 691200) -> 0.20% fee (20,000)
+        set_block_timestamp(1000 + 8 * 86400);
+        let nonce_c = FixedBytes::repeat_byte(0x03);
+        let (alpha_neg3, _hm3, pk_iss3, nullifier3) =
+            register_mock_issuer_with_nonce(&mut contract, owner, spend_amount, FixedBytes::ZERO, nonce_c);
+        let initial_principal = contract.total_deposited_principal().unwrap();
+        assert!(contract
+            .spend(
+                root,
+                nullifier3,
+                alpha_neg3.into(),
+                pk_iss3.into(),
+                Address::ZERO,
+                spend_amount,
+                FixedBytes::ZERO,
+                U256::ZERO,
+                nonce_c,
+            )
+            .unwrap());
+        let after_spend_principal = contract.total_deposited_principal().unwrap();
+        // spend_fee = (10,000,000 * 20 + 9999) / 10000 = 20,000
+        assert_eq!(initial_principal - after_spend_principal, U256::from(10_020_000));
+
+        // Scenario D: Spend using valid root with delta_t = 31 days (>= 30 days)
+        // registration = 1000, current = 1000 + 31 * 86400 = 2679400 -> 0.10% fee (10,000)
+        set_block_timestamp(1000 + 31 * 86400);
+        let nonce_d = FixedBytes::repeat_byte(0x04);
+        let (alpha_neg4, _hm4, pk_iss4, nullifier4) =
+            register_mock_issuer_with_nonce(&mut contract, owner, spend_amount, FixedBytes::ZERO, nonce_d);
+        let initial_principal = contract.total_deposited_principal().unwrap();
+        assert!(contract
+            .spend(
+                root,
+                nullifier4,
+                alpha_neg4.into(),
+                pk_iss4.into(),
+                Address::ZERO,
+                spend_amount,
+                FixedBytes::ZERO,
+                U256::ZERO,
+                nonce_d,
+            )
+            .unwrap());
+        let after_spend_principal = contract.total_deposited_principal().unwrap();
+        // spend_fee = (10,000,000 * 10 + 9999) / 10000 = 10,000
+        assert_eq!(initial_principal - after_spend_principal, U256::from(10_010_000));
     }
 }

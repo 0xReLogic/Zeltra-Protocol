@@ -64,6 +64,7 @@ impl Nimbus {
 
     pub fn _spend(
         &mut self,
+        root: FixedBytes<32>,
         nullifier: FixedBytes<32>,
         alpha_neg_bytes: Bytes,
         pk_iss_bytes: Bytes,
@@ -121,9 +122,27 @@ impl Nimbus {
         }
 
         // `amount` is the exact merchant/recipient payout. Fees are debited on top.
-        // Private spend / transaction fee: flat 0.25% (round up)
+        // Private spend / transaction fee: flat 0.25% (default), or holding-time discounts
+        let mut fee_bps = U256::from(25); // 0.25%
+
+        if root != FixedBytes::ZERO {
+            let root_timestamp = self.clean_association_roots.get(root);
+            if root_timestamp == U256::ZERO {
+                return Err(b"INVALID_ASSOCIATION_ROOT".to_vec());
+            }
+            let delta_t = current_time.checked_sub(root_timestamp).unwrap_or(U256::ZERO);
+            let seven_days = U256::from(7 * 24 * 60 * 60);
+            let thirty_days = U256::from(30 * 24 * 60 * 60);
+
+            if delta_t >= thirty_days {
+                fee_bps = U256::from(10); // 0.10% (1 month hold)
+            } else if delta_t >= seven_days {
+                fee_bps = U256::from(20); // 0.20% (7 days hold)
+            }
+        }
+
         let spend_fee = (amount
-            .checked_mul(U256::from(25))
+            .checked_mul(fee_bps)
             .ok_or_else(|| b"SPEND_FEE_MUL_OVERFLOW".to_vec())?
             + U256::from(9999))
             / U256::from(10000);
@@ -202,6 +221,7 @@ impl Nimbus {
     /// to buy outcome shares under the recipient's name in a single transaction.
     pub fn _spend_and_buy_shares(
         &mut self,
+        root: FixedBytes<32>,
         nullifier: FixedBytes<32>,
         alpha_neg_bytes: Bytes,
         pk_iss_bytes: Bytes,
@@ -234,6 +254,7 @@ impl Nimbus {
 
         // 1. Verify and invalidate the signature (same as spend)
         let is_valid = self._spend(
+            root,
             nullifier,
             alpha_neg_bytes,
             pk_iss_bytes,
@@ -385,6 +406,7 @@ impl Nimbus {
 
         // Execute spend and buy shares on destination chain
         let success = self._spend_and_buy_shares(
+            FixedBytes::ZERO,
             nullifier.into(),
             Bytes::from(alpha_neg_bytes),
             Bytes::from(pk_iss_bytes),

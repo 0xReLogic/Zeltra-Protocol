@@ -192,7 +192,7 @@ impl Nimbus {
         proof_c_bytes: Bytes,
     ) -> Result<bool, Vec<u8>> {
         // 1. Verify clean root is registered on-chain
-        if !self.clean_association_roots.get(root) {
+        if self.clean_association_roots.get(root) == U256::ZERO {
             return Ok(false);
         }
 

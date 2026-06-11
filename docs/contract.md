@@ -60,7 +60,7 @@ nimbus-contracts/src/
 ├── spend.rs        Spend, Polymarket intent, fallback, dan CCIP receiver
 ├── verification.rs Groth16 dan compliance verification
 ├── vault.rs        Accounting, reserve allocation, dan liquidity buffer
-├── interfaces.rs   Interface ERC-20, Aave, RWA, dan Conditional Tokens
+├── interfaces.rs   Interface ERC-20 dan Conditional Tokens
 ├── constants.rs    Alamat precompile EIP-2537
 ├── helpers.rs      Authorization, pause, sender, dan timestamp
 └── types.rs        Konversi BLS12-381 ke format EVM
@@ -105,16 +105,9 @@ method ABI `camelCase`.
 | `stablecoin` | Token collateral ERC-20 |
 | `fee_recipient` | Penerima fee dan yield |
 | `total_deposited_principal` | Liability principal yang masih outstanding |
-| `aave_pool`, `a_token`, `rwa_token` | Integrasi reserve eksternal |
 | `ccip_router` | Router yang diizinkan memanggil CCIP receiver |
-| `fast_path_phase` | Mode premium dan sumber liquidity fast path |
-| `total_lp_liquidity` | Kapasitas LP fase 3 |
-| `utilized_lp_liquidity` | Liquidity LP yang sedang digunakan |
-| `target_cash_pct` | Target cash reserve: 15%, 30%, atau 45% |
 
-Parameter sensitif seperti fee recipient, fast-path phase, Aave, dan RWA
-menggunakan proposal lalu eksekusi setelah timelock 24 jam. Perubahan ownership
-menggunakan `proposeOwner` lalu `claimOwnership`.
+Parameter sensitif seperti fee recipient menggunakan proposal lalu eksekusi setelah timelock 24 jam. Perubahan ownership menggunakan `proposeOwner` lalu `claimOwnership`.
 
 Field baru wajib ditambahkan di akhir `Nimbus` storage agar layout field lama
 tidak bergeser.
@@ -248,7 +241,11 @@ Perhitungan:
 
 ```text
 recipient_due  = amount                          // exact recipient payout
-spend_fee      = ceil(recipient_due * 25 / 10_000) // 0.25%
+holding_time   = block.timestamp - root_timestamps[root]
+fee_bps        = 25                              // 0.25% (default)
+                 // diskon: fee_bps = 20 (0.20%) jika holding_time >= 7 hari
+                 // diskon: fee_bps = 10 (0.10%) jika holding_time >= 30 hari (1 bulan)
+spend_fee      = ceil(recipient_due * fee_bps / 10_000)
 total_debit    = recipient_due + spend_fee
 payout         = recipient_due
 ```
@@ -480,7 +477,7 @@ eksplisit. Deployment baru harus mendaftarkan issuer key sebelum hard test spend
    chain; Arbitrum Sepolia `0x0b` sudah lolos, `0x0f` pairing Nimbus belum.
 5. Audit liability, fee, rounding, dan solvency pada seluruh state transition.
 6. Lengkapi authentication dan replay protection CCIP.
-7. Uji Aave, RWA, dan Polymarket tanpa mock.
+7. Uji integration Polymarket tanpa mock.
 8. Tambahkan event untuk seluruh perubahan state finansial.
 9. Tentukan migration dan emergency recovery sebelum deployment immutable.
 

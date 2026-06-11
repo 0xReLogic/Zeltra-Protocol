@@ -17,13 +17,12 @@ Agar protokol dan pendiri memenangkan "game ekonomi" ini, tokenomics harus menye
 ```mermaid
 flowchart TD
     User[User / Transactor] -->|Bayar Biaya Protokol USDC| Contract[Nimbus L2 Contract]
-    Contract -->|Dynamic Cash Buffer: 15%-45%| LPBuffer[Liquidity Buffer]
-    Contract -->|DeFi/RWA: 55%-85% split 5:2| YieldGen[Aave V3 + Ondo RWA]
+    Contract -->|100% Kas Likuid| LPBuffer[Liquidity Buffer]
     
-    YieldGen -->|Akumulasi Bunga USDC| Treasury[Protocol Treasury]
+    Contract -->|Akumulasi Biaya Transaksi USDC| Treasury[Protocol Treasury]
     
-    Treasury -->|15% Buyback & Burn| DEX[DEX Uniswap: Buy NIMB]
-    Treasury -->|65% Pembagian Dividen USDC| SafetyStaking[Safety Module Staking]
+    Treasury -->|50% Buyback & Burn| DEX[DEX Uniswap: Buy NIMB]
+    Treasury -->|30% Pembagian Dividen USDC| SafetyStaking[Safety Module Staking]
     Treasury -->|20% Kas Developer/Pendiri| Founders[Wallet Founders - USDC]
 
     SafetyStaking -->|Staker Kunci NIMB| SecureShield[Backstop Risiko Slashing]
@@ -41,13 +40,13 @@ flowchart TD
 *   **Mekanisme**: Pemegang token $NIMB (termasuk retail, investor, dan founder) dapat mengunci koin mereka ke dalam **Safety Module**.
 *   **Fungsi**: Kunci staking ini berfungsi sebagai *backstop* (asuransi sistem) jika terjadi kegagalan CCIP lintas rantai atau exploit teknis pada brankas likuiditas.
 *   **Reward (Real Yield)**: Sebagai kompensasi atas risiko ini, staker mendapatkan **pembagian keuntungan riil dalam bentuk USDC** (bukan token inflasi baru) yang bersumber dari:
-    1.  **65% APY Yield** yang dihasilkan oleh Brankas Likuiditas Dinamis (Aave V3 & Ondo RWA).
+    1.  Porsi yield dari modular yield wrapper eksternal (Aave/RWA) di masa depan.
     2.  Porsi potongan biaya transaksi / deposit minting fee.
 *   **Dampak Ekonomi**: Menawarkan dividen USDC membuat pemegang koin enggan menjual token $NIMB mereka. Mereka lebih memilih mengunci token demi mendapatkan passive income USDC pasif yang stabil.
 
 > [!NOTE]
 > **Status Implementasi (Fase Lanjutan - Ditunda)**:
-> Mekanisme staking Safety Module dan distribusi yield USDC ini **ditangguhkan** sementara pada rilis awal Nimbus V1 (Fase Bootstrap). Karena token $NIMB belum diluncurkan, logic distribusi ke staker belum diimplementasikan di smart contract awal. Seluruh yield DeFi/RWA yang dihasilkan Brankas Dinamis untuk sementara dialokasikan penuh ke kas protokol (Treasury/Admin contract) untuk membiayai operasional, pengembangan sirkuit ZK utama, dan audit keamanan.
+> Mekanisme staking Safety Module dan distribusi yield USDC ini **ditangguhkan** sementara pada rilis awal Nimbus V1 (Fase Bootstrap). Karena token $NIMB belum diluncurkan, logic distribusi ke staker belum diimplementasikan di smart contract awal. Seluruh biaya transaksi yang dikumpulkan oleh kontrak untuk sementara dialokasikan penuh ke kas protokol (Treasury/Admin contract) untuk membiayai operasional, pengembangan sirkuit ZK utama, dan audit keamanan.
 
 
 ### C. Protokol Deflasi: Automated Buyback & Burn

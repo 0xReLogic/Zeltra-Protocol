@@ -16,8 +16,8 @@ sol_storage! {
         // Nullifier mapping to prevent double-spending of ephemeral keys
         mapping(bytes32 => bool) nullifiers;
 
-        // Mapping of valid Merkle roots of clean association sets (Fase A: ZK-Compliance)
-        mapping(bytes32 => bool) clean_association_roots;
+        // Mapping of valid Merkle roots of clean association sets to their registration timestamp (Fase A: ZK-Compliance)
+        mapping(bytes32 => uint256) clean_association_roots;
 
         // Owner address for admin operations (Fase E: Security)
         address owner;

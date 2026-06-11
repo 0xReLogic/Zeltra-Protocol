@@ -64,7 +64,7 @@ Pengguna memasukkan stablecoin ke Nimbus Privacy Pool. Setelah proses issuance
 selesai, pengguna memperoleh kemampuan melakukan private spend tanpa memakai
 funding wallet untuk setiap pembelian.
 
-Deposit/shield dikenai fee `0,10%`. Saldo bersih setelah fee menjadi liability
+Deposit/shield dikenai fee `0,20%`. Saldo bersih setelah fee menjadi liability
 pool dan dapat dipakai sebagai pre-staged balance untuk manusia atau agent.
 
 ### 4.2 Private Spend
@@ -83,7 +83,8 @@ secara penuh. Protocol fee didebit di atas `amount` dari saldo pengirim:
 
 ```text
 merchant payout = harga merchant
-protocol fee    = ceil(harga merchant * 0,15%)
+protocol fee    = ceil(harga merchant * fee_bps) 
+                  // fee_bps = 0.25% (default), 0.20% (hold >= 7 hari), 0.10% (hold >= 30 hari)
 total debit     = harga merchant + protocol fee + execution fee
 ```
 
@@ -102,7 +103,7 @@ Pengguna dapat mengeluarkan saldo dari privacy pool menuju alamat publik. Untuk 
 | Aktivitas | Biaya target | Penerima |
 |---|---:|---|
 | Deposit/shield | 0,20% dari nominal | Protocol treasury |
-| Private spend/transaction | 0,25% dari nominal | Protocol treasury |
+| Private spend/transaction | 0,25% dari nominal (Diskon ke 0,20% jika hold >= 7 hari; 0,10% jika hold >= 30 hari) | Protocol treasury |
 | Execution fee | Gas quote + markup relayer | Relayer |
 | Fast/cross-chain settlement | Quote dinamis | Relayer/LP, jaringan, treasury |
 | SDK dan integrasi | Gratis | N/A |
@@ -116,20 +117,20 @@ Biaya pengguna terdiri dari protocol fee dan fixed execution quote:
 
 ```text
 Network Fee =
-    protocol fee 0,15% dari nominal transaksi
+    protocol fee 0,25% dari nominal transaksi (default)
   + gas reimbursement
   + relayer markup
 ```
 
-Contoh ilustratif, bukan harga tetap:
+Contoh ilustratif (dengan default fee 0,25%), bukan harga tetap:
 
 ```text
 Harga merchant                  100,0000 USDC
-Protocol fee 0,15%                0,1500 USDC
+Protocol fee 0,25%                0,2500 USDC
 Gas quote                         0,0200 USDC
 Relayer markup 15% gas            0,0030 USDC
                                 -------------
-Total pengguna                  100,1730 USDC
+Total pengguna                  100,2730 USDC
 Merchant menerima              100,0000 USDC
 ```
 
@@ -225,7 +226,7 @@ Seluruh collateral stablecoin milik pengguna disimpan dalam kas likuid aktif lan
 ### Protocol treasury menerima
 
 - deposit/shield fee `0,20%`;
-- private spend/transaction fee `0,25%` (termasuk spend untuk penarikan);
+- private spend/transaction fee `0,25%` (dapat didiskon ke `0,20%` jika hold >= 7 hari; atau `0,10%` jika hold >= 30 hari);
 - bagian yang transparan dari fast/cross-chain settlement;
 
 ### Protocol treasury membayar

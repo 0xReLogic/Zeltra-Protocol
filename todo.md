@@ -1267,7 +1267,10 @@ HT-06.
 Target bisnis:
 
 - Deposit/shield fee: `0,20%`.
-- Private spend / withdraw fee: `0,25%`.
+- Private spend / withdraw fee:
+  - Hold < 7 hari: `0,25%` (default).
+  - Hold >= 7 hari: `0,20%` (holding-time discount).
+  - Hold >= 30 hari (1 bulan): `0,10%` (Whale holding-time discount).
 - Agent Spending Wallet memakai pre-staged state Layer 7 agar agent dapat
   melakukan instant private settlement tanpa funding ulang per request.
 
@@ -1277,6 +1280,7 @@ Status:
 
 Sisa implementasi wajib:
 
+- [x] Implementasikan On-Chain Cryptographic Time Proof (Opsi A) dengan memetakan valid root ke timestamp registrasinya (`mapping(bytes32 => uint256) clean_association_roots`) untuk menghitung holding-time diskon fee secara anonim dan gas-efisien.
 - [ ] Pastikan refund akibat gagal issuance/settlement tidak dikenai fee.
 - [ ] Pastikan spend/withdraw tidak bisa melewati outstanding liability, pending spend,
   atau locked/pre-staged agent allowance.
