@@ -10,16 +10,6 @@ sol_interface! {
         function approve(address spender, uint256 value) external returns (bool);
     }
 
-    interface IAavePool {
-        function supply(address asset, uint256 amount, address on_behalf_of, uint16 referral_code) external;
-        function withdraw(address asset, uint256 amount, address to) external returns (uint256);
-    }
-
-    interface IRwaToken {
-        function deposit(uint256 amount) external returns (uint256);
-        function redeem(uint256 amount, uint256 min_receive) external returns (uint256);
-    }
-
     interface IConditionalTokens {
         function splitPosition(
             address collateral_token,

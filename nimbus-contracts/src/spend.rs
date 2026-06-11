@@ -121,25 +121,14 @@ impl Nimbus {
         }
 
         // `amount` is the exact merchant/recipient payout. Fees are debited on top.
-        let base_fee = (amount
-            .checked_mul(U256::from(15))
-            .ok_or_else(|| b"BASE_FEE_MUL_OVERFLOW".to_vec())?
+        // Private spend / transaction fee: flat 0.25% (round up)
+        let spend_fee = (amount
+            .checked_mul(U256::from(25))
+            .ok_or_else(|| b"SPEND_FEE_MUL_OVERFLOW".to_vec())?
             + U256::from(9999))
             / U256::from(10000);
 
-        // Calculate dynamic premium if Fase 2 or 3 is active
-        let premium = self._calculate_fast_path_premium(amount)?;
-
-        // fee_recipient gets base_fee + 20% of premium
-        let premium_share = (premium
-            .checked_mul(U256::from(20))
-            .ok_or_else(|| b"PREMIUM_SHARE_MUL_OVERFLOW".to_vec())?
-            + U256::from(99))
-            / U256::from(100);
-
-        let protocol_share = base_fee
-            .checked_add(premium_share)
-            .ok_or_else(|| b"PROTOCOL_SHARE_OVERFLOW".to_vec())?;
+        let protocol_share = spend_fee;
 
         let payout = amount;
         let total_debit = payout
@@ -157,9 +146,6 @@ impl Nimbus {
             self.total_deposited_principal.set(new_principal);
             self.nullifiers.insert(nullifier, true);
 
-            // Track epoch volume for dynamic rebalancing
-            self.update_epoch_and_rebalance_ratio(total_debit)?;
-
             // Enforce invariant: contract_assets >= outstanding_liabilities
             self.check_liability_invariant()?;
 
@@ -171,9 +157,6 @@ impl Nimbus {
             // 2. EFFECTS
             self.nullifiers.insert(nullifier, true);
             self.total_deposited_principal.set(new_principal);
-
-            // Track epoch volume for dynamic rebalancing
-            self.update_epoch_and_rebalance_ratio(total_debit)?;
 
             // 3. INTERACTIONS
             self.ensure_liquidity(total_debit)?;

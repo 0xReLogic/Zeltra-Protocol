@@ -54,12 +54,6 @@ impl Nimbus {
         self.paused.set(false);
         self.stablecoin.set(stablecoin_addr);
         self.fee_recipient.set(fee_recipient_addr);
-        self.fast_path_phase.set(U256::from(1));
-        self.target_cash_pct.set(U256::from(30));
-        self.epoch_start_timestamp
-            .set(U256::from(self.block_timestamp()));
-        self.current_epoch_id.set(U256::ZERO);
-        self.current_epoch_volume.set(U256::ZERO);
         Ok(())
     }
 
@@ -121,141 +115,10 @@ impl Nimbus {
         Ok(())
     }
 
-    pub fn fast_path_phase(&self) -> Result<U256, Vec<u8>> {
-        Ok(self.fast_path_phase.get())
-    }
-
-    pub fn propose_fast_path_phase(&mut self, phase: U256) -> Result<(), Vec<u8>> {
-        self.check_owner()?;
-        if phase < U256::from(1) || phase > U256::from(3) {
-            return Err(b"INVALID_PHASE".to_vec());
-        }
-        self.proposed_fast_path_phase.set(phase);
-        self.fast_path_phase_eta
-            .set(U256::from(self.block_timestamp() + 86400));
-        Ok(())
-    }
-
-    pub fn execute_fast_path_phase(&mut self) -> Result<(), Vec<u8>> {
-        self.check_owner()?;
-        let eta = self.fast_path_phase_eta.get();
-        if eta == U256::ZERO {
-            return Err(b"NO_PROPOSAL_ACTIVE".to_vec());
-        }
-        let current_time = U256::from(self.block_timestamp());
-        if current_time < eta {
-            return Err(b"TIMELOCK_NOT_EXPIRED".to_vec());
-        }
-        let phase = self.proposed_fast_path_phase.get();
-        self.fast_path_phase.set(phase);
-        self.fast_path_phase_eta.set(U256::ZERO);
-        Ok(())
-    }
-
-    pub fn total_lp_liquidity(&self) -> Result<U256, Vec<u8>> {
-        Ok(self.total_lp_liquidity.get())
-    }
-
-    pub fn utilized_lp_liquidity(&self) -> Result<U256, Vec<u8>> {
-        Ok(self.utilized_lp_liquidity.get())
-    }
-
-    pub fn set_lp_liquidity(&mut self, total: U256, utilized: U256) -> Result<(), Vec<u8>> {
-        self.check_owner()?;
-        if utilized > total {
-            return Err(b"INVALID_UTILIZATION".to_vec());
-        }
-        self.total_lp_liquidity.set(total);
-        self.utilized_lp_liquidity.set(utilized);
-        Ok(())
-    }
-
-    pub fn propose_aave_params(&mut self, pool: Address, a_token: Address) -> Result<(), Vec<u8>> {
-        self.check_owner()?;
-        self.proposed_aave_pool.set(pool);
-        self.proposed_a_token.set(a_token);
-        self.aave_params_eta
-            .set(U256::from(self.block_timestamp() + 86400));
-        Ok(())
-    }
-
-    pub fn execute_aave_params(&mut self) -> Result<(), Vec<u8>> {
-        self.check_owner()?;
-        let eta = self.aave_params_eta.get();
-        if eta == U256::ZERO {
-            return Err(b"NO_PROPOSAL_ACTIVE".to_vec());
-        }
-        let current_time = U256::from(self.block_timestamp());
-        if current_time < eta {
-            return Err(b"TIMELOCK_NOT_EXPIRED".to_vec());
-        }
-        let pool = self.proposed_aave_pool.get();
-        let a_token = self.proposed_a_token.get();
-        self.aave_pool.set(pool);
-        self.a_token.set(a_token);
-        self.aave_params_eta.set(U256::ZERO);
-        Ok(())
-    }
-
-    pub fn propose_rwa_token(&mut self, rwa: Address) -> Result<(), Vec<u8>> {
-        self.check_owner()?;
-        self.proposed_rwa_token.set(rwa);
-        self.rwa_token_eta
-            .set(U256::from(self.block_timestamp() + 86400));
-        Ok(())
-    }
-
-    pub fn execute_rwa_token(&mut self) -> Result<(), Vec<u8>> {
-        self.check_owner()?;
-        let eta = self.rwa_token_eta.get();
-        if eta == U256::ZERO {
-            return Err(b"NO_PROPOSAL_ACTIVE".to_vec());
-        }
-        let current_time = U256::from(self.block_timestamp());
-        if current_time < eta {
-            return Err(b"TIMELOCK_NOT_EXPIRED".to_vec());
-        }
-        let rwa = self.proposed_rwa_token.get();
-        self.rwa_token.set(rwa);
-        self.rwa_token_eta.set(U256::ZERO);
-        Ok(())
-    }
-
-    pub fn aave_pool(&self) -> Result<Address, Vec<u8>> {
-        Ok(self.aave_pool.get())
-    }
-
-    pub fn a_token(&self) -> Result<Address, Vec<u8>> {
-        Ok(self.a_token.get())
-    }
-
-    pub fn rwa_token(&self) -> Result<Address, Vec<u8>> {
-        Ok(self.rwa_token.get())
-    }
-
     pub fn total_deposited_principal(&self) -> Result<U256, Vec<u8>> {
         Ok(self.total_deposited_principal.get())
     }
 
-    /// Returns the current dynamic cash reserve percentage (range 15-45, default 30).
-    pub fn target_cash_pct(&self) -> Result<U256, Vec<u8>> {
-        Ok(self.target_cash_pct.get())
-    }
-
-    /// Returns the current epoch ID (increments every 24h).
-    pub fn current_epoch_id(&self) -> Result<U256, Vec<u8>> {
-        Ok(self.current_epoch_id.get())
-    }
-
-    /// Returns the accumulated transaction volume in the current epoch.
-    pub fn current_epoch_volume(&self) -> Result<U256, Vec<u8>> {
-        Ok(self.current_epoch_volume.get())
-    }
-
-    /// Returns the historical volume for a given epoch ID.
-    pub fn historical_epoch_volume(&self, epoch_id: U256) -> Result<U256, Vec<u8>> {
-        Ok(self.historical_epoch_volumes.get(epoch_id))
-    }
 
     /// Returns the CCIP Router address configured for the contract.
     pub fn ccip_router(&self) -> Result<Address, Vec<u8>> {
@@ -535,9 +398,6 @@ impl Nimbus {
         )
     }
 
-    pub fn calculate_fast_path_premium(&self, amount: U256) -> Result<U256, Vec<u8>> {
-        self._calculate_fast_path_premium(amount)
-    }
 
     pub fn total_assets(&mut self) -> Result<U256, Vec<u8>> {
         self._total_assets()
@@ -1357,7 +1217,7 @@ mod tests {
     }
 
     #[test]
-    fn test_fast_path_liquidity_premium_phases() {
+    fn test_liquid_vault_deposit_spend_yield() {
         reset_test_state();
         let owner = address!("1111111111111111111111111111111111111111");
         set_msg_sender(owner);
@@ -1365,95 +1225,7 @@ mod tests {
         let mut contract = Nimbus::default();
         contract.init(owner, Address::ZERO, Address::ZERO).unwrap();
 
-        // Default phase should be 1
-        assert_eq!(contract.fast_path_phase().unwrap(), U256::from(1));
-
-        // Fase 1: Premium is always 0
-        let amount = U256::from(10_000_000); // 10,000,000 (10 USDC)
-        assert_eq!(
-            contract.calculate_fast_path_premium(amount).unwrap(),
-            U256::ZERO
-        );
-
-        // Change to Fase 2 via propose & execute
-        contract.propose_fast_path_phase(U256::from(2)).unwrap();
-        set_block_timestamp(86401);
-        contract.execute_fast_path_phase().unwrap();
-        assert_eq!(contract.fast_path_phase().unwrap(), U256::from(2));
-        // Fase 2: 0.05% flat premium => 10,000,000 * 5 / 10,000 = 5000
-        assert_eq!(
-            contract.calculate_fast_path_premium(amount).unwrap(),
-            U256::from(5000)
-        );
-
-        // Change to Fase 3 via propose & execute
-        contract.propose_fast_path_phase(U256::from(3)).unwrap();
-        set_block_timestamp(86401 * 2);
-        contract.execute_fast_path_phase().unwrap();
-        assert_eq!(contract.fast_path_phase().unwrap(), U256::from(3));
-
-        // Fase 3 with zero liquidity should fail
-        assert!(contract.calculate_fast_path_premium(amount).is_err());
-
-        // Set LP liquidity: total = 100,000,000 (100 USDC), utilized = 0
-        contract
-            .set_lp_liquidity(U256::from(100000000), U256::from(0))
-            .unwrap();
-        // New utilization after adding amount(10,000,000) is 10,000,000 / 100,000,000 = 10% (1,000 bps)
-        // Rate = 5 + 10 * 1,000 / 10,000 = 5 + 1 = 6 bps
-        // Premium = 10,000,000 * 6 / 10,000 = 6000
-        assert_eq!(
-            contract.calculate_fast_path_premium(amount).unwrap(),
-            U256::from(6000)
-        );
-
-        // Set utilized to 80,000,000 (80 USDC)
-        contract
-            .set_lp_liquidity(U256::from(100000000), U256::from(80000000))
-            .unwrap();
-        // New utilization after adding amount(10,000,000) is 90,000,000 / 100,000,000 = 90% (9,000 bps)
-        // Rate = 5 + 10 * 9,000 / 10,000 = 5 + 9 = 14 bps
-        // Premium = 10,000,000 * 14 / 10,000 = 14000
-        assert_eq!(
-            contract.calculate_fast_path_premium(amount).unwrap(),
-            U256::from(14000)
-        );
-
-        // Request amount exceeding capacity (capacity is 20,000,000, we request 30,000,000)
-        let large_amount = U256::from(30000000);
-        // Should trigger Dynamic Pool Cap limit and error
-        assert!(contract.calculate_fast_path_premium(large_amount).is_err());
-    }
-
-    #[test]
-    fn test_defi_rwa_cascading_buffer() {
-        reset_test_state();
-        let owner = address!("1111111111111111111111111111111111111111");
-        set_msg_sender(owner);
-
-        let mut contract = Nimbus::default();
-        contract.init(owner, Address::ZERO, Address::ZERO).unwrap();
-
-        // Assert initial addresses
-        assert_eq!(contract.aave_pool().unwrap(), Address::ZERO);
-        assert_eq!(contract.a_token().unwrap(), Address::ZERO);
-        assert_eq!(contract.rwa_token().unwrap(), Address::ZERO);
         assert_eq!(contract.total_deposited_principal().unwrap(), U256::ZERO);
-
-        // Test propose & execute params
-        let pool = address!("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
-        let a_token = address!("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb");
-        let rwa = address!("cccccccccccccccccccccccccccccccccccccccc");
-
-        contract.propose_aave_params(pool, a_token).unwrap();
-        contract.propose_rwa_token(rwa).unwrap();
-        set_block_timestamp(86401);
-        contract.execute_aave_params().unwrap();
-        contract.execute_rwa_token().unwrap();
-
-        assert_eq!(contract.aave_pool().unwrap(), pool);
-        assert_eq!(contract.a_token().unwrap(), a_token);
-        assert_eq!(contract.rwa_token().unwrap(), rwa);
 
         // Test deposit increases principal (must be >= 10_000_000)
         let sid = FixedBytes::repeat_byte(0xde);
@@ -1461,11 +1233,11 @@ mod tests {
             .deposit(sid, vec![0x42; 256].into(), U256::from(20_000_000))
             .unwrap();
 
-        // fee = (20,000,000 + 999) / 1000 = 20000
-        // net_amount = 20,000,000 - 20,000 = 19,980,000 net
+        // fee = (20,000,000 * 20 + 9999) / 10000 = 40,000
+        // net_amount = 20,000,000 - 40,000 = 19_960_000 net
         assert_eq!(
             contract.total_deposited_principal().unwrap(),
-            U256::from(19_980_000)
+            U256::from(19_960_000)
         );
 
         // Test spend decreases principal
@@ -1489,14 +1261,18 @@ mod tests {
             .unwrap();
 
         assert!(is_valid);
+        // spend fee = (10,000,000 * 25 + 9999) / 10000 = 25,000
+        // total debit = 10,025_000
+        // new principal = 19_960_000 - 10,025_000 = 9_935_000
         assert_eq!(
             contract.total_deposited_principal().unwrap(),
-            U256::from(9_965_000)
+            U256::from(9_935_000)
         );
 
         // Test yield claim under test (where total assets = principal, so yield is 0)
         assert_eq!(contract.claim_accumulated_yield().unwrap(), U256::ZERO);
     }
+
 
     #[test]
     fn test_polymarket_fallback_refund() {
@@ -1681,10 +1457,10 @@ mod tests {
             .deposit(sid, commitment.clone().into(), deposit_amount)
             .unwrap();
         let after_deposit_principal = contract.total_deposited_principal().unwrap();
-        // Fee is 0.1%, so net amount = 10_000_000 - 10_000 = 9_990_000
+        // Fee is 0.20%, so net amount = 10_000_000 - 20_000 = 9_980_000
         assert!(after_deposit_principal > initial_principal);
         let net_amount = after_deposit_principal - initial_principal;
-        assert_eq!(net_amount, U256::from(9_990_000));
+        assert_eq!(net_amount, U256::from(9_980_000));
 
         // 2. Reveal - principal should NOT decrease (DEC-001)
         set_msg_sender(owner);
@@ -1709,7 +1485,8 @@ mod tests {
         recipient_hash[12..].copy_from_slice(recipient.as_slice());
         let recipient_hash = FixedBytes::from(recipient_hash);
         let spend_amount = U256::from(5_000_000);
-        let spend_fee = U256::from(7_500);
+        // flat 0.25% fee: (5_000_000 * 25 + 9999) / 10000 = 12_500
+        let spend_fee = U256::from(12_500);
         let total_spend_debit = spend_amount + spend_fee;
         let (alpha_neg, hm, pk_iss, nullifier) =
             register_mock_issuer(&mut contract, owner, spend_amount, recipient_hash);

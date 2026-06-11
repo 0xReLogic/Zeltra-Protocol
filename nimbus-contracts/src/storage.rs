@@ -31,25 +31,8 @@ sol_storage! {
         // Address that receives the protocol fees
         address fee_recipient;
 
-        // --- Fast-Path Liquidity Premium (Roadmap Fase 1-3) ---
-        // Active phase: 1 = Standard CCIP, 2 = Treasury-funded, 3 = Public LP with Dynamic Cap
-        uint256 fast_path_phase;
-        // LP Pool tracking variables for Fase 3
-        uint256 total_lp_liquidity;
-        uint256 utilized_lp_liquidity;
-
-        // --- DeFi & RWA Integration (Roadmap Item 2) ---
-        address aave_pool;
-        address a_token;
-        address rwa_token;
+        // --- Principal Tracking for Liability Invariant ---
         uint256 total_deposited_principal;
-
-        // --- Dynamic Liquidity Rebalancing (Moving Average Volatility) ---
-        uint256 current_epoch_id;
-        uint256 current_epoch_volume;
-        uint256 epoch_start_timestamp;
-        mapping(uint256 => uint256) historical_epoch_volumes;
-        uint256 target_cash_pct;
 
         // --- Polymarket CTF Fallback (Roadmap Item 3) ---
         mapping(bytes32 => uint256) failed_intent_refunds;
@@ -58,13 +41,6 @@ sol_storage! {
         address pending_owner;
         address proposed_fee_recipient;
         uint256 fee_recipient_eta;
-        uint256 proposed_fast_path_phase;
-        uint256 fast_path_phase_eta;
-        address proposed_aave_pool;
-        address proposed_a_token;
-        uint256 aave_params_eta;
-        address proposed_rwa_token;
-        uint256 rwa_token_eta;
 
         // --- CCIP Router Address Configuration (Production Security Best Practice) ---
         address ccip_router;

@@ -89,8 +89,12 @@ impl Nimbus {
             return Err(b"AMOUNT_TOO_SMALL".to_vec());
         }
 
-        // Calculate deposit/minting fee of 0.1% (amount / 1000, round up)
-        let fee = (amount + U256::from(999)) / U256::from(1000);
+        // Calculate deposit/minting fee of 0.20% (round up)
+        let fee = (amount
+            .checked_mul(U256::from(20))
+            .ok_or_else(|| b"FEE_MULTIPLY_OVERFLOW".to_vec())?
+            + U256::from(9999))
+            / U256::from(10000);
         let net_amount = amount
             .checked_sub(fee)
             .ok_or_else(|| b"NET_AMOUNT_UNDERFLOW".to_vec())?;
@@ -110,9 +114,6 @@ impl Nimbus {
             .checked_add(net_amount)
             .ok_or_else(|| b"PRINCIPAL_OVERFLOW".to_vec())?;
         self.total_deposited_principal.set(new_principal);
-
-        // Track epoch volume for dynamic rebalancing (7-epoch moving average)
-        self.update_epoch_and_rebalance_ratio(net_amount)?;
 
         // 3. INTERACTIONS
         #[cfg(not(test))]
@@ -148,8 +149,6 @@ impl Nimbus {
                 }
             }
         }
-
-        self.allocate_reserves(net_amount)?;
 
         // Enforce invariant: contract_assets >= outstanding_liabilities
         self.check_liability_invariant()?;
