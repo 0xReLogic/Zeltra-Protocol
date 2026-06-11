@@ -54,38 +54,44 @@ collateral hasil issuance tetap menjadi liability sampai spend.
 Accessed: 2026-06-06.
 
 ## Known risks
+ 
+ - BLS spend verification is still bypassed elsewhere and remains independently
+   critical.
+ - `session_resolved` currently combines "issuance completed" and "refund closed";
+   a future migration should use an explicit enum state.
+ - Existing deployed sessions do not have the appended commitment fields and
+   require migration or a fresh testnet deployment.
+ - Unit tests mock only the EIP-2537 response; this has been verified via the real Stylus testnet hard test (HT-03).
+ 
+ ## Versi/library/network
+ 
+ - `stylus-sdk = 0.6.0`
+ - `alloy-primitives = 0.7.6`
+ - Target precompile: EIP-2537 G2 MSM at `0x0e`
+ 
+ ## Test
+ 
+ Positive:
+ 
+ - Deposit with a 256-byte commitment succeeds.
+ - Matching reveal resolves the session without reducing principal.
+ - Refund after reveal fails.
+ 
+ Negative:
+ 
+ - Invalid commitment length fails.
+ - Duplicate `sid` fails.
+ - Caller-supplied commitment differing from deposit fails.
 
-- BLS spend verification is still bypassed elsewhere and remains independently
-  critical.
-- `session_resolved` currently combines "issuance completed" and "refund closed";
-  a future migration should use an explicit enum state.
-- Existing deployed sessions do not have the appended commitment fields and
-  require migration or a fresh testnet deployment.
-- Unit tests mock only the EIP-2537 response; a real Stylus testnet hard test is
-  mandatory.
-
-## Versi/library/network
-
-- `stylus-sdk = 0.6.0`
-- `alloy-primitives = 0.7.6`
-- Target precompile: EIP-2537 G2 MSM at `0x0e`
-
-## Test
-
-Positive:
-
-- Deposit with a 256-byte commitment succeeds.
-- Matching reveal resolves the session without reducing principal.
-- Refund after reveal fails.
-
-Negative:
-
-- Invalid commitment length fails.
-- Duplicate `sid` fails.
-- Caller-supplied commitment differing from deposit fails.
-
-## Rollback/recovery
-
-This change appends storage fields but changes session semantics. Deploy a fresh
-testnet contract and pause the previous deployment. Do not attempt an in-place
-mainnet rollout until migration behavior for existing sessions is specified.
+### On-Chain Hard Test Verification (HT-03)
+On 2026-06-11, the deposit, sign, and reveal lifecycle EIP-2537 precompile verification checks were fully validated on-chain in Arbitrum Sepolia under test suite `HT-03`:
+- Test suite script: [scripts/ht03_deposit_sign_reveal_tests.py](file:///home/azureuser/crypto/scripts/ht03_deposit_sign_reveal_tests.py)
+- Official test report: [test-reports/ht03_deposit_sign_reveal_tests.json](file:///home/azureuser/crypto/test-reports/ht03_deposit_sign_reveal_tests.json)
+- Result: **11/11 tests passed**.
+  - Verified that EIP-2537 G2 MSM (`BLS12_G2_MSM`) precompile at `0x0e` properly verifies masking key `k` and commitment `com_k` on-chain (reverting or returning `false` on incorrect inputs).
+ 
+ ## Rollback/recovery
+ 
+ This change appends storage fields but changes session semantics. Deploy a fresh
+ testnet contract and pause the previous deployment. Do not attempt an in-place
+ mainnet rollout until migration behavior for existing sessions is specified.

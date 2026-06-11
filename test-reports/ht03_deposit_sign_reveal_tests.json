@@ -1,0 +1,102 @@
+{
+  "test_suite": "HT-03 Atomic Deposit -> Sign -> Reveal On-Chain Tests",
+  "contract": "0x62ca774e20b76431d189e1635400b91b03c2b031",
+  "chain_id": 421614,
+  "wallet": "0x23e32D309c575A3D5E7CD2867BE12B00efa44Bb1",
+  "timestamp": "2026-06-11T07:50:57.665054+00:00",
+  "results": [
+    {
+      "test_id": "PT-01",
+      "description": "Happy path deposit and reveal",
+      "passed": true,
+      "tx_hash": "b5a9f0f15d3e9fe7f7feee8e30986b692fea5209ca654bbaa354c93b1b09bce6",
+      "details": "Deposit & Reveal succeeded. Secondary reveal returned False as expected.",
+      "timestamp": "2026-06-11T07:50:53.437858+00:00"
+    },
+    {
+      "test_id": "NT-01",
+      "description": "Reveal with mismatched k (returns false)",
+      "passed": true,
+      "tx_hash": null,
+      "details": "Returned False. Expected False.",
+      "timestamp": "2026-06-11T07:50:54.959237+00:00"
+    },
+    {
+      "test_id": "NT-02",
+      "description": "Reveal with wrong pk_iss (returns false)",
+      "passed": true,
+      "tx_hash": null,
+      "details": "Returned ('0x4d534d5f505245434f4d50494c455f43414c4c5f4641494c4544', '0x4d534d5f505245434f4d50494c455f43414c4c5f4641494c4544'). Expected precompile failure.",
+      "timestamp": "2026-06-11T07:50:55.253481+00:00"
+    },
+    {
+      "test_id": "NT-03",
+      "description": "Reveal with wrong com_k (reverts)",
+      "passed": true,
+      "tx_hash": null,
+      "details": "Result: ('0x434f4d4d49544d454e545f4d49534d41544348', '0x434f4d4d49544d454e545f4d49534d41544348')",
+      "timestamp": "2026-06-11T07:50:55.578533+00:00"
+    },
+    {
+      "test_id": "NT-04",
+      "description": "Reveal for non-existent sid (reverts)",
+      "passed": true,
+      "tx_hash": null,
+      "details": "Result: ('0x4e4f5f4445504f5349545f464f554e44', '0x4e4f5f4445504f5349545f464f554e44')",
+      "timestamp": "2026-06-11T07:50:55.881245+00:00"
+    },
+    {
+      "test_id": "NT-05",
+      "description": "Duplicate reveal (returns false)",
+      "passed": true,
+      "tx_hash": null,
+      "details": "Result: False",
+      "timestamp": "2026-06-11T07:50:56.177594+00:00"
+    },
+    {
+      "test_id": "NT-06a",
+      "description": "Reveal with short k (reverts)",
+      "passed": true,
+      "tx_hash": null,
+      "details": "Result: ('0x494e56414c49445f5343414c41525f4c454e475448', '0x494e56414c49445f5343414c41525f4c454e475448')",
+      "timestamp": "2026-06-11T07:50:56.471423+00:00"
+    },
+    {
+      "test_id": "NT-06b",
+      "description": "Reveal with short pk_iss (reverts)",
+      "passed": true,
+      "tx_hash": null,
+      "details": "Result: ('0x494e56414c49445f5055424c49435f4b45595f4c454e475448', '0x494e56414c49445f5055424c49435f4b45595f4c454e475448')",
+      "timestamp": "2026-06-11T07:50:56.765376+00:00"
+    },
+    {
+      "test_id": "NT-06c",
+      "description": "Reveal with short com_k (reverts)",
+      "passed": true,
+      "tx_hash": null,
+      "details": "Result: ('0x494e56414c49445f434f4d4d49544d454e545f4c454e475448', '0x494e56414c49445f434f4d4d49544d454e545f4c454e475448')",
+      "timestamp": "2026-06-11T07:50:57.059541+00:00"
+    },
+    {
+      "test_id": "NT-07",
+      "description": "Deposit with duplicate sid (reverts)",
+      "passed": true,
+      "tx_hash": null,
+      "details": "Result: ('0x53455353494f4e5f414c52454144595f455849535453', '0x53455353494f4e5f414c52454144595f455849535453')",
+      "timestamp": "2026-06-11T07:50:57.352613+00:00"
+    },
+    {
+      "test_id": "NT-08",
+      "description": "Deposit with invalid commitment length (reverts)",
+      "passed": true,
+      "tx_hash": null,
+      "details": "Result: ('0x494e56414c49445f434f4d4d49544d454e545f4c454e475448', '0x494e56414c49445f434f4d4d49544d454e545f4c454e475448')",
+      "timestamp": "2026-06-11T07:50:57.664908+00:00"
+    }
+  ],
+  "summary": {
+    "total": 11,
+    "passed": 11,
+    "failed": 0
+  }
+}

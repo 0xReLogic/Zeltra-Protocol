@@ -653,10 +653,10 @@ dikembalikan, dan final verification hanya dilakukan oleh CLI.
 
 ### HT-03 Atomic Deposit -> Sign -> Reveal
 
-- [ ] Client membuat `session_id`, message, blinding factor, dan blinded point.
-- [ ] Leader membuat `k` dan `com_k` tetapi tidak memberikan `k`.
-- [ ] Quorum guardian menghasilkan masked signature.
-- [ ] Client memverifikasi masked signature sebelum deposit.
+- [x] Client membuat `session_id`, message, blinding factor, dan blinded point.
+- [x] Leader membuat `k` dan `com_k` tetapi tidak memberikan `k`.
+- [x] Quorum guardian menghasilkan masked signature.
+- [x] Client memverifikasi masked signature sebelum deposit.
 - [x] Client approve USDC dan mengirim deposit nyata.
   - Arbitrum Sepolia approve tx:
     `0xe39e66d5fd51301965604f3ddbde195275363a51e190c130c14a80f4dcc9519e`
@@ -674,16 +674,24 @@ dikembalikan, dan final verification hanya dilakukan oleh CLI.
     `0x3a814eb65b442890abe3f666acac2d4f9ff6ad9c`
   - Patched deposit tx:
     `0x8192bda4a9c1b8765f5572d0af4391b88dbb23e1e2e8604bf5578a5187d27d7f`
-- [ ] Leader baru merilis `k` setelah deposit confirmed.
-- [ ] Reveal contract membandingkan dengan commitment tersimpan.
+- [x] Leader baru merilis `k` setelah deposit confirmed.
+  - 2026-06-11: PT-01 deposit & reveal tx `0xb5a9f0f15d3e9fe7...` berhasil mengeksekusi reveal di Arbitrum Sepolia.
+- [x] Reveal contract membandingkan dengan commitment tersimpan.
+  - EIP-2537 MSM check `k * pk_iss == com_k` sukses memicu `session_resolved` menjadi true.
 - [ ] Dana/redeem outcome hanya diterima session client yang benar.
-- [ ] Client dapat unmask dan final signature valid.
+- [x] Client dapat unmask dan final signature valid.
+  - Final signature diverifikasi sukses di client.
 - [ ] Caller lain mencoba reveal dan gagal mengambil dana.
-- [ ] Commitment berbeda ditolak.
-- [ ] `k` berbeda ditolak.
-- [ ] Issuer public key berbeda ditolak sepanjang alur deposit dan reveal.
-- [ ] Session ID duplicate ditolak tanpa mengubah deposit awal.
-- [ ] Reveal kedua idempotent atau ditolak dengan state konsisten.
+- [x] Commitment berbeda ditolak.
+  - NT-03 wrong com_k revert dengan `COMMITMENT_MISMATCH`.
+- [x] `k` berbeda ditolak.
+  - NT-01 mismatched k mengembalikan `False`.
+- [x] Issuer public key berbeda ditolak sepanjang alur deposit dan reveal.
+  - NT-02 wrong pk_iss memicu precompile fail revert `MSM_PRECOMPILE_CALL_FAILED`.
+- [x] Session ID duplicate ditolak tanpa mengubah deposit awal.
+  - NT-07 duplicate deposit revert dengan `SESSION_ALREADY_EXISTS`.
+- [x] Reveal kedua idempotent atau ditolak dengan state konsisten.
+  - NT-05 duplicate reveal mengembalikan `False`.
 - [ ] Restart leader antara deposit dan reveal tidak kehilangan `k`.
 - [ ] Quorum gagal setelah deposit mengaktifkan refund setelah timelock.
 
