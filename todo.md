@@ -410,6 +410,26 @@ Checklist:
 - Jika contract pause: policy harus menentukan apakah refund tetap aktif.
 - Tidak ada recovery path yang membutuhkan admin mengambil custody user.
 
+### Flow 5 - Withdraw / Unshield
+
+1. Client memilih amount untuk di-unshield dari privacy pool ke alamat publik.
+2. Client/SDK menghasilkan parameter pembuktian ZK / spend credential untuk unshield.
+3. Relayer memvalidasi format, policy, dan status pool TVL.
+4. Contract memverifikasi pembuktian dan menghitung fee penarikan:
+   - **Standard Fee**: Flat fee sebesar 0.10% dari nominal unshield.
+   - **Withdrawal Queue (Lock-up Period)**: Untuk penarikan skala besar (>5% dari total TVL), penarikan diwajibkan masuk antrean dengan masa tunda 24-48 jam.
+   - **Emergency Dynamic Fee (Penalty)**: Jika user memaksa penarikan instan (bypassing the queue) saat kas likuid berada di level minimum (15%), contract akan mengenakan dynamic fee tambahan untuk menutup biaya gas/slippage likuidasi paksa posisi yield/RWA (Aave & Ondo).
+5. Contract memotong total liability pool, mentransfer nominal bersih ke recipient publik, dan menyalurkan fee ke protocol treasury.
+
+Checklist:
+
+- Unshield fee default 0.10% terpotong dengan benar dari total transfer.
+- Penarikan >5% TVL ditolak secara instan dan dimasukkan ke status pending queue.
+- Lock-up period 24-48 jam berjalan dengan benar sebelum dana queue dapat diklaim.
+- Penarikan instan saat kas di bawah batas aman memicu emergency dynamic penalty fee.
+- State update pool balance, total liability, dan total TVL terupdate secara atomic.
+
+
 ## Core MVP Gate
 
 Core dianggap berhasil hanya jika semua berikut lulus hard test nyata:
@@ -430,162 +450,14 @@ Core dianggap berhasil hanya jika semua berikut lulus hard test nyata:
 Sebelum gate ini selesai, fitur tambahan tidak boleh menjadi dependency jalur
 uang utama.
 
-## Peta Produk di Atas Core
-
-Semua produk menggunakan credential dan liability core yang sama.
-
-### Produk A - Private Wallet Payment
-
-```text
-User connect wallet -> deposit -> credential -> private transfer/withdraw
-```
-
-Ini adalah produk pertama dan reference flow.
-
-- UI connect wallet.
-- Deposit status.
-- Credential status tanpa mengekspos secret.
-- Form recipient/amount.
-- Spend status confirmed.
-- Refund/recovery UI.
-
-### Produk B - AI Agent Payments
-
-```text
-Owner deposit -> Agent Spending Wallet L7 -> credential pool -> bayar API/merchant
-```
-
-Tidak membutuhkan contract accounting baru. Agent Spending Wallet adalah
-pre-staged authorization state di Layer 7, bukan wallet kustodian baru. Saldo
-tetap liability pool, tetapi owner memberi allowance terbatas agar agent dapat
-melakukan instant private settlement tanpa deposit baru untuk setiap API call.
-
-- SDK mengelola token pool (Diimplementasikan di `AgentTokenPool` dalam `nimbus-sdk/src/x402/pool.rs`).
-- Agent tidak menyimpan root/guardian share (Agen hanya menyimpan `ready_tokens` (blind signatures), tidak memegang rahasia threshold).
-- Spending policy: budget, recipient allowlist, expiry, max amount (Terikat secara kriptografis pada signature payload via `NimbusPaymentPayload`).
-- Spending policy mencakup merchant/category allowlist, per-tx cap, daily cap, expiry, nonce/nullifier, dan max Network Fee (Didukung oleh skema pembatasan policy di dalam `pool.rs`).
-- Agent Spending Wallet tidak dapat spend melebihi saldo pool atau credential yang tersedia (Dibatasi oleh ketersediaan credential di `ready_tokens` pool).
-- Pre-staged state terikat ke owner dan tidak dapat dipakai ulang oleh agent lain (Session ID dan commitment dikunci unik per sesi owner).
-- Agent budget habis menghasilkan gagal aman tanpa partial payment (Gagal secara atomik tanpa *partial payout*).
-- Retry tidak menyebabkan double payment (Dicegah oleh nullifier dan local cache `spent_nullifiers`).
-- Human owner dapat pause/revoke agent (Owner bisa mencabut key atau pause via contract admin).
-- Pause/revoke owner langsung memblokir issuance payload baru (Kontrak pintar menolak deposit/reveal baru saat di-pause).
-- Dokumentasikan bahwa Agent Spending Wallet adalah working balance untuk instant private settlement, bukan lock, yield product, atau kustodian baru (Didokumentasikan di `docs/bisnis.md` Bagian 6).
-
-### Produk C - x402 API Payment
-
-```text
-API meminta payment -> agent memilih credential -> facilitator settle ->
-API memberi resource
-```
-
-- Payment terikat ke resource dan merchant.
-- Resource diberikan setelah settlement policy terpenuhi.
-- Satu payment tidak dapat membeli resource berbeda jika tidak diizinkan.
-- x402 memakai core spend, bukan jalur payout terpisah.
-
-### Produk D - Cross-Chain Payment
-
-```text
-Credential core -> source CCIP -> destination verify -> destination payout
-```
-
-- Baru diaktifkan setelah single-chain core lulus.
-- Source success dibedakan dari destination success.
-- Ada recovery jika destination gagal.
-- Liability cross-chain mempunyai satu source of truth.
-
-### Produk E - Private Polymarket Intent
-
-```text
-Credential core -> payout destination -> buy outcome shares
-```
-
-- Baru diaktifkan setelah payment dan CCIP stabil.
-- Failure membeli shares tidak menghilangkan claim user.
-- Refund recipient terikat pada pemilik intent.
-
-### Produk F - DeFi/RWA Yield
-
-```text
-Idle backing assets -> controlled external allocation -> yield
-```
-
-Ini bukan payment core dan tidak boleh mengubah nilai credential.
-
-- Baru diaktifkan setelah liability ledger stabil.
-- Principal selalu dapat memenuhi withdrawal.
-- Yield dipisahkan dari user principal.
-- External protocol failure memiliki cap dan emergency unwind.
-
-### Produk G - ZK Compliance
-
-```text
-Optional eligibility proof -> core deposit/spend authorization
-```
-
-- Compliance menjadi gate tambahan, bukan ledger baru.
-- Privacy proof tidak boleh mencetak atau menghapus liability.
-- Tetap prototype sampai circuit dan VK production selesai.
-
-## Urutan Produk
-
-1. **Core MVP + Produk A**: private wallet deposit/spend/refund.
-2. **Produk B**: AI agent memakai core yang sama.
-3. **Produk C**: x402 memakai agent/core settlement.
-4. **Produk D**: cross-chain setelah single-chain stabil.
-5. **Produk E**: Polymarket intent.
-6. **Produk F**: yield optimization setelah accounting matang.
-7. **Produk G**: compliance production setelah circuit diaudit.
-
-Rule:
-
-- Produk berikutnya tidak boleh mengubah invariant core.
-- Setiap produk memiliki feature flag/cap terpisah.
-- Produk gagal tidak boleh membuat core payment insolvent.
-- Produk tambahan dapat dimatikan tanpa menghalangi refund core.
-
 ## Status Saat Ini
 
-### Sudah Nyata
-
-- [x] Parameter ABI byte array menggunakan `stylus_sdk::abi::Bytes`.
-- [x] Relayer menggunakan Alloy `sol!` untuk type-safe calldata `spend(...)`.
-- [x] Relayer dapat mengirim transaksi EVM melalui HTTP atau WebSocket RPC.
-- [x] Primary dan fallback RPC provider tersedia.
-- [x] Gas price dibaca secara dinamis dari RPC.
-- [x] CCIP fee dibaca melalui `IRouterClient.getFee(...)`.
-- [x] CCIP message dikirim melalui `IRouterClient.ccipSend(...)`.
-- [x] Payload CCIP 648-byte dibentuk dan didekode oleh destination contract.
-- [x] `EVMExtraArgsV2` menggunakan `allowOutOfOrderExecution = true`.
-- [x] Destination contract memiliki konfigurasi dan pengecekan caller CCIP
-  router.
-- [x] SQLite memakai atomic `INSERT OR IGNORE` untuk nullifier.
-- [x] Hash-to-curve pada `nimbus-core` menggunakan RFC 9380.
-- [x] Seluruh `cargo test --workspace` lulus: 39 test.
 
 ### Artifact Testnet yang Sudah Ada
 
 - `nimbus-core/examples/generate_bls_test_data.rs`
 - `nimbus-node/.env.test`
-- `scripts/testnet_integration.py`
-- `scripts/run_e2e_test.py`
-- `scripts/run_e2e_vault_test.py`
-
-Catatan:
-
-`generate_bls_test_data.rs` kemungkinan dipakai pada pengujian terakhir untuk
-menghasilkan parameter dengan ukuran ABI yang benar. Namun, vector yang
-dihasilkan saat ini bukan vector BLS production yang valid:
-
-- Menggunakan `SHA256(message) -> scalar * G1`, bukan
-  `nimbus_core::hash_to_g1()` RFC 9380.
-- Nilai yang diberi label `alpha_neg_hex` sebenarnya masih `alpha`, belum
-  dinegasikan.
-- Amount curl contoh adalah `1_000_000` atau 1 USDC, sedangkan contract
-  mensyaratkan minimum spend 5 USDC.
-- Curl menguji endpoint relayer dan keberhasilan broadcast, bukan membuktikan
-  pairing verification contract.
+- `scripts/`
 
 ## Hard-Test Charter: Testnet Diperlakukan Seperti Mainnet
 

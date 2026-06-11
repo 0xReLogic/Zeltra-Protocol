@@ -38,3 +38,17 @@ Menjawab pertanyaan krusial investor/user terkait arsitektur Nimbus:
 - **Double-Spending & Gas**: Menjelaskan pencegahan double-spend 100% on-chain lewat nullifiers database di contract, serta efisiensi gas fee menggunakan **Adaptive Micro-Batching** (menggabungkan hingga 8 transaksi off-chain ke satu call `batch_spend`).
 - **MEV Front-running**: Menjelaskan bahwa payload diikat secara kriptografis ke signature BLS (termasuk `recipient` dan `amount`), sehingga transaksi tidak bisa dibajak di mempool.
 - **Produk & Token Utility**: Menjelaskan portofolio produk (AI Agent Spending Wallet, POS, Yield Vaults) serta utilitas token `NIMB` (Staking, Slashing, Fee Discount, DAO governance).
+
+## 3. Sinkronisasi Model Bisnis, Pembersihan Todo, & Flow 5 (Withdraw / Unshield)
+
+### A. Penambahan Spesifikasi Flow 5 (Withdraw / Unshield)
+- Menambahkan **Flow 5 - Withdraw / Unshield** ke dalam [todo.md](file:///home/azureuser/crypto/todo.md#L413) di bawah bagian *Core Business Flow* dengan rincian model biaya dinamis:
+  - **Standard Fee**: Flat 0.10% unshield fee.
+  - **Withdrawal Queue (Lock-up Period)**: Penarikan >5% TVL harus masuk antrean 24-48 jam.
+  - **Emergency Dynamic Fee (Penalty)**: Dynamic fee tambahan untuk penarikan instan saat kas likuid berada di batas minimal (15%) guna menutup slippage/gas penarikan paksa dari Aave/Ondo.
+
+### B. Pembersihan Redundansi todo.md & Sinkronisasi Kode
+- Menghapus bagian **Peta Produk di Atas Core** dan **Urutan Produk** dari [todo.md](file:///home/azureuser/crypto/todo.md) karena sudah tercakup di [docs/bisnis.md](file:///home/azureuser/crypto/docs/bisnis.md) dan [docs/roadmap.md](file:///home/azureuser/crypto/docs/roadmap.md). Ini menghemat sekitar 120 baris berkas todo untuk optimalisasi konteks AI.
+- Menghapus **Catatan** warning lama tentang `generate_bls_test_data.rs` karena generator data tes, format RFC 9380 hash-to-curve, negasi alpha, dan limit minimum 5 USDC kini sudah terimplementasi secara valid di code.
+- Memverifikasi implementasi fee deposit (0.10%) dan spend (0.15%) di level smart contract (`deposit.rs` & `spend.rs`) serta menganalisis batasan `MAX_BATCH_SIZE: usize = 8` (kaitannya dengan EVM Block Gas Limit dan batas heap memori WASM/Stylus).
+
