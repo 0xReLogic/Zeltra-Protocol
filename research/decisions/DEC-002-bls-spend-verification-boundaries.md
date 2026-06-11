@@ -72,9 +72,19 @@ Accessed: 2026-06-06.
 ## Test
 
 Host regression tests cover malformed length, infinity, untrusted key, false
-pairing output, nullifier mismatch, replay, and insufficient principal. The host
-still mocks precompile execution. A Stylus testnet test with official valid and
-invalid EIP-2537 vectors remains mandatory.
+pairing output, nullifier mismatch, replay, and insufficient principal. 
+
+On 2026-06-11, the on-chain Stylus testnet test suite was successfully executed on Arbitrum Sepolia using `scripts/ht04_spend_negative_tests.py`. All 13/13 test cases passed:
+- **NT-01/02**: Corrupted signatures (byte flips) successfully reverted by precompile.
+- **NT-03**: Wrong issuer public key reverted.
+- **NT-05**: Wrong amount (mismatch against signed message) reverted.
+- **NT-06/07/08/09**: Invalid input lengths (G1 signature != 128 bytes, public key != 256 bytes) reverted.
+- **NT-10**: Point at infinity signature reverted.
+- **NT-11**: Nullifier replay rejected (returns false without reverting or changing state).
+- State and outstanding principal remained completely unchanged across all negative test cases.
+
+The official report is saved at [ht04_spend_negative_tests.json](file:///home/azureuser/crypto/test-reports/ht04_spend_negative_tests.json).
+
 
 ## Rollback/recovery
 

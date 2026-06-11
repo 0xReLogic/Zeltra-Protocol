@@ -1,0 +1,46 @@
+{
+  "test_suite": "HT-05 Refund and Timeout On-Chain Tests",
+  "contract": "0x62ca774e20b76431d189e1635400b91b03c2b031",
+  "chain_id": 421614,
+  "wallet": "0x23e32D309c575A3D5E7CD2867BE12B00efa44Bb1",
+  "timestamp": "2026-06-11T03:06:46.855127+00:00",
+  "results": [
+    {
+      "test_id": "NT-01",
+      "description": "Refund before timelock 24 hours (reverts)",
+      "passed": true,
+      "tx_hash": null,
+      "details": "Reverted as expected. State unchanged. Error: ('execution reverted', '0x')",
+      "timestamp": "2026-06-11T03:06:42.974111+00:00"
+    },
+    {
+      "test_id": "NT-02",
+      "description": "Refund non-existent session (reverts)",
+      "passed": true,
+      "tx_hash": null,
+      "details": "Reverted as expected. State unchanged. Error: ('execution reverted', '0x')",
+      "timestamp": "2026-06-11T03:06:43.769011+00:00"
+    },
+    {
+      "test_id": "NT-03",
+      "description": "Refund by non-client address (reverts)",
+      "passed": true,
+      "tx_hash": null,
+      "details": "Reverted as expected. State unchanged. Error: ('execution reverted', '0x')",
+      "timestamp": "2026-06-11T03:06:44.562652+00:00"
+    },
+    {
+      "test_id": "NT-04",
+      "description": "Refund after reveal/resolved (reverts)",
+      "passed": true,
+      "tx_hash": null,
+      "details": "Reverted as expected. State unchanged. Error: ('execution reverted', '0x')",
+      "timestamp": "2026-06-11T03:06:46.855044+00:00"
+    }
+  ],
+  "summary": {
+    "total": 4,
+    "passed": 4,
+    "failed": 0
+  }
+}

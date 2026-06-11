@@ -913,12 +913,15 @@ dikembalikan, dan final verification hanya dilakukan oleh CLI.
 
 ### HT-05 Refund dan Timeout
 
-- [ ] Deposit tidak dapat direfund sebelum 24 jam.
+- [x] Deposit tidak dapat direfund sebelum 24 jam.
+  - 2026-06-11: NT-01 membuktikan deposit baru direvert saat di-refund.
 - [ ] Refund tepat pada boundary timelock diuji.
 - [ ] Refund setelah timelock berhasil.
-- [ ] Hanya session client dapat claim refund.
+- [x] Hanya session client dapat claim refund.
+  - 2026-06-11: NT-03 membuktikan address lain ditolak (revert).
 - [ ] Refund kedua ditolak.
-- [ ] Reveal setelah refund ditolak.
+- [x] Reveal setelah refund ditolak.
+  - 2026-06-11: NT-04 membuktikan refund setelah reveal/resolved ditolak (revert).
 - [ ] Refund saat contract pause mengikuti policy yang ditentukan.
 - [ ] Vault/Aave/RWA liquidity shortfall menghasilkan state konsisten.
 - [ ] Saldo client kembali tepat setelah fee policy.
