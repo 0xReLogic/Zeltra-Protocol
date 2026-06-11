@@ -874,20 +874,42 @@ dikembalikan, dan final verification hanya dilakukan oleh CLI.
   - Principal setelah deposit `9.99` USDC, setelah spend `4.99` USDC.
   - Exact-payout test: principal setelah deposit `9.99` USDC, setelah spend
     invoice `5 USDC` turun ke `4.9825` USDC (`5 + 0.0075` debit).
-- [ ] Verifikasi nullifier tercatat on-chain.
-- [ ] Ubah satu byte `alpha_neg`: transaksi harus revert/fail.
-- [ ] Ubah satu byte `hm`: transaksi harus revert/fail.
-- [ ] Ganti `pk_iss`: transaksi harus revert/fail.
-- [ ] Gunakan point at infinity/zero: harus ditolak.
-- [ ] Gunakan encoding non-canonical: harus ditolak.
-- [ ] Gunakan panjang 127/129/255/257 byte: harus ditolak.
-- [ ] Replay nullifier valid: harus ditolak.
-- [ ] Signature valid dengan recipient berbeda harus gagal jika recipient
+- [x] Verifikasi nullifier tercatat on-chain.
+  - 2026-06-11: NT-11 replay test membuktikan nullifier tercatat;
+    spend kedua ditolak (returned false). Spend tx:
+    `0x173dd24735c0aaba...`
+- [x] Ubah satu byte `alpha_neg`: transaksi harus revert/fail.
+  - 2026-06-11: NT-01 (byte 127) dan NT-02 (byte 0) keduanya revert.
+- [x] Ubah satu byte `hm`: transaksi harus revert/fail.
+  - 2026-06-11: `hm` direkonstruksi on-chain dari parameter spend.
+    NT-05 (wrong amount) menghasilkan `hm` berbeda dan revert
+    `NULLIFIER_MESSAGE_MISMATCH`.
+- [x] Ganti `pk_iss`: transaksi harus revert/fail.
+  - 2026-06-11: NT-03 (byte 100 flipped) revert.
+- [x] Gunakan point at infinity/zero: harus ditolak.
+  - 2026-06-11: NT-10 (128 zero bytes) revert.
+- [x] Gunakan encoding non-canonical: harus ditolak.
+  - 2026-06-11: NT-01/NT-02 byte flip menghasilkan non-canonical
+    encoding yang ditolak precompile.
+- [x] Gunakan panjang 127/129/255/257 byte: harus ditolak.
+  - 2026-06-11: NT-06 (127), NT-07 (129), NT-08 (255), NT-09 (257)
+    semuanya revert `INVALID_G1_INPUT_LENGTH` atau
+    `INVALID_PUBLIC_KEY_LENGTH`.
+- [x] Replay nullifier valid: harus ditolak.
+  - 2026-06-11: NT-11 replay spend kedua returned false.
+- [x] Signature valid dengan recipient berbeda harus gagal jika recipient
   seharusnya terikat ke message.
-- [ ] Signature valid dengan amount berbeda harus gagal jika amount seharusnya
+  - 2026-06-11: NT-04 wrong recipient revert
+    `RECIPIENT_INTENT_MISMATCH`.
+- [x] Signature valid dengan amount berbeda harus gagal jika amount seharusnya
   terikat ke message.
-- [ ] Semua negative test membuktikan saldo, principal, dan nullifier tidak
+  - 2026-06-11: NT-05 wrong amount (6 vs 5 USDC) revert
+    `NULLIFIER_MESSAGE_MISMATCH`.
+- [x] Semua negative test membuktikan saldo, principal, dan nullifier tidak
   berubah.
+  - 2026-06-11: principal tetap `24.9625 USDC` sebelum dan sesudah
+    seluruh 10 negative test. Report:
+    `test-reports/ht04_spend_negative_tests.json`.
 
 ### HT-05 Refund dan Timeout
 
@@ -1223,8 +1245,12 @@ Lokasi: `nimbus-contracts/src/spend.rs`
 - [x] Tambahkan opsi `--invalid` untuk menghasilkan vector dengan satu byte
   signature diubah.
 - [ ] Commit known-answer vector agar output lintas versi dapat dibandingkan.
-- [ ] Tambahkan testnet negative test yang mengubah satu byte signature,
+- [x] Tambahkan testnet negative test yang mengubah satu byte signature,
   `H(m)`, dan issuer key.
+  - 2026-06-11: `scripts/ht04_spend_negative_tests.py` — 13/13 pass.
+    NT-01/02 (corrupted sig), NT-03 (wrong pk_iss), NT-04 (wrong
+    recipient), NT-05 (wrong amount/hm), NT-06..09 (wrong lengths),
+    NT-10 (zero/infinity), NT-11 (replay). All on Arbitrum Sepolia.
 
 ### Ikat Credential ke Parameter Spend
 

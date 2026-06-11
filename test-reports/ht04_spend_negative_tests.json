@@ -1,0 +1,123 @@
+{
+  "test_suite": "HT-04 Spend BLS On-Chain Negative Tests",
+  "contract": "0x62ca774e20b76431d189e1635400b91b03c2b031",
+  "chain_id": 421614,
+  "wallet": "0x23e32D309c575A3D5E7CD2867BE12B00efa44Bb1",
+  "timestamp": "2026-06-11T00:22:38.830652+00:00",
+  "deposit_amount": 10000000,
+  "spend_amount": 5000000,
+  "principal_after_deposit": 24962500,
+  "principal_after_spend": 19955000,
+  "final_principal": 19955000,
+  "results": [
+    {
+      "test_id": "NT-01",
+      "description": "Corrupted alpha_neg \u2014 1 byte flipped at position 127",
+      "passed": true,
+      "tx_hash": null,
+      "details": "Reverted as expected. State unchanged. ",
+      "timestamp": "2026-06-11T00:22:27.154405+00:00"
+    },
+    {
+      "test_id": "NT-02",
+      "description": "Corrupted alpha_neg \u2014 1 byte flipped at position 0",
+      "passed": true,
+      "tx_hash": null,
+      "details": "Reverted as expected. State unchanged. ",
+      "timestamp": "2026-06-11T00:22:27.967889+00:00"
+    },
+    {
+      "test_id": "NT-03",
+      "description": "Wrong pk_iss \u2014 1 byte flipped at position 100",
+      "passed": true,
+      "tx_hash": null,
+      "details": "Reverted as expected. State unchanged. ",
+      "timestamp": "2026-06-11T00:22:28.768792+00:00"
+    },
+    {
+      "test_id": "NT-04",
+      "description": "Wrong recipient \u2014 address doesn't match signed intent hash",
+      "passed": true,
+      "tx_hash": null,
+      "details": "Reverted as expected. State unchanged. ",
+      "timestamp": "2026-06-11T00:22:29.554520+00:00"
+    },
+    {
+      "test_id": "NT-05",
+      "description": "Wrong amount \u2014 6 USDC but signed for 5 USDC",
+      "passed": true,
+      "tx_hash": null,
+      "details": "Reverted as expected. State unchanged. ",
+      "timestamp": "2026-06-11T00:22:30.352695+00:00"
+    },
+    {
+      "test_id": "NT-06",
+      "description": "alpha_neg length 127 \u2014 INVALID_G1_INPUT_LENGTH expected",
+      "passed": true,
+      "tx_hash": null,
+      "details": "Reverted as expected. State unchanged. ",
+      "timestamp": "2026-06-11T00:22:31.155290+00:00"
+    },
+    {
+      "test_id": "NT-07",
+      "description": "alpha_neg length 129 \u2014 INVALID_G1_INPUT_LENGTH expected",
+      "passed": true,
+      "tx_hash": null,
+      "details": "Reverted as expected. State unchanged. ",
+      "timestamp": "2026-06-11T00:22:31.956970+00:00"
+    },
+    {
+      "test_id": "NT-08",
+      "description": "pk_iss length 255 \u2014 INVALID_PUBLIC_KEY_LENGTH expected",
+      "passed": true,
+      "tx_hash": null,
+      "details": "Reverted as expected. State unchanged. ",
+      "timestamp": "2026-06-11T00:22:32.766511+00:00"
+    },
+    {
+      "test_id": "NT-09",
+      "description": "pk_iss length 257 \u2014 INVALID_PUBLIC_KEY_LENGTH expected",
+      "passed": true,
+      "tx_hash": null,
+      "details": "Reverted as expected. State unchanged. ",
+      "timestamp": "2026-06-11T00:22:33.573064+00:00"
+    },
+    {
+      "test_id": "NT-10",
+      "description": "Zero alpha_neg \u2014 point at infinity / all zeros",
+      "passed": true,
+      "tx_hash": null,
+      "details": "Reverted as expected. State unchanged. ",
+      "timestamp": "2026-06-11T00:22:34.386569+00:00"
+    },
+    {
+      "test_id": "PT-01",
+      "description": "Valid spend succeeds on-chain",
+      "passed": true,
+      "tx_hash": "173dd24735c0aaba99268ea2fe0b2a89d10ce351f65f8342bb6fd57320c46908",
+      "details": "Gas used: 630654",
+      "timestamp": "2026-06-11T00:22:35.403298+00:00"
+    },
+    {
+      "test_id": "PT-02",
+      "description": "Principal decreased after valid spend",
+      "passed": true,
+      "tx_hash": null,
+      "details": "Delta: -5.0075 USDC",
+      "timestamp": "2026-06-11T00:22:37.671802+00:00"
+    },
+    {
+      "test_id": "NT-11",
+      "description": "Replay nullifier \u2014 same valid spend a second time",
+      "passed": true,
+      "tx_hash": null,
+      "details": "eth_call returned False (rejected)",
+      "timestamp": "2026-06-11T00:22:38.295951+00:00"
+    }
+  ],
+  "summary": {
+    "total": 13,
+    "passed": 13,
+    "failed": 0
+  }
+}
