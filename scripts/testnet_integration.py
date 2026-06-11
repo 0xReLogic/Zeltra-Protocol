@@ -1,4 +1,12 @@
 #!/usr/bin/env python3
+"""
+NIMBUS ON-CHAIN TESTNET INTEGRATION TESTER
+==========================================
+
+Runs dry-run simulation calls and verify EIP-2537 precompile execution 
+against the deployed contract on Arbitrum Sepolia.
+"""
+
 import sys
 import os
 from web3 import Web3
@@ -21,9 +29,8 @@ def env_bool(name, default=False):
     return value.lower() in {"1", "true", "yes", "on"}
 
 
-# Arbitrum Sepolia network settings. Secrets and deployment-specific addresses
-# must come from the environment so this script can be committed safely.
-RPC_URL = os.environ.get("RPC_URL", "https://sepolia-rollup.arbitrum.io/rpc")
+# Network settings from environment
+RPC_URL = os.environ.get("RPC_URL", "https://arbitrum-sepolia.core.chainstack.com/d18e11a2327c1a17c030975e3e0c8e24")
 CHAIN_ID = int(os.environ.get("CHAIN_ID", "421614"))
 CONTRACT_ADDRESS = env_required("NIMBUS_CONTRACT_ADDRESS", "CONTRACT_ADDRESS")
 PRIVATE_KEY = env_required("NIMBUS_RELAYER_PRIVATE_KEY", "PRIVATE_KEY")
@@ -37,6 +44,7 @@ INIT_IF_NEEDED = env_bool("NIMBUS_INIT_IF_NEEDED", False)
 NIMBUS_ABI = [
     {
         "inputs": [
+            {"internalType": "address", "name": "owner", "type": "address"},
             {"internalType": "address", "name": "stablecoin_addr", "type": "address"},
             {"internalType": "address", "name": "fee_recipient_addr", "type": "address"}
         ],
@@ -48,25 +56,21 @@ NIMBUS_ABI = [
     {
         "inputs": [],
         "name": "stablecoin",
-        "outputs": [
-            {"internalType": "address", "name": "", "type": "address"}
-        ],
+        "outputs": [{"internalType": "address", "name": "", "type": "address"}],
         "stateMutability": "view",
         "type": "function"
     },
     {
         "inputs": [],
         "name": "feeRecipient",
-        "outputs": [
-            {"internalType": "address", "name": "", "type": "address"}
-        ],
+        "outputs": [{"internalType": "address", "name": "", "type": "address"}],
         "stateMutability": "view",
         "type": "function"
     },
     {
         "inputs": [
             {"internalType": "bytes32", "name": "sid", "type": "bytes32"},
-            {"internalType": "uint8[]", "name": "_com_k_bytes", "type": "uint8[]"},
+            {"internalType": "bytes", "name": "com_k_bytes", "type": "bytes"},
             {"internalType": "uint256", "name": "amount", "type": "uint256"}
         ],
         "name": "deposit",
@@ -77,48 +81,43 @@ NIMBUS_ABI = [
     {
         "inputs": [
             {"internalType": "bytes32", "name": "sid", "type": "bytes32"},
-            {"internalType": "uint8[]", "name": "k_bytes", "type": "uint8[]"},
-            {"internalType": "uint8[]", "name": "pk_iss_bytes", "type": "uint8[]"},
-            {"internalType": "uint8[]", "name": "com_k_bytes", "type": "uint8[]"}
+            {"internalType": "bytes", "name": "k_bytes", "type": "bytes"},
+            {"internalType": "bytes", "name": "pk_iss_bytes", "type": "bytes"},
+            {"internalType": "bytes", "name": "com_k_bytes", "type": "bytes"}
         ],
         "name": "revealMaskKey",
-        "outputs": [
-            {"internalType": "bool", "name": "", "type": "bool"}
-        ],
+        "outputs": [{"internalType": "bool", "name": "", "type": "bool"}],
         "stateMutability": "nonpayable",
         "type": "function"
     },
     {
         "inputs": [
             {"internalType": "bytes32", "name": "nullifier", "type": "bytes32"},
-            {"internalType": "uint8[]", "name": "alpha_neg_bytes", "type": "uint8[]"},
-            {"internalType": "uint8[]", "name": "hm_bytes", "type": "uint8[]"},
-            {"internalType": "uint8[]", "name": "pk_iss_bytes", "type": "uint8[]"},
+            {"internalType": "bytes", "name": "alpha_neg_bytes", "type": "bytes"},
+            {"internalType": "bytes", "name": "pk_iss_bytes", "type": "bytes"},
             {"internalType": "address", "name": "recipient", "type": "address"},
-            {"internalType": "uint256", "name": "amount", "type": "uint256"}
+            {"internalType": "uint256", "name": "amount", "type": "uint256"},
+            {"internalType": "bytes32", "name": "recipient_or_intent_hash", "type": "bytes32"},
+            {"internalType": "uint256", "name": "expiry", "type": "uint256"},
+            {"internalType": "bytes32", "name": "nonce", "type": "bytes32"}
         ],
         "name": "spend",
-        "outputs": [
-            {"internalType": "bool", "name": "", "type": "bool"}
-        ],
+        "outputs": [{"internalType": "bool", "name": "", "type": "bool"}],
         "stateMutability": "nonpayable",
         "type": "function"
     },
     {
         "inputs": [
             {"internalType": "bytes32", "name": "nullifier", "type": "bytes32"},
-            {"internalType": "uint8[]", "name": "alpha_neg_bytes", "type": "uint8[]"},
-            {"internalType": "uint8[]", "name": "hm_bytes", "type": "uint8[]"},
-            {"internalType": "uint8[]", "name": "pk_iss_bytes", "type": "uint8[]"},
+            {"internalType": "bytes", "name": "alpha_neg_bytes", "type": "bytes"},
+            {"internalType": "bytes", "name": "pk_iss_bytes", "type": "bytes"},
             {"internalType": "address", "name": "polymarket_ctf", "type": "address"},
             {"internalType": "address", "name": "collateral_token", "type": "address"},
             {"internalType": "bytes32", "name": "condition_id", "type": "bytes32"},
             {"internalType": "uint256", "name": "amount", "type": "uint256"}
         ],
         "name": "spendAndBuyShares",
-        "outputs": [
-            {"internalType": "bool", "name": "", "type": "bool"}
-        ],
+        "outputs": [{"internalType": "bool", "name": "", "type": "bool"}],
         "stateMutability": "nonpayable",
         "type": "function"
     },
@@ -128,9 +127,7 @@ NIMBUS_ABI = [
             {"internalType": "address", "name": "recipient", "type": "address"}
         ],
         "name": "claimFailedIntentRefund",
-        "outputs": [
-            {"internalType": "bool", "name": "", "type": "bool"}
-        ],
+        "outputs": [{"internalType": "bool", "name": "", "type": "bool"}],
         "stateMutability": "nonpayable",
         "type": "function"
     },
@@ -140,14 +137,12 @@ NIMBUS_ABI = [
             {"internalType": "bytes32", "name": "nullifier", "type": "bytes32"},
             {"internalType": "address", "name": "recipient", "type": "address"},
             {"internalType": "uint256", "name": "amount", "type": "uint256"},
-            {"internalType": "uint8[]", "name": "proof_a_neg_bytes", "type": "uint8[]"},
-            {"internalType": "uint8[]", "name": "proof_b_bytes", "type": "uint8[]"},
-            {"internalType": "uint8[]", "name": "proof_c_bytes", "type": "uint8[]"}
+            {"internalType": "bytes", "name": "proof_a_neg_bytes", "type": "bytes"},
+            {"internalType": "bytes", "name": "proof_b_bytes", "type": "bytes"},
+            {"internalType": "bytes", "name": "proof_c_bytes", "type": "bytes"}
         ],
         "name": "verifyCompliance",
-        "outputs": [
-            {"internalType": "bool", "name": "", "type": "bool"}
-        ],
+        "outputs": [{"internalType": "bool", "name": "", "type": "bool"}],
         "stateMutability": "view",
         "type": "function"
     }
@@ -208,18 +203,15 @@ def main():
             sys.exit(3)
 
         print("\n[Action] Contract is NOT initialized. Initializing now...")
-        
-        # Build transaction
         nonce = w3.eth.get_transaction_count(address)
-        tx = contract.functions.init(usdc_addr, address).build_transaction({
+        tx = contract.functions.init(address, usdc_addr, address).build_transaction({
             'from': address,
             'nonce': nonce,
-            'gas': 4000000,
-            'maxFeePerGas': w3.to_wei(1, 'gwei'),
-            'maxPriorityFeePerGas': w3.to_wei(1, 'gwei'),
+            'gas': 2000000,
+            'maxFeePerGas': w3.to_wei(0.1, 'gwei'),
+            'maxPriorityFeePerGas': w3.to_wei(0.001, 'gwei'),
             'chainId': CHAIN_ID
         })
-        
         signed_tx = w3.eth.account.sign_transaction(tx, private_key=PRIVATE_KEY)
         tx_hash = w3.eth.send_raw_transaction(signed_tx.raw_transaction)
         print(f"  Sent init transaction! Tx Hash: {tx_hash.hex()}")
@@ -250,9 +242,8 @@ def main():
     dummy_nullifier = os.urandom(32)
     
     # A. Test Deposit (100 USDC)
-    # Expected: will revert if caller doesn't have USDC/allowance, but serves as E2E test of signature matching
     print("  1. Simulating Deposit transaction...")
-    dummy_com = list(os.urandom(256))
+    dummy_com = os.urandom(256)
     try:
         contract.functions.deposit(dummy_sid, dummy_com, 100 * 1_000_000).call({'from': address})
         print("    Deposit simulation succeeded!")
@@ -261,30 +252,31 @@ def main():
 
     # B. Test Reveal (revealMaskKey)
     print("  2. Simulating Reveal (revealMaskKey) with G2 point inputs...")
-    dummy_k = list(os.urandom(32))
-    dummy_pk = list(os.urandom(256))
-    dummy_com_key = list(os.urandom(256))
+    dummy_k = os.urandom(32)
+    dummy_pk = os.urandom(256)
+    dummy_com_key = os.urandom(256)
     try:
-        # A dry-run call
         result = contract.functions.revealMaskKey(dummy_sid, dummy_k, dummy_pk, dummy_com_key).call({'from': address})
         print(f"    Reveal verification finished. Result: {result}")
     except Exception as e:
-        # If precompile execution fails because coordinates are invalid, it will revert with b"MSM_PRECOMPILE_CALL_FAILED"
         print(f"    Reveal verification returned expected status/revert: {e}")
 
     # C. Test Spend (spend)
     print("  3. Simulating Spend verification pairing check...")
-    dummy_alpha = list(os.urandom(128))
-    dummy_hm = list(os.urandom(128))
-    dummy_pk_g2 = list(os.urandom(256))
+    dummy_alpha = os.urandom(128)
+    dummy_pk_g2 = os.urandom(256)
+    dummy_intent = os.urandom(32)
+    dummy_nonce = os.urandom(32)
     try:
         result = contract.functions.spend(
             dummy_nullifier,
             dummy_alpha,
-            dummy_hm,
             dummy_pk_g2,
             address,
-            10 * 1_000_000
+            10 * 1_000_000,
+            dummy_intent,
+            0, # expiry = 0 (never expires)
+            dummy_nonce
         ).call({'from': address})
         print(f"    Spend verification finished. Result: {result}")
     except Exception as e:
@@ -298,16 +290,15 @@ def main():
         result = contract.functions.spendAndBuyShares(
             dummy_nullifier,
             dummy_alpha,
-            dummy_hm,
             dummy_pk_g2,
             dummy_ctf,
             usdc_addr,
             dummy_condition_id,
             10 * 1_000_000
         ).call({'from': address})
-        print(f"    CCIP Buy Shares finished. Result: {result}")
+        print(f"    Spend And Buy Shares finished. Result: {result}")
     except Exception as e:
-        print(f"    CCIP Buy Shares returned expected status/revert: {e}")
+        print(f"    Spend And Buy Shares returned expected status/revert: {e}")
 
     # E. Test Refund (claimFailedIntentRefund)
     print("  5. Simulating Refund (claimFailedIntentRefund)...")
@@ -323,9 +314,9 @@ def main():
     # F. Test ZK Compliance Verification (verifyCompliance)
     print("  6. Simulating ZK Compliance (verifyCompliance) verification...")
     dummy_root = os.urandom(32)
-    dummy_proof_a = list(os.urandom(128))
-    dummy_proof_b = list(os.urandom(256))
-    dummy_proof_c = list(os.urandom(128))
+    dummy_proof_a = os.urandom(128)
+    dummy_proof_b = os.urandom(256)
+    dummy_proof_c = os.urandom(128)
     try:
         result = contract.functions.verifyCompliance(
             dummy_root,

@@ -1761,12 +1761,18 @@ Sebelum menjalankan:
 
 Test matrix minimum:
 
-- [ ] Signature BLS valid diterima dan receipt sukses.
-- [ ] Signature dengan satu byte berubah ditolak.
-- [ ] `H(m)` dengan satu byte berubah ditolak.
-- [ ] Issuer public key berbeda ditolak.
-- [ ] Nullifier yang sama ditolak pada percobaan kedua.
-- [ ] Failed signature tidak mengubah nullifier atau principal.
+- [x] Signature BLS valid diterima dan receipt sukses.
+  - 2026-06-11: PT-01 pada `ht04_spend_negative_tests.py` sukses mengirim spend transaction.
+- [x] Signature dengan satu byte berubah ditolak.
+  - 2026-06-11: NT-01/NT-02 dibuktikan direvert oleh contract.
+- [x] `H(m)` dengan satu byte berubah ditolak.
+  - 2026-06-11: NT-05 dibuktikan direvert oleh contract.
+- [x] Issuer public key berbeda ditolak.
+  - 2026-06-11: NT-03 dibuktikan direvert oleh contract.
+- [x] Nullifier yang sama ditolak pada percobaan kedua.
+  - 2026-06-11: NT-11 (replay spend) dibuktikan ditolak (returned false).
+- [x] Failed signature tidak mengubah nullifier atau principal.
+  - 2026-06-11: Saldo principal tetap utuh pada seluruh percobaan negative tests.
 - [ ] CCIP source transaction sukses dan menghasilkan message ID asli.
 - [ ] CCIP message terpantau sampai destination success.
 - [ ] Invalid source chain atau sender CCIP ditolak.
