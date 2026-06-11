@@ -1789,8 +1789,10 @@ path.
 
 - [ ] Rotasi seluruh credential yang pernah ter-commit atau dibagikan.
 - [ ] Hapus credential nyata dari Git history.
-- [ ] Tambahkan `nimbus-node/.env.test` ke `.gitignore`.
-- [ ] Buat `nimbus-node/.env.test.example` hanya dengan placeholder.
+- [x] Tambahkan `nimbus-node/.env.test` ke `.gitignore`.
+  - 2026-06-11: Ditambahkan ke root `.gitignore` dan dilepas dari pelacakan git (`git rm --cached`).
+- [x] Buat `nimbus-node/.env.test.example` hanya dengan placeholder.
+  - 2026-06-11: File template `nimbus-node/.env.test.example` berhasil dibuat.
 - [ ] Muat secret melalui secret manager atau environment CI.
 - [ ] Tambahkan secret scanning pada CI.
 - [ ] Pastikan script test tidak mencetak private key, Vault token, atau RPC
