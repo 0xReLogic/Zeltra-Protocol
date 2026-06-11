@@ -75,20 +75,20 @@ acak sebagai dasar perubahan critical.
 
 ### Aturan Riset
 
-- [ ] Gunakan minimal dua sumber independen untuk klaim critical.
-- [ ] Setidaknya satu sumber harus primer/resmi.
-- [ ] Catat tanggal publikasi dan versi spesifikasi/library.
-- [ ] Bedakan standard aktif, draft, proposal, dan eksperimen.
-- [ ] Cari known attack dan failure mode, bukan hanya happy path.
-- [ ] Cari audit finding yang mirip dengan flow Nimbus.
-- [ ] Bandingkan minimal satu implementasi production/audited jika tersedia.
-- [ ] Jangan menganggap teknologi tahun 2026 otomatis lebih aman.
-- [ ] Jangan mengubah cryptographic construction hanya untuk optimasi tanpa
+- Gunakan minimal dua sumber independen untuk klaim critical.
+- Setidaknya satu sumber harus primer/resmi.
+- Catat tanggal publikasi dan versi spesifikasi/library.
+- Bedakan standard aktif, draft, proposal, dan eksperimen.
+- Cari known attack dan failure mode, bukan hanya happy path.
+- Cari audit finding yang mirip dengan flow Nimbus.
+- Bandingkan minimal satu implementasi production/audited jika tersedia.
+- Jangan menganggap teknologi tahun 2026 otomatis lebih aman.
+- Jangan mengubah cryptographic construction hanya untuk optimasi tanpa
   security argument yang jelas.
-- [ ] Jangan copy contract/library code tanpa memahami invariant dan lisensi.
-- [ ] Verifikasi hasil riset terhadap versi dependency yang benar-benar dipakai
+- Jangan copy contract/library code tanpa memahami invariant dan lisensi.
+- Verifikasi hasil riset terhadap versi dependency yang benar-benar dipakai
   repo.
-- [ ] Setelah riset, tetap wajib hard-test di testnet tanpa mock.
+- Setelah riset, tetap wajib hard-test di testnet tanpa mock.
 
 ### Research Note Wajib
 
@@ -110,11 +110,11 @@ Rencana negative test:
 Rollback/recovery:
 ```
 
-- [ ] Simpan research note di `research/decisions/`.
-- [ ] Gunakan satu file per keputusan.
-- [ ] Sertakan link sumber dan tanggal akses.
-- [ ] Tandai asumsi yang belum terbukti.
-- [ ] Hubungkan decision ID ke TODO, code change, dan hard-test report.
+- Simpan research note di `research/decisions/`.
+- Gunakan satu file per keputusan.
+- Sertakan link sumber dan tanggal akses.
+- Tandai asumsi yang belum terbukti.
+- Hubungkan decision ID ke TODO, code change, dan hard-test report.
 
 ### Research Gate Kelulusan
 
@@ -200,12 +200,12 @@ double payout.
 
 Keputusan sebelum melanjutkan:
 
-- [x] Tetapkan model MVP sebagai **collateral-backed private payment**
+- Tetapkan model MVP sebagai **collateral-backed private payment**
   (`DEC-001`).
-- [x] Dokumentasikan bahwa deposit net menjadi liability sampai spend/refund.
-- [x] Ubah reveal agar tidak membayar USDC.
-- [x] Pastikan hanya spend atau refund yang mengurangi liability.
-- [x] Hapus logic lama yang memperlakukan reveal sebagai payout.
+- Dokumentasikan bahwa deposit net menjadi liability sampai spend/refund.
+- Ubah reveal agar tidak membayar USDC.
+- Pastikan hanya spend atau refund yang mengurangi liability.
+- Hapus logic lama yang memperlakukan reveal sebagai payout.
 
 ### P0 Bisnis: Potensi Double Payout Saat Reveal
 
@@ -224,14 +224,14 @@ payout saat reveal + payout saat spend
 
 Ini merupakan business-logic blocker paling kritis.
 
-- [x] Buat hard test yang membuktikan satu deposit tidak dapat menghasilkan
+- Buat hard test yang membuktikan satu deposit tidak dapat menghasilkan
   dua payout.
-- [x] Hapus transfer USDC dari reveal untuk model collateral-backed.
-- [x] Reveal hanya mengubah signing-session state; distribusi `k` tetap tugas
+- Hapus transfer USDC dari reveal untuk model collateral-backed.
+- Reveal hanya mengubah signing-session state; distribusi `k` tetap tugas
   leader/off-chain.
-- [x] Liability tidak turun saat reveal.
-- [x] Liability turun tepat satu kali saat spend atau refund.
-- [x] Tambahkan invariant global setelah setiap transaksi:
+- Liability tidak turun saat reveal.
+- Liability turun tepat satu kali saat spend atau refund.
+- Tambahkan invariant global setelah setiap transaksi:
   `contract_assets >= outstanding_liabilities`.
 
 Acceptance criteria:
@@ -285,12 +285,12 @@ session A deposit -> membuka k session B
 
 TODO state machine:
 
-- [ ] Definisikan enum/status yang sama pada contract, relayer DB, SDK, dan API.
-- [ ] Setiap transition memiliki precondition eksplisit.
-- [ ] Setiap transition idempotent atau menolak retry dengan aman.
-- [ ] Simpan tx hash/block untuk transition on-chain.
-- [ ] Rekonsiliasi state relayer dengan contract setelah restart.
-- [ ] Jangan menyimpulkan state finansial hanya dari log atau queue memory.
+- Definisikan enum/status yang sama pada contract, relayer DB, SDK, dan API.
+- Setiap transition memiliki precondition eksplisit.
+- Setiap transition idempotent atau menolak retry dengan aman.
+- Simpan tx hash/block untuk transition on-chain.
+- Rekonsiliasi state relayer dengan contract setelah restart.
+- Jangan menyimpulkan state finansial hanya dari log atau queue memory.
 
 ## Ledger dan Invariant Bisnis
 
@@ -306,18 +306,18 @@ recipient_payout  = net_liability - redemption_fee
 
 Invariant protocol:
 
-- [ ] `assets >= outstanding_liabilities`.
-- [ ] `gross_deposit = deposit_fee + net_liability`.
-- [ ] Satu session hanya menambah liability satu kali.
-- [ ] Satu credential hanya mengurangi liability satu kali.
-- [ ] `SPENT XOR REFUNDED`; tidak boleh keduanya.
-- [ ] Failed/reverted transaction tidak mengubah liability.
-- [ ] Fee hanya diakui setelah transaksi yang mendasarinya berhasil.
-- [ ] Rounding selalu menguntungkan solvency, tetapi tidak mengambil fee
+- `assets >= outstanding_liabilities`.
+- `gross_deposit = deposit_fee + net_liability`.
+- Satu session hanya menambah liability satu kali.
+- Satu credential hanya mengurangi liability satu kali.
+- `SPENT XOR REFUNDED`; tidak boleh keduanya.
+- Failed/reverted transaction tidak mengubah liability.
+- Fee hanya diakui setelah transaksi yang mendasarinya berhasil.
+- Rounding selalu menguntungkan solvency, tetapi tidak mengambil fee
   tersembunyi.
-- [ ] Decimal token divalidasi; MVP hanya USDC 6 decimal.
-- [ ] Admin tidak dapat mengklaim user principal sebagai yield.
-- [ ] Saldo contract langsung bukan satu-satunya liability ledger.
+- Decimal token divalidasi; MVP hanya USDC 6 decimal.
+- Admin tidak dapat mengklaim user principal sebagai yield.
+- Saldo contract langsung bukan satu-satunya liability ledger.
 
 Ledger minimum yang harus dapat diaudit:
 
@@ -347,12 +347,12 @@ Ledger minimum yang harus dapat diaudit:
 
 Checklist:
 
-- [ ] Tidak ada liability sebelum deposit receipt sukses.
-- [ ] `k` tidak bocor sebelum deposit confirmed.
-- [ ] Deposit commitment sama dengan signing commitment.
-- [ ] Amount session sama dengan amount deposit.
-- [ ] Credential final diverifikasi client sebelum dianggap ready.
-- [ ] Reveal tidak mengirim payout.
+- Tidak ada liability sebelum deposit receipt sukses.
+- `k` tidak bocor sebelum deposit confirmed.
+- Deposit commitment sama dengan signing commitment.
+- Amount session sama dengan amount deposit.
+- Credential final diverifikasi client sebelum dianggap ready.
+- Reveal tidak mengirim payout.
 
 ### Flow 2 - Spend Private Credential
 
@@ -369,14 +369,14 @@ Checklist:
 
 Checklist:
 
-- [ ] Recipient terikat pada signature.
-- [ ] Amount terikat pada signature.
-- [ ] Chain ID dan contract address terikat pada signature.
-- [ ] Asset terikat pada signature.
-- [ ] Expiry terikat pada signature.
-- [ ] Nullifier unik dan deterministic dari credential/domain.
-- [ ] State update dan transfer atomic.
-- [ ] API tidak melaporkan sukses sebelum settlement state yang disepakati.
+- Recipient terikat pada signature.
+- Amount terikat pada signature.
+- Chain ID dan contract address terikat pada signature.
+- Asset terikat pada signature.
+- Expiry terikat pada signature.
+- Nullifier unik dan deterministic dari credential/domain.
+- State update dan transfer atomic.
+- API tidak melaporkan sukses sebelum settlement state yang disepakati.
 
 ### Flow 3 - Refund
 
@@ -392,40 +392,40 @@ deadline.
 
 Checklist:
 
-- [ ] Credential yang sudah ready tidak dapat direfund.
-- [ ] Session yang sudah spent tidak dapat direfund.
-- [ ] Hanya depositor atau recovery address yang disepakati dapat menerima
+- Credential yang sudah ready tidak dapat direfund.
+- Session yang sudah spent tidak dapat direfund.
+- Hanya depositor atau recovery address yang disepakati dapat menerima
   refund.
-- [ ] Refund tidak membayar lebih dari liability session.
-- [ ] Refund retry tidak menghasilkan transfer kedua.
+- Refund tidak membayar lebih dari liability session.
+- Refund retry tidak menghasilkan transfer kedua.
 
 ### Flow 4 - Recovery
 
-- [ ] Jika leader mati sebelum deposit: tidak ada dana yang perlu dipulihkan.
-- [ ] Jika leader mati setelah deposit: session dapat dilanjutkan node baru atau
+- Jika leader mati sebelum deposit: tidak ada dana yang perlu dipulihkan.
+- Jika leader mati setelah deposit: session dapat dilanjutkan node baru atau
   direfund setelah timeout.
-- [ ] Jika guardian kurang quorum: tidak ada `k` release, lalu refund.
-- [ ] Jika relayer mati setelah broadcast: node baru mencari receipt dan
+- Jika guardian kurang quorum: tidak ada `k` release, lalu refund.
+- Jika relayer mati setelah broadcast: node baru mencari receipt dan
   melanjutkan state.
-- [ ] Jika contract pause: policy harus menentukan apakah refund tetap aktif.
-- [ ] Tidak ada recovery path yang membutuhkan admin mengambil custody user.
+- Jika contract pause: policy harus menentukan apakah refund tetap aktif.
+- Tidak ada recovery path yang membutuhkan admin mengambil custody user.
 
 ## Core MVP Gate
 
 Core dianggap berhasil hanya jika semua berikut lulus hard test nyata:
 
-- [ ] Deposit nyata.
-- [ ] Masked threshold signing nyata.
-- [ ] Atomic release `k`.
-- [ ] Credential final valid.
-- [ ] Spend BLS valid menghasilkan satu payout.
-- [ ] Signature invalid tidak menghasilkan payout.
-- [ ] Double spend gagal.
-- [ ] Refund berhasil pada failure path.
-- [ ] Spend dan refund tidak pernah sama-sama berhasil.
-- [ ] Restart leader/relayer tidak menghilangkan uang atau request.
-- [ ] Accounting selalu solvent.
-- [ ] Emergency pause/recovery bekerja.
+- Deposit nyata.
+- Masked threshold signing nyata.
+- Atomic release `k`.
+- Credential final valid.
+- Spend BLS valid menghasilkan satu payout.
+- Signature invalid tidak menghasilkan payout.
+- Double spend gagal.
+- Refund berhasil pada failure path.
+- Spend dan refund tidak pernah sama-sama berhasil.
+- Restart leader/relayer tidak menghilangkan uang atau request.
+- Accounting selalu solvent.
+- Emergency pause/recovery bekerja.
 
 Sebelum gate ini selesai, fitur tambahan tidak boleh menjadi dependency jalur
 uang utama.
@@ -442,12 +442,12 @@ User connect wallet -> deposit -> credential -> private transfer/withdraw
 
 Ini adalah produk pertama dan reference flow.
 
-- [ ] UI connect wallet.
-- [ ] Deposit status.
-- [ ] Credential status tanpa mengekspos secret.
-- [ ] Form recipient/amount.
-- [ ] Spend status confirmed.
-- [ ] Refund/recovery UI.
+- UI connect wallet.
+- Deposit status.
+- Credential status tanpa mengekspos secret.
+- Form recipient/amount.
+- Spend status confirmed.
+- Refund/recovery UI.
 
 ### Produk B - AI Agent Payments
 
@@ -460,28 +460,17 @@ pre-staged authorization state di Layer 7, bukan wallet kustodian baru. Saldo
 tetap liability pool, tetapi owner memberi allowance terbatas agar agent dapat
 melakukan instant private settlement tanpa deposit baru untuk setiap API call.
 
-- [x] SDK mengelola token pool.
-  - 2026-06-11: Diimplementasikan di `AgentTokenPool` dalam `nimbus-sdk/src/x402/pool.rs`.
-- [x] Agent tidak menyimpan root/guardian share.
-  - 2026-06-11: Agen hanya menyimpan `ready_tokens` (blind signatures), tidak memegang rahasia threshold.
-- [x] Spending policy: budget, recipient allowlist, expiry, max amount.
-  - 2026-06-11: Terikat secara kriptografis pada signature payload via `NimbusPaymentPayload`.
-- [x] Spending policy mencakup merchant/category allowlist, per-tx cap, daily cap, expiry, nonce/nullifier, dan max Network Fee.
-  - 2026-06-11: Didukung oleh skema pembatasan policy di dalam `pool.rs`.
-- [x] Agent Spending Wallet tidak dapat spend melebihi saldo pool atau credential yang tersedia.
-  - 2026-06-11: Dibatasi oleh ketersediaan credential di `ready_tokens` pool.
-- [x] Pre-staged state terikat ke owner dan tidak dapat dipakai ulang oleh agent lain.
-  - 2026-06-11: Session ID dan commitment dikunci unik per sesi owner.
-- [x] Agent budget habis menghasilkan gagal aman tanpa partial payment.
-  - 2026-06-11: Gagal secara atomik tanpa *partial payout*.
-- [x] Retry tidak menyebabkan double payment.
-  - 2026-06-11: Dicegah oleh nullifier dan local cache `spent_nullifiers`.
-- [x] Human owner dapat pause/revoke agent.
-  - 2026-06-11: Owner bisa mencabut key atau pause via contract admin.
-- [x] Pause/revoke owner langsung memblokir issuance payload baru.
-  - 2026-06-11: Kontrak pintar menolak deposit/reveal baru saat di-pause.
-- [x] Dokumentasikan bahwa Agent Spending Wallet adalah working balance untuk instant private settlement, bukan lock, yield product, atau kustodian baru.
-  - 2026-06-11: Didokumentasikan di `docs/bisnis.md` Bagian 6.
+- SDK mengelola token pool (Diimplementasikan di `AgentTokenPool` dalam `nimbus-sdk/src/x402/pool.rs`).
+- Agent tidak menyimpan root/guardian share (Agen hanya menyimpan `ready_tokens` (blind signatures), tidak memegang rahasia threshold).
+- Spending policy: budget, recipient allowlist, expiry, max amount (Terikat secara kriptografis pada signature payload via `NimbusPaymentPayload`).
+- Spending policy mencakup merchant/category allowlist, per-tx cap, daily cap, expiry, nonce/nullifier, dan max Network Fee (Didukung oleh skema pembatasan policy di dalam `pool.rs`).
+- Agent Spending Wallet tidak dapat spend melebihi saldo pool atau credential yang tersedia (Dibatasi oleh ketersediaan credential di `ready_tokens` pool).
+- Pre-staged state terikat ke owner dan tidak dapat dipakai ulang oleh agent lain (Session ID dan commitment dikunci unik per sesi owner).
+- Agent budget habis menghasilkan gagal aman tanpa partial payment (Gagal secara atomik tanpa *partial payout*).
+- Retry tidak menyebabkan double payment (Dicegah oleh nullifier dan local cache `spent_nullifiers`).
+- Human owner dapat pause/revoke agent (Owner bisa mencabut key atau pause via contract admin).
+- Pause/revoke owner langsung memblokir issuance payload baru (Kontrak pintar menolak deposit/reveal baru saat di-pause).
+- Dokumentasikan bahwa Agent Spending Wallet adalah working balance untuk instant private settlement, bukan lock, yield product, atau kustodian baru (Didokumentasikan di `docs/bisnis.md` Bagian 6).
 
 ### Produk C - x402 API Payment
 
@@ -490,10 +479,10 @@ API meminta payment -> agent memilih credential -> facilitator settle ->
 API memberi resource
 ```
 
-- [ ] Payment terikat ke resource dan merchant.
-- [ ] Resource diberikan setelah settlement policy terpenuhi.
-- [ ] Satu payment tidak dapat membeli resource berbeda jika tidak diizinkan.
-- [ ] x402 memakai core spend, bukan jalur payout terpisah.
+- Payment terikat ke resource dan merchant.
+- Resource diberikan setelah settlement policy terpenuhi.
+- Satu payment tidak dapat membeli resource berbeda jika tidak diizinkan.
+- x402 memakai core spend, bukan jalur payout terpisah.
 
 ### Produk D - Cross-Chain Payment
 
@@ -501,10 +490,10 @@ API memberi resource
 Credential core -> source CCIP -> destination verify -> destination payout
 ```
 
-- [ ] Baru diaktifkan setelah single-chain core lulus.
-- [ ] Source success dibedakan dari destination success.
-- [ ] Ada recovery jika destination gagal.
-- [ ] Liability cross-chain mempunyai satu source of truth.
+- Baru diaktifkan setelah single-chain core lulus.
+- Source success dibedakan dari destination success.
+- Ada recovery jika destination gagal.
+- Liability cross-chain mempunyai satu source of truth.
 
 ### Produk E - Private Polymarket Intent
 
@@ -512,9 +501,9 @@ Credential core -> source CCIP -> destination verify -> destination payout
 Credential core -> payout destination -> buy outcome shares
 ```
 
-- [ ] Baru diaktifkan setelah payment dan CCIP stabil.
-- [ ] Failure membeli shares tidak menghilangkan claim user.
-- [ ] Refund recipient terikat pada pemilik intent.
+- Baru diaktifkan setelah payment dan CCIP stabil.
+- Failure membeli shares tidak menghilangkan claim user.
+- Refund recipient terikat pada pemilik intent.
 
 ### Produk F - DeFi/RWA Yield
 
@@ -524,10 +513,10 @@ Idle backing assets -> controlled external allocation -> yield
 
 Ini bukan payment core dan tidak boleh mengubah nilai credential.
 
-- [ ] Baru diaktifkan setelah liability ledger stabil.
-- [ ] Principal selalu dapat memenuhi withdrawal.
-- [ ] Yield dipisahkan dari user principal.
-- [ ] External protocol failure memiliki cap dan emergency unwind.
+- Baru diaktifkan setelah liability ledger stabil.
+- Principal selalu dapat memenuhi withdrawal.
+- Yield dipisahkan dari user principal.
+- External protocol failure memiliki cap dan emergency unwind.
 
 ### Produk G - ZK Compliance
 
@@ -535,9 +524,9 @@ Ini bukan payment core dan tidak boleh mengubah nilai credential.
 Optional eligibility proof -> core deposit/spend authorization
 ```
 
-- [ ] Compliance menjadi gate tambahan, bukan ledger baru.
-- [ ] Privacy proof tidak boleh mencetak atau menghapus liability.
-- [ ] Tetap prototype sampai circuit dan VK production selesai.
+- Compliance menjadi gate tambahan, bukan ledger baru.
+- Privacy proof tidak boleh mencetak atau menghapus liability.
+- Tetap prototype sampai circuit dan VK production selesai.
 
 ## Urutan Produk
 
@@ -551,10 +540,10 @@ Optional eligibility proof -> core deposit/spend authorization
 
 Rule:
 
-- [ ] Produk berikutnya tidak boleh mengubah invariant core.
-- [ ] Setiap produk memiliki feature flag/cap terpisah.
-- [ ] Produk gagal tidak boleh membuat core payment insolvent.
-- [ ] Produk tambahan dapat dimatikan tanpa menghalangi refund core.
+- Produk berikutnya tidak boleh mengubah invariant core.
+- Setiap produk memiliki feature flag/cap terpisah.
+- Produk gagal tidak boleh membuat core payment insolvent.
+- Produk tambahan dapat dimatikan tanpa menghalangi refund core.
 
 ## Status Saat Ini
 
