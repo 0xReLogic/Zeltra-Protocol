@@ -77,7 +77,7 @@ dibuktikan dengan benchmark atau hard test sebelum menjadi acceptance criteria.
 - [ ] Definisikan siapa yang dapat mengajukan challenge dan biaya anti-spam.
 - [ ] Hubungkan voting DAO ke challenge period untuk keputusan akhir seizure.
 - [ ] Definisikan quorum, voting period, delegation, conflict of interest, dan
-  protection terhadap governance capture untuk konsensus token KAWAL.
+  protection terhadap governance capture untuk konsensus token NIMB.
 - [ ] Bangun paket Decentralized Relayer Node untuk operator pihak ketiga.
 - [ ] Tambahkan registration, stake, health check, reward, penalty, rotation,
   dan graceful exit untuk relayer.

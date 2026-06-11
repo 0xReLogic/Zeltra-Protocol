@@ -568,14 +568,6 @@ Rule:
 - [x] Hash-to-curve pada `nimbus-core` menggunakan RFC 9380.
 - [x] Seluruh `cargo test --workspace` lulus: 39 test.
 
-### Kesimpulan Integrasi Terakhir
-
-Integrasi terakhir membuktikan bahwa relayer dapat membentuk calldata dan
-mengirim transaksi spend/CCIP nyata ke chain. Integrasi tersebut belum
-membuktikan bahwa signature BLS telah diverifikasi, message CCIP telah selesai
-dieksekusi di destination chain, atau compliance proof aman secara
-kriptografis.
-
 ### Artifact Testnet yang Sudah Ada
 
 - `nimbus-core/examples/generate_bls_test_data.rs`
