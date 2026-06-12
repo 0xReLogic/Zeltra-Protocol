@@ -518,32 +518,32 @@ cepat, tetapi tidak boleh menjadi satu-satunya bukti bahwa fitur selesai.
 
 ### HT-01 Vault/KMS Nyata
 
-- [ ] Node leader berhasil mengambil share 40-byte dari Vault Tailscale.
-- [ ] Share terdeserialisasi menjadi `(index, Fr)` yang expected.
-- [ ] Node tidak pernah mencetak share.
-- [ ] Token invalid menyebabkan startup gagal pada hard-test mode.
-- [ ] Vault sealed menyebabkan startup gagal atau node tidak-ready.
-- [ ] Setelah Vault unseal, node dapat recovery tanpa mengganti share.
-- [ ] Path salah tidak fallback ke test key.
-- [ ] Hapus `NIMBUS_SHARE_KEY` dan buktikan Vault menjadi sumber key tunggal.
-- [ ] Restart node dan pastikan public key/share index konsisten.
-- [ ] Rotasi/reload key diuji tanpa menghasilkan mixed-key ceremony.
+- [x] Node leader berhasil mengambil share 40-byte dari Vault Tailscale.
+- [x] Share terdeserialisasi menjadi `(index, Fr)` yang expected.
+- [x] Node tidak pernah mencetak share.
+- [x] Token invalid menyebabkan startup gagal pada hard-test mode.
+- [x] Vault sealed menyebabkan startup gagal atau node tidak-ready.
+- [x] Setelah Vault unseal, node dapat recovery tanpa mengganti share.
+- [x] Path salah tidak fallback ke test key.
+- [x] Hapus `NIMBUS_SHARE_KEY` dan buktikan Vault menjadi sumber key tunggal.
+- [x] Restart node dan pastikan public key/share index konsisten.
+- [x] Rotasi/reload key diuji tanpa menghasilkan mixed-key ceremony.
 
 ### HT-02 Distributed Threshold Signing via Tailscale
 
-- [ ] Jalankan leader pada VPS ini dan guardian pada VPS Tailscale lain.
-- [ ] Bind guardian hanya ke IP Tailscale.
-- [ ] Buktikan port guardian tidak dapat diakses dari interface publik.
-- [ ] Leader mengirim blinded message dan `k`, bukan meminta share key.
-- [ ] Guardian mengambil share lokal dan mengembalikan partial signature.
+- [x] Jalankan leader pada VPS ini dan guardian pada VPS Tailscale lain.
+- [x] Bind guardian hanya ke IP Tailscale.
+- [x] Buktikan port guardian tidak dapat diakses dari interface publik.
+- [x] Leader mengirim blinded message dan `k`, bukan meminta share key.
+- [x] Guardian mengambil share lokal dan mengembalikan partial signature.
 - [x] Response guardian menyertakan share index asli dari `KeyManager`.
-- [ ] Response guardian menyertakan key version, session ID, dan request digest.
+- [x] Response guardian menyertakan key version, session ID, dan request digest.
 - [x] Leader dan guardian memakai issuer public key hasil ceremony yang sama,
   bukan public key yang diturunkan dari share lokal.
 - [x] Client tidak dapat mengganti issuer public key pada request leader.
 - [x] Leader memverifikasi pairing partial signature terhadap public share
   yang dipin sebelum menghitungnya ke quorum.
-- [ ] Aggregate minimal threshold menghasilkan masked signature valid.
+- [x] Aggregate minimal threshold menghasilkan masked signature valid.
 - [x] Leader menolak hasil signing saat jumlah share unik masih sub-threshold.
 - [x] Duplicate guardian index ditolak dan tidak dihitung ke quorum.
 - [x] Guardian index palsu/tidak terdaftar ditolak.

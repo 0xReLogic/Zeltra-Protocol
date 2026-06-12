@@ -47,22 +47,31 @@ proc_split = subprocess.run([cli_path, "split-key", "-s", sk_iss, "-t", "3", "-n
 output_split = proc_split.stdout
 
 shares = []
+public_shares = []
 for line in output_split.split("\n"):
-    if line.strip().startswith("Share"):
-        pass
-    elif len(line.strip()) == 80:  # Hex representation of index + scalar (8 + 32 bytes)
-        shares.append(line.strip())
+    line_stripped = line.strip()
+    if len(line_stripped) == 80:  # Hex representation of index + scalar (8 + 32 bytes)
+        shares.append(line_stripped)
+    elif len(line_stripped) == 192:  # Compressed G2 point (96 bytes)
+        public_shares.append(line_stripped)
 
-if len(shares) != 5:
-    print("Error: Expected to split into 5 shares, but got:", len(shares))
+if len(shares) != 5 or len(public_shares) != 5:
+    print(f"Error: Expected 5 secret and 5 public shares, got {len(shares)} and {len(public_shares)}")
     sys.exit(1)
 
-for i, share in enumerate(shares):
-    print(f"  Share {i+1}: {share[:12]}...{share[-12:]}")
+for i in range(5):
+    print(f"  Share {i+1}: {shares[i][:12]}...  Public Share {i+1}: {public_shares[i][:12]}...")
 
 # Step 4: Startup the 5 nodes
 print("\n[Step 4] Launching relayer nodes (1 Leader, 4 Guardians)...")
 nodes = []
+# Clean old test DBs
+for i in range(5):
+    for suffix in ["", "-shm", "-wal"]:
+        path = f"test_cluster_node_{i+1}.db{suffix}"
+        if os.path.exists(path):
+            os.remove(path)
+
 # Node 1 is Leader on 8080. Nodes 2-5 are Guardians on 8081-8084.
 for i in range(5):
     port = str(8080 + i)
@@ -70,9 +79,28 @@ for i in range(5):
     env["PORT"] = port
     env["NIMBUS_SHARE_INDEX"] = str(i + 1)
     env["NIMBUS_SHARE_KEY"] = shares[i]
+    env["NIMBUS_ENV"] = "test"
+    env["NIMBUS_DB_PATH"] = f"test_cluster_node_{i+1}.db"
+    env["NIMBUS_THRESHOLD"] = "3"
+    env["NIMBUS_ISSUER_PUBLIC_KEY"] = pk_iss
+    
+    # Construct guardian public keys (excluding the local share index)
+    guardian_keys = {}
+    for j in range(5):
+        idx = j + 1
+        if idx != (i + 1):
+            guardian_keys[str(idx)] = public_shares[j]
+    env["NIMBUS_GUARDIAN_PUBLIC_KEYS"] = json.dumps(guardian_keys)
+    
+    # Clean old logs
+    log_path = f"test_cluster_node_{i+1}.log"
+    if os.path.exists(log_path):
+        os.remove(log_path)
+    
+    log_file = open(log_path, "w")
     
     # Run the relayer node process
-    proc = subprocess.Popen(["./target/debug/nimbus-node"], env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    proc = subprocess.Popen(["./target/debug/nimbus-node"], env=env, stdout=log_file, stderr=subprocess.STDOUT)
     nodes.append((port, proc))
     print(f"  Node {i+1} (Port {port}): Started Index {i+1}")
 
@@ -80,12 +108,28 @@ for i in range(5):
 time.sleep(3)
 print("\n[Step 5] Checking nodes health...")
 for port, _ in nodes:
-    try:
-        response = urllib.request.urlopen(f"http://127.0.0.1:{port}/health", timeout=2)
-        data = json.loads(response.read().decode())
-        print(f"  Node on Port {port}: HEALTHY (status: {data.get('status')})")
-    except Exception as e:
-        print(f"  Node on Port {port}: UNHEALTHY or unreachable: {e}")
+    healthy = False
+    last_error = None
+    for attempt in range(1, 6):
+        try:
+            response = urllib.request.urlopen(f"http://127.0.0.1:{port}/health", timeout=3)
+            data = json.loads(response.read().decode())
+            print(f"  Node on Port {port}: HEALTHY (status: {data.get('status')}) on attempt {attempt}")
+            healthy = True
+            break
+        except Exception as e:
+            last_error = e
+            time.sleep(1)
+    
+    if not healthy:
+        print(f"  Node on Port {port}: UNHEALTHY or unreachable after 5 attempts: {last_error}")
+        # Print the log file content of this node
+        log_path = f"test_cluster_node_{int(port)-8079}.log"
+        if os.path.exists(log_path):
+            print(f"--- Log for Node on Port {port} ---")
+            with open(log_path, 'r') as f:
+                print(f.read())
+            print("-----------------------------------")
         # Clean up and exit
         for _, p in nodes:
             p.terminate()
@@ -111,6 +155,9 @@ print(f"  Blinding Factor (r) : {r_factor[:12]}...")
 # Step 7: Call Leader Node to collect signatures from Guardians
 print("\n[Step 7] Initiating leader signing request to port 8080...")
 payload = {
+    "session_id": "sim_session_id_12345",
+    "amount": 1000000,
+    "client_address": "0x23e32d309c575a3d5e7cd2867be12b00efa44bb1",
     "blinded_hex": blinded_msg,
     "guardian_urls": [
         "http://127.0.0.1:8081",
@@ -128,19 +175,66 @@ req = urllib.request.Request(
 )
 
 try:
-    response = urllib.request.urlopen(req, timeout=5)
+    response = urllib.request.urlopen(req, timeout=15)
     result = json.loads(response.read().decode())
     print("  Leader sign call: SUCCESS")
     com_k = result["com_k_hex"]
-    k_val = result["k_hex"]
     sigs = result["partial_signatures"]
     print(f"    Commitment (com_k) : {com_k[:12]}...")
-    print(f"    Masking Key (k)    : {k_val[:12]}...")
     print(f"    Received {len(sigs)} partial signatures:")
     for sig in sigs:
         print(f"      - Index {sig['index']}: {sig['signature_hex'][:12]}...")
 except Exception as e:
     print(f"  Leader signing failed: {e}")
+    # Print the log file content of Leader node (Node 1)
+    if os.path.exists("test_cluster_node_1.log"):
+        print("--- Log for Leader Node (Port 8080) ---")
+        with open("test_cluster_node_1.log", "r") as f:
+            print(f.read())
+        print("---------------------------------------")
+    for _, p in nodes:
+        p.terminate()
+    sys.exit(1)
+
+# Step 7.5: Confirm Deposit & Reveal Masking Key
+print("\n[Step 7.5] Confirming deposit and revealing masking key...")
+deposit_payload = {
+    "session_id": "sim_session_id_12345",
+    "amount": 1000000,
+    "com_k": com_k,
+    "idempotency_key": "sim_idempotency_12345"
+}
+req_dep = urllib.request.Request(
+    "http://127.0.0.1:8080/api/deposit",
+    data=json.dumps(deposit_payload).encode("utf-8"),
+    headers={"Content-Type": "application/json"}
+)
+try:
+    resp_dep = urllib.request.urlopen(req_dep, timeout=5)
+    dep_result = json.loads(resp_dep.read().decode())
+    print(f"  Deposit confirmation: {dep_result['status']} ({dep_result['message']})")
+except Exception as e:
+    print(f"  Deposit confirmation failed: {e}")
+    for _, p in nodes:
+        p.terminate()
+    sys.exit(1)
+
+reveal_payload = {
+    "session_id": "sim_session_id_12345"
+}
+req_rev = urllib.request.Request(
+    "http://127.0.0.1:8080/api/reveal",
+    data=json.dumps(reveal_payload).encode("utf-8"),
+    headers={"Content-Type": "application/json"}
+)
+try:
+    resp_rev = urllib.request.urlopen(req_rev, timeout=5)
+    rev_result = json.loads(resp_rev.read().decode())
+    print(f"  Reveal call: {rev_result['status']}")
+    k_val = rev_result["masking_key_hex"]
+    print(f"    Revealed Masking Key (k): {k_val[:12]}...")
+except Exception as e:
+    print(f"  Reveal failed: {e}")
     for _, p in nodes:
         p.terminate()
     sys.exit(1)
@@ -198,6 +292,15 @@ print(output_verify.strip())
 print("\nTerminating relayer nodes...")
 for port, p in nodes:
     p.terminate()
+    p.wait()
+
+# Clean test DBs
+for i in range(5):
+    for suffix in ["", "-shm", "-wal"]:
+        path = f"test_cluster_node_{i+1}.db{suffix}"
+        if os.path.exists(path):
+            os.remove(path)
+
 print("Cluster shut down successfully.")
 print("==========================================================")
 print("INTEGRATION TEST PASSED SUCCESSFULLY!")
