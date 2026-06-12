@@ -245,6 +245,35 @@ impl EvmClient {
         }
     }
 
+    /// Fetch relayer wallet balance from blockchain with fallback
+    pub async fn get_relayer_balance_eth(&self) -> Result<f64> {
+        let result = self.provider.get_balance(self.signer_address).await;
+
+        let wei = match result {
+            Ok(bal) => bal,
+            Err(e) => {
+                eprintln!("PRIMARY RPC ERROR (balance): {}", e);
+
+                if let Some(ref fallback) = self.fallback_provider {
+                    println!("FALLBACK: Switching to secondary RPC for balance...");
+                    fallback
+                        .get_balance(self.signer_address)
+                        .await
+                        .context("Fallback RPC balance juga gagal")?
+                } else {
+                    return Err(anyhow::anyhow!(
+                        "Primary RPC gagal dan no fallback configured for balance: {}",
+                        e
+                    ));
+                }
+            }
+        };
+
+        let eth = wei.to::<u128>() as f64 / 1_000_000_000_000_000_000.0;
+        Ok(eth)
+    }
+
+
     pub async fn broadcast_spend_transaction(
         &self,
         root_hex: &str,

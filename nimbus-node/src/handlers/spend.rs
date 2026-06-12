@@ -220,6 +220,26 @@ async fn process_same_chain_batch(state: &AppState, items: Vec<QueuedSpend>) {
         }
         return;
     };
+
+    // --- ETH balance validation ---
+    let current_bal = evm_client.get_relayer_balance_eth().await.unwrap_or(0.0);
+    *state.relayer_wallet_balance_eth.lock().await = current_bal;
+
+    let gas_price = evm_client.get_gas_price().await.unwrap_or(20_000_000);
+    let gas_limit = 250_000f64 + 850_000f64 * items.len() as f64;
+    let estimated_cost_eth = (gas_limit * gas_price as f64) / 1_000_000_000_000_000_000.0;
+
+    if let Err(msg) = state.check_balance_for_batch(estimated_cost_eth).await {
+        eprintln!("SETTLEMENT BATCH REJECTED: {}", msg);
+        for item in items {
+            let _ = state
+                .db
+                .retry_spend(item.id, &msg, item.retry_count)
+                .await;
+        }
+        return;
+    }
+
     let payload: Vec<_> = items.iter().map(batch_item).collect();
     match evm_client.broadcast_spend_batch(&payload).await {
         Ok(outcome) if outcome.success => {
@@ -285,6 +305,24 @@ async fn process_single_spend(state: &AppState, item: QueuedSpend) {
         return;
     };
     let request = &item.request;
+
+    // --- ETH balance validation ---
+    let current_bal = evm_client.get_relayer_balance_eth().await.unwrap_or(0.0);
+    *state.relayer_wallet_balance_eth.lock().await = current_bal;
+
+    let gas_price = evm_client.get_gas_price().await.unwrap_or(20_000_000);
+    let gas_limit = if request.cross_chain.is_some() { 1_200_000f64 } else { 1_000_000f64 };
+    let estimated_cost_eth = (gas_limit * gas_price as f64) / 1_000_000_000_000_000_000.0;
+
+    if let Err(msg) = state.check_balance_for_batch(estimated_cost_eth).await {
+        eprintln!("SETTLEMENT SINGLE REJECTED: {}", msg);
+        let _ = state
+            .db
+            .retry_spend(item.id, &msg, item.retry_count)
+            .await;
+        return;
+    }
+
     let result = if let Some(cc) = &request.cross_chain {
         let stablecoin_addr = std::env::var("NIMBUS_STABLECOIN_ADDRESS")
             .unwrap_or_else(|_| "0x75faf114eafb1bdbe2f0316df893fd58ce46aa4d".to_string());
