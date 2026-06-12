@@ -1278,9 +1278,9 @@ Sisa implementasi wajib:
 - [x] Terapkan adaptive window nyata: target 1 detik, hard timeout 2 detik,
   kirim lebih cepat ketika batch penuh.
 - [x] Hubungkan pemeriksaan saldo ETH relayer sebelum single/batch broadcast.
-- [ ] Deploy contract baru yang memiliki `batchSpend()` ke Arbitrum Sepolia.
+- [x] Deploy contract baru yang memiliki `batchSpend()` ke Arbitrum Sepolia.
 - [x] Generate ABI deployment terbaru dan cocokkan selector dengan relayer.
-- [ ] Aktifkan `NIMBUS_BATCH_ENABLED=true` hanya pada deployment baru tersebut.
+- [x] Aktifkan `NIMBUS_BATCH_ENABLED=true` hanya pada deployment baru tersebut.
 - [ ] Hard test batch ukuran 1, 2, 8, dan 9 pada testnet.
 - [ ] Hard test satu item invalid dalam batch dan buktikan tidak ada partial
   payout/nullifier corruption.

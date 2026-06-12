@@ -1,0 +1,31 @@
+{
+  "schema": "nimbus.deployment-manifest.v1",
+  "created_at": "2026-06-12T14:41:09Z",
+  "phase": "deploy",
+  "status": "passed",
+  "network": "arbitrum-sepolia",
+  "chain_id_hint": 421614,
+  "rpc_configured": true,
+  "contract_address": "0xbda5fea381775a74ba8986090a919b17bb632a6d",
+  "deploy_log": "/home/azureuser/crypto/deployments/arbitrum-sepolia-20260612T144109Z-deploy.log",
+  "git": {
+    "commit": "bcc3e682f681da48d9aa5cf4bfb59d707d261cd3",
+    "dirty": false
+  },
+  "toolchain": {
+    "rustc": "rustc 1.92.0 (ded5c06cf 2025-12-08)\nbinary: rustc\ncommit-hash: ded5c06cf21d2b93bffd5d884aa6e96934ee4234\ncommit-date: 2025-12-08\nhost: x86_64-unknown-linux-gnu\nrelease: 1.92.0\nLLVM version: 21.1.3",
+    "cargo_stylus": "stylus 0.10.7"
+  },
+  "build": {
+    "features": "",
+    "no_verify": false,
+    "max_fee_per_gas_gwei": "0.1"
+  },
+  "checks": {
+    "stylus_check": "passed"
+  },
+  "notes": [
+    "Manifest does not include private keys, RPC credentials, or secrets.",
+    "Verify deployed bytecode, ABI selectors, init parameters, and receipt status before using this deployment for hard tests."
+  ]
+}
