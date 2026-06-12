@@ -1,46 +1,78 @@
 {
   "test_suite": "HT-05 Refund and Timeout On-Chain Tests",
-  "contract": "0x62ca774e20b76431d189e1635400b91b03c2b031",
+  "contract": "0xe6430973795bb1cc3083787e554ef2a559dad7f1",
   "chain_id": 421614,
   "wallet": "0x23e32D309c575A3D5E7CD2867BE12B00efa44Bb1",
-  "timestamp": "2026-06-11T03:06:46.855127+00:00",
+  "timestamp": "2026-06-12T03:01:17.741689+00:00",
   "results": [
     {
       "test_id": "NT-01",
-      "description": "Refund before timelock 24 hours (reverts)",
+      "description": "Refund before timelock (reverts)",
       "passed": true,
       "tx_hash": null,
-      "details": "Reverted as expected. State unchanged. Error: ('execution reverted', '0x')",
-      "timestamp": "2026-06-11T03:06:42.974111+00:00"
+      "details": "Reverted as expected. State unchanged. Error: ('0x54494d454c4f434b5f4e4f545f45585049524544', '0x54494d454c4f434b5f4e4f545f45585049524544')",
+      "timestamp": "2026-06-12T03:00:05.583810+00:00"
     },
     {
       "test_id": "NT-02",
       "description": "Refund non-existent session (reverts)",
       "passed": true,
       "tx_hash": null,
-      "details": "Reverted as expected. State unchanged. Error: ('execution reverted', '0x')",
-      "timestamp": "2026-06-11T03:06:43.769011+00:00"
+      "details": "Reverted as expected. State unchanged. Error: ('0x4e4f5f4445504f5349545f464f554e44', '0x4e4f5f4445504f5349545f464f554e44')",
+      "timestamp": "2026-06-12T03:00:06.344581+00:00"
     },
     {
       "test_id": "NT-03",
       "description": "Refund by non-client address (reverts)",
       "passed": true,
       "tx_hash": null,
-      "details": "Reverted as expected. State unchanged. Error: ('execution reverted', '0x')",
-      "timestamp": "2026-06-11T03:06:44.562652+00:00"
+      "details": "Reverted as expected. State unchanged. Error: ('0x4e4f545f53455353494f4e5f434c49454e54', '0x4e4f545f53455353494f4e5f434c49454e54')",
+      "timestamp": "2026-06-12T03:00:07.118996+00:00"
     },
     {
       "test_id": "NT-04",
       "description": "Refund after reveal/resolved (reverts)",
       "passed": true,
       "tx_hash": null,
-      "details": "Reverted as expected. State unchanged. Error: ('execution reverted', '0x')",
-      "timestamp": "2026-06-11T03:06:46.855044+00:00"
+      "details": "Reverted as expected. State unchanged. Error: ('0x53455353494f4e5f414c52454144595f5245534f4c564544', '0x53455353494f4e5f414c52454144595f5245534f4c",
+      "timestamp": "2026-06-12T03:00:09.306542+00:00"
+    },
+    {
+      "test_id": "PT-01",
+      "description": "Refund claim after expiry succeeds",
+      "passed": true,
+      "tx_hash": "5a2bde7e2a96bf3d6469ecd44c6b9add92ecfb62091c79d1e17b6fd8a88d9394",
+      "details": null,
+      "timestamp": "2026-06-12T03:01:16.726059+00:00"
+    },
+    {
+      "test_id": "PT-02",
+      "description": "Principal decreases by net amount (amount - deposit fee)",
+      "passed": true,
+      "tx_hash": null,
+      "details": "Principal decreased by 9.98 USDC (Expected 9.98)",
+      "timestamp": "2026-06-12T03:01:16.726105+00:00"
+    },
+    {
+      "test_id": "PT-04",
+      "description": "Double-refund is rejected (reverts)",
+      "passed": true,
+      "tx_hash": null,
+      "details": "Reverted as expected. State unchanged. Error: ('0x53455353494f4e5f414c52454144595f5245534f4c564544', '0x53455353494f4e5f414c52454144595f5245534f4c",
+      "timestamp": "2026-06-12T03:01:17.486714+00:00"
+    },
+    {
+      "test_id": "PT-05",
+      "description": "Reveal after refund is rejected (returns False)",
+      "passed": true,
+      "tx_hash": null,
+      "details": null,
+      "timestamp": "2026-06-12T03:01:17.741604+00:00"
     }
   ],
   "summary": {
-    "total": 4,
-    "passed": 4,
+    "total": 8,
+    "passed": 8,
     "failed": 0
   }
 }

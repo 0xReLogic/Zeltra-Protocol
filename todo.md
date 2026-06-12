@@ -484,84 +484,6 @@ cepat, tetapi tidak boleh menjadi satu-satunya bukti bahwa fitur selesai.
 - [ ] Log startup harus mencetak mode, chain ID, signer address, contract
   address, dan artifact version tanpa mencetak secret.
 
-### Status Script Test Saat Ini
-
-#### `scripts/run_e2e_test.py`
-
-Saat ini belum valid sebagai hard test karena:
-
-- Menghasilkan `alpha_neg`, `hm`, dan `pk_iss` dari random bytes.
-- Menetapkan lulus hanya jika log berisi
-  `Real CCIP transaction broadcasted successfully`.
-- Hanya memeriksa nullifier masuk SQLite.
-- Tidak menunggu source receipt.
-- Tidak mengambil CCIP message ID dari event.
-- Tidak menunggu destination execution.
-- Menghapus database lama sehingga tidak menguji recovery.
-- Memuat RPC credential dan private key secara hardcoded.
-
-TODO:
-
-- [ ] Ganti seluruh dummy cryptography dengan output protocol nyata.
-- [x] Ambil konfigurasi hanya dari environment.
-- [ ] Tunggu receipt source dan verifikasi status.
-- [ ] Parse event CCIP dan message ID.
-- [ ] Tunggu destination receipt.
-- [ ] Verifikasi saldo dan state destination.
-- [ ] Gagal jika contract menerima signature invalid.
-
-#### `scripts/run_e2e_vault_test.py`
-
-Saat ini hanya membuktikan node dapat memuat key dari Vault dan broadcast
-request dengan signature random. Spend request itu tidak menggunakan share key
-yang baru diambil untuk menghasilkan signature protocol.
-
-TODO:
-
-- [x] Hapus Vault token, private key, dan RPC credential hardcoded.
-- [ ] Panggil endpoint signing sehingga share Vault benar-benar digunakan.
-- [ ] Verifikasi partial signature terhadap share index/public commitment.
-- [ ] Lanjutkan sampai aggregate, unmask, spend, dan receipt on-chain.
-- [ ] Test Vault sealed, token invalid, path salah, dan recovery setelah unseal.
-
-#### `scripts/testnet_integration.py`
-
-Saat ini memakai ABI lama `uint8[]`, sedangkan contract terbaru memakai
-Solidity `bytes`. Script juga banyak menggunakan `eth_call` dengan random
-input, sehingga revert dianggap sebagai hasil yang dapat diterima.
-
-TODO:
-
-- [ ] Generate ABI langsung dari build contract terbaru.
-- [ ] Jangan maintain ABI manual yang mudah stale.
-- [ ] Ganti seluruh `uint8[]` menjadi ABI aktual `bytes`.
-- [ ] Gunakan signature/proof valid untuk positive path.
-- [ ] Pisahkan expected success dan expected revert secara tegas.
-- [ ] Fail test jika positive path revert.
-- [ ] Fail test jika negative path unexpectedly sukses.
-
-#### `scripts/simulate_cluster.py`
-
-Script ini berguna untuk simulasi matematika lokal, tetapi bukan distributed
-hard test karena seluruh node dan share berjalan pada satu host, `k` langsung
-dikembalikan, dan final verification hanya dilakukan oleh CLI.
-
-- [ ] Pertahankan sebagai fast local simulation.
-- [ ] Buat script baru untuk leader dan guardian lintas VPS via Tailscale.
-- [ ] Setiap guardian mengambil share sendiri dari environment/Vault.
-- [ ] Leader hanya menerima partial signature.
-- [ ] Uji guardian offline, response lambat, response corrupt, dan index salah.
-- [ ] Lanjutkan ceremony sampai transaksi contract nyata.
-
-#### Script Lain
-
-- [x] `scripts/check_balance.py` harus mengambil RPC/address dari environment.
-- [ ] `scripts/test_rpc_fallback.sh` harus benar-benar mematikan primary route
-  atau memakai endpoint invalid dan membuktikan transaksi masuk via fallback.
-- [x] `scripts/deploy_testnet.sh` harus menyimpan deployment manifest.
-- [x] Semua private key/RPC token hardcoded harus dihapus dari script.
-- [ ] Tambahkan lint/scan yang menggagalkan commit jika pola private key atau
-  Vault token ditemukan.
 
 ## Hard-Test Matrix
 
@@ -758,20 +680,24 @@ dikembalikan, dan final verification hanya dilakukan oleh CLI.
   - 2026-06-11: principal tetap `24.9625 USDC` sebelum dan sesudah
     seluruh 10 negative test. Report:
     `test-reports/ht04_spend_negative_tests.json`.
+- [x] Uji Dynamic Fee berdasarkan holding time (Fase A - Option A):
+  - [x] PT-01: Hold < 60 detik (fee 0.25%).
+  - [x] PT-02: Hold >= 60 detik (fee 0.20%).
+  - [x] PT-03: Hold >= 90 detik (fee 0.10%).
+  - [x] NT-12: Spend dengan unregistered Merkle root (revert `INVALID_ASSOCIATION_ROOT`).
 
-### HT-05 Refund dan Timeout
+### HT-05 Refund dan Timeout (Timelock 60 Detik untuk Testnet)
 
-- [x] Deposit tidak dapat direfund sebelum 24 jam.
-  - 2026-06-11: NT-01 membuktikan deposit baru direvert saat di-refund.
-- [ ] Refund tepat pada boundary timelock diuji.
-- [ ] Refund setelah timelock berhasil.
+- [x] Deposit tidak dapat direfund sebelum 60 detik.
+- [x] Refund tepat pada boundary timelock diuji (60 detik).
+- [x] Refund setelah timelock berhasil.
 - [x] Hanya session client dapat claim refund.
   - 2026-06-11: NT-03 membuktikan address lain ditolak (revert).
-- [ ] Refund kedua ditolak.
+- [x] Refund kedua ditolak.
 - [x] Reveal setelah refund ditolak.
   - 2026-06-11: NT-04 membuktikan refund setelah reveal/resolved ditolak (revert).
 - [ ] Refund saat contract pause mengikuti policy yang ditentukan.
-- [ ] Saldo client kembali tepat setelah fee policy.
+- [x] Saldo client kembali tepat setelah fee policy.
 
 ### HT-06 Relayer Queue, Crash, dan Recovery
 

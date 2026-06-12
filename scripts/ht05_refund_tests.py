@@ -5,19 +5,15 @@ HT-05: Refund and Timeout On-Chain Tests
 
 Runs all refund and timeout test cases against the deployed Nimbus contract on Arbitrum Sepolia.
 For each case, verifies:
-  1. Transaction reverts (receipt status == 0) or eth_call reverts
-  2. On-chain principal does NOT change (for negative tests)
+  1. Transaction reverts (receipt status == 0) or eth_call reverts for negative cases.
+  2. Timelock refund of 60 seconds (instead of 24h).
+  3. Positive refund decreases principal by net amount (amount - deposit fee).
+  4. Double-refund is rejected.
+  5. Reveal after refund is rejected.
 
-Test matrix:
-  NT-01: Refund before timelock 24 hours (reverts)
-  NT-02: Refund non-existent session (reverts)
-  NT-03: Refund by non-client (reverts)
-  NT-04: Refund after reveal/resolved (reverts)
-  PT-01: Refund succeeds after 24 hours (if an eligible session is found)
-  PT-02: Principal decreases by net amount (after positive refund)
-  PT-03: Session status is marked resolved (after positive refund)
-  PT-04: Double-refund is rejected (reverts)
-  PT-05: Reveal after refund is rejected (returns false or reverts)
+Usage:
+  source nimbus-node/.env.test
+  python3 scripts/ht05_refund_tests.py
 """
 
 import json
@@ -55,7 +51,7 @@ MY_ADDRESS = account.address
 CONTRACT_ABI = [
     {"inputs": [{"name": "sid", "type": "bytes32"}, {"name": "_com_k_bytes", "type": "bytes"}, {"name": "amount", "type": "uint256"}], "name": "deposit", "outputs": [], "stateMutability": "nonpayable", "type": "function"},
     {"inputs": [{"name": "sid", "type": "bytes32"}, {"name": "k_bytes", "type": "bytes"}, {"name": "pk_iss_bytes", "type": "bytes"}, {"name": "com_k_bytes", "type": "bytes"}], "name": "revealMaskKey", "outputs": [{"name": "", "type": "bool"}], "stateMutability": "nonpayable", "type": "function"},
-    {"inputs": [{"name": "sid", "type": "bytes32"}], "name": "claim_refund", "outputs": [], "stateMutability": "nonpayable", "type": "function"},
+    {"inputs": [{"name": "sid", "type": "bytes32"}], "name": "claimRefund", "outputs": [], "stateMutability": "nonpayable", "type": "function"},
     {"inputs": [], "name": "totalDepositedPrincipal", "outputs": [{"name": "", "type": "uint256"}], "stateMutability": "view", "type": "function"},
 ]
 
@@ -140,20 +136,15 @@ def record_result(test_id, description, passed, tx_hash=None, details=None):
 
 
 def run_negative_refund_test(test_id, description, sid_bytes, from_address=MY_ADDRESS):
-    """
-    Run claim_refund that should revert. Verify:
-    1. eth_call reverts
-    2. Principal remains unchanged
-    """
+    """Run claimRefund that should revert. Verify principal unchanged."""
     principal_before = get_principal()
-    fn = contract.functions.claim_refund(sid_bytes)
+    fn = contract.functions.claimRefund(sid_bytes)
     success, call_result = try_eth_call(fn, from_address=from_address)
 
     if success:
         record_result(test_id, description, False, details=f"eth_call unexpectedly succeeded and returned: {call_result}")
         return
 
-    # Call reverted
     principal_after = get_principal()
     state_unchanged = principal_before == principal_after
 
@@ -177,15 +168,16 @@ def main():
     print(f"Timestamp: {datetime.now(timezone.utc).isoformat()}")
     print()
 
-    # Approve USDC if needed
+    # Approve USDC if needed (deposit total: 10 USDC for negative timelock, 10 USDC for positive, 10 USDC for resolved)
+    total_approve_needed = DEPOSIT_AMOUNT * 3
     allowance = usdc.functions.allowance(MY_ADDRESS, contract.address).call()
-    if allowance < DEPOSIT_AMOUNT:
-        print(f"Approving {DEPOSIT_AMOUNT / 1e6} USDC...")
-        receipt = build_and_send_tx(usdc.functions.approve(contract.address, DEPOSIT_AMOUNT * 10), gas=200_000)
+    if allowance < total_approve_needed:
+        print(f"Approving {total_approve_needed / 1e6} USDC...")
+        receipt = build_and_send_tx(usdc.functions.approve(contract.address, total_approve_needed), gas=200_000)
         print(f"Approve status: {receipt['status']}")
 
-    # ── NT-01: Refund before timelock 24 hours ───────────────────────
-    print("\n[NT-01] Testing refund before 24-hour timelock...")
+    # ── NT-01: Refund before timelock 60 seconds ───────────────────────
+    print("\n[NT-01] Testing refund before 60-second timelock...")
     sid_nt01 = os.urandom(32)
     nonce_nt01 = os.urandom(32).hex()
     bls_data = generate_bls_vectors(nonce_nt01)
@@ -199,7 +191,7 @@ def main():
         sys.exit(1)
 
     run_negative_refund_test(
-        "NT-01", "Refund before timelock 24 hours (reverts)",
+        "NT-01", "Refund before timelock (reverts)",
         sid_nt01
     )
 
@@ -247,12 +239,71 @@ def main():
         sid_nt04
     )
 
-    # ── PT-01 to PT-05: Positive Refund (Requires a session > 24 hours old) ──
-    print("\n[PT-01..05] Checking for eligible sessions > 24 hours old...")
-    print("  Note: In-place Arbitrum Sepolia testnet has a 24-hour timelock.")
-    print("  Since we cannot fast-forward time on the public testnet, a real positive refund")
-    print("  requires an active session deposited more than 24 hours ago.")
-    print("  Skipping positive refund tests (PT-01..PT-05).")
+    # ── PT-01 to PT-05: Positive Refund (Hold >= 60 seconds) ──────────
+    print("\n[PT-01..05] Testing Positive Refund flow after 60-second timelock...")
+    
+    sid_pt = os.urandom(32)
+    nonce_pt = os.urandom(32).hex()
+    bls_data_pt = generate_bls_vectors(nonce_pt)
+    com_k_pt = bytes.fromhex(bls_data_pt["com_k_hex"].replace("0x", ""))
+    k_pt = bytes.fromhex(bls_data_pt["k_hex"].replace("0x", ""))
+    pk_iss_pt = bytes.fromhex(bls_data_pt["pk_iss_hex"].replace("0x", ""))
+
+    print(f"  Depositing {DEPOSIT_AMOUNT / 1e6} USDC for session {sid_pt.hex()}...")
+    receipt = build_and_send_tx(contract.functions.deposit(sid_pt, com_k_pt, DEPOSIT_AMOUNT))
+    deposit_time = time.time()
+    print(f"  Deposit status: {receipt['status']}, tx: {receipt['transactionHash'].hex()}")
+    if receipt['status'] != 1:
+        print("  ERROR: Deposit failed")
+        sys.exit(1)
+
+    # Sleep 65 seconds
+    elapsed = time.time() - deposit_time
+    wait_time = max(0.0, 65.0 - elapsed)
+    if wait_time > 0:
+        print(f"  Waiting {wait_time:.1f}s for refund timelock to expire...")
+        time.sleep(wait_time)
+
+    # PT-01 & PT-02: Refund claim succeeds and principal decreases correctly
+    print("  Claiming refund...")
+    principal_before = get_principal()
+    receipt = build_and_send_tx(contract.functions.claimRefund(sid_pt))
+    principal_after = get_principal()
+    principal_delta = principal_before - principal_after
+
+    # deposit fee = (10,000,000 * 20 + 9999) / 10000 = 20,000 USDC units
+    # expected net refund = 10,000,000 - 20,000 = 9,980_000 USDC units
+    expected_net_refund = DEPOSIT_AMOUNT - 20_000
+
+    if receipt['status'] == 1:
+        record_result("PT-01", "Refund claim after expiry succeeds", True, tx_hash=receipt['transactionHash'].hex())
+    else:
+        record_result("PT-01", "Refund claim after expiry succeeds", False, tx_hash=receipt.get('transactionHash', b'').hex())
+
+    if principal_delta == expected_net_refund:
+        record_result("PT-02", "Principal decreases by net amount (amount - deposit fee)", True,
+                      details=f"Principal decreased by {principal_delta / 1e6} USDC (Expected 9.98)")
+    else:
+        record_result("PT-02", "Principal decreases by net amount (amount - deposit fee)", False,
+                      details=f"Principal decreased by {principal_delta / 1e6} USDC (Expected 9.98)")
+
+    # PT-04: Double-refund is rejected (reverts)
+    print("\n  PT-04: Testing double-refund rejection...")
+    run_negative_refund_test(
+        "PT-04", "Double-refund is rejected (reverts)",
+        sid_pt
+    )
+
+    # PT-05: Reveal after refund is rejected
+    print("\n  PT-05: Testing reveal after refund rejection...")
+    fn_reveal = contract.functions.revealMaskKey(sid_pt, k_pt, pk_iss_pt, com_k_pt)
+    success, call_result = try_eth_call(fn_reveal)
+    
+    if success and call_result == False:
+        record_result("PT-05", "Reveal after refund is rejected (returns False)", True)
+    else:
+        record_result("PT-05", "Reveal after refund is rejected (returns False)", False,
+                      details=f"Call succeeded={success}, result/error={call_result}")
 
     # ── Summary ──────────────────────────────────────────────────────
     print()
