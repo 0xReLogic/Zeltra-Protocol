@@ -82,6 +82,7 @@ pub async fn handle_x402_verify(
         amount: sig.payment.amount,
         eip7702_auth: None,
         cross_chain: None,
+        association_root_hex: None,
         alpha_neg_hex: sig.payment.alpha_neg_hex.clone(),
         hm_hex: sig.payment.hm_hex.clone(),
         pk_iss_hex: sig.payment.pk_iss_hex.clone(),

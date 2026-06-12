@@ -12,6 +12,7 @@ use std::str::FromStr;
 
 sol! {
     function spend(
+        bytes32 root,
         bytes32 nullifier,
         bytes calldata alpha_neg_bytes,
         bytes calldata pk_iss_bytes,
@@ -23,6 +24,7 @@ sol! {
     ) external returns (bool);
 
     function batchSpend(
+        bytes32[] calldata roots,
         bytes32[] calldata nullifiers,
         bytes[] calldata alphaNegItems,
         bytes[] calldata pkIssItems,
@@ -75,6 +77,7 @@ pub struct TransactionOutcome {
 
 #[derive(Clone, Debug)]
 pub struct BatchSpendItem {
+    pub root_hex: String,
     pub nullifier: String,
     pub alpha_neg_hex: String,
     pub pk_iss_hex: String,
@@ -244,6 +247,7 @@ impl EvmClient {
 
     pub async fn broadcast_spend_transaction(
         &self,
+        root_hex: &str,
         nullifier: &str,
         alpha_neg_hex: &str,
         pk_iss_hex: &str,
@@ -260,6 +264,18 @@ impl EvmClient {
         );
         println!("  Recipient   : {}", recipient);
         println!("  Amount      : {} USDC", amount as f64 / 1_000_000.0);
+
+        // Parse root to FixedBytes<32>
+        let root_bytes =
+            hex::decode(root_hex.trim_start_matches("0x")).context("Invalid root hex")?;
+        if root_bytes.len() != 32 {
+            anyhow::bail!(
+                "Invalid root length: expected 32, got {}",
+                root_bytes.len()
+            );
+        }
+        let mut root_fixed = [0u8; 32];
+        root_fixed.copy_from_slice(&root_bytes);
 
         // Parse nullifier to FixedBytes<32>
         let nullifier_bytes =
@@ -326,6 +342,7 @@ impl EvmClient {
 
         // Encode calldata using alloy's sol! macro type-safely
         let call_data = spendCall {
+            root: root_fixed.into(),
             nullifier: nullifier_fixed.into(),
             alpha_neg_bytes: alpha_neg_bytes.into(),
             pk_iss_bytes: pk_iss_bytes.into(),
@@ -364,6 +381,7 @@ impl EvmClient {
             anyhow::bail!("batch size must be between 2 and 8");
         }
 
+        let mut roots = Vec::with_capacity(items.len());
         let mut nullifiers = Vec::with_capacity(items.len());
         let mut alpha_neg_items = Vec::with_capacity(items.len());
         let mut pk_iss_items = Vec::with_capacity(items.len());
@@ -374,6 +392,15 @@ impl EvmClient {
         let mut nonces = Vec::with_capacity(items.len());
 
         for item in items {
+            let root = hex::decode(item.root_hex.trim_start_matches("0x"))
+                .context("Invalid batch root hex")?;
+            if root.len() != 32 {
+                anyhow::bail!("Invalid batch root length");
+            }
+            let mut root_fixed = [0u8; 32];
+            root_fixed.copy_from_slice(&root);
+            roots.push(root_fixed.into());
+
             let nullifier = hex::decode(item.nullifier.trim_start_matches("0x"))
                 .context("Invalid batch nullifier hex")?;
             if nullifier.len() != 32 {
@@ -423,6 +450,7 @@ impl EvmClient {
         }
 
         let call_data = batchSpendCall {
+            roots,
             nullifiers,
             alphaNegItems: alpha_neg_items,
             pkIssItems: pk_iss_items,

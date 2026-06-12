@@ -1059,6 +1059,7 @@ mod tests {
             amount: 10_000_000,
             eip7702_auth: None,
             cross_chain: None,
+            association_root_hex: None,
             alpha_neg_hex: format!("0x{}", "11".repeat(128)),
             hm_hex: format!("0x{}", "22".repeat(128)),
             pk_iss_hex: format!("0x{}", "33".repeat(256)),

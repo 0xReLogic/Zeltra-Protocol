@@ -29,6 +29,8 @@ pub struct SpendRequest {
     pub cross_chain: Option<CrossChainParams>,
     // BLS signature components for contract verification
     #[serde(default)]
+    pub association_root_hex: Option<String>,
+    #[serde(default)]
     pub alpha_neg_hex: String,
     #[serde(default)]
     pub hm_hex: String,

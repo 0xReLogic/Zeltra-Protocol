@@ -186,6 +186,11 @@ pub async fn process_spend_batch(state: &AppState) {
 fn batch_item(item: &QueuedSpend) -> BatchSpendItem {
     const ZERO_WORD: &str = "0x0000000000000000000000000000000000000000000000000000000000000000";
     BatchSpendItem {
+        root_hex: item
+            .request
+            .association_root_hex
+            .clone()
+            .unwrap_or_else(|| ZERO_WORD.to_string()),
         nullifier: item.request.nullifier.clone(),
         alpha_neg_hex: item.request.alpha_neg_hex.clone(),
         pk_iss_hex: item.request.pk_iss_hex.clone(),
@@ -299,8 +304,10 @@ async fn process_single_spend(state: &AppState, item: QueuedSpend) {
             )
             .await
     } else {
+        let root = request.association_root_hex.as_deref().unwrap_or(ZERO_WORD);
         evm_client
             .broadcast_spend_transaction(
+                root,
                 &request.nullifier,
                 &request.alpha_neg_hex,
                 &request.pk_iss_hex,

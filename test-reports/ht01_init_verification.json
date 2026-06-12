@@ -1,0 +1,55 @@
+{
+  "test_suite": "HT-01 Deployment & Storage Initialization Verification",
+  "contract": "0xe6430973795bb1cc3083787e554ef2a559dad7f1",
+  "wallet": "0x23e32D309c575A3D5E7CD2867BE12B00efa44Bb1",
+  "timestamp": "2026-06-12T03:38:52.886979+00:00",
+  "results": [
+    {
+      "test_id": "HT01-01",
+      "description": "Storage initialization cannot be performed twice (reverts)",
+      "passed": true,
+      "details": "Reverted as expected: ('web3.py only accepts checksum addresses. The software that gave you this non-checksum address shou",
+      "timestamp": "2026-06-12T03:38:52.075821+00:00"
+    },
+    {
+      "test_id": "HT01-02",
+      "description": "Stablecoin address matches configured value",
+      "passed": true,
+      "details": "On-chain: 0x75faf114eafb1BDbe2F0316DF893fd58CE46AA4d, Expected: 0x75faf114eafb1bdbe2f0316df893fd58ce46aa4d",
+      "timestamp": "2026-06-12T03:38:52.338671+00:00"
+    },
+    {
+      "test_id": "HT01-03",
+      "description": "Fee recipient matches configured owner/relayer address",
+      "passed": true,
+      "details": "On-chain: 0x23e32D309c575A3D5E7CD2867BE12B00efa44Bb1, Expected: 0x23e32D309c575A3D5E7CD2867BE12B00efa44Bb1",
+      "timestamp": "2026-06-12T03:38:52.615234+00:00"
+    },
+    {
+      "test_id": "HT01-04",
+      "description": "Non-owners cannot call owner-restricted functions",
+      "passed": true,
+      "details": "Reverted as expected: ('0x4e4f545f4f574e4552', '0x4e4f545f4f574e4552')",
+      "timestamp": "2026-06-12T03:38:52.886652+00:00"
+    },
+    {
+      "test_id": "HT01-05",
+      "description": "Spend function selector matches contract specifications",
+      "passed": true,
+      "details": "Selector: 0x4138427f",
+      "timestamp": "2026-06-12T03:38:52.886842+00:00"
+    },
+    {
+      "test_id": "HT01-06",
+      "description": "BatchSpend function selector matches contract specifications",
+      "passed": true,
+      "details": "Selector: 0x7ea2ee2e",
+      "timestamp": "2026-06-12T03:38:52.886888+00:00"
+    }
+  ],
+  "summary": {
+    "total": 6,
+    "passed": 6,
+    "failed": 0
+  }
+}
