@@ -259,6 +259,14 @@ Issuer key dikelola melalui:
 Kontrak bersifat fail-closed: jika belum ada issuer key yang didaftarkan, semua
 spend ditolak.
 
+### `batchSpend(roots, nullifiers, alphaNegItems, pkIssItems, recipients, amounts, recipientOrIntentHashes, expiries, nonces)`
+
+Mengeksekusi hingga maksimal 8 spend item dalam satu transaksi terpadu untuk efisiensi gas fee relayer (dicatat dalam [`DEC-014`](../research/decisions/DEC-014-batch-spend-stylus-implementation.md)).
+
+Fitur ini:
+- Melakukan verifikasi semua $N$ tanda tangan BLS12-381 secara gabungan melalui pemanggilan tunggal precompile `BLS12_PAIRING_CHECK` (`0x0f`) dengan payload berukuran $768 \times N$ bytes (menghemat base call gas cost precompile).
+- Bersifat sepenuhnya atomic: jika salah satu item gagal (misalnya karena tanda tangan tidak cocok atau nullifier duplikat), seluruh transaksi batch akan revert tanpa mengubah state apa pun.
+
 > **Critical blocker:** pairing valid belum membuktikan bahwa issuer menyetujui
 > `amount`, `recipient`, action, expiry, chain, dan contract tertentu karena
 > contract masih menerima `H(m)` dari caller. Canonical spend message dan

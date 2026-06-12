@@ -294,22 +294,142 @@ impl Nimbus {
             return Err(b"BATCH_LENGTH_MISMATCH".to_vec());
         }
 
+        // 1. CHECKS & PREPARATION
+        self.check_not_paused()?;
+
+        let current_time = U256::from(self.block_timestamp());
+        let chain_id = U256::from(self.env_chain_id());
+        let contract_address = self.env_contract_address();
+
+        let mut hm_items = Vec::with_capacity(len);
+
         for i in 0..len {
-            let valid = self._spend(
-                roots[i],
-                nullifiers[i],
-                alpha_neg_items[i].clone(),
-                pk_iss_items[i].clone(),
-                recipients[i],
+            // Expiry check
+            if expiries[i] != U256::ZERO && current_time > expiries[i] {
+                return Err(b"TRANSACTION_EXPIRED".to_vec());
+            }
+
+            // Enforce minimum transaction size of 5 USDC
+            let min_amount = U256::from(5_000_000);
+            if amounts[i] < min_amount {
+                return Err(b"AMOUNT_TOO_SMALL".to_vec());
+            }
+
+            // Recipient or intent mismatch check
+            if recipients[i] != Address::ZERO && recipient_or_intent_hashes[i] != crate::spend::recipient_hash(recipients[i]) {
+                return Err(b"RECIPIENT_INTENT_MISMATCH".to_vec());
+            }
+
+            // Check double spend (Nullifier)
+            if self.nullifiers.get(nullifiers[i]) {
+                return Err(b"BATCH_ITEM_INVALID".to_vec());
+            }
+
+            // Reconstruct message hash and G1 curve point H(m) on-chain
+            let m_hash = crate::helpers::compute_spend_hash(
+                chain_id,
+                contract_address,
                 amounts[i],
                 recipient_or_intent_hashes[i],
                 expiries[i],
                 nonces[i],
-            )?;
-            if !valid {
-                return Err(b"BATCH_ITEM_INVALID".to_vec());
+            );
+            let hm_affine = crate::helpers::hash_to_g1(&m_hash);
+            let hm_evm_bytes = crate::types::to_evm_g1(&hm_affine);
+            let hm_bytes = Bytes::from(hm_evm_bytes.to_vec());
+
+            if nullifiers[i] != keccak256(&hm_bytes) {
+                return Err(b"NULLIFIER_MESSAGE_MISMATCH".to_vec());
+            }
+
+            hm_items.push(hm_bytes);
+        }
+
+        // 2. BATCH SIGNATURE VERIFICATION
+        if !self.verify_bls_spend_batch(&alpha_neg_items, &hm_items, &pk_iss_items)? {
+            return Err(b"BATCH_ITEM_INVALID".to_vec());
+        }
+
+        // 3. EXECUTE EFFECTS AND INTERACTIONS
+        for i in 0..len {
+            let mut fee_bps = U256::from(25); // 0.25%
+
+            if roots[i] != FixedBytes::ZERO {
+                let root_timestamp = self.clean_association_roots.get(roots[i]);
+                if root_timestamp == U256::ZERO {
+                    return Err(b"INVALID_ASSOCIATION_ROOT".to_vec());
+                }
+                let delta_t = current_time.checked_sub(root_timestamp).unwrap_or(U256::ZERO);
+                let seven_days = U256::from(7 * 24 * 60 * 60);
+                let thirty_days = U256::from(30 * 24 * 60 * 60);
+
+                if delta_t >= thirty_days {
+                    fee_bps = U256::from(10); // 0.10% (1 month hold)
+                } else if delta_t >= seven_days {
+                    fee_bps = U256::from(20); // 0.20% (7 days hold)
+                }
+            }
+
+            let spend_fee = (amounts[i]
+                .checked_mul(fee_bps)
+                .ok_or_else(|| b"SPEND_FEE_MUL_OVERFLOW".to_vec())?
+                + U256::from(9999))
+                / U256::from(10000);
+
+            let protocol_share = spend_fee;
+            let payout = amounts[i];
+            let total_debit = payout
+                .checked_add(protocol_share)
+                .ok_or_else(|| b"TOTAL_DEBIT_OVERFLOW".to_vec())?;
+
+            let principal = self.total_deposited_principal.get();
+            let new_principal = principal
+                .checked_sub(total_debit)
+                .ok_or_else(|| b"INSUFFICIENT_PRINCIPAL".to_vec())?;
+
+            // State changes
+            self.nullifiers.insert(nullifiers[i], true);
+            self.total_deposited_principal.set(new_principal);
+
+            #[cfg(not(test))]
+            {
+                self.ensure_liquidity(total_debit)?;
+
+                let stablecoin_address = self.stablecoin.get();
+                let erc20 = IErc20::new(stablecoin_address);
+                let host = Self::runtime_host();
+
+                // Transfer payout to recipient (if not zero address)
+                if recipients[i] != Address::ZERO && payout > U256::ZERO {
+                    let success = erc20
+                        .transfer(&host, Call::new_mutating(self), recipients[i], payout)
+                        .map_err(|e| e)?;
+                    if !success {
+                        return Err(b"SPEND_TRANSFER_FAILED".to_vec());
+                    }
+                }
+
+                // Transfer fee to fee_recipient
+                if protocol_share > U256::ZERO {
+                    let recipient_fee = self.fee_recipient.get();
+                    let fee_success = erc20
+                        .transfer(
+                            &host,
+                            Call::new_mutating(self),
+                            recipient_fee,
+                            protocol_share,
+                        )
+                        .map_err(|e| e)?;
+                    if !fee_success {
+                        return Err(b"SPEND_FEE_TRANSFER_FAILED".to_vec());
+                    }
+                }
             }
         }
+
+        // Final invariant enforcement
+        self.check_liability_invariant()?;
+
         Ok(true)
     }
 
@@ -1471,6 +1591,138 @@ mod tests {
                 vec![FixedBytes::ZERO; 2],
             ),
             Err(b"BATCH_LENGTH_MISMATCH".to_vec())
+        );
+    }
+
+    #[test]
+    fn test_batch_spend_success() {
+        reset_test_state();
+        let owner = address!("1111111111111111111111111111111111111111");
+        set_msg_sender(owner);
+
+        let mut contract = Nimbus::default();
+        contract.init(owner, Address::ZERO, Address::ZERO).unwrap();
+
+        // Deposit enough funds to cover both spends
+        contract
+            .deposit(
+                FixedBytes::repeat_byte(0xaa),
+                vec![0x42; 256].into(),
+                U256::from(50_000_000),
+            )
+            .unwrap();
+
+        // Create 2 mock spends of 10,000,000 each
+        let (alpha_neg1, hm1, pk_iss1, nullifier1) = register_mock_issuer_with_nonce(
+            &mut contract,
+            owner,
+            U256::from(10_000_000),
+            FixedBytes::ZERO,
+            FixedBytes::repeat_byte(0x01),
+        );
+
+        let (alpha_neg2, hm2, pk_iss2, nullifier2) = register_mock_issuer_with_nonce(
+            &mut contract,
+            owner,
+            U256::from(10_000_000),
+            FixedBytes::ZERO,
+            FixedBytes::repeat_byte(0x02),
+        );
+
+        // Execute batch spend
+        let ok = contract
+            .batch_spend(
+                vec![FixedBytes::ZERO, FixedBytes::ZERO],
+                vec![nullifier1, nullifier2],
+                vec![alpha_neg1.into(), alpha_neg2.into()],
+                vec![pk_iss1.into(), pk_iss2.into()],
+                vec![Address::ZERO, Address::ZERO],
+                vec![U256::from(10_000_000), U256::from(10_000_000)],
+                vec![FixedBytes::ZERO, FixedBytes::ZERO],
+                vec![U256::ZERO, U256::ZERO],
+                vec![FixedBytes::repeat_byte(0x01), FixedBytes::repeat_byte(0x02)],
+            )
+            .unwrap();
+
+        assert!(ok);
+
+        // Verify nullifiers are marked spent
+        assert!(contract.nullifiers.get(nullifier1));
+        assert!(contract.nullifiers.get(nullifier2));
+
+        // Verify principal reduction:
+        // deposit net principal: 49,900,000
+        // spend 1: 10,000,000 + fee (25,000) = 10,025,000 debit
+        // spend 2: 10,000,000 + fee (25,000) = 10,025,000 debit
+        // expected final principal: 49,900,000 - 20,050,000 = 29,850,000
+        assert_eq!(
+            contract.total_deposited_principal().unwrap(),
+            U256::from(29_850_000)
+        );
+    }
+
+    #[test]
+    fn test_batch_spend_reverts_on_any_invalid() {
+        reset_test_state();
+        let owner = address!("1111111111111111111111111111111111111111");
+        set_msg_sender(owner);
+
+        let mut contract = Nimbus::default();
+        contract.init(owner, Address::ZERO, Address::ZERO).unwrap();
+
+        // Deposit funds
+        contract
+            .deposit(
+                FixedBytes::repeat_byte(0xaa),
+                vec![0x42; 256].into(),
+                U256::from(50_000_000),
+            )
+            .unwrap();
+
+        // Item 1: Valid
+        let (alpha_neg1, hm1, pk_iss1, nullifier1) = register_mock_issuer_with_nonce(
+            &mut contract,
+            owner,
+            U256::from(10_000_000),
+            FixedBytes::ZERO,
+            FixedBytes::repeat_byte(0x01),
+        );
+
+        // Item 2: Invalid
+        let (alpha_neg2, hm2, pk_iss2, nullifier2) = register_mock_issuer_with_nonce(
+            &mut contract,
+            owner,
+            U256::from(10_000_000),
+            FixedBytes::ZERO,
+            FixedBytes::repeat_byte(0x02),
+        );
+
+        // Let's set pairing result to false during verification
+        set_pairing_result(false);
+
+        let res = contract.batch_spend(
+            vec![FixedBytes::ZERO, FixedBytes::ZERO],
+            vec![nullifier1, nullifier2],
+            vec![alpha_neg1.clone().into(), alpha_neg2.clone().into()],
+            vec![pk_iss1.clone().into(), pk_iss2.clone().into()],
+            vec![Address::ZERO, Address::ZERO],
+            vec![U256::from(10_000_000), U256::from(10_000_000)],
+            vec![FixedBytes::ZERO, FixedBytes::ZERO],
+            vec![U256::ZERO, U256::ZERO],
+            vec![FixedBytes::repeat_byte(0x01), FixedBytes::repeat_byte(0x02)],
+        );
+
+        assert_eq!(res, Err(b"BATCH_ITEM_INVALID".to_vec()));
+
+        // Restore pairing result
+        set_pairing_result(true);
+
+        // Verify state is preserved
+        assert!(!contract.nullifiers.get(nullifier1));
+        assert!(!contract.nullifiers.get(nullifier2));
+        assert_eq!(
+            contract.total_deposited_principal().unwrap(),
+            U256::from(49_900_000)
         );
     }
 

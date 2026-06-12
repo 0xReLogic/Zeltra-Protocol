@@ -1223,6 +1223,7 @@ Sisa implementasi wajib:
 
 Decision:
 `research/decisions/DEC-006-adaptive-private-spend-batching.md`
+`research/decisions/DEC-014-batch-spend-stylus-implementation.md`
 
 Tujuan:
 

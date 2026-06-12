@@ -62,6 +62,61 @@ impl Nimbus {
         Ok(output[31] == 1)
     }
 
+    pub(crate) fn verify_bls_spend_batch(
+        &self,
+        alpha_neg_list: &[Bytes],
+        hm_list: &[Bytes],
+        pk_iss_list: &[Bytes],
+    ) -> Result<bool, Vec<u8>> {
+        let len = alpha_neg_list.len();
+        if len == 0 {
+            return Ok(true);
+        }
+
+        let generator = to_evm_g2(&G2Affine::generator());
+        let mut input = Vec::with_capacity(768 * len);
+
+        for i in 0..len {
+            let alpha_neg_bytes = &alpha_neg_list[i];
+            let hm_bytes = &hm_list[i];
+            let pk_iss_bytes = &pk_iss_list[i];
+
+            if alpha_neg_bytes.len() != 128 || hm_bytes.len() != 128 {
+                return Err(b"INVALID_G1_INPUT_LENGTH".to_vec());
+            }
+            if pk_iss_bytes.len() != 256 {
+                return Err(b"INVALID_PUBLIC_KEY_LENGTH".to_vec());
+            }
+            if alpha_neg_bytes.iter().all(|byte| *byte == 0)
+                || hm_bytes.iter().all(|byte| *byte == 0)
+                || pk_iss_bytes.iter().all(|byte| *byte == 0)
+            {
+                return Err(b"POINT_AT_INFINITY_NOT_ALLOWED".to_vec());
+            }
+            if !self.trusted_issuer_keys.get(keccak256(pk_iss_bytes)) {
+                return Err(b"UNTRUSTED_ISSUER_KEY".to_vec());
+            }
+
+            input.extend_from_slice(alpha_neg_bytes);
+            input.extend_from_slice(&generator);
+            input.extend_from_slice(hm_bytes);
+            input.extend_from_slice(pk_iss_bytes);
+        }
+
+        let host = Self::runtime_host();
+        let output = unsafe {
+            RawCall::new_static(&host)
+                .limit_return_data(0, 32)
+                .call(BLS12_PAIRING_CHECK, &input)
+        }
+        .map_err(|_| b"BLS_PAIRING_PRECOMPILE_FAILED".to_vec())?;
+
+        if output.len() != 32 || output[..31].iter().any(|byte| *byte != 0) {
+            return Err(b"INVALID_PAIRING_OUTPUT".to_vec());
+        }
+        Ok(output[31] == 1)
+    }
+
     pub fn _spend(
         &mut self,
         root: FixedBytes<32>,
@@ -426,7 +481,7 @@ impl Nimbus {
     }
 }
 
-fn recipient_hash(recipient: Address) -> FixedBytes<32> {
+pub(crate) fn recipient_hash(recipient: Address) -> FixedBytes<32> {
     let mut out = [0u8; 32];
     out[12..].copy_from_slice(recipient.as_slice());
     FixedBytes::from(out)

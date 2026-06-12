@@ -9,7 +9,7 @@ Dokumen ini memetakan seluruh tugas kritis (TODO) yang wajib diselesaikan dan di
 Modifikasi smart contract pasca-deploy di mainnet sangat berisiko dan mahal. Berikut adalah daftar TODO kontrak yang harus diselesaikan terlebih dahulu:
 
 ### 1.1 Optimasi Gas & Batch Spending (`batchSpend`)
-*   [ ] **Implementasi Fitur `batchSpend()`:** Saat ini transaksi spend dikirimkan satu per satu. Untuk menghemat gas fee secara signifikan (meningkatkan margin profit relayer), contract harus mendukung pemrosesan banyak spend sekaligus dalam satu batch.
+*   [x] **Implementasi Fitur `batchSpend()`:** Saat ini transaksi spend dikirimkan satu per satu. Untuk menghemat gas fee secara signifikan (meningkatkan margin profit relayer), contract harus mendukung pemrosesan banyak spend sekaligus dalam satu batch.
 *   [ ] **Sinkronisasi ABI & Selector:** Lakukan kompilasi ulang contract dengan fitur batching, generate ABI terbaru, dan pastikan method selector `batchSpend` cocok 100% dengan pemicu di relayer.
 *   [ ] **Benchmark Gas Realk:** Uji perbandingan konsumsi gas antara transaksi single vs batch (ukuran 2, 4, 8, dan 9) pada Arbitrum Sepolia sebelum rilis.
 
