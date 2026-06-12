@@ -95,6 +95,8 @@ method ABI `camelCase`.
 | `nullifiers[nullifier]` | Replay protection dan pencegahan double-spend |
 | `clean_association_roots[root]` | Root compliance yang disetujui owner/oracle |
 | `failed_intent_refunds[nullifier]` | Payout yang perlu diklaim setelah intent gagal |
+| `ccip_processed_messages[messageId]` | Replay protection untuk CCIP |
+| `ccip_allowed_senders[key]` | Allowlist pengirim CCIP per chain selector |
 
 ### Configuration dan Accounting
 
@@ -304,19 +306,18 @@ saat ini masih bypass.
 Receiver:
 
 1. Memeriksa kontrak tidak paused.
-2. Jika `ccip_router` dikonfigurasi, mensyaratkan caller sama dengan router.
-3. Mensyaratkan payload tepat 584 byte (di mana H(m) tidak lagi dikirim secara eksplisit tetapi direkonstruksi on-chain).
-4. Mendekode parameter spend dan destination action.
-5. Menjalankan `spendAndBuyShares`.
+2. Mensyaratkan `ccip_router` sudah dikonfigurasi (tidak boleh `Address::ZERO`) dan caller sama dengan router.
+3. Memeriksa replay protection terhadap `messageId` di `ccip_processed_messages`.
+4. Memverifikasi pengirim (`sender` & `sourceChainSelector`) terdaftar di `ccip_allowed_senders`.
+5. Mensyaratkan payload tepat 584 byte (di mana H(m) tidak lagi dikirim secara eksplisit tetapi direkonstruksi on-chain).
+6. Mendekode parameter spend dan destination action.
+7. Menjalankan `spendAndBuyShares` dan menandai `messageId` sebagai diproses.
 
 Jika `condition_id == bytes32(0)`, flow digunakan sebagai direct transfer dan
 field target berperan sebagai recipient wallet.
 
 Yang belum lengkap untuk mainnet:
 
-- allowlist source chain;
-- validasi sender per source chain;
-- replay binding terhadap `message_id`;
 - hard test dengan CCIP router dan token nyata.
 
 ## 8. EIP-2537 BLS12-381 Precompile
@@ -474,7 +475,10 @@ eksplisit. Deployment baru harus mendaftarkan issuer key sebelum hard test spend
 - malformed input dan point-at-infinity rejection;
 - checked principal subtraction;
 - unit/regression test lifecycle deposit dan reveal;
-- ikat credential ke amount, recipient/action, expiry, chain, dan contract (selesai secara end-to-end pada kontrak, SDK, dan relayer).
+- ikat credential ke amount, recipient/action, expiry, chain, dan contract (selesai secara end-to-end pada kontrak, SDK, dan relayer);
+- validasi dan allowlist pengirim CCIP (`ccip_allowed_senders`) per source chain;
+- replay protection terhadap CCIP `message_id` (`ccip_processed_messages`);
+- proteksi `ccip_router` wajib dikonfigurasi (tidak boleh `Address::ZERO`) sebelum memproses pesan lintas rantai.
 
 ### Blocker sebelum dana nyata
 
@@ -484,7 +488,6 @@ eksplisit. Deployment baru harus mendaftarkan issuer key sebelum hard test spend
 4. Uji precompile EIP-2537 dengan test vector valid dan invalid di target
    chain; Arbitrum Sepolia `0x0b` sudah lolos, `0x0f` pairing Nimbus belum.
 5. Audit liability, fee, rounding, dan solvency pada seluruh state transition.
-6. Lengkapi authentication dan replay protection CCIP.
 7. Uji integration Polymarket tanpa mock.
 8. Tambahkan event untuk seluruh perubahan state finansial.
 9. Tentukan migration dan emergency recovery sebelum deployment immutable.

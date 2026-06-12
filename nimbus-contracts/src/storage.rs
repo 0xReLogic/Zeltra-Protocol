@@ -52,6 +52,10 @@ sol_storage! {
 
         // --- Spend authorization (DEC-002) ---
         mapping(bytes32 => bool) trusted_issuer_keys;
+
+        // --- CCIP Security (DEC-015) ---
+        mapping(bytes32 => bool) ccip_processed_messages;
+        mapping(bytes32 => bool) ccip_allowed_senders;
     }
 }
 

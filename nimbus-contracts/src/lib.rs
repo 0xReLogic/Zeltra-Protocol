@@ -185,6 +185,27 @@ impl Nimbus {
         Ok(self.trusted_issuer_keys.get(keccak256(&pk_iss_bytes)))
     }
 
+    pub fn set_ccip_sender_allowlist(
+        &mut self,
+        source_chain_selector: u64,
+        sender: Bytes,
+        allowed: bool,
+    ) -> Result<(), Vec<u8>> {
+        self.check_owner()?;
+        let key = self.ccip_allowlist_key(source_chain_selector, &sender);
+        self.ccip_allowed_senders.insert(key, allowed);
+        Ok(())
+    }
+
+    pub fn is_ccip_sender_allowed(
+        &self,
+        source_chain_selector: u64,
+        sender: Bytes,
+    ) -> Result<bool, Vec<u8>> {
+        let key = self.ccip_allowlist_key(source_chain_selector, &sender);
+        Ok(self.ccip_allowed_senders.get(key))
+    }
+
     // --- Liability Invariant Check ---
 
     /// Verifies the invariant: contract_assets >= outstanding_liabilities
@@ -815,11 +836,20 @@ mod tests {
     fn test_ccip_receive_decoding_and_execution() {
         reset_test_state();
         let owner = address!("1111111111111111111111111111111111111111");
+        let router = address!("2222222222222222222222222222222222222222");
         set_msg_sender(owner);
+
         let mut nimbus_contract = Nimbus::default();
         nimbus_contract
             .init(owner, Address::ZERO, Address::ZERO)
             .unwrap();
+
+        // Configure CCIP router and allowlist sender
+        nimbus_contract.set_ccip_router(router).unwrap();
+        nimbus_contract
+            .set_ccip_sender_allowlist(1, vec![].into(), true)
+            .unwrap();
+
         nimbus_contract
             .deposit(
                 FixedBytes::repeat_byte(0x66),
@@ -842,8 +872,12 @@ mod tests {
         // payload[520..552] is expiry (zeros)
         // payload[552..584] is nonce (zeros)
 
+        // Set message sender to CCIP Router before execution
+        set_msg_sender(router);
+
+        let message_id = FixedBytes::repeat_byte(0x99);
         let result =
-            nimbus_contract.ccip_receive(FixedBytes::ZERO, 1, vec![].into(), payload.into());
+            nimbus_contract.ccip_receive(message_id, 1, vec![].into(), payload.into());
         match result {
             Ok(_) => {}
             Err(e) => {
@@ -853,6 +887,53 @@ mod tests {
                 );
             }
         }
+
+        // Test Replay protection
+        let replay_result =
+            nimbus_contract.ccip_receive(message_id, 1, vec![].into(), vec![0; 584].into());
+        assert_eq!(replay_result, Err(b"CCIP_MESSAGE_ALREADY_PROCESSED".to_vec()));
+    }
+
+    #[test]
+    fn test_ccip_receive_negative_cases() {
+        reset_test_state();
+        let owner = address!("1111111111111111111111111111111111111111");
+        let router = address!("2222222222222222222222222222222222222222");
+        set_msg_sender(owner);
+
+        let mut nimbus_contract = Nimbus::default();
+        nimbus_contract
+            .init(owner, Address::ZERO, Address::ZERO)
+            .unwrap();
+
+        let payload = vec![0u8; 584].into();
+        let message_id = FixedBytes::repeat_byte(0x88);
+
+        // Case 1: CCIP router not configured (is ZERO)
+        assert_eq!(
+            nimbus_contract.ccip_receive(message_id, 1, vec![].into(), payload),
+            Err(b"CCIP_ROUTER_NOT_CONFIGURED".to_vec())
+        );
+
+        // Configure router
+        nimbus_contract.set_ccip_router(router).unwrap();
+
+        // Case 2: Caller is not the router (caller is owner)
+        let payload = vec![0u8; 584].into();
+        assert_eq!(
+            nimbus_contract.ccip_receive(message_id, 1, vec![].into(), payload),
+            Err(b"ONLY_CCIP_ROUTER_ALLOWED".to_vec())
+        );
+
+        // Set caller to router
+        set_msg_sender(router);
+
+        // Case 3: Sender is not allowlisted
+        let payload = vec![0u8; 584].into();
+        assert_eq!(
+            nimbus_contract.ccip_receive(message_id, 1, vec![].into(), payload),
+            Err(b"CCIP_SENDER_NOT_ALLOWED".to_vec())
+        );
     }
 
     #[test]

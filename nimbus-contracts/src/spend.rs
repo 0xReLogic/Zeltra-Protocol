@@ -17,6 +17,17 @@ use crate::storage::Nimbus;
 use crate::types::to_evm_g2;
 
 impl Nimbus {
+    pub(crate) fn ccip_allowlist_key(
+        &self,
+        source_chain_selector: u64,
+        sender: &[u8],
+    ) -> FixedBytes<32> {
+        let mut bytes = Vec::with_capacity(8 + sender.len());
+        bytes.extend_from_slice(&source_chain_selector.to_be_bytes());
+        bytes.extend_from_slice(sender);
+        keccak256(&bytes)
+    }
+
     /// Verifies the unmasked BLS signature on-chain using pairing precompile (EIP-2537: 0x0f).
     /// Verification check: e(-alpha, G2) * e(H(m), pk_iss) == 1
     fn verify_bls_spend(
@@ -426,16 +437,30 @@ impl Nimbus {
     /// Receives a cross-chain payload via Chainlink CCIP and executes the transaction (Fase B).
     pub fn _ccip_receive(
         &mut self,
-        _message_id: FixedBytes<32>,
-        _source_chain_selector: u64,
-        _sender: Bytes,
+        message_id: FixedBytes<32>,
+        source_chain_selector: u64,
+        sender: Bytes,
         payload: Bytes,
     ) -> Result<(), Vec<u8>> {
         // Enforce caller verification if CCIP Router address is configured (Production Best Practice)
         let caller = self.msg_sender();
         let configured_router = self.ccip_router.get();
-        if configured_router != Address::ZERO && caller != configured_router {
+        if configured_router == Address::ZERO {
+            return Err(b"CCIP_ROUTER_NOT_CONFIGURED".to_vec());
+        }
+        if caller != configured_router {
             return Err(b"ONLY_CCIP_ROUTER_ALLOWED".to_vec());
+        }
+
+        // Replay protection: Check if message has already been processed
+        if self.ccip_processed_messages.get(message_id) {
+            return Err(b"CCIP_MESSAGE_ALREADY_PROCESSED".to_vec());
+        }
+
+        // Verify sender and source chain selector are on the allowlist
+        let key = self.ccip_allowlist_key(source_chain_selector, &sender);
+        if !self.ccip_allowed_senders.get(key) {
+            return Err(b"CCIP_SENDER_NOT_ALLOWED".to_vec());
         }
 
         if payload.len() != 584 {
@@ -476,6 +501,9 @@ impl Nimbus {
         if !success {
             return Err(b"CCIP_EXECUTION_FAILED".to_vec());
         }
+
+        // Mark message as processed successfully
+        self.ccip_processed_messages.insert(message_id, true);
 
         Ok(())
     }

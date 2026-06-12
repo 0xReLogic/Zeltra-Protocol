@@ -733,19 +733,23 @@ cepat, tetapi tidak boleh menjadi satu-satunya bukti bahwa fitur selesai.
 
 ### HT-08 CCIP Source ke Destination
 
+Decision:
+`research/decisions/DEC-015-ccip-cross-chain-security-validations.md`
+
+
 - [ ] Deploy/configure contract source dan destination yang benar.
-- [ ] Set router non-zero pada destination.
-- [ ] Allowlist source chain selector dan sender contract.
+- [x] Set router non-zero pada destination.
+- [x] Allowlist source chain selector dan sender contract.
 - [ ] Kirim payload valid dengan signature nyata.
 - [ ] Tunggu source receipt sukses.
 - [ ] Parse CCIP message ID asli dari event.
 - [ ] Pantau CCIP explorer/API atau destination logs.
 - [ ] Tunggu destination receipt sukses.
 - [ ] Verifikasi destination nullifier dan payout.
-- [ ] Replay message ID ditolak.
-- [ ] Caller non-router ditolak.
-- [ ] Router benar tetapi source selector salah ditolak.
-- [ ] Router benar tetapi sender salah ditolak.
+- [x] Replay message ID ditolak.
+- [x] Caller non-router ditolak.
+- [x] Router benar tetapi source selector salah ditolak.
+- [x] Router benar tetapi sender salah ditolak.
 - [ ] Payload 647/649 byte ditolak.
 - [ ] Payload valid tetapi signature corrupt gagal tanpa payout.
 - [ ] Destination contract paused menghasilkan status failure yang terpantau.

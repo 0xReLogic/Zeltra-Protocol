@@ -14,11 +14,11 @@ Modifikasi smart contract pasca-deploy di mainnet sangat berisiko dan mahal. Ber
 *   [ ] **Benchmark Gas Realk:** Uji perbandingan konsumsi gas antara transaksi single vs batch (ukuran 2, 4, 8, dan 9) pada Arbitrum Sepolia sebelum rilis.
 
 ### 1.2 Validasi Pengiriman Lintas Rantai (CCIP Security)
-*   [ ] **Enforce `ccip_router != Address::ZERO`:** Kontrak harus menolak semua pesan lintas rantai jika alamat router CCIP belum dikonfigurasi oleh admin.
-*   [ ] **Allowlist Validasi:** 
-    *   [ ] Validasi `source_chain_selector` untuk memastikan pesan hanya datang dari chain yang disetujui.
-    *   [ ] Cocokkan alamat pengirim CCIP dengan daftar kontrak relayer yang sah di source chain (mencegah spoofing deposit/spend).
-*   [ ] **Replay Protection via Message ID:** Simpan dan verifikasi CCIP `messageId` sebagai pengaman agar pesan yang sama tidak bisa dieksekusi dua kali.
+*   [x] **Enforce `ccip_router != Address::ZERO`**: Kontrak harus menolak semua pesan lintas rantai jika alamat router CCIP belum dikonfigurasi oleh admin.
+*   [x] **Allowlist Validasi**: 
+    *   [x] Validasi `source_chain_selector` untuk memastikan pesan hanya datang dari chain yang disetujui.
+    *   [x] Cocokkan alamat pengirim CCIP dengan daftar kontrak relayer yang sah di source chain (mencegah spoofing deposit/spend).
+*   [x] **Replay Protection via Message ID**: Simpan dan verifikasi CCIP `messageId` sebagai pengaman agar pesan yang sama tidak bisa dieksekusi dua kali.
 
 ### 1.3 Integrasi ZK Compliance (Fase A)
 *   [ ] **Penyelesaian Verifying Key (VK) Sirkuit:** Skema proving dan sirkuit compliance (Merkle membership proof untuk clean association set) harus sudah bersifat final.
