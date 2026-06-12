@@ -114,12 +114,51 @@ async fn main() {
     // Spawn key rotation background task (Finding #12)
     let _rotation_handle = state.key_manager.clone().spawn_rotation_task();
 
-    // Spawn background worker to batch and process spends every 2 seconds
+    // Spawn background worker with adaptive same-chain batching window (Finding #10)
     let worker_state = state.clone();
     tokio::spawn(async move {
+        let mut last_process = Instant::now();
         loop {
-            tokio::time::sleep(Duration::from_secs(2)).await;
-            process_spend_batch(&worker_state).await;
+            let queue_count = worker_state.db.queued_spend_count().await.unwrap_or(0);
+            
+            let oldest_age_secs = if queue_count > 0 {
+                if let Ok(Some(oldest)) = worker_state.db.get_oldest_queued_spend_timestamp().await {
+                    let now_secs = std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .unwrap_or_default()
+                        .as_secs();
+                    now_secs.saturating_sub(oldest as u64)
+                } else {
+                    0
+                }
+            } else {
+                0
+            };
+
+            let should_process = if queue_count == 0 {
+                false
+            } else if queue_count >= 8 {
+                // Batch is full, process immediately
+                true
+            } else if oldest_age_secs >= 2 {
+                // Hard timeout reached
+                true
+            } else if oldest_age_secs >= 1 && last_process.elapsed() >= Duration::from_secs(1) {
+                // Target window reached
+                true
+            } else {
+                false
+            };
+
+            if should_process {
+                process_spend_batch(&worker_state).await;
+                last_process = Instant::now();
+                // Sleep briefly before next check to avoid CPU spin
+                tokio::time::sleep(Duration::from_millis(100)).await;
+            } else {
+                // Sleep 250ms and check queue status again
+                tokio::time::sleep(Duration::from_millis(250)).await;
+            }
         }
     });
 

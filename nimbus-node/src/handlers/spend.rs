@@ -155,15 +155,27 @@ pub async fn process_spend_batch(state: &AppState) {
         .as_secs();
 
     for item in items {
-        if item.request.deadline.is_some_and(|deadline| now > deadline) {
+        let is_expired = item.request.deadline.is_some_and(|deadline| now > deadline)
+            || item.request.expiry.is_some_and(|expiry| now > expiry);
+
+        if is_expired {
             let _ = state
                 .db
-                .fail_spend(item.id, None, "deadline expired before broadcast")
+                .fail_spend(item.id, None, "deadline or expiry expired before broadcast")
                 .await;
         } else if item.request.cross_chain.is_some() {
             direct.push(item);
         } else {
-            same_chain.push(item);
+            // Check if deadline/expiry is approaching (near is defined as <= 30 seconds remaining)
+            let is_near = item.request.deadline.is_some_and(|d| d.saturating_sub(now) <= 30)
+                || item.request.expiry.is_some_and(|e| e.saturating_sub(now) <= 30);
+            
+            if is_near {
+                println!("RELAYER: Deadline/expiry is near for item {}. Bypassing batching.", item.id);
+                direct.push(item);
+            } else {
+                same_chain.push(item);
+            }
         }
     }
 
@@ -212,7 +224,7 @@ fn batch_item(item: &QueuedSpend) -> BatchSpendItem {
 
 async fn process_same_chain_batch(state: &AppState, items: Vec<QueuedSpend>) {
     let Some(ref evm_client) = state.evm_client else {
-        for item in items {
+        for item in &items {
             let _ = state
                 .db
                 .retry_spend(item.id, "EVM client unavailable", item.retry_count)
@@ -231,7 +243,7 @@ async fn process_same_chain_batch(state: &AppState, items: Vec<QueuedSpend>) {
 
     if let Err(msg) = state.check_balance_for_batch(estimated_cost_eth).await {
         eprintln!("SETTLEMENT BATCH REJECTED: {}", msg);
-        for item in items {
+        for item in &items {
             let _ = state
                 .db
                 .retry_spend(item.id, &msg, item.retry_count)
@@ -243,44 +255,68 @@ async fn process_same_chain_batch(state: &AppState, items: Vec<QueuedSpend>) {
     let payload: Vec<_> = items.iter().map(batch_item).collect();
     match evm_client.broadcast_spend_batch(&payload).await {
         Ok(outcome) if outcome.success => {
-            for item in items {
-                if state
-                    .db
-                    .mark_spend_submitted(item.id, &outcome.tx_hash)
-                    .await
-                    .is_err()
-                {
-                    continue;
-                }
-                let _ = state
-                    .db
-                    .mark_spend_confirmed(
-                        item.id,
-                        &item.request.nullifier,
-                        &outcome.tx_hash,
-                        outcome.block_number,
-                    )
-                    .await;
+            // Atomic DB confirmation
+            let confirm_items: Vec<_> = items
+                .iter()
+                .map(|item| (item.id, item.request.nullifier.clone()))
+                .collect();
+            if let Err(e) = state
+                .db
+                .mark_batch_spend_confirmed(confirm_items, &outcome.tx_hash, outcome.block_number)
+                .await
+            {
+                eprintln!("SETTLEMENT: failed to confirm batch in DB: {}", e);
+            }
+
+            // Storing batch metadata & margin calculation (Finding #10)
+            let mut total_revenue_usdc = 0.0;
+            for item in &items {
+                let amount_usdc = item.request.amount as f64 / 1_000_000.0;
+                let fee_usdc = amount_usdc * 0.0025; // 0.25% standard fee
+                total_revenue_usdc += fee_usdc;
+            }
+
+            let total_cost_eth = (outcome.gas_used as f64 * outcome.effective_gas_price as f64)
+                / 1_000_000_000_000_000_000.0;
+            let eth_price = std::env::var("NIMBUS_ETH_PRICE_USDC")
+                .ok()
+                .and_then(|v| v.parse::<f64>().ok())
+                .unwrap_or(3500.0);
+            let actual_gas_cost_usdc = total_cost_eth * eth_price;
+            let margin_usdc = total_revenue_usdc - actual_gas_cost_usdc;
+
+            if let Err(e) = state
+                .db
+                .store_batch_metadata(
+                    &outcome.tx_hash,
+                    items.len(),
+                    &outcome.tx_hash,
+                    outcome.gas_used,
+                    outcome.effective_gas_price,
+                    total_cost_eth,
+                    margin_usdc,
+                )
+                .await
+            {
+                eprintln!("SETTLEMENT: failed to store batch metadata: {}", e);
             }
         }
         Ok(outcome) => {
+            // Batch transaction reverted on-chain. Splitting batch for individual execution
+            println!("RELAYER WARNING: Batch reverted on-chain (tx: {}). Splitting batch to process items individually...", outcome.tx_hash);
             for item in items {
                 let _ = state
                     .db
                     .mark_spend_submitted(item.id, &outcome.tx_hash)
                     .await;
-                let _ = state
-                    .db
-                    .fail_spend(
-                        item.id,
-                        Some(&outcome.tx_hash),
-                        "batch transaction receipt status was reverted",
-                    )
-                    .await;
+                // Retry individual execution
+                process_single_spend(state, item).await;
             }
         }
         Err(error) => {
+            // Broadcast error. Splitting batch for individual execution
             let message = error.to_string();
+            println!("RELAYER WARNING: Batch broadcast failed: {}. Splitting batch to process items individually...", message);
             for item in items {
                 if item.retry_count >= 7 {
                     let _ = state.db.fail_spend(item.id, None, &message).await;

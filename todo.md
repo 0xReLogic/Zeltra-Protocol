@@ -1267,15 +1267,15 @@ Sisa implementasi wajib:
   nominal bersih yang diterima merchant.
 - [ ] Pisahkan accounting: gas cost, reimbursement, gross execution fee,
   relayer margin, protocol share, dan rounding.
-- [ ] Simpan quote, batch ID, jumlah item, receipt gas used, effective gas
+- [x] Simpan quote, batch ID, jumlah item, receipt gas used, effective gas
   price, total cost, dan margin pada database.
-- [ ] Buat konfirmasi batch/nullifier dalam satu transaksi database atomic,
+- [x] Buat konfirmasi batch/nullifier dalam satu transaksi database atomic,
   bukan update row satu per satu.
-- [ ] Jika batch revert, pecah batch untuk mengidentifikasi item invalid tanpa
+- [x] Jika batch revert, pecah batch untuk mengidentifikasi item invalid tanpa
   membuat item valid gagal permanen atau terjebak retry bersama.
-- [ ] Terapkan deadline-near bypass; transaksi yang mendekati expiry langsung
+- [x] Terapkan deadline-near bypass; transaksi yang mendekati expiry langsung
   memakai jalur single.
-- [ ] Terapkan adaptive window nyata: target 1 detik, hard timeout 2 detik,
+- [x] Terapkan adaptive window nyata: target 1 detik, hard timeout 2 detik,
   kirim lebih cepat ketika batch penuh.
 - [x] Hubungkan pemeriksaan saldo ETH relayer sebelum single/batch broadcast.
 - [ ] Deploy contract baru yang memiliki `batchSpend()` ke Arbitrum Sepolia.

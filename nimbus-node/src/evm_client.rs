@@ -73,6 +73,8 @@ pub struct TransactionOutcome {
     pub tx_hash: String,
     pub block_number: u64,
     pub success: bool,
+    pub gas_used: u64,
+    pub effective_gas_price: u128,
 }
 
 #[derive(Clone, Debug)]
@@ -211,10 +213,13 @@ impl EvmClient {
             if success { "SUCCESS" } else { "FAILED" }
         );
 
+        let effective_gas_price = receipt.effective_gas_price;
         Ok(TransactionOutcome {
             tx_hash,
             block_number,
             success,
+            gas_used: receipt.gas_used,
+            effective_gas_price,
         })
     }
 

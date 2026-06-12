@@ -157,6 +157,19 @@ impl Database {
                     created_at INTEGER NOT NULL
                 );
                 CREATE INDEX IF NOT EXISTS idx_idempotency_created ON idempotency_cache(created_at);
+
+                -- Batch metadata tracking (Finding #10 / Margin Tracking)
+                CREATE TABLE IF NOT EXISTS spend_batches (
+                    batch_id TEXT PRIMARY KEY,
+                    item_count INTEGER NOT NULL,
+                    tx_hash TEXT NOT NULL,
+                    gas_used INTEGER NOT NULL,
+                    effective_gas_price INTEGER NOT NULL,
+                    total_cost_eth REAL NOT NULL,
+                    margin_usdc REAL NOT NULL,
+                    created_at INTEGER NOT NULL
+                );
+                CREATE INDEX IF NOT EXISTS idx_batches_created ON spend_batches(created_at);
             ",
             )?;
 
@@ -392,6 +405,81 @@ impl Database {
         .await?
     }
 
+    pub async fn mark_batch_spend_confirmed(
+        &self,
+        items: Vec<(i64, String)>,
+        tx_hash: &str,
+        block_number: u64,
+    ) -> Result<()> {
+        let path = self.path.clone();
+        let db_key = database_key()?;
+        let tx_hash = tx_hash.to_string();
+
+        task::spawn_blocking(move || -> Result<()> {
+            let mut conn = open_connection(&path, &db_key)?;
+            let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+            let now = unix_timestamp()?;
+
+            for (id, nullifier) in items {
+                tx.execute(
+                    "INSERT OR IGNORE INTO nullifiers (nullifier, spent_at, tx_hash)
+                     VALUES (?, ?, ?)",
+                    params![nullifier, now, tx_hash],
+                )?;
+                let changed = tx.execute(
+                    "UPDATE spend_queue
+                     SET status = 'confirmed', processed = 1, tx_hash = ?,
+                         block_number = ?, lease_until = NULL, updated_at = ?
+                     WHERE id = ? AND status IN ('broadcasting','submitted')",
+                    params![tx_hash, block_number as i64, now, id],
+                )?;
+                if changed != 1 {
+                    anyhow::bail!("queue item {} was not in a confirmable state", id);
+                }
+            }
+            tx.commit()?;
+            Ok(())
+        })
+        .await?
+    }
+
+    pub async fn store_batch_metadata(
+        &self,
+        batch_id: &str,
+        item_count: usize,
+        tx_hash: &str,
+        gas_used: u64,
+        effective_gas_price: u128,
+        total_cost_eth: f64,
+        margin_usdc: f64,
+    ) -> Result<()> {
+        let path = self.path.clone();
+        let db_key = database_key()?;
+        let batch_id = batch_id.to_string();
+        let tx_hash = tx_hash.to_string();
+
+        task::spawn_blocking(move || -> Result<()> {
+            let conn = open_connection(&path, &db_key)?;
+            let now = unix_timestamp()?;
+            conn.execute(
+                "INSERT INTO spend_batches (batch_id, item_count, tx_hash, gas_used, effective_gas_price, total_cost_eth, margin_usdc, created_at)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                params![
+                    batch_id,
+                    item_count as i64,
+                    tx_hash,
+                    gas_used as i64,
+                    effective_gas_price as i64,
+                    total_cost_eth,
+                    margin_usdc,
+                    now
+                ],
+            )?;
+            Ok(())
+        })
+        .await?
+    }
+
     pub async fn retry_spend(&self, id: i64, error: &str, retry_count: u32) -> Result<()> {
         let delay = 2_i64.saturating_pow(retry_count.min(8)).min(300);
         let path = self.path.clone();
@@ -465,6 +553,20 @@ impl Database {
                 |row| row.get::<_, i64>(0),
             )?;
             Ok(count as usize)
+        })
+        .await?
+    }
+
+    pub async fn get_oldest_queued_spend_timestamp(&self) -> Result<Option<i64>> {
+        let path = self.path.clone();
+        let db_key = database_key()?;
+        task::spawn_blocking(move || -> Result<Option<i64>> {
+            let conn = open_connection(&path, &db_key)?;
+            let mut stmt = conn.prepare(
+                "SELECT MIN(created_at) FROM spend_queue WHERE status IN ('queued', 'retryable')"
+            )?;
+            let timestamp: Option<i64> = stmt.query_row([], |row| row.get(0))?;
+            Ok(timestamp)
         })
         .await?
     }
