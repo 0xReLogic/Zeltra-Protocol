@@ -26,11 +26,11 @@ sol! {
     function batchSpend(
         bytes32[] calldata roots,
         bytes32[] calldata nullifiers,
-        bytes[] calldata alphaNegItems,
-        bytes[] calldata pkIssItems,
+        bytes[] calldata alpha_neg_items,
+        bytes[] calldata pk_iss_items,
         address[] calldata recipients,
         uint256[] calldata amounts,
-        bytes32[] calldata recipientOrIntentHashes,
+        bytes32[] calldata recipient_or_intent_hashes,
         uint256[] calldata expiries,
         bytes32[] calldata nonces
     ) external returns (bool);
@@ -452,11 +452,11 @@ impl EvmClient {
         let call_data = batchSpendCall {
             roots,
             nullifiers,
-            alphaNegItems: alpha_neg_items,
-            pkIssItems: pk_iss_items,
+            alpha_neg_items: alpha_neg_items,
+            pk_iss_items: pk_iss_items,
             recipients,
             amounts,
-            recipientOrIntentHashes: recipient_or_intent_hashes,
+            recipient_or_intent_hashes: recipient_or_intent_hashes,
             expiries,
             nonces,
         }
