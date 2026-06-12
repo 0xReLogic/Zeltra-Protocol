@@ -105,6 +105,8 @@ pub async fn load_share_key() -> (nimbus_core::Fr, u32) {
         .parse::<u32>()
         .unwrap_or(1);
 
+    let is_strict = crate::config::runtime_mode().is_strict();
+
     // 1. Check if Vault/OpenBao is configured
     if let Ok(vault_token) = std::env::var("NIMBUS_VAULT_TOKEN") {
         let vault_addr = std::env::var("NIMBUS_VAULT_ADDR")
@@ -154,12 +156,20 @@ pub async fn load_share_key() -> (nimbus_core::Fr, u32) {
                             }
                         }
                         println!("KMS INTEGRATION: Error parsing/deserializing share key bytes from Vault.");
+                        if is_strict {
+                            println!("CRITICAL: Vault key parsing/deserialization failed in strict mode. Failing startup.");
+                            std::process::exit(1);
+                        }
                     }
                     Err(e) => {
                         println!(
                             "KMS INTEGRATION: Error parsing Vault response JSON: {}. Response: {}",
                             e, body
                         );
+                        if is_strict {
+                            println!("CRITICAL: Vault JSON parsing failed in strict mode. Failing startup.");
+                            std::process::exit(1);
+                        }
                     }
                 }
             }
@@ -168,32 +178,41 @@ pub async fn load_share_key() -> (nimbus_core::Fr, u32) {
                     "KMS INTEGRATION: Failed to fetch secret from OpenBao/Vault: {}",
                     e
                 );
-            }
-        }
-    }
-
-    // 2. Fallback to NIMBUS_SHARE_KEY for local development / backward compatibility
-    if let Ok(hex_str) = std::env::var("NIMBUS_SHARE_KEY") {
-        println!("WARNING: Raw plain text 'NIMBUS_SHARE_KEY' env variable detected.");
-        println!(
-            "         This is unsafe for production. Use OpenBao/Vault KMS integration instead."
-        );
-        if let Ok(bytes) = hex::decode(&hex_str) {
-            if bytes.len() == 40 {
-                if let Some((idx, fr)) =
-                    nimbus_core::deserialize_from_bytes::<(usize, nimbus_core::Fr)>(&bytes)
-                {
-                    return (fr, idx as u32);
+                if is_strict {
+                    println!("CRITICAL: Failed to query Vault in strict mode. Failing startup.");
+                    std::process::exit(1);
                 }
-            } else if let Some(fr) = nimbus_core::deserialize_from_bytes::<nimbus_core::Fr>(&bytes)
-            {
-                return (fr, env_index);
+            }
+        }
+    } else if is_strict {
+        println!("CRITICAL: NIMBUS_VAULT_TOKEN environment variable is required in strict mode but not set.");
+        std::process::exit(1);
+    }
+
+    // 2. Fallback to NIMBUS_SHARE_KEY for local development / backward compatibility (disabled in strict mode)
+    if !is_strict {
+        if let Ok(hex_str) = std::env::var("NIMBUS_SHARE_KEY") {
+            println!("WARNING: Raw plain text 'NIMBUS_SHARE_KEY' env variable detected.");
+            println!(
+                "         This is unsafe for production. Use OpenBao/Vault KMS integration instead."
+            );
+            if let Ok(bytes) = hex::decode(&hex_str) {
+                if bytes.len() == 40 {
+                    if let Some((idx, fr)) =
+                        nimbus_core::deserialize_from_bytes::<(usize, nimbus_core::Fr)>(&bytes)
+                    {
+                        return (fr, idx as u32);
+                    }
+                } else if let Some(fr) = nimbus_core::deserialize_from_bytes::<nimbus_core::Fr>(&bytes)
+                {
+                    return (fr, env_index);
+                }
             }
         }
     }
 
-    // 3. Fallback only allowed in test mode
-    if cfg!(test) || std::env::var("NIMBUS_ENV").unwrap_or_default() == "test" {
+    // 3. Fallback only allowed in test mode (disabled in strict mode)
+    if !is_strict && (cfg!(test) || std::env::var("NIMBUS_ENV").unwrap_or_default() == "test") {
         println!("WARNING: No share key found. Using test default insecure key.");
         return (nimbus_core::Fr::from(12345u64), env_index);
     }
