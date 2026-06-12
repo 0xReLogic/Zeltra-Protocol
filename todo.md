@@ -1279,7 +1279,7 @@ Sisa implementasi wajib:
   kirim lebih cepat ketika batch penuh.
 - [ ] Hubungkan pemeriksaan saldo ETH relayer sebelum single/batch broadcast.
 - [ ] Deploy contract baru yang memiliki `batchSpend()` ke Arbitrum Sepolia.
-- [ ] Generate ABI deployment terbaru dan cocokkan selector dengan relayer.
+- [x] Generate ABI deployment terbaru dan cocokkan selector dengan relayer.
 - [ ] Aktifkan `NIMBUS_BATCH_ENABLED=true` hanya pada deployment baru tersebut.
 - [ ] Hard test batch ukuran 1, 2, 8, dan 9 pada testnet.
 - [ ] Hard test satu item invalid dalam batch dan buktikan tidak ada partial
