@@ -1,6 +1,6 @@
 use rusqlite::{Connection, Result};
-use std::env;
 use serde_json::{Map, Value};
+use std::env;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args: Vec<String> = env::args().collect();
@@ -17,7 +17,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     conn.pragma_update(None, "kdf_iter", "1000")?;
 
     let mut stmt = conn.prepare(query)?;
-    let col_names: Vec<String> = stmt.column_names().into_iter().map(|s| s.to_string()).collect();
+    let col_names: Vec<String> = stmt
+        .column_names()
+        .into_iter()
+        .map(|s| s.to_string())
+        .collect();
     let col_count = stmt.column_count();
 
     let mut rows = stmt.query([])?;
@@ -38,7 +42,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         Value::Null
                     }
                 }
-                rusqlite::types::ValueRef::Text(s) => Value::String(String::from_utf8_lossy(s).into_owned()),
+                rusqlite::types::ValueRef::Text(s) => {
+                    Value::String(String::from_utf8_lossy(s).into_owned())
+                }
                 rusqlite::types::ValueRef::Blob(b) => Value::String(hex::encode(b)),
             };
             row_map.insert(col_name.clone(), value);

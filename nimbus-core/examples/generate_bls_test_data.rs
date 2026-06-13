@@ -1,11 +1,11 @@
+use ark_ec::CurveGroup;
 use nimbus_core::{
     client_blind, client_unmask, get_alpha_neg_evm, get_hm_evm, get_pk_iss_evm,
-    issuer_sign_blinded, verify_unmasked, IssuerSecretKey, to_evm_g2,
+    issuer_sign_blinded, to_evm_g2, verify_unmasked, IssuerSecretKey,
 };
 use rand::{rngs::StdRng, SeedableRng};
 use sha3::{Digest, Keccak256};
 use std::collections::HashMap;
-use ark_ec::CurveGroup;
 
 fn to_evm_scalar(scalar: &ark_bls12_381::Fr) -> [u8; 32] {
     let mut buf = vec![];

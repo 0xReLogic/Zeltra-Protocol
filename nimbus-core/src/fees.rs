@@ -3,6 +3,21 @@ pub const DEPOSIT_FEE_BPS: u64 = 20;
 pub const PRIVATE_SPEND_FEE_BPS: u64 = 25;
 pub const DEFAULT_RELAYER_MARKUP_BPS: u64 = 1_500;
 
+pub const SEVEN_DAYS_SECS: u64 = 7 * 24 * 60 * 60;
+pub const THIRTY_DAYS_SECS: u64 = 30 * 24 * 60 * 60;
+pub const SPEND_FEE_7DAY_BPS: u64 = 20;
+pub const SPEND_FEE_30DAY_BPS: u64 = 10;
+
+pub fn spend_fee_bps_for_holding(holding_secs: u64) -> u64 {
+    if holding_secs >= THIRTY_DAYS_SECS {
+        SPEND_FEE_30DAY_BPS
+    } else if holding_secs >= SEVEN_DAYS_SECS {
+        SPEND_FEE_7DAY_BPS
+    } else {
+        PRIVATE_SPEND_FEE_BPS
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct SpendQuote {
     pub merchant_amount: u64,
@@ -87,6 +102,30 @@ pub fn quote_private_spend(
     })
 }
 
+pub fn quote_private_spend_with_fee(
+    merchant_amount: u64,
+    gas_cost: u64,
+    relayer_markup_bps: u64,
+    fee_bps: u64,
+) -> Option<SpendQuote> {
+    let contract_amount = merchant_amount;
+    let protocol_fee = fee_round_up(merchant_amount, fee_bps)?;
+    let (relayer_markup, execution_fee) = quote_execution_fee(gas_cost, relayer_markup_bps)?;
+    let user_total_debit = contract_amount
+        .checked_add(protocol_fee)?
+        .checked_add(execution_fee)?;
+
+    Some(SpendQuote {
+        merchant_amount,
+        contract_amount,
+        protocol_fee,
+        gas_cost,
+        relayer_markup,
+        execution_fee,
+        user_total_debit,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -135,5 +174,27 @@ mod tests {
                 assert!(net_after_fee(gross - 1, PRIVATE_SPEND_FEE_BPS).unwrap() < merchant_amount);
             }
         }
+    }
+
+    #[test]
+    fn holding_time_fee_tiers() {
+        assert_eq!(spend_fee_bps_for_holding(0), 25);
+        assert_eq!(spend_fee_bps_for_holding(59), 25);
+        assert_eq!(spend_fee_bps_for_holding(SEVEN_DAYS_SECS), 20);
+        assert_eq!(spend_fee_bps_for_holding(SEVEN_DAYS_SECS + 1), 20);
+        assert_eq!(spend_fee_bps_for_holding(THIRTY_DAYS_SECS), 10);
+        assert_eq!(spend_fee_bps_for_holding(THIRTY_DAYS_SECS + 1), 10);
+    }
+
+    #[test]
+    fn quote_with_custom_fee_bps() {
+        let q25 = quote_private_spend_with_fee(100_000_000, 0, 0, 25).unwrap();
+        assert_eq!(q25.protocol_fee, 250_000);
+
+        let q20 = quote_private_spend_with_fee(100_000_000, 0, 0, 20).unwrap();
+        assert_eq!(q20.protocol_fee, 200_000);
+
+        let q10 = quote_private_spend_with_fee(100_000_000, 0, 0, 10).unwrap();
+        assert_eq!(q10.protocol_fee, 100_000);
     }
 }

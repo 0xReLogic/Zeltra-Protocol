@@ -567,7 +567,7 @@ impl Database {
         task::spawn_blocking(move || -> Result<Option<i64>> {
             let conn = open_connection(&path, &db_key)?;
             let mut stmt = conn.prepare(
-                "SELECT MIN(created_at) FROM spend_queue WHERE status IN ('queued', 'retryable')"
+                "SELECT MIN(created_at) FROM spend_queue WHERE status IN ('queued', 'retryable')",
             )?;
             let timestamp: Option<i64> = stmt.query_row([], |row| row.get(0))?;
             Ok(timestamp)

@@ -35,6 +35,8 @@ sol! {
         bytes32[] calldata nonces
     ) external returns (bool);
 
+    function getCleanRootTimestamp(bytes32 root) external view returns (uint256);
+
     struct EVMTokenAmount {
         address token;
         uint256 amount;
@@ -174,9 +176,16 @@ impl EvmClient {
         })
     }
 
-    async fn send_tx_with_fallback(&self, mut tx: TransactionRequest) -> Result<TransactionOutcome> {
+    async fn send_tx_with_fallback(
+        &self,
+        mut tx: TransactionRequest,
+    ) -> Result<TransactionOutcome> {
         // Fetch the latest transaction count dynamically to avoid local nonce cache issues
-        let nonce = match self.provider.get_transaction_count(self.signer_address).await {
+        let nonce = match self
+            .provider
+            .get_transaction_count(self.signer_address)
+            .await
+        {
             Ok(n) => n,
             Err(e) => {
                 eprintln!("PRIMARY RPC ERROR (get_transaction_count): {}", e);
@@ -300,7 +309,6 @@ impl EvmClient {
         Ok(eth)
     }
 
-
     pub async fn broadcast_spend_transaction(
         &self,
         root_hex: &str,
@@ -325,10 +333,7 @@ impl EvmClient {
         let root_bytes =
             hex::decode(root_hex.trim_start_matches("0x")).context("Invalid root hex")?;
         if root_bytes.len() != 32 {
-            anyhow::bail!(
-                "Invalid root length: expected 32, got {}",
-                root_bytes.len()
-            );
+            anyhow::bail!("Invalid root length: expected 32, got {}", root_bytes.len());
         }
         let mut root_fixed = [0u8; 32];
         root_fixed.copy_from_slice(&root_bytes);
@@ -736,5 +741,33 @@ impl EvmClient {
         );
         let signature = self.signer.sign_message(message.as_bytes()).await?;
         Ok(hex::encode(signature.as_bytes()))
+    }
+
+    pub async fn get_clean_root_timestamp(&self, root_hex: &str) -> Result<u64> {
+        let root_bytes =
+            hex::decode(root_hex.trim_start_matches("0x")).context("Invalid root hex")?;
+        if root_bytes.len() != 32 {
+            anyhow::bail!("Root must be 32 bytes, got {}", root_bytes.len());
+        }
+        let mut root = [0u8; 32];
+        root.copy_from_slice(&root_bytes);
+
+        let call_data = getCleanRootTimestampCall { root: root.into() }.abi_encode();
+
+        let tx = TransactionRequest::default()
+            .with_to(self.contract_address)
+            .with_input(Bytes::from(call_data));
+
+        let result = self
+            .provider
+            .call(tx)
+            .await
+            .context("Failed to call getCleanRootTimestamp")?;
+
+        if result.len() >= 32 {
+            Ok(U256::from_be_slice(&result[..32]).to::<u64>())
+        } else {
+            Ok(0)
+        }
     }
 }

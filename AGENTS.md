@@ -102,10 +102,10 @@ Refund path: if quorum fails or k never released → 24h timelock → user claim
 |---|---|---|
 | Deposit | 20 bps (0.20%) | `deposit.rs` + `fees.rs` |
 | Spend default | 25 bps (0.25%) | `spend.rs` + `fees.rs` |
-| Spend hold ≥ 7 days | 20 bps (0.20%) | `spend.rs` |
-| Spend hold ≥ 30 days | 10 bps (0.10%) | `spend.rs` |
+| Spend hold ≥ 7 days | 20 bps (0.20%) | `spend.rs` + `fees.rs` |
+| Spend hold ≥ 30 days | 10 bps (0.10%) | `spend.rs` + `fees.rs` |
 
-Holding time is calculated from `clean_association_roots` root registration timestamp (on-chain cryptographic time proof).
+Holding time is calculated from `clean_association_roots` root registration timestamp. Quote endpoint (`/api/quote/private-spend?association_root=...`) returns the applicable tier and discount to the user before they commit. Root timestamps are cached in node memory after first RPC query.
 
 ## Key Files to Read
 

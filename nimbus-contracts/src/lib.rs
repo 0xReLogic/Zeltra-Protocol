@@ -119,7 +119,6 @@ impl Nimbus {
         Ok(self.total_deposited_principal.get())
     }
 
-
     /// Returns the CCIP Router address configured for the contract.
     pub fn ccip_router(&self) -> Result<Address, Vec<u8>> {
         Ok(self.ccip_router.get())
@@ -153,6 +152,11 @@ impl Nimbus {
         let current_time = U256::from(self.block_timestamp());
         self.clean_association_roots.insert(root, current_time);
         Ok(())
+    }
+
+    /// Returns the registration timestamp for a clean association root (0 if unregistered).
+    pub fn get_clean_root_timestamp(&self, root: FixedBytes<32>) -> Result<U256, Vec<u8>> {
+        Ok(self.clean_association_roots.get(root))
     }
 
     pub fn register_issuer_key(&mut self, pk_iss_bytes: Bytes) -> Result<(), Vec<u8>> {
@@ -337,7 +341,9 @@ impl Nimbus {
             }
 
             // Recipient or intent mismatch check
-            if recipients[i] != Address::ZERO && recipient_or_intent_hashes[i] != crate::spend::recipient_hash(recipients[i]) {
+            if recipients[i] != Address::ZERO
+                && recipient_or_intent_hashes[i] != crate::spend::recipient_hash(recipients[i])
+            {
                 return Err(b"RECIPIENT_INTENT_MISMATCH".to_vec());
             }
 
@@ -380,7 +386,9 @@ impl Nimbus {
                 if root_timestamp == U256::ZERO {
                     return Err(b"INVALID_ASSOCIATION_ROOT".to_vec());
                 }
-                let delta_t = current_time.checked_sub(root_timestamp).unwrap_or(U256::ZERO);
+                let delta_t = current_time
+                    .checked_sub(root_timestamp)
+                    .unwrap_or(U256::ZERO);
                 let seven_days = U256::from(7 * 24 * 60 * 60);
                 let thirty_days = U256::from(30 * 24 * 60 * 60);
 
@@ -546,7 +554,6 @@ impl Nimbus {
             proof_c_bytes,
         )
     }
-
 
     pub fn total_assets(&mut self) -> Result<U256, Vec<u8>> {
         self._total_assets()
@@ -876,8 +883,7 @@ mod tests {
         set_msg_sender(router);
 
         let message_id = FixedBytes::repeat_byte(0x99);
-        let result =
-            nimbus_contract.ccip_receive(message_id, 1, vec![].into(), payload.into());
+        let result = nimbus_contract.ccip_receive(message_id, 1, vec![].into(), payload.into());
         match result {
             Ok(_) => {}
             Err(e) => {
@@ -891,7 +897,10 @@ mod tests {
         // Test Replay protection
         let replay_result =
             nimbus_contract.ccip_receive(message_id, 1, vec![].into(), vec![0; 584].into());
-        assert_eq!(replay_result, Err(b"CCIP_MESSAGE_ALREADY_PROCESSED".to_vec()));
+        assert_eq!(
+            replay_result,
+            Err(b"CCIP_MESSAGE_ALREADY_PROCESSED".to_vec())
+        );
     }
 
     #[test]
@@ -1509,7 +1518,6 @@ mod tests {
         assert_eq!(contract.claim_accumulated_yield().unwrap(), U256::ZERO);
     }
 
-
     #[test]
     fn test_polymarket_fallback_refund() {
         reset_test_state();
@@ -2011,8 +2019,13 @@ mod tests {
         // Scenario A: Spend using non-registered root -> should revert
         let invalid_root = FixedBytes::repeat_byte(0xee);
         let nonce_a = FixedBytes::repeat_byte(0x01);
-        let (alpha_neg, _hm, pk_iss, nullifier) =
-            register_mock_issuer_with_nonce(&mut contract, owner, spend_amount, FixedBytes::ZERO, nonce_a);
+        let (alpha_neg, _hm, pk_iss, nullifier) = register_mock_issuer_with_nonce(
+            &mut contract,
+            owner,
+            spend_amount,
+            FixedBytes::ZERO,
+            nonce_a,
+        );
         assert_eq!(
             contract.spend(
                 invalid_root,
@@ -2032,8 +2045,13 @@ mod tests {
         // block_timestamp = 1000 + 100 = 1100 (delta_t = 100) -> 0.25% fee (25,000)
         set_block_timestamp(1100);
         let nonce_b = FixedBytes::repeat_byte(0x02);
-        let (alpha_neg2, _hm2, pk_iss2, nullifier2) =
-            register_mock_issuer_with_nonce(&mut contract, owner, spend_amount, FixedBytes::ZERO, nonce_b);
+        let (alpha_neg2, _hm2, pk_iss2, nullifier2) = register_mock_issuer_with_nonce(
+            &mut contract,
+            owner,
+            spend_amount,
+            FixedBytes::ZERO,
+            nonce_b,
+        );
         let initial_principal = contract.total_deposited_principal().unwrap();
         assert!(contract
             .spend(
@@ -2050,14 +2068,22 @@ mod tests {
             .unwrap());
         let after_spend_principal = contract.total_deposited_principal().unwrap();
         // spend_fee = (10,000,000 * 25 + 9999) / 10000 = 25,000
-        assert_eq!(initial_principal - after_spend_principal, U256::from(10_025_000));
+        assert_eq!(
+            initial_principal - after_spend_principal,
+            U256::from(10_025_000)
+        );
 
         // Scenario C: Spend using valid root with delta_t = 8 days (>= 7 days, < 30 days)
         // registration = 1000, current = 1000 + 8 * 86400 = 692200 (delta_t = 691200) -> 0.20% fee (20,000)
         set_block_timestamp(1000 + 8 * 86400);
         let nonce_c = FixedBytes::repeat_byte(0x03);
-        let (alpha_neg3, _hm3, pk_iss3, nullifier3) =
-            register_mock_issuer_with_nonce(&mut contract, owner, spend_amount, FixedBytes::ZERO, nonce_c);
+        let (alpha_neg3, _hm3, pk_iss3, nullifier3) = register_mock_issuer_with_nonce(
+            &mut contract,
+            owner,
+            spend_amount,
+            FixedBytes::ZERO,
+            nonce_c,
+        );
         let initial_principal = contract.total_deposited_principal().unwrap();
         assert!(contract
             .spend(
@@ -2074,14 +2100,22 @@ mod tests {
             .unwrap());
         let after_spend_principal = contract.total_deposited_principal().unwrap();
         // spend_fee = (10,000,000 * 20 + 9999) / 10000 = 20,000
-        assert_eq!(initial_principal - after_spend_principal, U256::from(10_020_000));
+        assert_eq!(
+            initial_principal - after_spend_principal,
+            U256::from(10_020_000)
+        );
 
         // Scenario D: Spend using valid root with delta_t = 31 days (>= 30 days)
         // registration = 1000, current = 1000 + 31 * 86400 = 2679400 -> 0.10% fee (10,000)
         set_block_timestamp(1000 + 31 * 86400);
         let nonce_d = FixedBytes::repeat_byte(0x04);
-        let (alpha_neg4, _hm4, pk_iss4, nullifier4) =
-            register_mock_issuer_with_nonce(&mut contract, owner, spend_amount, FixedBytes::ZERO, nonce_d);
+        let (alpha_neg4, _hm4, pk_iss4, nullifier4) = register_mock_issuer_with_nonce(
+            &mut contract,
+            owner,
+            spend_amount,
+            FixedBytes::ZERO,
+            nonce_d,
+        );
         let initial_principal = contract.total_deposited_principal().unwrap();
         assert!(contract
             .spend(
@@ -2098,6 +2132,9 @@ mod tests {
             .unwrap());
         let after_spend_principal = contract.total_deposited_principal().unwrap();
         // spend_fee = (10,000,000 * 10 + 9999) / 10000 = 10,000
-        assert_eq!(initial_principal - after_spend_principal, U256::from(10_010_000));
+        assert_eq!(
+            initial_principal - after_spend_principal,
+            U256::from(10_010_000)
+        );
     }
 }

@@ -36,11 +36,17 @@ pub async fn post_http(url: &str, body: &str) -> Result<String, String> {
         .await
         .map_err(|e| format!("Write failed: {}", e))?;
 
-    println!("HTTP CLIENT: Sent request to {}:\n{}", host_port, request_str);
+    println!(
+        "HTTP CLIENT: Sent request to {}:\n{}",
+        host_port, request_str
+    );
 
     let response = read_http_response(&mut stream).await?;
 
-    println!("HTTP CLIENT: Received raw response from {}:\n{}", host_port, response);
+    println!(
+        "HTTP CLIENT: Received raw response from {}:\n{}",
+        host_port, response
+    );
 
     if let Some(pos) = response.find("\r\n\r\n") {
         Ok(response[pos + 4..].to_string())
@@ -101,8 +107,8 @@ pub async fn get_http_with_headers(url: &str, headers: &[(&str, &str)]) -> Resul
 }
 
 async fn read_http_response(stream: &mut tokio::net::TcpStream) -> Result<String, String> {
-    use tokio::time::timeout;
     use std::time::Duration;
+    use tokio::time::timeout;
 
     let read_fut = async {
         let mut buf = Vec::new();
@@ -111,7 +117,10 @@ async fn read_http_response(stream: &mut tokio::net::TcpStream) -> Result<String
 
         // 1. Read until we find the end of the headers (\r\n\r\n)
         loop {
-            let n = stream.read(&mut temp).await.map_err(|e| format!("Read error: {}", e))?;
+            let n = stream
+                .read(&mut temp)
+                .await
+                .map_err(|e| format!("Read error: {}", e))?;
             if n == 0 {
                 break;
             }
@@ -153,14 +162,20 @@ async fn read_http_response(stream: &mut tokio::net::TcpStream) -> Result<String
             if current_body_len < len {
                 let remaining = len - current_body_len;
                 let mut remaining_buf = vec![0u8; remaining];
-                stream.read_exact(&mut remaining_buf).await.map_err(|e| format!("Read remaining body error: {}", e))?;
+                stream
+                    .read_exact(&mut remaining_buf)
+                    .await
+                    .map_err(|e| format!("Read remaining body error: {}", e))?;
                 let remaining_str = String::from_utf8_lossy(&remaining_buf);
                 response_str.push_str(&remaining_str);
             }
         } else {
             // Read to end
             let mut remaining_buf = Vec::new();
-            stream.read_to_end(&mut remaining_buf).await.map_err(|e| format!("Read to end error: {}", e))?;
+            stream
+                .read_to_end(&mut remaining_buf)
+                .await
+                .map_err(|e| format!("Read to end error: {}", e))?;
             let remaining_str = String::from_utf8_lossy(&remaining_buf);
             response_str.push_str(&remaining_str);
         }
@@ -174,5 +189,7 @@ async fn read_http_response(stream: &mut tokio::net::TcpStream) -> Result<String
 }
 
 fn find_subsequence(haystack: &[u8], needle: &[u8]) -> Option<usize> {
-    haystack.windows(needle.len()).position(|window| window == needle)
+    haystack
+        .windows(needle.len())
+        .position(|window| window == needle)
 }

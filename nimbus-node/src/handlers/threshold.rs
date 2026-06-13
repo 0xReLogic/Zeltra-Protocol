@@ -329,7 +329,10 @@ pub async fn handle_sign_share(
         });
     }
 
-    println!("GUARDIAN: Successfully signed share for Session ID: {}", payload.session_id);
+    println!(
+        "GUARDIAN: Successfully signed share for Session ID: {}",
+        payload.session_id
+    );
 
     Json(SignShareResponse {
         status: "SUCCESS".to_string(),

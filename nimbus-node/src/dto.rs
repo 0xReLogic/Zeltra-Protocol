@@ -111,6 +111,8 @@ pub struct PrivateSpendQuoteRequest {
     pub estimated_gas_cost: Option<u64>,
     #[serde(default)]
     pub relayer_markup_bps: Option<u64>,
+    #[serde(default)]
+    pub association_root: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -125,6 +127,10 @@ pub struct PrivateSpendQuoteResponse {
     pub user_total_debit: u64,
     pub fee_bps: u64,
     pub relayer_markup_bps: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub fee_tier: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub discount_bps: Option<u64>,
     pub message: String,
 }
 

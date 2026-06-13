@@ -41,8 +41,10 @@ pub use threshold::{
 // Re-export fee policy helpers
 pub use fees::{
     ceil_div, deposit_fee, fee_round_up, gross_up_for_exact_net, gross_up_private_spend_amount,
-    net_after_fee, private_spend_fee, quote_execution_fee, quote_private_spend, SpendQuote,
+    net_after_fee, private_spend_fee, quote_execution_fee, quote_private_spend,
+    quote_private_spend_with_fee, spend_fee_bps_for_holding, SpendQuote,
     DEFAULT_RELAYER_MARKUP_BPS, DEPOSIT_FEE_BPS, FEE_DENOMINATOR_BPS, PRIVATE_SPEND_FEE_BPS,
+    SEVEN_DAYS_SECS, SPEND_FEE_30DAY_BPS, SPEND_FEE_7DAY_BPS, THIRTY_DAYS_SECS,
 };
 
 // Re-export compliance circuit

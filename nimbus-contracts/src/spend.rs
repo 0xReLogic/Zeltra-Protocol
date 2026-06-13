@@ -196,7 +196,9 @@ impl Nimbus {
             if root_timestamp == U256::ZERO {
                 return Err(b"INVALID_ASSOCIATION_ROOT".to_vec());
             }
-            let delta_t = current_time.checked_sub(root_timestamp).unwrap_or(U256::ZERO);
+            let delta_t = current_time
+                .checked_sub(root_timestamp)
+                .unwrap_or(U256::ZERO);
             let seven_days = U256::from(7 * 24 * 60 * 60);
             let thirty_days = U256::from(30 * 24 * 60 * 60);
 

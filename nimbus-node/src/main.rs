@@ -120,9 +120,10 @@ async fn main() {
         let mut last_process = Instant::now();
         loop {
             let queue_count = worker_state.db.queued_spend_count().await.unwrap_or(0);
-            
+
             let oldest_age_secs = if queue_count > 0 {
-                if let Ok(Some(oldest)) = worker_state.db.get_oldest_queued_spend_timestamp().await {
+                if let Ok(Some(oldest)) = worker_state.db.get_oldest_queued_spend_timestamp().await
+                {
                     let now_secs = std::time::SystemTime::now()
                         .duration_since(std::time::UNIX_EPOCH)
                         .unwrap_or_default()

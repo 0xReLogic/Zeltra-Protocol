@@ -203,7 +203,8 @@ pub async fn load_share_key() -> (nimbus_core::Fr, u32) {
                     {
                         return (fr, idx as u32);
                     }
-                } else if let Some(fr) = nimbus_core::deserialize_from_bytes::<nimbus_core::Fr>(&bytes)
+                } else if let Some(fr) =
+                    nimbus_core::deserialize_from_bytes::<nimbus_core::Fr>(&bytes)
                 {
                     return (fr, env_index);
                 }

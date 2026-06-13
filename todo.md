@@ -1261,6 +1261,8 @@ Sisa implementasi wajib:
 - [ ] Tambahkan `max_execution_fee`, `quote_expiry`, `quote_id`, chain ID, dan
   relayer identity ke message/hash yang ditandatangani user.
 - [x] Buat endpoint quote deterministik untuk jalur single private spend.
+- [x] Quote endpoint menampilkan fee tier dan diskon berdasarkan holding time
+  (`association_root` → `getCleanRootTimestamp` → tier 25/20/10 bps, cached di node).
 - [ ] Tambahkan estimasi batch ke endpoint quote setelah benchmark gas testnet.
 - [ ] Pastikan relayer tidak dapat memotong lebih dari fixed quote.
 - [ ] Implementasikan pemotongan execution fee dalam stablecoin tanpa mengubah

@@ -44,6 +44,9 @@ pub struct AppState {
     /// Circuit breaker for blockchain RPC provider
     #[allow(dead_code)]
     pub rpc_circuit_breaker: CircuitBreaker,
+
+    /// Cache for clean_association_roots: root_hex -> registration timestamp
+    pub root_timestamp_cache: Arc<Mutex<HashMap<String, u64>>>,
 }
 
 impl AppState {
@@ -95,6 +98,7 @@ impl AppState {
                 success_threshold: 2,
                 name: "blockchain-rpc".to_string(),
             }),
+            root_timestamp_cache: Arc::new(Mutex::new(HashMap::new())),
         }
     }
 

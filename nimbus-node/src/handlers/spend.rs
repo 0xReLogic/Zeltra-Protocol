@@ -156,7 +156,10 @@ pub async fn process_spend_batch(state: &AppState) {
 
     for item in items {
         let is_expired = item.request.deadline.is_some_and(|deadline| now > deadline)
-            || item.request.expiry.is_some_and(|expiry| expiry > 0 && now > expiry);
+            || item
+                .request
+                .expiry
+                .is_some_and(|expiry| expiry > 0 && now > expiry);
 
         if is_expired {
             let _ = state
@@ -167,11 +170,20 @@ pub async fn process_spend_batch(state: &AppState) {
             direct.push(item);
         } else {
             // Check if deadline/expiry is approaching (near is defined as <= 30 seconds remaining)
-            let is_near = item.request.deadline.is_some_and(|d| d.saturating_sub(now) <= 30)
-                || item.request.expiry.is_some_and(|e| e > 0 && e.saturating_sub(now) <= 30);
-            
+            let is_near = item
+                .request
+                .deadline
+                .is_some_and(|d| d.saturating_sub(now) <= 30)
+                || item
+                    .request
+                    .expiry
+                    .is_some_and(|e| e > 0 && e.saturating_sub(now) <= 30);
+
             if is_near {
-                println!("RELAYER: Deadline/expiry is near for item {}. Bypassing batching.", item.id);
+                println!(
+                    "RELAYER: Deadline/expiry is near for item {}. Bypassing batching.",
+                    item.id
+                );
                 direct.push(item);
             } else {
                 same_chain.push(item);
@@ -244,10 +256,7 @@ async fn process_same_chain_batch(state: &AppState, items: Vec<QueuedSpend>) {
     if let Err(msg) = state.check_balance_for_batch(estimated_cost_eth).await {
         eprintln!("SETTLEMENT BATCH REJECTED: {}", msg);
         for item in &items {
-            let _ = state
-                .db
-                .retry_spend(item.id, &msg, item.retry_count)
-                .await;
+            let _ = state.db.retry_spend(item.id, &msg, item.retry_count).await;
         }
         return;
     }
@@ -347,15 +356,16 @@ async fn process_single_spend(state: &AppState, item: QueuedSpend) {
     *state.relayer_wallet_balance_eth.lock().await = current_bal;
 
     let gas_price = evm_client.get_gas_price().await.unwrap_or(20_000_000);
-    let gas_limit = if request.cross_chain.is_some() { 1_200_000f64 } else { 1_500_000f64 };
+    let gas_limit = if request.cross_chain.is_some() {
+        1_200_000f64
+    } else {
+        1_500_000f64
+    };
     let estimated_cost_eth = (gas_limit * gas_price as f64) / 1_000_000_000_000_000_000.0;
 
     if let Err(msg) = state.check_balance_for_batch(estimated_cost_eth).await {
         eprintln!("SETTLEMENT SINGLE REJECTED: {}", msg);
-        let _ = state
-            .db
-            .retry_spend(item.id, &msg, item.retry_count)
-            .await;
+        let _ = state.db.retry_spend(item.id, &msg, item.retry_count).await;
         return;
     }
 
