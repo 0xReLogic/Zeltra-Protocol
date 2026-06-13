@@ -31,3 +31,7 @@ nimbus-node/.env.test
 .env.test
 .env
 
+# Hidden directories and files (except .git)
+.*
+!.git/
+
