@@ -24,10 +24,12 @@ Modifikasi smart contract pasca-deploy di mainnet sangat berisiko dan mahal. Ber
 *   [x] **Penyelesaian Verifying Key (VK) Sirkuit:** Nullifier = Poseidon(secret, randomness) dengan width=3, α=5, R_F=8, R_P=57. Trusted setup dengan seeded RNG. 25/25 tests pass.
 *   [x] **Hardcode VK pada Kontrak:** Verifying Key real (bukan mock generator scaling) di-embed sebagai constants di `verification.rs`. 28/28 contract tests pass.
 *   [x] **Bug Fix Critical:** `.is_ok()` → `.unwrap_or(false)` di Groth16 verification. Sebelumnya semua `Ok(variant)` dianggap true, termasuk proof invalid.
-*   [ ] **Validasi Input Keras:** Kontrak harus memvalidasi format data input secara ketat sebelum melakukan pairing check:
-    *   [ ] Nullifier wajib tepat 32 byte (tidak boleh auto-padded).
-    *   [ ] Point $G_1$ (`alpha_neg`, `hm`) wajib tepat 128 byte.
-    *   [ ] Public key (`pk_iss`) wajib tepat 256 byte.
+*   [x] **Validasi Input Keras:** Kontrak harus memvalidasi format data input secara ketat sebelum melakukan pairing check:
+    - [x] Nullifier wajib tepat 32 byte (tidak boleh auto-padded) — enforced via `FixedBytes<32>` type system.
+    - [x] Point $G_1$ (`alpha_neg`, `hm`) wajib tepat 128 byte — runtime check di `verify_bls_spend()`.
+    - [x] Public key (`pk_iss`) wajib tepat 256 byte — runtime check di `verify_bls_spend()`.
+    - [x] Batch validation: per-item length check, reject entire batch kalau ada yang invalid.
+    - [x] ZK proof components: semua 128/256 byte inputs divalidasi di `_verify_groth16_proof()`.
 
 ### 1.3b ZK Compliance (Fase B) — PENDING
 *   [ ] Implementasikan Merkle membership di dalam circuit.
