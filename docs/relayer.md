@@ -9,11 +9,10 @@ Dokumen ini mendokumentasikan desain teknis, endpoints, dan optimalisasi **Nimbu
 
 ## 0. Informasi Deployment Testnet L2
 
-Berikut adalah informasi deployment resmi kontrak Nimbus di testnet Arbitrum Sepolia untuk referensi integrasi relayer node:
-*   **Alamat Kontrak Nimbus (L2)**: `0xe6430973795bb1cc3083787e554ef2a559dad7f1`
+*   **Alamat Kontrak Nimbus**: `0x7853df45be072977082d2872e199ac2e405c6d22`
 *   **Jaringan**: Arbitrum Sepolia Testnet
-*   **Arbitrum RPC Endpoint**: `https://sepolia-rollup.arbitrum.io/rpc`
-*   **Explorer**: [Sepolia Arbiscan](https://sepolia.arbiscan.io/address/0xe6430973795bb1cc3083787e554ef2a559dad7f1)
+*   **RPC Endpoint**: `https://sepolia-rollup.arbitrum.io/rpc`
+*   **Explorer**: [Sepolia Arbiscan](https://sepolia.arbiscan.io/address/0x7853df45be072977082d2872e199ac2e405c6d22)
 
 ---
 
@@ -121,22 +120,21 @@ Response:
 {
   "status": "OK",
   "merchant_amount": 100000000,
-  "contract_amount": 100150226,
-  "protocol_fee": 150226,
+  "contract_amount": 100000000,
+  "protocol_fee": 250000,
   "gas_cost": 20000,
   "relayer_markup": 3000,
   "execution_fee": 23000,
-  "user_total_debit": 100173226,
-  "fee_bps": 15,
+  "user_total_debit": 100273000,
+  "fee_bps": 25,
   "relayer_markup_bps": 1500,
+  "fee_tier": "default",
+  "discount_bps": null,
   "message": "Informational quote only; signed max_execution_fee is not active yet"
 }
 ```
 
-`contract_amount` adalah nominal yang harus masuk ke payload spend agar contract
-memotong fee 0,15% tetapi merchant tetap menerima `merchant_amount`. Endpoint
-ini belum menggantikan signed `max_execution_fee`; monetisasi execution fee
-tetap belum boleh diaktifkan sebelum quote ditandatangani dan direkonsiliasi.
+`contract_amount = merchant_amount` (merchant terima nominal exact). Protocol fee (25 bps) dan execution fee (gas + markup) dipisah dan ditambahkan di atas invoice. Fee tier menunjukkan holding time discount: default (25 bps), 7+ days (20 bps), atau 30+ days (10 bps).
 
 ## 3. Konfigurasi Node (Environment Variables)
 
@@ -165,6 +163,9 @@ Every instance of `nimbus-node` reads configurations from environment variables 
 | `PORT` | `8080` | Port untuk HTTP server. |
 | `NIMBUS_SIGNING_STALL_THRESHOLD` | `600` | Threshold detik untuk mendeteksi stalled signing session (default 10 menit). |
 | `NIMBUS_AUTO_REFUND` | `false` | Enable/disable auto-refund untuk stalled signing session (DEC-012). |
+| `NIMBUS_DESTINATION_RPC_URL` | `None` | RPC URL destination chain untuk CCIP destination tracking. Graceful no-op kalau tidak diset. |
+| `NIMBUS_CCIP_OFFRAMP` | `None` | OffRamp contract address di destination chain untuk monitor CCIP message status. |
+| `NIMBUS_CCIP_REFUND_TIMEOUT_SECS` | `86400` | Timeout detik sebelum refund bisa di-claim setelah CCIP destination failed (default 24h). Mencegah double payout attack. |
 
 ### Integrasi OpenBao / Vault (Production Mode)
 
@@ -261,18 +262,22 @@ Nimbus Node telah direfaktor menjadi struktur modular yang terorganisir dengan b
 ```
 nimbus-node/src/
 ├── main.rs              # Entry point minimal
+├── config.rs            # Runtime mode dan network configuration
 ├── dto.rs               # Request/Response DTOs
-├── state.rs             # AppState + database and circuit breaker state
+├── state.rs             # AppState + database, circuit breaker, root timestamp cache
 ├── database.rs          # SQLCipher persistent SQLite database
 ├── circuit_breaker.rs   # Resilience Circuit Breaker pattern
 ├── key_rotation.rs      # Key rotation and in-memory split management
 ├── http.rs              # HTTP client utilities
 ├── kms.rs               # OpenBao/Vault KMS integration
+├── evm_client.rs        # Ethereum transaction broadcasting (single, batch, CCIP)
+├── ccip_monitor.rs      # CCIP destination tracking background worker
 └── handlers/
     ├── mod.rs           # Handler exports
     ├── health.rs        # Health check endpoint
     ├── deposit.rs       # Deposit & reveal handlers
-    ├── spend.rs         # Spend + batch processing logic
+    ├── spend.rs         # Spend + batch processing + CCIP refund
+    ├── quote.rs         # Private spend fee quote calculator
     ├── x402.rs          # x402 facilitator endpoint
     └── threshold.rs     # Threshold signing handlers
 ```
@@ -302,13 +307,16 @@ Mengecek status kesehatan node relayer, jumlah antrean transaksi, nullifier yang
 *   **Response (JSON):**
     ```json
     {
-      "status": "OK", // Bisa berupa "OK", "DEGRADED_RPC_DOWN", atau "ERROR_DATABASE_DOWN"
+      "status": "OK",
       "queued_transactions": 0,
       "processed_nullifiers": 15,
       "relayer_wallet_balance_eth": 10.0,
-      "relayer_accumulated_profit_usdc": 0.0
+      "relayer_accumulated_profit_usdc": 0.0,
+      "ccip_pending_count": 0,
+      "ccip_failure_count": 0
     }
     ```
+    `ccip_pending_count`: jumlah CCIP transaction yang menunggu destination status. `ccip_failure_count`: jumlah CCIP transaction yang gagal di destination.
 
 ### B. Signing Health Check (DEC-012)
 Mengecek status session signing yang stalled (deposit confirmed tapi belum resolve). Memberikan visibility ke operational team untuk quorum failure detection.
@@ -413,11 +421,31 @@ Dihubungi oleh klien untuk mengirimkan token privat secara anonim, baik secara l
       "status": "QUEUED",
       "message": "Spend persisted with settlement id 42",
       "queue_position": 1,
-      "estimated_gas_usdc": 1.25                    // Opsional: Perkiraan beban biaya gas relayer dalam USDC
+      "estimated_gas_usdc": 1.25
+    }
+    ```
+    *CCIP Note:* Jika `cross_chain` disediakan, relayer parse `CCIPMessageSent` event dari source receipt, extract `message_id`, dan background worker monitor destination status via `ExecutionStateChanged` events. Status flow: `submitted` → `confirmed` (state 2) atau `failed` (state 3). Refund bisa di-claim via endpoint `/api/ccip/refund` setelah 24h timeout.
+
+### F. CCIP Refund
+Claim refund untuk CCIP transaction yang gagal di destination chain. Hanya bisa dipanggil setelah 24h timeout (prevent double payout attack).
+*   **Method:** `POST`
+*   **Path:** `/api/ccip/refund`
+*   **Payload (JSON):**
+    ```json
+    {
+      "nullifier": "nullifier_hash_hex..."
+    }
+    ```
+*   **Response (JSON):**
+    ```json
+    {
+      "status": "SUCCESS",
+      "tx_hash": "0xrefund_tx_hash...",
+      "message": "Refund claimed successfully"
     }
     ```
 
-### F. Verifikasi Pembayaran x402 (Fase C: AI Agent Facilitator)
+### G. Verifikasi Pembayaran x402 (Fase C: AI Agent Facilitator)
 Menerima payload PAYMENT-SIGNATURE terenkode Base64 dari AI Agent yang menggunakan token anonim Nimbus untuk membayar akses resource API secara privat, memverifikasi nullifier, dan menjadwalkan settlement.
 *   **Method:** `POST`
 *   **Path:** `/api/x402/verify`
