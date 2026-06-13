@@ -141,6 +141,12 @@ pub struct HealthResponse {
     pub processed_nullifiers: usize,
     pub relayer_wallet_balance_eth: f64,
     pub relayer_accumulated_profit_usdc: f64,
+    /// CCIP cross-chain spends awaiting destination confirmation
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ccip_pending_count: Option<i64>,
+    /// CCIP cross-chain spends that failed on destination chain
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ccip_failure_count: Option<i64>,
 }
 
 #[derive(Serialize)]

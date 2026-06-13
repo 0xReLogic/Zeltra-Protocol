@@ -77,6 +77,8 @@ pub struct TransactionOutcome {
     pub success: bool,
     pub gas_used: u64,
     pub effective_gas_price: u128,
+    /// CCIP message ID extracted from CCIPMessageSent event (if CCIP transaction)
+    pub ccip_message_id: Option<String>,
 }
 
 #[derive(Clone, Debug)]
@@ -251,6 +253,7 @@ impl EvmClient {
             success,
             gas_used: receipt.gas_used,
             effective_gas_price,
+            ccip_message_id: None,
         })
     }
 
@@ -710,11 +713,45 @@ impl EvmClient {
             .with_max_priority_fee_per_gas(1_000_000)
             .with_input(Bytes::from(ccip_send_call));
 
-        let outcome = self.send_tx_with_fallback(tx).await?;
+        let mut outcome = self.send_tx_with_fallback(tx).await?;
+
+        // Parse CCIPMessageSent event to extract messageId
+        if outcome.success {
+            if let Ok(Some(receipt)) = self
+                .provider
+                .get_transaction_receipt(outcome.tx_hash.parse().unwrap())
+                .await
+            {
+                // CCIPMessageSent event signature: keccak256("CCIPMessageSent((bytes32,uint64,address,bytes,bytes,address,uint256,uint256,(address,uint256)[],bytes))")
+                let event_signature =
+                    alloy::primitives::keccak256("CCIPMessageSent((bytes32,uint64,address,bytes,bytes,address,uint256,uint256,(address,uint256)[],bytes))");
+
+                for log in receipt.inner.logs() {
+                    let log_address = log.address();
+                    if log_address == self.ccip_router_address {
+                        if let Some(topic0) = log.topics().first() {
+                            if *topic0 == event_signature {
+                                // messageId is the first indexed topic (topic1)
+                                if let Some(topic1) = log.topics().get(1) {
+                                    let topic1_bytes: &[u8] = topic1.as_slice();
+                                    let message_id = format!("0x{}", hex::encode(topic1_bytes));
+                                    println!("  CCIP Message ID      : {}", message_id);
+                                    outcome.ccip_message_id = Some(message_id);
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        if outcome.ccip_message_id.is_none() {
+            println!("  CCIP Message ID      : (not found in logs)");
+        }
 
         println!("RELAYER: Real CCIP transaction broadcasted successfully");
         println!("  Source Tx Hash       : {}", outcome.tx_hash);
-        println!("  CCIP Message ID      : pending event parsing");
 
         Ok(outcome)
     }

@@ -1,3 +1,4 @@
+mod ccip_monitor;
 mod circuit_breaker;
 mod config;
 mod database;
@@ -205,6 +206,13 @@ async fn main() {
         }
     });
 
+    // Spawn CCIP destination monitor (if configured)
+    let ccip_db = state.db.clone();
+    let ccip_config = config::CcipDestinationConfig::from_env();
+    tokio::spawn(async move {
+        ccip_monitor::ccip_monitor_loop(ccip_db, ccip_config).await;
+    });
+
     let app = Router::new()
         .route("/health", get(health_check))
         .route("/api/signing-health", get(signing_health))
@@ -215,6 +223,7 @@ async fn main() {
         .route("/api/x402/verify", post(handle_x402_verify))
         .route("/api/sign-share", post(handle_sign_share))
         .route("/api/leader/sign", post(handle_leader_sign))
+        .route("/api/ccip/refund", post(handle_ccip_refund))
         .layer(axum::middleware::from_fn(rate_limit_middleware))
         .layer(DefaultBodyLimit::max(64 * 1024)) // 64KB request body size limit
         .with_state(state.clone());

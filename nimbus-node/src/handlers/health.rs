@@ -37,6 +37,10 @@ pub async fn health_check(
         true
     };
 
+    // 3. Query CCIP destination tracking metrics
+    let ccip_pending = state.db.ccip_pending_count().await.ok();
+    let ccip_failure = state.db.ccip_failure_count().await.ok();
+
     let status = if !db_ok {
         "ERROR_DATABASE_DOWN".to_string()
     } else if !rpc_ok {
@@ -51,6 +55,8 @@ pub async fn health_check(
         processed_nullifiers,
         relayer_wallet_balance_eth,
         relayer_accumulated_profit_usdc,
+        ccip_pending_count: ccip_pending,
+        ccip_failure_count: ccip_failure,
     })
 }
 

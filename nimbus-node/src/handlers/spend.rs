@@ -407,21 +407,71 @@ async fn process_single_spend(state: &AppState, item: QueuedSpend) {
             .await
     };
 
+    let is_ccip = request.cross_chain.is_some();
+    let ccip_chain_selector = request
+        .cross_chain
+        .as_ref()
+        .map(|cc| cc.destination_chain_selector);
+
     match result {
         Ok(outcome) if outcome.success => {
             let _ = state
                 .db
                 .mark_spend_submitted(item.id, &outcome.tx_hash)
                 .await;
-            let _ = state
-                .db
-                .mark_spend_confirmed(
-                    item.id,
-                    &request.nullifier,
-                    &outcome.tx_hash,
-                    outcome.block_number,
-                )
-                .await;
+
+            if is_ccip {
+                // CCIP cross-chain: track destination, don't mark confirmed yet
+                if let Some(message_id) = &outcome.ccip_message_id {
+                    let chain_sel = ccip_chain_selector.unwrap_or(0);
+                    if let Err(e) = state
+                        .db
+                        .set_ccip_tracking(item.id, message_id, chain_sel)
+                        .await
+                    {
+                        eprintln!(
+                            "CCIP_TRACKING: Failed to set tracking for id={}: {}",
+                            item.id, e
+                        );
+                    }
+                    // Also insert nullifier to prevent double-spend while awaiting destination
+                    let _ = state
+                        .db
+                        .mark_spend_confirmed(
+                            item.id,
+                            &request.nullifier,
+                            &outcome.tx_hash,
+                            outcome.block_number,
+                        )
+                        .await;
+                    println!(
+                        "CCIP: Spend {} queued for destination tracking (msg_id={})",
+                        item.id, message_id
+                    );
+                } else {
+                    // No message ID parsed — fall back to immediate confirm (graceful degradation)
+                    let _ = state
+                        .db
+                        .mark_spend_confirmed(
+                            item.id,
+                            &request.nullifier,
+                            &outcome.tx_hash,
+                            outcome.block_number,
+                        )
+                        .await;
+                }
+            } else {
+                // Same-chain: mark confirmed immediately
+                let _ = state
+                    .db
+                    .mark_spend_confirmed(
+                        item.id,
+                        &request.nullifier,
+                        &outcome.tx_hash,
+                        outcome.block_number,
+                    )
+                    .await;
+            }
         }
         Ok(outcome) => {
             let _ = state
@@ -446,5 +496,65 @@ async fn process_single_spend(state: &AppState, item: QueuedSpend) {
                 .retry_spend(item.id, &error.to_string(), item.retry_count)
                 .await;
         }
+    }
+}
+
+/// CCIP refund endpoint.
+///
+/// POST /api/ccip/refund
+/// Body: { "nullifier": "0x..." }
+///
+/// Authorizes a refund for a failed CCIP cross-chain spend by freeing the nullifier
+/// so the user can re-submit the spend. Only allowed if:
+/// 1. destination_status = 'failed' (confirmed by CCIP monitor)
+/// 2. Refund timeout has elapsed (default 24h, prevents manual execution race)
+#[derive(serde::Deserialize)]
+pub struct CcipRefundRequest {
+    pub nullifier: String,
+}
+
+#[derive(serde::Serialize)]
+pub struct CcipRefundResponse {
+    pub status: String,
+    pub nullifier: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+}
+
+pub async fn handle_ccip_refund(
+    axum::extract::State(state): axum::extract::State<AppState>,
+    Json(payload): Json<CcipRefundRequest>,
+) -> Json<CcipRefundResponse> {
+    let refund_timeout = crate::config::CcipDestinationConfig::from_env().refund_timeout_secs;
+
+    match state
+        .db
+        .authorize_ccip_refund(&payload.nullifier, refund_timeout)
+        .await
+    {
+        Ok(true) => {
+            println!(
+                "CCIP_REFUND: Nullifier freed for re-spend: {}...",
+                &payload.nullifier[..8.min(payload.nullifier.len())]
+            );
+            Json(CcipRefundResponse {
+                status: "refund_authorized".to_string(),
+                nullifier: payload.nullifier,
+                error: None,
+            })
+        }
+        Ok(false) => Json(CcipRefundResponse {
+            status: "refund_denied".to_string(),
+            nullifier: payload.nullifier,
+            error: Some(
+                "Not eligible: destination not failed, or refund timeout not yet elapsed"
+                    .to_string(),
+            ),
+        }),
+        Err(e) => Json(CcipRefundResponse {
+            status: "error".to_string(),
+            nullifier: payload.nullifier,
+            error: Some(e.to_string()),
+        }),
     }
 }

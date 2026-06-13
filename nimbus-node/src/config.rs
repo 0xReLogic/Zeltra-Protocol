@@ -91,6 +91,39 @@ pub fn runtime_mode() -> RuntimeMode {
     RuntimeMode::from_env()
 }
 
+/// CCIP destination tracking configuration.
+/// All fields are optional — if not set, destination tracking is disabled (graceful no-op).
+#[derive(Debug, Clone)]
+pub struct CcipDestinationConfig {
+    /// RPC URL for the destination chain (e.g., "https://sepolia-rollup.arbitrum.io/rpc")
+    pub destination_rpc_url: Option<String>,
+    /// CCIP OffRamp contract address on destination chain
+    pub ccip_offramp_address: Option<String>,
+    /// Timeout before freeing failed nullifier (seconds, default 86400 = 24h)
+    pub refund_timeout_secs: u64,
+}
+
+impl CcipDestinationConfig {
+    pub fn from_env() -> Self {
+        let destination_rpc_url = std::env::var("NIMBUS_DESTINATION_RPC_URL").ok();
+        let ccip_offramp_address = std::env::var("NIMBUS_CCIP_OFFRAMP").ok();
+        let refund_timeout_secs = std::env::var("NIMBUS_CCIP_REFUND_TIMEOUT_SECS")
+            .ok()
+            .and_then(|v| v.parse::<u64>().ok())
+            .unwrap_or(86400); // 24 hours default
+
+        Self {
+            destination_rpc_url,
+            ccip_offramp_address,
+            refund_timeout_secs,
+        }
+    }
+
+    pub fn is_enabled(&self) -> bool {
+        self.destination_rpc_url.is_some() && self.ccip_offramp_address.is_some()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
