@@ -62,3 +62,14 @@ Selain smart contract, fungsionalitas relayer harus ditingkatkan ke standar keam
 *   [ ] **Deadline-Near Bypass:** Jika suatu transaksi dalam antrean (`spend_queue`) mendekati waktu kedaluwarsa (expiry), relayer harus me-bypass antrean normal dan langsung membroadcast transaksi tersebut secara instan.
 *   [ ] **Pencegahan Double Broadcast:** Pastikan dua thread worker tidak dapat memproses antrean transaksi yang sama secara bersamaan (gunakan row locking pada database SQLite).
 *   [ ] **Penanganan Nonce & Gas Spikes:** Terapkan strategi adaptif untuk otomatis mengirim ulang transaksi (replacement transaction / speed-up) dengan gas price lebih tinggi jika transaksi stuck di mempool Arbitrum.
+
+### 2.4 CCIP Destination Tracking (SELESAI 2026-06-13)
+*   [x] **Message ID Parsing:** Parse CCIP message ID dari source event (CCIPMessageSent) dan simpan di DB.
+*   [x] **Background Monitor:** Worker polling setiap 30 detik, query ExecutionStateChanged events dari OffRamp di destination chain.
+*   [x] **Status Tracking:** Update DB status submitted → confirmed (state 2) atau failed (state 3).
+*   [x] **Manual Refund Endpoint:** POST /api/ccip/refund dengan 24h timeout safety (prevent double payout attack dari Dedaub audit finding).
+*   [x] **Double Payout Prevention:** Nullifier locked di DB sampai refund authorized + timeout elapsed.
+*   [x] **Health Metrics:** ccip_pending_count dan ccip_failure_count di /health endpoint.
+*   [x] **Configuration:** Env vars NIMBUS_DESTINATION_RPC_URL, NIMBUS_CCIP_OFFRAMP, NIMBUS_CCIP_REFUND_TIMEOUT_SECS (default 24h). Graceful no-op kalau config tidak diset.
+
+**Testing:** 24/24 tests pass, clippy clean, cargo fmt applied.

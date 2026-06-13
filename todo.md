@@ -1429,14 +1429,23 @@ Fase B - PENDING:
 
 ## P1 - CCIP Contract Security
 
+**On-chain (contract):**
 - [ ] Wajibkan `ccip_router != Address::ZERO` sebelum menerima message.
 - [ ] Tolak semua caller jika router belum dikonfigurasi.
 - [ ] Validasi `source_chain_selector` dengan allowlist.
 - [ ] Decode dan validasi sender CCIP.
 - [ ] Bind sender contract yang sah untuk setiap source chain.
-- [ ] Gunakan message ID untuk replay protection.
-- [ ] Tambahkan event untuk received, executed, dan failed intents.
+- [x] Gunakan message ID untuk replay protection. (2026-06-13)
 - [ ] Audit payload encoding antara source relayer dan destination contract.
+
+**Off-chain (node):**
+- [x] Parse CCIP message ID dari source event (CCIPMessageSent). (2026-06-13)
+- [x] Background worker monitor destination status (ExecutionStateChanged events). (2026-06-13)
+- [x] Update DB: submitted → confirmed (state 2) atau failed (state 3). (2026-06-13)
+- [x] Manual refund endpoint POST /api/ccip/refund dengan 24h timeout safety. (2026-06-13)
+- [x] Double payout prevention: nullifier locked sampai refund authorized + timeout elapsed. (2026-06-13)
+- [x] Health metrics: ccip_pending_count, ccip_failure_count. (2026-06-13)
+- [x] Config: NIMBUS_DESTINATION_RPC_URL, NIMBUS_CCIP_OFFRAMP, NIMBUS_CCIP_REFUND_TIMEOUT_SECS. (2026-06-13)
 
 ## P2 - x402
 
