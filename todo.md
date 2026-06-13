@@ -1281,12 +1281,12 @@ Sisa implementasi wajib:
 - [x] Deploy contract baru yang memiliki `batchSpend()` ke Arbitrum Sepolia.
 - [x] Generate ABI deployment terbaru dan cocokkan selector dengan relayer.
 - [x] Aktifkan `NIMBUS_BATCH_ENABLED=true` hanya pada deployment baru tersebut.
-- [ ] Hard test batch ukuran 1, 2, 8, dan 9 pada testnet.
-- [ ] Hard test satu item invalid dalam batch dan buktikan tidak ada partial
+- [x] Hard test batch ukuran 1, 2, 8, dan 9 pada testnet.
+- [x] Hard test satu item invalid dalam batch dan buktikan tidak ada partial
   payout/nullifier corruption.
-- [ ] Benchmark gas receipt single versus batch 2/4/8; jangan memakai asumsi
-  persentase penghematan.
-- [ ] Ukur latency API-to-broadcast dan API-to-confirmed p50/p95/p99.
+- [x] Benchmark gas receipt single versus batch 2/4/8; jangan memakai asumsi
+  persentase penghematan. (Hasil: [gas_latency_benchmark.md](file:///home/azureuser/crypto/docs/gas_latency_benchmark.md))
+- [x] Ukur latency API-to-broadcast dan API-to-confirmed p50/p95/p99.
 - [x] Tambahkan fee helper terpusat agar merchant menerima nominal exact dan
   protocol fee didebit di atas invoice.
 - [x] Pisahkan gas reimbursement dan markup relayer dalam quote informasional.
@@ -1295,7 +1295,7 @@ Sisa implementasi wajib:
   - Core quote sekarang: `contract_amount = merchant_amount`,
     `protocol_fee = ceil(merchant_amount * 15 / 10_000)`,
     `user_total_debit = merchant_amount + protocol_fee + execution_fee`.
-- [ ] Buktikan margin batch positif setelah gas, RPC, retry, dan transaksi
+- [x] Buktikan margin batch positif setelah gas, RPC, retry, dan transaksi
   revert diperhitungkan.
 - [ ] Tambahkan integration test signed quote sampai settlement accounting.
 - [ ] Audit eksternal jalur fee dan batch sebelum mainnet.

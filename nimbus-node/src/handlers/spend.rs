@@ -156,7 +156,7 @@ pub async fn process_spend_batch(state: &AppState) {
 
     for item in items {
         let is_expired = item.request.deadline.is_some_and(|deadline| now > deadline)
-            || item.request.expiry.is_some_and(|expiry| now > expiry);
+            || item.request.expiry.is_some_and(|expiry| expiry > 0 && now > expiry);
 
         if is_expired {
             let _ = state
@@ -168,7 +168,7 @@ pub async fn process_spend_batch(state: &AppState) {
         } else {
             // Check if deadline/expiry is approaching (near is defined as <= 30 seconds remaining)
             let is_near = item.request.deadline.is_some_and(|d| d.saturating_sub(now) <= 30)
-                || item.request.expiry.is_some_and(|e| e.saturating_sub(now) <= 30);
+                || item.request.expiry.is_some_and(|e| e > 0 && e.saturating_sub(now) <= 30);
             
             if is_near {
                 println!("RELAYER: Deadline/expiry is near for item {}. Bypassing batching.", item.id);
@@ -347,7 +347,7 @@ async fn process_single_spend(state: &AppState, item: QueuedSpend) {
     *state.relayer_wallet_balance_eth.lock().await = current_bal;
 
     let gas_price = evm_client.get_gas_price().await.unwrap_or(20_000_000);
-    let gas_limit = if request.cross_chain.is_some() { 1_200_000f64 } else { 1_000_000f64 };
+    let gas_limit = if request.cross_chain.is_some() { 1_200_000f64 } else { 1_500_000f64 };
     let estimated_cost_eth = (gas_limit * gas_price as f64) / 1_000_000_000_000_000_000.0;
 
     if let Err(msg) = state.check_balance_for_batch(estimated_cost_eth).await {
@@ -399,22 +399,19 @@ async fn process_single_spend(state: &AppState, item: QueuedSpend) {
 
     match result {
         Ok(outcome) if outcome.success => {
-            if state
+            let _ = state
                 .db
                 .mark_spend_submitted(item.id, &outcome.tx_hash)
-                .await
-                .is_ok()
-            {
-                let _ = state
-                    .db
-                    .mark_spend_confirmed(
-                        item.id,
-                        &request.nullifier,
-                        &outcome.tx_hash,
-                        outcome.block_number,
-                    )
-                    .await;
-            }
+                .await;
+            let _ = state
+                .db
+                .mark_spend_confirmed(
+                    item.id,
+                    &request.nullifier,
+                    &outcome.tx_hash,
+                    outcome.block_number,
+                )
+                .await;
         }
         Ok(outcome) => {
             let _ = state

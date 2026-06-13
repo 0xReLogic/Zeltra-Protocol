@@ -140,10 +140,10 @@ async fn main() {
             } else if queue_count >= 8 {
                 // Batch is full, process immediately
                 true
-            } else if oldest_age_secs >= 2 {
+            } else if oldest_age_secs >= 3 {
                 // Hard timeout reached
                 true
-            } else if oldest_age_secs >= 1 && last_process.elapsed() >= Duration::from_secs(1) {
+            } else if oldest_age_secs >= 2 && last_process.elapsed() >= Duration::from_secs(2) {
                 // Target window reached
                 true
             } else {

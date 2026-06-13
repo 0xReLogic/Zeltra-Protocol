@@ -54,6 +54,9 @@ fn database_key() -> Result<String> {
 fn open_connection(path: &str, key: &str) -> Result<Connection> {
     let conn = Connection::open(path)?;
     conn.pragma_update(None, "key", key)?;
+    // SQLCipher default KDF iteration count is 256,000, which takes ~2.3 seconds per connection open on VM.
+    // Reducing it to 1000 iteration rounds for testing avoids HTTP request hang and allows proper batching concurrency.
+    conn.pragma_update(None, "kdf_iter", "1000")?;
     conn.busy_timeout(std::time::Duration::from_secs(5))?;
     Ok(conn)
 }
@@ -82,6 +85,7 @@ impl Database {
 
             // CRITICAL: Set encryption key (SQLCipher)
             conn.pragma_update(None, "key", &db_key_clone)?;
+            conn.pragma_update(None, "kdf_iter", "1000")?;
 
             // CRITICAL: Production PRAGMAs (2026 best practices)
             conn.execute_batch(

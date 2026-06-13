@@ -174,7 +174,29 @@ impl EvmClient {
         })
     }
 
-    async fn send_tx_with_fallback(&self, tx: TransactionRequest) -> Result<TransactionOutcome> {
+    async fn send_tx_with_fallback(&self, mut tx: TransactionRequest) -> Result<TransactionOutcome> {
+        // Fetch the latest transaction count dynamically to avoid local nonce cache issues
+        let nonce = match self.provider.get_transaction_count(self.signer_address).await {
+            Ok(n) => n,
+            Err(e) => {
+                eprintln!("PRIMARY RPC ERROR (get_transaction_count): {}", e);
+                if let Some(ref fallback) = self.fallback_provider {
+                    println!("FALLBACK: Switching to secondary RPC to get transaction count...");
+                    fallback
+                        .get_transaction_count(self.signer_address)
+                        .await
+                        .context("Fallback RPC get_transaction_count also failed")?
+                } else {
+                    return Err(anyhow::anyhow!(
+                        "Failed to get transaction count from primary RPC and no fallback: {}",
+                        e
+                    ));
+                }
+            }
+        };
+
+        tx = tx.with_nonce(nonce);
+
         // Try primary provider
         let result = self.provider.send_transaction(tx.clone()).await;
 
@@ -394,7 +416,7 @@ impl EvmClient {
         let tx = TransactionRequest::default()
             .with_to(self.contract_address)
             .with_value(U256::ZERO)
-            .with_gas_limit(1_000_000)
+            .with_gas_limit(1_500_000)
             .with_max_fee_per_gas(max_fee)
             .with_max_priority_fee_per_gas(1_000_000)
             .with_input(Bytes::from(call_data));

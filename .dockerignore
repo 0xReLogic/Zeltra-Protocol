@@ -1,0 +1,7 @@
+target/
+.git/
+.cargo/
+nimbus-relayer.db*
+test-relayer.db*
+*.db
+*.log

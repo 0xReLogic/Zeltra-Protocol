@@ -1,0 +1,132 @@
+version: '3'
+
+services:
+  vault:
+    image: hashicorp/vault:latest
+    container_name: nimbus-vault
+    ports:
+      - "8200:8200"
+    environment:
+      VAULT_DEV_ROOT_TOKEN_ID: test-root-token
+      VAULT_DEV_LISTEN_ADDRESS: 0.0.0.0:8200
+    cap_add:
+      - IPC_LOCK
+
+  leader:
+    image: nimbus-node:latest
+    container_name: nimbus-leader
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./test_leader.db:/app/test_leader.db
+    environment:
+      - PORT=8080
+      - NIMBUS_BIND_ADDR=0.0.0.0
+      - NIMBUS_ENV=test
+      - NIMBUS_SHARE_INDEX=1
+      - NIMBUS_VAULT_ADDR=http://vault:8200
+      - NIMBUS_VAULT_TOKEN=test-root-token
+      - NIMBUS_VAULT_PATH=v1/secret/data/nimbus/leader
+      - NIMBUS_THRESHOLD=3
+      - NIMBUS_DB_PATH=/app/test_leader.db
+      - NIMBUS_ISSUER_PUBLIC_KEY=${NIMBUS_ISSUER_PUBLIC_KEY}
+      - NIMBUS_GUARDIAN_PUBLIC_KEYS=${NIMBUS_GUARDIAN_PUBLIC_KEYS_1}
+      - NIMBUS_RPC_URL=${NIMBUS_RPC_URL}
+      - NIMBUS_RPC_FALLBACK_URL=${NIMBUS_RPC_FALLBACK_URL}
+      - NIMBUS_RELAYER_PRIVATE_KEY=${NIMBUS_RELAYER_PRIVATE_KEY}
+      - NIMBUS_CONTRACT_ADDRESS=${NIMBUS_CONTRACT_ADDRESS}
+      - NIMBUS_BATCH_ENABLED=true
+    depends_on:
+      - vault
+
+  guardian-1:
+    image: nimbus-node:latest
+    container_name: nimbus-guardian-1
+    ports:
+      - "8081:8081"
+    volumes:
+      - ./test_guardian_1.db:/app/test_guardian_1.db
+    environment:
+      - PORT=8081
+      - NIMBUS_BIND_ADDR=0.0.0.0
+      - NIMBUS_ENV=test
+      - NIMBUS_SHARE_INDEX=2
+      - NIMBUS_VAULT_ADDR=http://vault:8200
+      - NIMBUS_VAULT_TOKEN=test-root-token
+      - NIMBUS_VAULT_PATH=v1/secret/data/nimbus/guardian-1
+      - NIMBUS_THRESHOLD=3
+      - NIMBUS_DB_PATH=/app/test_guardian_1.db
+      - NIMBUS_ISSUER_PUBLIC_KEY=${NIMBUS_ISSUER_PUBLIC_KEY}
+      - NIMBUS_GUARDIAN_PUBLIC_KEYS=${NIMBUS_GUARDIAN_PUBLIC_KEYS_2}
+      - NIMBUS_TRUSTED_LEADERS=${NIMBUS_TRUSTED_LEADERS}
+    depends_on:
+      - vault
+
+  guardian-2:
+    image: nimbus-node:latest
+    container_name: nimbus-guardian-2
+    ports:
+      - "8082:8082"
+    volumes:
+      - ./test_guardian_2.db:/app/test_guardian_2.db
+    environment:
+      - PORT=8082
+      - NIMBUS_BIND_ADDR=0.0.0.0
+      - NIMBUS_ENV=test
+      - NIMBUS_SHARE_INDEX=3
+      - NIMBUS_VAULT_ADDR=http://vault:8200
+      - NIMBUS_VAULT_TOKEN=test-root-token
+      - NIMBUS_VAULT_PATH=v1/secret/data/nimbus/guardian-2
+      - NIMBUS_THRESHOLD=3
+      - NIMBUS_DB_PATH=/app/test_guardian_2.db
+      - NIMBUS_ISSUER_PUBLIC_KEY=${NIMBUS_ISSUER_PUBLIC_KEY}
+      - NIMBUS_GUARDIAN_PUBLIC_KEYS=${NIMBUS_GUARDIAN_PUBLIC_KEYS_3}
+      - NIMBUS_TRUSTED_LEADERS=${NIMBUS_TRUSTED_LEADERS}
+    depends_on:
+      - vault
+
+  guardian-3:
+    image: nimbus-node:latest
+    container_name: nimbus-guardian-3
+    ports:
+      - "8083:8083"
+    volumes:
+      - ./test_guardian_3.db:/app/test_guardian_3.db
+    environment:
+      - PORT=8083
+      - NIMBUS_BIND_ADDR=0.0.0.0
+      - NIMBUS_ENV=test
+      - NIMBUS_SHARE_INDEX=4
+      - NIMBUS_VAULT_ADDR=http://vault:8200
+      - NIMBUS_VAULT_TOKEN=test-root-token
+      - NIMBUS_VAULT_PATH=v1/secret/data/nimbus/guardian-3
+      - NIMBUS_THRESHOLD=3
+      - NIMBUS_DB_PATH=/app/test_guardian_3.db
+      - NIMBUS_ISSUER_PUBLIC_KEY=${NIMBUS_ISSUER_PUBLIC_KEY}
+      - NIMBUS_GUARDIAN_PUBLIC_KEYS=${NIMBUS_GUARDIAN_PUBLIC_KEYS_4}
+      - NIMBUS_TRUSTED_LEADERS=${NIMBUS_TRUSTED_LEADERS}
+    depends_on:
+      - vault
+
+  guardian-4:
+    image: nimbus-node:latest
+    container_name: nimbus-guardian-4
+    ports:
+      - "8084:8084"
+    volumes:
+      - ./test_guardian_4.db:/app/test_guardian_4.db
+    environment:
+      - PORT=8084
+      - NIMBUS_BIND_ADDR=0.0.0.0
+      - NIMBUS_ENV=test
+      - NIMBUS_SHARE_INDEX=5
+      - NIMBUS_VAULT_ADDR=http://vault:8200
+      - NIMBUS_VAULT_TOKEN=test-root-token
+      - NIMBUS_VAULT_PATH=v1/secret/data/nimbus/guardian-4
+      - NIMBUS_THRESHOLD=3
+      - NIMBUS_DB_PATH=/app/test_guardian_4.db
+      - NIMBUS_ISSUER_PUBLIC_KEY=${NIMBUS_ISSUER_PUBLIC_KEY}
+      - NIMBUS_GUARDIAN_PUBLIC_KEYS=${NIMBUS_GUARDIAN_PUBLIC_KEYS_5}
+      - NIMBUS_TRUSTED_LEADERS=${NIMBUS_TRUSTED_LEADERS}
+    depends_on:
+      - vault
