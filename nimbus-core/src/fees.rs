@@ -1,6 +1,6 @@
 pub const FEE_DENOMINATOR_BPS: u64 = 10_000;
-pub const DEPOSIT_FEE_BPS: u64 = 10;
-pub const PRIVATE_SPEND_FEE_BPS: u64 = 15;
+pub const DEPOSIT_FEE_BPS: u64 = 20;
+pub const PRIVATE_SPEND_FEE_BPS: u64 = 25;
 pub const DEFAULT_RELAYER_MARKUP_BPS: u64 = 1_500;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -93,15 +93,15 @@ mod tests {
 
     #[test]
     fn deposit_fee_matches_contract_rounding() {
-        assert_eq!(deposit_fee(10_000_000), Some(10_000));
-        assert_eq!(deposit_fee(20_000_000), Some(20_000));
+        assert_eq!(deposit_fee(10_000_000), Some(20_000));
+        assert_eq!(deposit_fee(20_000_000), Some(40_000));
         assert_eq!(deposit_fee(1), Some(1));
         assert_eq!(deposit_fee(0), Some(0));
     }
 
     #[test]
     fn private_spend_fee_matches_contract_rounding() {
-        assert_eq!(private_spend_fee(10_000_000), Some(15_000));
+        assert_eq!(private_spend_fee(10_000_000), Some(25_000));
         assert_eq!(private_spend_fee(1), Some(1));
         assert_eq!(private_spend_fee(0), Some(0));
     }
@@ -112,11 +112,11 @@ mod tests {
 
         assert_eq!(quote.merchant_amount, 100_000_000);
         assert_eq!(quote.contract_amount, 100_000_000);
-        assert_eq!(quote.protocol_fee, 150_000);
+        assert_eq!(quote.protocol_fee, 250_000);
         assert_eq!(quote.gas_cost, 20_000);
         assert_eq!(quote.relayer_markup, 3_000);
         assert_eq!(quote.execution_fee, 23_000);
-        assert_eq!(quote.user_total_debit, 100_173_000);
+        assert_eq!(quote.user_total_debit, 100_273_000);
     }
 
     #[test]
