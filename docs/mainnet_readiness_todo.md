@@ -21,12 +21,20 @@ Modifikasi smart contract pasca-deploy di mainnet sangat berisiko dan mahal. Ber
 *   [x] **Replay Protection via Message ID**: Simpan dan verifikasi CCIP `messageId` sebagai pengaman agar pesan yang sama tidak bisa dieksekusi dua kali.
 
 ### 1.3 Integrasi ZK Compliance (Fase A)
-*   [ ] **Penyelesaian Verifying Key (VK) Sirkuit:** Skema proving dan sirkuit compliance (Merkle membership proof untuk clean association set) harus sudah bersifat final.
-*   [ ] **Hardcode VK pada Kontrak:** Masukkan/embed Verifying Key permanen ke dalam smart contract. *VK ini tidak boleh diubah tanpa upgrade sirkuit.*
+*   [x] **Penyelesaian Verifying Key (VK) Sirkuit:** Nullifier = Poseidon(secret, randomness) dengan width=3, α=5, R_F=8, R_P=57. Trusted setup dengan seeded RNG. 25/25 tests pass.
+*   [x] **Hardcode VK pada Kontrak:** Verifying Key real (bukan mock generator scaling) di-embed sebagai constants di `verification.rs`. 28/28 contract tests pass.
+*   [x] **Bug Fix Critical:** `.is_ok()` → `.unwrap_or(false)` di Groth16 verification. Sebelumnya semua `Ok(variant)` dianggap true, termasuk proof invalid.
 *   [ ] **Validasi Input Keras:** Kontrak harus memvalidasi format data input secara ketat sebelum melakukan pairing check:
     *   [ ] Nullifier wajib tepat 32 byte (tidak boleh auto-padded).
     *   [ ] Point $G_1$ (`alpha_neg`, `hm`) wajib tepat 128 byte.
     *   [ ] Public key (`pk_iss`) wajib tepat 256 byte.
+
+### 1.3b ZK Compliance (Fase B) — PENDING
+*   [ ] Implementasikan Merkle membership di dalam circuit.
+*   [ ] Bind root, nullifier, recipient, amount, chain ID, dan domain separator.
+*   [ ] Tambahkan range constraint untuk amount.
+*   [ ] Tambahkan address/field canonicality constraints.
+*   [ ] Distribusikan proving key sebagai artifact versioned (production).
 
 ### 1.4 Kebijakan Pause & Timelock (Governance)
 *   [ ] **Emergency Pause Policy:** Tentukan apakah fungsi `claim_refund` (penarikan dana escrow setelah timeout 24 jam) tetap boleh diakses oleh pengguna saat kontrak sedang di-pause oleh admin. *Rekomendasi: Tetap bolehkan refund untuk menjaga trust pengguna.*

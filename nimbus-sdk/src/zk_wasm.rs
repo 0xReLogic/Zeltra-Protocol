@@ -96,14 +96,16 @@ pub fn client_generate_compliance_proof(
 
     // Convert inputs to Fr scalars (EVM uses big-endian scalars)
     let mut root_fr = Fr::from_be_bytes_mod_order(&root_bytes);
-    let mut nullifier_fr = Fr::from_be_bytes_mod_order(&nullifier_bytes);
     let mut recipient_fr = Fr::from_be_bytes_mod_order(&recipient_bytes);
     let mut amount_fr = Fr::from_be_bytes_mod_order(&amount_bytes);
 
     // Generate secret and randomness for the proof using cryptographically secure OsRng
     let mut rng = OsRng;
     let mut secret = Fr::rand(&mut rng);
-    let mut randomness = nullifier_fr - secret;
+    let mut randomness = Fr::rand(&mut rng);
+
+    // Derive nullifier from secret and randomness via Poseidon hash
+    let mut nullifier_fr = compute_nullifier(secret, randomness);
 
     // Get the proving key
     let pk = PROVING_KEY

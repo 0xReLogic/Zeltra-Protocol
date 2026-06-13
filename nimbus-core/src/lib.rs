@@ -3,6 +3,7 @@ mod compliance_circuit;
 mod crypto;
 mod evm;
 mod fees;
+mod poseidon;
 mod serialization;
 mod threshold;
 mod types;
@@ -49,8 +50,13 @@ pub use fees::{
 
 // Re-export compliance circuit
 pub use compliance_circuit::{
-    generate_compliance_keys, generate_compliance_proof, verify_compliance_proof, ComplianceKeys,
+    generate_compliance_keys, generate_compliance_proof, generate_evm_vk_constants,
+    serialize_vk_bytes, verify_compliance_proof, ComplianceCircuit, ComplianceKeys,
+    TRUSTED_SETUP_SEED,
 };
+
+// Re-export Poseidon hash
+pub use poseidon::compute_nullifier;
 
 #[cfg(test)]
 mod tests {

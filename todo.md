@@ -1263,10 +1263,9 @@ Sisa implementasi wajib:
 - [x] Buat endpoint quote deterministik untuk jalur single private spend.
 - [x] Quote endpoint menampilkan fee tier dan diskon berdasarkan holding time
   (`association_root` → `getCleanRootTimestamp` → tier 25/20/10 bps, cached di node).
-- [ ] Tambahkan estimasi batch ke endpoint quote setelah benchmark gas testnet.
+- [ ] Tambahkan batch profitability metrics ke health endpoint dan DB queries
+  (`batch_count`, `total_batch_margin_usdc`, `avg_batch_size`) untuk internal dashboard.
 - [ ] Pastikan relayer tidak dapat memotong lebih dari fixed quote.
-- [ ] Implementasikan pemotongan execution fee dalam stablecoin tanpa mengubah
-  nominal bersih yang diterima merchant.
 - [ ] Pisahkan accounting: gas cost, reimbursement, gross execution fee,
   relayer margin, protocol share, dan rounding.
 - [x] Simpan quote, batch ID, jumlah item, receipt gas used, effective gas
@@ -1308,6 +1307,23 @@ Terminal condition:
   execution quote tidak dapat dimanipulasi, accounting durable cocok dengan
   receipt, merchant menerima nominal tepat, benchmark testnet tersimpan, dan
   seluruh negative test lulus.
+
+### Relayer Execution Fee Batch Claim
+
+Prinsip: **contract minimal, node canggih.** batchSpend() tidak berubah.
+Node akumulasi execution fee (gas + markup 15%) di DB, klaim berkala via 1 tx.
+
+Kontrak:
+
+- [ ] `claimExecutionFee(uint256 amount)` — owner/relayer only, transfer USDC.
+
+Node:
+
+- [ ] Track `execution_fee` + kolom `claimed` di `spend_batches`.
+- [ ] Background worker: `SUM(execution_fee) WHERE claimed = false`,
+  klaim saat threshold tercapai (amount/count/time-based).
+- [ ] Update `claimed = true` hanya setelah tx sukses.
+- [ ] Gas overhead: ~65k per claim (negligible kalau di-batch).
 
 ### Perbaiki Lifecycle Nullifier
 
@@ -1388,32 +1404,28 @@ TODO:
 Lokasi:
 
 - `nimbus-core/src/compliance_circuit.rs`
+- `nimbus-core/src/poseidon.rs` (BARU)
 - `nimbus-sdk/src/zk_wasm.rs`
 - `nimbus-contracts/src/verification.rs`
 
-Masalah saat ini:
+Fase A - SELESAI (2026-06-13):
 
-- Circuit hanya memberi constraint `nullifier = secret + randomness`.
-- Root, recipient, dan amount dialokasikan tetapi tidak diberi constraint.
-- Tidak ada Merkle membership proof.
-- Proving key dibuat saat runtime menggunakan test setup.
-- Verifying key contract memakai scaled generators dan dinyatakan mock.
-- Unit test contract mengembalikan `Ok(true)` untuk proof dengan panjang valid.
+- [x] Tentukan statement compliance final secara formal (nullifier = Poseidon(secret, randomness)).
+- [x] Implementasikan hash nullifier yang cryptographically secure (Poseidon width=3, α=5, R_F=8, R_P=57).
+- [x] Jalankan trusted setup yang sesuai dengan deployment policy (seeded RNG, artifact embedded).
+- [x] Embed atau simpan verifying key nyata pada contract (hardcoded constants dari trusted setup).
+- [x] Pastikan SDK dan contract memakai circuit/version/VK yang sama (25/25 + 28/28 tests pass).
+- [x] Tambahkan known-answer vectors lintas core, SDK, dan contract.
+- [x] Tambahkan negative proof tests (tampered nullifier, wrong VK, invalid proof).
+- [x] Fix: `.is_ok()` → `.unwrap_or(false)` di Groth16 verification (Result<bool> semantics).
 
-TODO:
+Fase B - PENDING:
 
-- [ ] Tentukan statement compliance final secara formal.
-- [ ] Implementasikan hash nullifier yang cryptographically secure.
 - [ ] Implementasikan Merkle membership di dalam circuit.
 - [ ] Bind root, nullifier, recipient, amount, chain ID, dan domain separator.
 - [ ] Tambahkan range constraint untuk amount.
 - [ ] Tambahkan address/field canonicality constraints.
-- [ ] Jalankan trusted setup yang sesuai dengan deployment policy.
-- [ ] Distribusikan proving key sebagai artifact versioned, bukan generate runtime.
-- [ ] Embed atau simpan verifying key nyata pada contract.
-- [ ] Pastikan SDK dan contract memakai circuit/version/VK yang sama.
-- [ ] Tambahkan known-answer vectors lintas core, SDK, dan contract.
-- [ ] Tambahkan negative proof tests.
+- [ ] Distribusikan proving key sebagai artifact versioned, bukan generate runtime (untuk production).
 
 ## P1 - CCIP Contract Security
 
