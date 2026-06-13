@@ -1446,6 +1446,7 @@ Fase B - PENDING:
 - [x] Double payout prevention: nullifier locked sampai refund authorized + timeout elapsed. (2026-06-13)
 - [x] Health metrics: ccip_pending_count, ccip_failure_count. (2026-06-13)
 - [x] Config: NIMBUS_DESTINATION_RPC_URL, NIMBUS_CCIP_OFFRAMP, NIMBUS_CCIP_REFUND_TIMEOUT_SECS. (2026-06-13)
+- [ ] **Test di testnet (Arbitrum Sepolia):** Verifikasi end-to-end CCIP flow — source broadcast, destination monitoring, failed tx refund, double payout prevention. Test saat deployment. (24/24 unit tests pass, belum hard-test di testnet)
 
 ## P2 - x402
 
