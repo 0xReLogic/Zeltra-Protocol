@@ -5,6 +5,7 @@ mod crypto;
 mod evm;
 mod fees;
 mod note;
+mod note_circuit;
 mod poseidon;
 mod serialization;
 mod threshold;
@@ -70,6 +71,12 @@ pub use note::{
 
 // Re-export accounting state machine (DEC-016A Gate B)
 pub use accounting::{ContractAccounting, TransitionResult};
+
+// Re-export Private Note Circuit (DEC-016A Gate C)
+pub use note_circuit::{
+    extract_public_inputs, generate_note_circuit_keys, generate_note_proof, verify_note_proof,
+    NoteCircuitKeys, PrivateNoteCircuit, NUM_PUBLIC_INPUTS,
+};
 
 #[cfg(test)]
 mod tests {
