@@ -770,6 +770,28 @@ Decision:
 - [ ] Reentrancy dari token/CTF diuji menggunakan deployed adversarial contract.
 - [ ] Allowance sisa setelah failure diperiksa.
 
+### HT-10 Signed Quote + Execution Fee Settlement (Single + Batch)
+
+**Single spend quote:**
+- [ ] End-to-end single spend: quote → wallet sign EIP-712 → spend → relayer reimbursed.
+- [ ] Tampered maxExecutionFee (signature mismatch) → contract rejects, no deduction.
+- [ ] Expired quote (quoteExpiry < block.timestamp) → contract rejects stale quote.
+- [ ] Execution fee > maxExecutionFee → contract reverts `EXECUTION_FEE_EXCEEDED`.
+- [ ] Wrong signer key (sign dengan key bukan depositor) → signature verification fails.
+
+**Batch spend quote:**
+- [ ] End-to-end batch: quote → sign → batchSpend → all items settle, execution fee accumulated.
+- [ ] Satu item invalid dalam batch + signed quote → entire batch reverts, no partial settlement.
+- [ ] Batch quote dengan mixed fee tiers (berbeda holding time per credential).
+
+**Claim worker:**
+- [ ] Threshold trigger ($1 / 10 tx di testnet) → worker claims from contract.
+- [ ] Worker calls claimExecutionFee with wrong signer → contract rejects, fees stay accumulated.
+- [ ] Concurrent claim (manual cast send + worker race) → only one succeeds.
+
+**Cross-cutting:**
+- [ ] Cross-chain replay (sign di Sepolia, attempt replay di mainnet) → domain separator blocks it.
+
 ### HT-11 Governance dan Pause
 
 - [ ] Non-owner gagal propose/execute.
@@ -929,7 +951,7 @@ Gate B:
 
 ### Campaign C - Distributed Relayer Safety
 
-- [ ] Jalankan HT-01, HT-02, HT-06, HT-07, dan HT-12.
+- [ ] Jalankan HT-01, HT-02, HT-06, HT-07, HT-10, dan HT-12.
 - [ ] Gunakan leader VPS ini dan guardian VPS melalui Tailscale.
 - [ ] Lakukan kill/restart saat setiap transition penting.
 
@@ -938,6 +960,7 @@ Gate C:
 - Kehilangan satu proses/RPC tidak menyebabkan lost request atau double spend.
 - Leader tidak pernah memperoleh guardian share.
 - Quorum dan key version selalu ditegakkan.
+- Signed quote (single + batch) enforce execution fee limit dan reject tampered/expired quotes.
 
 ### Campaign D - Cross-Chain Safety
 

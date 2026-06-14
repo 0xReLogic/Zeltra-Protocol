@@ -167,6 +167,28 @@ Relayer bayar gas sendiri tapi ga ada reimbursement dari user. Quote sekarang cu
 ## Next Steps
 ✅ Signed Quote implementation COMPLETE. Ready for integration testing di testnet.
 
+## HT-10 Hard Tests (Testnet)
+
+**Single spend:**
+- [ ] End-to-end: quote → wallet sign EIP-712 → spend → relayer reimbursed
+- [ ] Tampered maxExecutionFee → signature mismatch → contract rejects
+- [ ] Expired quote → contract rejects stale quote
+- [ ] execution_fee > maxExecutionFee → reverts EXECUTION_FEE_EXCEEDED
+- [ ] Wrong signer key → signature verification fails
+
+**Batch spend:**
+- [ ] End-to-end batch: quote → sign → batchSpend → all items settle
+- [ ] 1 invalid item in batch + signed quote → full revert, no partial settlement
+- [ ] Mixed fee tiers (different holding time per credential)
+
+**Claim worker:**
+- [ ] Threshold trigger ($1 / 10 tx testnet) → worker claims
+- [ ] Wrong signer on claimExecutionFee → contract rejects
+- [ ] Concurrent claim (manual cast send + worker race) → only one succeeds
+
+**Cross-cutting:**
+- [ ] Cross-chain replay (Sepolia → mainnet) → domain separator blocks
+
 ## Security Requirements (from research)
 - [x] ALL fee parameters included in signed hash (prevent Biconomy #492)
   - ExecutionQuote struct: quoteId, maxExecutionFee, merchantAmount, quoteExpiry, relayerAddress
