@@ -1,3 +1,4 @@
+mod accounting;
 mod blind_sign;
 mod compliance_circuit;
 mod crypto;
@@ -66,6 +67,9 @@ pub use note::{
     fr_from_be_bytes, fr_to_be_bytes, merkle_append, merkle_hash, note_commitment,
     verify_merkle_proof, verify_value_conservation, PrivateNoteV1, MERKLE_TREE_DEPTH,
 };
+
+// Re-export accounting state machine (DEC-016A Gate B)
+pub use accounting::{ContractAccounting, TransitionResult};
 
 #[cfg(test)]
 mod tests {
