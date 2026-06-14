@@ -1,7 +1,8 @@
 # Private Note Balance dan Change Output
 
 **Priority:** Tier 0 - Mainnet Blocker
-**Status:** Design gate in progress (0 implementation items complete)
+**Status:** Gate A/B/C dibuka kembali setelah audit independen; Gate C0 security
+repair wajib selesai sebelum Gate D.
 **Decision:** `research/decisions/DEC-016-private-note-change-ledger.md`
 
 ## Stop Rule
@@ -78,36 +79,40 @@ sudah selesai.
 - [x] Tetapkan ownership/spending/nullifier key derivation.
 - [x] Tetapkan hubungan BLS issuance authorization dengan initial note commitment.
 - [x] Tetapkan migration policy deployment legacy.
-- [x] Tambahkan known-answer vectors lintas core/SDK/contract untuk:
+- [ ] Tambahkan known-answer vectors dari minimal dua implementasi independen
+  (bukan dua wrapper atas implementasi Rust yang sama) untuk:
   - note commitment;
   - nullifier;
   - parent hash;
   - Merkle root/path;
   - exact value conservation;
   - chain/contract domain separation.
-- [x] Independent design review: tidak ada jalur mint liability dari BLS dan ZK
+- [ ] Independent design review: tidak ada jalur mint liability dari BLS dan ZK
   secara bersamaan.
 
 **Gate A selesai jika:** format tidak ambigu dan dua implementasi independen
 menghasilkan vector yang sama.
 
-**Status: DONE** — DEC-016A frozen, KAV generated, 36 new tests pass.
+**Status: REOPENED** — format dasar dan implementasi Rust tersedia, tetapi Gate A
+belum lulus sampai KAV cocok pada dua implementasi independen dan design review
+selesai. Vector yang hanya dihasilkan oleh `nimbus-core` belum memenuhi syarat ini.
 
 ## Gate B - Perbaiki Accounting Sebelum Note Circuit
 
-- [x] Pisahkan storage/accounting:
+- [ ] Integrasikan storage/accounting berikut ke contract, bukan hanya model
+  transisi murni di `nimbus-core`:
   - `user_note_liability`;
   - `refundable_deposit_liability`;
   - `accrued_execution_fee_liability`;
   - realized protocol fees.
 - [x] Definisikan state transition table untuk deposit, refund, spend, fee accrue,
   fee claim, dan failed settlement.
-- [x] Saat spend, kurangi user liability sebesar payout + protocol fee +
+- [ ] Saat spend contract, kurangi user liability sebesar payout + protocol fee +
   execution fee.
-- [x] Saat execution fee accrue, tambah relayer liability dengan nominal sama.
-- [x] Saat claim, kurangi contract assets dan relayer liability dengan nominal sama.
-- [x] Cek invariant setelah execution fee claim.
-- [x] Tolak claim yang menyentuh backing user/refund.
+- [ ] Saat execution fee accrue di contract, tambah relayer liability dengan nominal sama.
+- [ ] Saat claim di contract, kurangi contract assets dan relayer liability dengan nominal sama.
+- [ ] Cek invariant on-chain setelah execution fee claim.
+- [ ] Tolak claim on-chain yang menyentuh backing user/refund.
 - [x] Gunakan exact `execution_fee`, bukan `max_execution_fee`, pada DB accounting.
 - [x] Hilangkan floating-point dari accounting ekonomi dan margin keputusan.
 - [ ] Tambahkan event terpisah untuk deposit fee, protocol fee, execution fee,
@@ -124,7 +129,9 @@ menghasilkan vector yang sama.
 **Gate B selesai jika:** untuk setiap generated transition sequence,
 `assets >= all liabilities` dan tidak ada nilai yang hilang atau tercetak.
 
-**Status: DONE** — 23 accounting tests pass, solvency invariant enforced.
+**Status: REOPENED** — 23 tests membuktikan model `ContractAccounting`, bukan
+implementasi contract. Gate B baru selesai setelah storage dan seluruh entrypoint
+contract memakai model liability terpisah serta invariant diuji pada contract.
 
 ## Gate C - Implementasi Private Note Circuit
 
@@ -167,7 +174,79 @@ menghasilkan vector yang sama.
 **Gate C selesai jika:** proof palsu untuk membership, ownership, value, fee,
 recipient, atau domain selalu gagal dan tidak mengubah state.
 
-**MVP Status:** Circuit works, 9/9 tests pass. 3 mainnet blockers documented in DEC-016B.
+**MVP Status:** Prototype proof round-trip berjalan, tetapi Gate C belum selesai.
+Audit menemukan blocker tambahan di luar DEC-016B. Selesaikan Gate C0 berikut
+sebelum mulai Gate D.
+
+## Gate C0 - Security Repair Sebelum Integrasi Contract
+
+### P0 - One note pays exactly once
+
+- [ ] Bind bit arah Merkle path ke `input_leaf_index` di dalam circuit.
+  - Dekomposisi indeks menjadi tepat `MERKLE_TREE_DEPTH` boolean bits.
+  - Enforce `input_leaf_index == sum(bit_i * 2^i)`.
+  - Enforce indeks `< 2^MERKLE_TREE_DEPTH`.
+  - Gunakan bits yang sama untuk conditional left/right Merkle hashing.
+- [ ] Tambahkan regression test yang mencoba membership path valid dengan
+  `input_leaf_index` berbeda.
+- [ ] Buktikan percobaan tersebut gagal saat proving atau verification.
+- [ ] Buktikan note yang sama tidak dapat menghasilkan dua nullifier valid hanya
+  dengan mengganti leaf index.
+
+### P0 - Integer value safety
+
+- [ ] Range constrain input value, merchant payout, protocol fee, execution fee,
+  dan change ke `[0, 2^64)`.
+- [ ] Pastikan value conservation adalah integer USDC, bukan persamaan yang dapat
+  wrap modulo scalar field.
+- [ ] Boolean-constrain `has_change` ke `{0, 1}`.
+- [ ] Enforce `has_change == 0` berarti `change_value == 0` dan output commitment
+  nol.
+- [ ] Enforce `has_change == 1` berarti change memenuhi dust/minimum-value policy
+  dan output commitment cocok.
+- [ ] Tambahkan negative tests untuk field overflow, modular wrap, non-boolean
+  `has_change`, hidden positive change, dan zero-value change note.
+
+### P0 - Payment and domain binding
+
+- [ ] Ganti binding hash sementara yang hanya dihitung tanpa dibandingkan dengan
+  nilai authoritative.
+- [ ] Definisikan canonical signed quote digest yang mengikat minimal:
+  recipient, merchant amount, protocol fee, exact/max execution fee, expiry,
+  chain ID, contract address, asset ID, circuit version, dan quote ID/nonce.
+- [ ] Enforce digest tersebut di circuit dan cocokkan dengan quote yang
+  diverifikasi contract.
+- [ ] Tambahkan negative test terpisah untuk setiap field yang ditukar atau
+  dimodifikasi.
+
+### P0 - Cryptographic parameters and setup
+
+- [ ] Ganti parameter Poseidon width-5 ad-hoc berbasis `StdRng` dengan parameter
+  standar/audited atau prosedur generation resmi yang terdokumentasi.
+- [ ] Bekukan seluruh constants, matrix, round schedule, serialization, dan hash
+  artifact dalam specification.
+- [ ] Validasi hasilnya menggunakan implementasi referensi independen.
+- [ ] Larang deterministic public-seed Groth16 setup pada production build.
+- [ ] Simpan proving/verifying key sebagai artifact versioned; jangan generate
+  saat runtime.
+- [ ] Jalankan MPC ceremony hanya setelah seluruh constraint dan public-input ABI
+  dibekukan serta direview.
+
+### P1 - Engineering gate
+
+- [ ] Cache development proving/verifying key pada tests agar setup tidak dibuat
+  ulang untuk setiap test.
+- [ ] `cargo fmt --all -- --check` lulus.
+- [ ] `cargo clippy -p nimbus-core --all-targets -- -D warnings` lulus untuk
+  perubahan private-note, dan warning legacy dicatat terpisah bila belum dapat
+  dibersihkan dalam scope ini.
+- [ ] Positive test dan minimal dua negative tests tersedia untuk setiap
+  constraint kritis.
+
+**Gate C0 selesai jika:** satu note tidak dapat menghasilkan lebih dari satu
+spend valid, semua nilai menggunakan semantics integer bounded, seluruh payment
+fields terikat ke signed quote/domain authoritative, dan production setup tidak
+dapat direkonstruksi dari seed publik.
 
 ## Gate D - Contract Private Note Ledger
 

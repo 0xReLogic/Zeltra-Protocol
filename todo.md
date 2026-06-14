@@ -5,6 +5,15 @@ runtime saat ini. Tujuannya adalah memisahkan fitur yang sudah nyata dari mock,
 bypass, fallback development, dan pekerjaan yang masih diperlukan sebelum
 mainnet.
 
+## Active Stop Gate - Private Note Balance
+
+- [ ] Selesaikan **Gate C0 - Security Repair** di
+  `docs/todos/private-note-balance.md`.
+- [ ] Jangan mulai Gate D, deploy private-note contract, trusted setup production,
+  atau monetisasi sebelum Gate A/B/C yang dibuka kembali dan Gate C0 selesai.
+- [ ] Prioritas pertama: bind Merkle path ke leaf index dan buktikan satu note
+  tidak dapat menghasilkan dua nullifier valid.
+
 ## Research Gate untuk Perubahan Critical
 
 Sebelum mengubah financial logic, cryptographic protocol, smart contract,
