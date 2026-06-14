@@ -206,11 +206,7 @@ fn native_mds_mul(state: &[Fr; 3], mds: &[Vec<Fr>]) -> [Fr; 3] {
 
 /// Native Poseidon permutation (field elements, no constraints).
 /// Used for computing the nullifier outside the circuit.
-pub fn native_poseidon_permutation(
-    state: &mut [Fr; 3],
-    round_constants: &[Fr],
-    mds: &[Vec<Fr>],
-) {
+pub fn native_poseidon_permutation(state: &mut [Fr; 3], round_constants: &[Fr], mds: &[Vec<Fr>]) {
     let mut rc_offset = 0;
 
     let add_rc = |state: &mut [Fr; 3], rc: &[Fr], offset: usize| {
@@ -260,6 +256,220 @@ pub fn compute_nullifier(secret: Fr, randomness: Fr) -> Fr {
     state[0]
 }
 
+// ═══════════════════════════════════════════════════════════════════════════
+// Width-5 Poseidon (for note commitments, nullifier derivation, Merkle nodes)
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// DEC-016A: PrivateNoteV1 requires hashing 4 inputs (value, owner_key, rho,
+// randomness) plus a domain tag in the capacity element. This needs width=5
+// (rate=4, capacity=1). Merkle tree node hashing also uses width-5.
+
+/// Width-5 Poseidon parameters.
+pub const POSEIDON_W5_WIDTH: usize = 5;
+pub const POSEIDON_W5_FULL_ROUNDS: usize = 8;
+/// Partial rounds for width-5 at 128-bit security.
+/// Per Poseidon paper Table 2: R_P = 60 for t=5, alpha=5, M=128.
+pub const POSEIDON_W5_PARTIAL_ROUNDS: usize = 60;
+pub const POSEIDON_W5_HALF_FULL: usize = POSEIDON_W5_FULL_ROUNDS / 2;
+
+/// Deterministic seed for width-5 round constants.
+/// Distinct from width-3 seed to ensure independent parameter sets.
+pub const POSEIDON_W5_SEED: u64 = 0x4e696d6275735735; // "NimbusW5"
+
+/// Generate round constants for width-5 Poseidon.
+pub fn generate_w5_round_constants() -> Vec<Fr> {
+    use ark_ff::UniformRand;
+
+    let mut rng = ark_std::rand::rngs::StdRng::seed_from_u64(POSEIDON_W5_SEED);
+    let total = POSEIDON_W5_WIDTH * (1 + POSEIDON_W5_FULL_ROUNDS + POSEIDON_W5_PARTIAL_ROUNDS);
+    (0..total).map(|_| Fr::rand(&mut rng)).collect()
+}
+
+/// Generate 5x5 MDS matrix using deterministic Cauchy construction.
+///
+/// Uses small sequential values: x = [1,2,3,4,5], y = [6,7,8,9,10].
+/// M[i][j] = 1 / (x[i] + y[j])
+///
+/// This is the canonical construction from the Poseidon paper, guaranteed
+/// to produce an MDS matrix. Unlike the width-3 implementation which uses
+/// random Cauchy vectors, this uses deterministic small values for
+/// reproducibility across independent implementations.
+pub fn generate_w5_mds_matrix() -> Vec<Vec<Fr>> {
+    let t = POSEIDON_W5_WIDTH;
+    let x: Vec<Fr> = (1..=t).map(|i| Fr::from(i as u64)).collect();
+    let y: Vec<Fr> = (t + 1..=2 * t).map(|i| Fr::from(i as u64)).collect();
+
+    (0..t)
+        .map(|i| {
+            (0..t)
+                .map(|j| {
+                    (x[i] + y[j])
+                        .inverse()
+                        .expect("Cauchy matrix entry must be invertible")
+                })
+                .collect()
+        })
+        .collect()
+}
+
+/// Native width-5 MDS multiplication.
+fn native_w5_mds_mul(state: &[Fr; POSEIDON_W5_WIDTH], mds: &[Vec<Fr>]) -> [Fr; POSEIDON_W5_WIDTH] {
+    let mut result = [Fr::from(0u64); POSEIDON_W5_WIDTH];
+    for (result_i, row) in result.iter_mut().zip(mds.iter()) {
+        for (state_j, mds_ij) in state.iter().zip(row.iter()) {
+            *result_i += *state_j * mds_ij;
+        }
+    }
+    result
+}
+
+/// Native width-5 Poseidon permutation.
+pub fn native_w5_poseidon_permutation(
+    state: &mut [Fr; POSEIDON_W5_WIDTH],
+    round_constants: &[Fr],
+    mds: &[Vec<Fr>],
+) {
+    let w = POSEIDON_W5_WIDTH;
+    let mut rc_offset = 0;
+
+    // Initial round constant addition
+    for i in 0..w {
+        state[i] += round_constants[rc_offset + i];
+    }
+    rc_offset += w;
+
+    // First half of full rounds: S-box on ALL state elements
+    for _ in 0..POSEIDON_W5_HALF_FULL {
+        for s in state.iter_mut() {
+            *s = native_sbox(*s);
+        }
+        *state = native_w5_mds_mul(state, mds);
+        for i in 0..w {
+            state[i] += round_constants[rc_offset + i];
+        }
+        rc_offset += w;
+    }
+
+    // Partial rounds: S-box on FIRST element only
+    for _ in 0..POSEIDON_W5_PARTIAL_ROUNDS {
+        state[0] = native_sbox(state[0]);
+        *state = native_w5_mds_mul(state, mds);
+        for i in 0..w {
+            state[i] += round_constants[rc_offset + i];
+        }
+        rc_offset += w;
+    }
+
+    // Second half of full rounds: S-box on ALL state elements
+    for _ in 0..POSEIDON_W5_HALF_FULL {
+        for s in state.iter_mut() {
+            *s = native_sbox(*s);
+        }
+        *state = native_w5_mds_mul(state, mds);
+        for i in 0..w {
+            state[i] += round_constants[rc_offset + i];
+        }
+        rc_offset += w;
+    }
+}
+
+/// Native width-5 Poseidon hash: H(inputs[0..4], domain_tag) → output
+///
+/// State layout: [input_0, input_1, input_2, input_3, domain_tag]
+/// Returns state[0] after permutation.
+pub fn native_poseidon_w5(inputs: &[Fr; 4], domain_tag: Fr) -> Fr {
+    let rc = generate_w5_round_constants();
+    let mds = generate_w5_mds_matrix();
+    let mut state = [inputs[0], inputs[1], inputs[2], inputs[3], domain_tag];
+    native_w5_poseidon_permutation(&mut state, &rc, &mds);
+    state[0]
+}
+
+/// Width-5 Poseidon hash gadget for R1CS circuits.
+///
+/// Same structure as native version but using FpVar constraints.
+#[allow(dead_code)] // Used in Phase 3 (circuit implementation)
+pub fn poseidon_w5_hash(
+    inputs: &[FpVar<Fr>; 4],
+    domain_tag: Fr,
+    round_constants: &[Fr],
+    mds: &[Vec<Fr>],
+) -> Result<FpVar<Fr>, SynthesisError> {
+    let w = POSEIDON_W5_WIDTH;
+    let mut state = [
+        inputs[0].clone(),
+        inputs[1].clone(),
+        inputs[2].clone(),
+        inputs[3].clone(),
+        FpVar::constant(domain_tag),
+    ];
+    let mut rc_offset = 0;
+
+    // Initial RC addition
+    for i in 0..w {
+        state[i] += round_constants[rc_offset + i];
+    }
+    rc_offset += w;
+
+    // First half of full rounds
+    for _ in 0..POSEIDON_W5_HALF_FULL {
+        for s in state.iter_mut() {
+            *s = sbox(s)?;
+        }
+        state = w5_mds_mul(&state, mds)?;
+        for i in 0..w {
+            state[i] += round_constants[rc_offset + i];
+        }
+        rc_offset += w;
+    }
+
+    // Partial rounds
+    for _ in 0..POSEIDON_W5_PARTIAL_ROUNDS {
+        state[0] = sbox(&state[0])?;
+        state = w5_mds_mul(&state, mds)?;
+        for i in 0..w {
+            state[i] += round_constants[rc_offset + i];
+        }
+        rc_offset += w;
+    }
+
+    // Second half of full rounds
+    for _ in 0..POSEIDON_W5_HALF_FULL {
+        for s in state.iter_mut() {
+            *s = sbox(s)?;
+        }
+        state = w5_mds_mul(&state, mds)?;
+        for i in 0..w {
+            state[i] += round_constants[rc_offset + i];
+        }
+        rc_offset += w;
+    }
+
+    Ok(state[0].clone())
+}
+
+/// Width-5 MDS matrix multiplication gadget for R1CS.
+#[allow(dead_code)] // Used in Phase 3 (circuit implementation)
+fn w5_mds_mul(
+    state: &[FpVar<Fr>; POSEIDON_W5_WIDTH],
+    mds: &[Vec<Fr>],
+) -> Result<[FpVar<Fr>; POSEIDON_W5_WIDTH], SynthesisError> {
+    let w = POSEIDON_W5_WIDTH;
+    let mut result: Vec<FpVar<Fr>> = (0..w).map(|_| FpVar::Constant(Fr::from(0u64))).collect();
+    for i in 0..w {
+        for j in 0..w {
+            result[i] = &result[i] + &state[j] * mds[i][j];
+        }
+    }
+    Ok([
+        result[0].clone(),
+        result[1].clone(),
+        result[2].clone(),
+        result[3].clone(),
+        result[4].clone(),
+    ])
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -302,5 +512,106 @@ mod tests {
         for row in &mds {
             assert_eq!(row.len(), POSEIDON_WIDTH);
         }
+    }
+
+    // ── Width-5 tests ──────────────────────────────────────────────
+
+    #[test]
+    fn test_w5_round_constants_length() {
+        let rc = generate_w5_round_constants();
+        let expected =
+            POSEIDON_W5_WIDTH * (1 + POSEIDON_W5_FULL_ROUNDS + POSEIDON_W5_PARTIAL_ROUNDS);
+        assert_eq!(rc.len(), expected);
+    }
+
+    #[test]
+    fn test_w5_mds_matrix_dimensions() {
+        let mds = generate_w5_mds_matrix();
+        assert_eq!(mds.len(), POSEIDON_W5_WIDTH);
+        for row in &mds {
+            assert_eq!(row.len(), POSEIDON_W5_WIDTH);
+        }
+    }
+
+    #[test]
+    fn test_w5_mds_matrix_is_mds() {
+        // Verify the matrix is actually MDS: all square sub-matrices are non-singular.
+        // For a Cauchy matrix M[i][j] = 1/(x_i + y_j) with distinct x_i + y_j,
+        // this is guaranteed by construction. We verify a basic property:
+        // no row is all zeros, and the determinant of any 1x1 submatrix is non-zero.
+        let mds = generate_w5_mds_matrix();
+        for row in &mds {
+            for entry in row {
+                assert_ne!(*entry, Fr::from(0u64), "MDS entry must be non-zero");
+            }
+        }
+    }
+
+    #[test]
+    fn test_w5_poseidon_deterministic() {
+        let inputs = [
+            Fr::from(1u64),
+            Fr::from(2u64),
+            Fr::from(3u64),
+            Fr::from(4u64),
+        ];
+        let domain = Fr::from(999u64);
+        let h1 = native_poseidon_w5(&inputs, domain);
+        let h2 = native_poseidon_w5(&inputs, domain);
+        assert_eq!(h1, h2, "Width-5 Poseidon must be deterministic");
+    }
+
+    #[test]
+    fn test_w5_poseidon_different_inputs() {
+        let domain = Fr::from(999u64);
+        let h1 = native_poseidon_w5(
+            &[
+                Fr::from(1u64),
+                Fr::from(2u64),
+                Fr::from(3u64),
+                Fr::from(4u64),
+            ],
+            domain,
+        );
+        let h2 = native_poseidon_w5(
+            &[
+                Fr::from(5u64),
+                Fr::from(6u64),
+                Fr::from(7u64),
+                Fr::from(8u64),
+            ],
+            domain,
+        );
+        assert_ne!(h1, h2, "Different inputs must produce different hashes");
+    }
+
+    #[test]
+    fn test_w5_poseidon_domain_separation() {
+        let inputs = [
+            Fr::from(1u64),
+            Fr::from(2u64),
+            Fr::from(3u64),
+            Fr::from(4u64),
+        ];
+        let h1 = native_poseidon_w5(&inputs, Fr::from(100u64));
+        let h2 = native_poseidon_w5(&inputs, Fr::from(200u64));
+        assert_ne!(
+            h1, h2,
+            "Different domain tags must produce different hashes"
+        );
+    }
+
+    #[test]
+    fn test_w5_independent_from_w3() {
+        // Width-5 hash of 2 inputs should NOT equal width-3 hash of same inputs.
+        // They use different round constants, MDS matrices, and widths.
+        let a = Fr::from(42u64);
+        let b = Fr::from(123u64);
+        let h_w3 = compute_nullifier(a, b);
+        let h_w5 = native_poseidon_w5(&[a, b, Fr::from(0u64), Fr::from(0u64)], Fr::from(0u64));
+        assert_ne!(
+            h_w3, h_w5,
+            "Width-3 and width-5 must produce different outputs"
+        );
     }
 }

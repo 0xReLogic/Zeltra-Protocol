@@ -72,8 +72,8 @@ pub fn sign_quote(
 ) -> Result<(u8, [u8; 32], [u8; 32]), String> {
     use k256::ecdsa::SigningKey;
 
-    let signing_key =
-        SigningKey::from_bytes(private_key.into()).map_err(|e| format!("Invalid private key: {}", e))?;
+    let signing_key = SigningKey::from_bytes(private_key.into())
+        .map_err(|e| format!("Invalid private key: {}", e))?;
 
     let hash = compute_quote_hash(quote, chain_id, contract_address);
 
@@ -124,7 +124,8 @@ pub fn verify_quote_signature(
     sig_bytes[..32].copy_from_slice(&r);
     sig_bytes[32..].copy_from_slice(&s);
 
-    let signature = Signature::from_bytes((&sig_bytes).into()).map_err(|e| format!("Invalid signature: {}", e))?;
+    let signature = Signature::from_bytes((&sig_bytes).into())
+        .map_err(|e| format!("Invalid signature: {}", e))?;
 
     let recovered_key = VerifyingKey::recover_from_prehash(&hash.0, &signature, recovery_id)
         .map_err(|e| format!("Recovery failed: {}", e))?;
@@ -187,7 +188,10 @@ mod tests {
         let hash1 = compute_quote_hash(&quote, 421614u64, contract_address);
         let hash2 = compute_quote_hash(&quote, 1u64, contract_address);
 
-        assert_ne!(hash1, hash2, "Different chain IDs should produce different hashes");
+        assert_ne!(
+            hash1, hash2,
+            "Different chain IDs should produce different hashes"
+        );
     }
 
     #[test]
@@ -235,8 +239,12 @@ mod tests {
         use k256::ecdsa::SigningKey;
 
         // Generate two different keys
-        let private_key1: [u8; 32] = SigningKey::random(&mut rand::thread_rng()).to_bytes().into();
-        let private_key2: [u8; 32] = SigningKey::random(&mut rand::thread_rng()).to_bytes().into();
+        let private_key1: [u8; 32] = SigningKey::random(&mut rand::thread_rng())
+            .to_bytes()
+            .into();
+        let private_key2: [u8; 32] = SigningKey::random(&mut rand::thread_rng())
+            .to_bytes()
+            .into();
 
         let signing_key2 = SigningKey::from_bytes((&private_key2).into()).unwrap();
         let wrong_signer = public_key_to_address(signing_key2.verifying_key());
@@ -256,14 +264,9 @@ mod tests {
         let signature = sign_quote(&quote, chain_id, contract_address, &private_key1).unwrap();
 
         // Try to verify with key2's address (should fail)
-        let is_valid = verify_quote_signature(
-            &quote,
-            chain_id,
-            contract_address,
-            signature,
-            wrong_signer,
-        )
-        .unwrap();
+        let is_valid =
+            verify_quote_signature(&quote, chain_id, contract_address, signature, wrong_signer)
+                .unwrap();
 
         assert!(!is_valid, "Signature from wrong signer should fail");
     }
@@ -272,7 +275,9 @@ mod tests {
     fn test_eip712_tampered_quote_fails() {
         use k256::ecdsa::SigningKey;
 
-        let private_key: [u8; 32] = SigningKey::random(&mut rand::thread_rng()).to_bytes().into();
+        let private_key: [u8; 32] = SigningKey::random(&mut rand::thread_rng())
+            .to_bytes()
+            .into();
         let signing_key = SigningKey::from_bytes((&private_key).into()).unwrap();
         let signer_address = public_key_to_address(signing_key.verifying_key());
 

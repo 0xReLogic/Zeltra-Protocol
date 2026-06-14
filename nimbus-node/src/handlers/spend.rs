@@ -110,7 +110,11 @@ pub async fn handle_spend(
         }
 
         // Check quote_id replay protection
-        match state.db.check_and_insert_quote_id(quote_id, user_addr).await {
+        match state
+            .db
+            .check_and_insert_quote_id(quote_id, user_addr)
+            .await
+        {
             Ok(true) => {
                 // Successfully inserted, not used before
             }

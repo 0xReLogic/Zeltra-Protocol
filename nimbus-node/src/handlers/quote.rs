@@ -1,8 +1,8 @@
 use crate::dto::{PrivateSpendQuoteRequest, PrivateSpendQuoteResponse};
 use crate::state::AppState;
+use alloy_primitives::{Address, U256};
 use axum::extract::{Query, State};
 use axum::Json;
-use alloy_primitives::{Address, U256};
 use nimbus_sdk::eip712::{compute_quote_hashes, ExecutionQuote};
 use std::str::FromStr;
 
@@ -126,11 +126,8 @@ pub async fn handle_private_spend_quote(
     };
 
     // Compute EIP-712 hashes for client verification
-    let (domain_separator, struct_hash) = compute_quote_hashes(
-        &execution_quote,
-        chain_id,
-        contract_addr,
-    );
+    let (domain_separator, struct_hash) =
+        compute_quote_hashes(&execution_quote, chain_id, contract_addr);
 
     Json(PrivateSpendQuoteResponse {
         status: "OK".to_string(),
@@ -149,7 +146,8 @@ pub async fn handle_private_spend_quote(
         quote_expiry: Some(quote_expiry),
         domain_separator: Some(format!("0x{}", hex::encode(domain_separator))),
         struct_hash: Some(format!("0x{}", hex::encode(struct_hash))),
-        message: "Sign the ExecutionQuote message in your wallet to authorize this spend".to_string(),
+        message: "Sign the ExecutionQuote message in your wallet to authorize this spend"
+            .to_string(),
     })
 }
 

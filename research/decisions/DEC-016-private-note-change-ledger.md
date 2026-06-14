@@ -2,6 +2,7 @@
 
 Date: 2026-06-14
 Status: Proposed - blocks mainnet and supersedes the reusable-voucher assumption
+Frozen spec: DEC-016A (research/decisions/DEC-016A-private-note-spec-freeze.md)
 
 ## Masalah
 

@@ -23,8 +23,11 @@ const CHECK_INTERVAL_SECS: u64 = 300; // 5 minutes
 /// Background worker that claims accumulated execution fees from the contract
 pub async fn execution_fee_claimer_worker(state: AppState) {
     println!("EXECUTION_FEE_CLAIMER: Worker started");
-    println!("  Threshold: {} USDC OR {} transactions", 
-             CLAIM_THRESHOLD_USDC / 1_000_000, CLAIM_THRESHOLD_TX_COUNT);
+    println!(
+        "  Threshold: {} USDC OR {} transactions",
+        CLAIM_THRESHOLD_USDC / 1_000_000,
+        CLAIM_THRESHOLD_TX_COUNT
+    );
     println!("  Interval: {} seconds", CHECK_INTERVAL_SECS);
 
     let mut ticker = interval(Duration::from_secs(CHECK_INTERVAL_SECS));
@@ -36,7 +39,10 @@ pub async fn execution_fee_claimer_worker(state: AppState) {
         let (unclaimed, _) = match state.db.get_unclaimed_execution_fees().await {
             Ok(fees) => fees,
             Err(e) => {
-                eprintln!("EXECUTION_FEE_CLAIMER: Failed to query unclaimed fees: {}", e);
+                eprintln!(
+                    "EXECUTION_FEE_CLAIMER: Failed to query unclaimed fees: {}",
+                    e
+                );
                 continue;
             }
         };
@@ -45,7 +51,10 @@ pub async fn execution_fee_claimer_worker(state: AppState) {
         let unclaimed_count = match state.db.get_unclaimed_batch_ids().await {
             Ok(ids) => ids.len() as u64,
             Err(e) => {
-                eprintln!("EXECUTION_FEE_CLAIMER: Failed to query unclaimed batch count: {}", e);
+                eprintln!(
+                    "EXECUTION_FEE_CLAIMER: Failed to query unclaimed batch count: {}",
+                    e
+                );
                 continue;
             }
         };
@@ -59,8 +68,11 @@ pub async fn execution_fee_claimer_worker(state: AppState) {
         }
 
         let trigger_reason = if usdc_threshold_met && count_threshold_met {
-            format!("both thresholds met ({} USDC AND {} tx)", 
-                    unclaimed / 1_000_000, unclaimed_count)
+            format!(
+                "both thresholds met ({} USDC AND {} tx)",
+                unclaimed / 1_000_000,
+                unclaimed_count
+            )
         } else if usdc_threshold_met {
             format!("USD threshold met ({} USDC)", unclaimed / 1_000_000)
         } else {
@@ -69,7 +81,9 @@ pub async fn execution_fee_claimer_worker(state: AppState) {
 
         println!(
             "EXECUTION_FEE_CLAIMER: Claiming {} USDC from {} batches — {}",
-            unclaimed / 1_000_000, unclaimed_count, trigger_reason
+            unclaimed / 1_000_000,
+            unclaimed_count,
+            trigger_reason
         );
 
         // Get the EVM client
@@ -116,7 +130,10 @@ pub async fn execution_fee_claimer_worker(state: AppState) {
                 );
             }
             Err(e) => {
-                eprintln!("EXECUTION_FEE_CLAIMER: Failed to claim execution fees: {}", e);
+                eprintln!(
+                    "EXECUTION_FEE_CLAIMER: Failed to claim execution fees: {}",
+                    e
+                );
             }
         }
     }

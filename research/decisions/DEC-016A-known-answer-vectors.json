@@ -1,0 +1,60 @@
+{
+  "_comment": "DEC-016A Known-Answer Vectors — canonical reference for cross-validation between nimbus-core, nimbus-sdk (WASM), and contract.",
+  "_generated": "2026-06-14",
+  "_source": "cargo test -p nimbus-core -- known_answer",
+
+  "seed_inputs": {
+    "spending_key": "Fr::from(42)",
+    "note_value": 99800000,
+    "note_value_usdc": "99.8 USDC (100 USDC - 0.2% deposit fee)",
+    "rho": "Fr::from(1)",
+    "randomness": "Fr::from(2)",
+    "leaf_index": 0,
+    "merchant_amount": 5000000,
+    "protocol_fee": 12500,
+    "execution_fee": 23000
+  },
+
+  "domain_separators": {
+    "note_commitment": "0x49476cc74d87b0ec3cbcf3e02b3794d86c6d8b5a8b5ccf7029a3b709e9e686df",
+    "nullifier": "0x541616c5d57d76e314728a4f2bdbdfe71f1ebcb705b8114d1f3216afa654c621",
+    "merkle_node": "0x3834656d06de7d572e49914bb58b1e27dd5f9f6d86240e64495a1d82db22e82e",
+    "initial_note": "0x53583822f8e973844e5583179d2bc8684c45a0b85310e551088dcd3d6815b523"
+  },
+
+  "note_commitment": {
+    "value": 99800000,
+    "owner_key": "Fr::from(42)",
+    "rho": "Fr::from(1)",
+    "randomness": "Fr::from(2)",
+    "commitment": "0x46d1b90c8a28c364fefdbb95bd709956e2f39a411750e6797fe1112b27635c59"
+  },
+
+  "nullifier_key": {
+    "spending_key": "Fr::from(42)",
+    "nullifier_key": "0x112c7c26870c6dcbdf343434984bd550c3d475e6b6e3bb6342fe915d444b677a"
+  },
+
+  "nullifier": {
+    "nullifier_key": "0x112c7c26870c6dcbdf343434984bd550c3d475e6b6e3bb6342fe915d444b677a",
+    "commitment": "0x46d1b90c8a28c364fefdbb95bd709956e2f39a411750e6797fe1112b27635c59",
+    "leaf_index": 0,
+    "nullifier": "0x5b0320f2c7066f0b751c4f5ddfec9dfdde2ca07ea0c8f0d5f335c54b532dba54"
+  },
+
+  "merkle_tree": {
+    "depth": 20,
+    "empty_root": "0x4e9a77b95958924d004a9841dfb0f92c8d70f99c54bc59da1fa53320c0aaa6d2",
+    "root_after_1_insert": "0x3ed6d45ee8da74b055fa37a13ec3459e9fa97db5f89d014fdb0e41013fb56bfd"
+  },
+
+  "value_conservation": {
+    "input_values": [99800000],
+    "merchant_amount": 5000000,
+    "protocol_fee": 12500,
+    "execution_fee": 23000,
+    "change_values": [94764500],
+    "change_usdc": "94.7645 USDC",
+    "balanced": true
+  }
+}

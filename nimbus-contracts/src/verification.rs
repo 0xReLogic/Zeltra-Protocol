@@ -165,7 +165,13 @@ impl Nimbus {
         [u8; 256],      // vk_delta_g2
         [[u8; 128]; 5], // vk_ic
     ) {
-        (ALPHA_G1, BETA_G2, GAMMA_G2, DELTA_G2, [IC_0, IC_1, IC_2, IC_3, IC_4])
+        (
+            ALPHA_G1,
+            BETA_G2,
+            GAMMA_G2,
+            DELTA_G2,
+            [IC_0, IC_1, IC_2, IC_3, IC_4],
+        )
     }
 
     /// Compute the public inputs G1 linear combination on-chain using precompiles G1 ADD and G1 MSM.

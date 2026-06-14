@@ -3,6 +3,7 @@ mod compliance_circuit;
 mod crypto;
 mod evm;
 mod fees;
+mod note;
 mod poseidon;
 mod serialization;
 mod threshold;
@@ -57,6 +58,14 @@ pub use compliance_circuit::{
 
 // Re-export Poseidon hash
 pub use poseidon::compute_nullifier;
+
+// Re-export Private Note V1 (DEC-016A)
+pub use note::{
+    compute_empty_hashes, compute_merkle_root, derive_nullifier, derive_nullifier_key,
+    domain_initial_note, domain_merkle_node, domain_note_commitment, domain_nullifier,
+    fr_from_be_bytes, fr_to_be_bytes, merkle_append, merkle_hash, note_commitment,
+    verify_merkle_proof, verify_value_conservation, PrivateNoteV1, MERKLE_TREE_DEPTH,
+};
 
 #[cfg(test)]
 mod tests {
