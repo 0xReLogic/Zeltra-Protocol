@@ -54,6 +54,22 @@ pub struct SpendRequest {
     /// If provided, duplicate requests with the same key return the cached response.
     #[serde(default)]
     pub idempotency_key: Option<String>,
+    // --- Signed Quote (EIP-712) ---
+    /// Maximum execution fee user is willing to pay (from signed quote)
+    #[serde(default)]
+    pub max_execution_fee: Option<u64>,
+    /// Quote ID from /quote endpoint (for replay protection)
+    #[serde(default)]
+    pub quote_id: Option<String>,
+    /// Quote expiry timestamp (Unix seconds)
+    #[serde(default)]
+    pub quote_expiry: Option<u64>,
+    /// EIP-712 signature over ExecutionQuote struct (v, r, s concatenated)
+    #[serde(default)]
+    pub quote_signature: Option<String>,
+    /// User's Ethereum address (signer of the quote)
+    #[serde(default)]
+    pub user_address: Option<String>,
 }
 
 #[derive(Clone, Serialize, Deserialize, Debug)]
@@ -131,6 +147,19 @@ pub struct PrivateSpendQuoteResponse {
     pub fee_tier: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub discount_bps: Option<u64>,
+    /// Unique quote ID for replay protection (hex string, 32 bytes)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub quote_id: Option<String>,
+    /// Quote expiry timestamp (Unix seconds)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub quote_expiry: Option<u64>,
+    /// EIP-712 domain separator hash (for client verification)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub domain_separator: Option<String>,
+    /// EIP-712 struct hash of ExecutionQuote (for client verification)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub struct_hash: Option<String>,
+    /// Message to display to user before signing
     pub message: String,
 }
 

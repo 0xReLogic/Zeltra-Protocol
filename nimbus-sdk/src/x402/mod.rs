@@ -204,7 +204,8 @@ mod tests {
         )
         .unwrap();
 
-        assert_eq!(sig.payment.amount, 100_150_226);
+        // With 25 bps (0.25%) fee: gross = 100_000_000 * 10000 / 9975 ≈ 100_250_627
+        assert_eq!(sig.payment.amount, 100_250_627);
         assert_eq!(
             nimbus_core::net_after_fee(sig.payment.amount, nimbus_core::PRIVATE_SPEND_FEE_BPS,),
             Some(100_000_000),

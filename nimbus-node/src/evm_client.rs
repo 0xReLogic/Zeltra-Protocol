@@ -35,6 +35,8 @@ sol! {
         bytes32[] calldata nonces
     ) external returns (bool);
 
+    function claimExecutionFees(uint256 amount) external;
+
     function getCleanRootTimestamp(bytes32 root) external view returns (uint256);
 
     struct EVMTokenAmount {
@@ -806,5 +808,39 @@ impl EvmClient {
         } else {
             Ok(0)
         }
+    }
+
+    /// Get the contract address as a hex string
+    pub fn contract_address(&self) -> String {
+        format!("{:?}", self.contract_address)
+    }
+
+    /// Get the chain ID from the provider
+    pub async fn chain_id(&self) -> Result<u64> {
+        self.provider
+            .get_chain_id()
+            .await
+            .context("Failed to get chain ID")
+    }
+
+    /// Claim accumulated execution fees from the contract
+    /// Returns the transaction outcome
+    pub async fn claim_execution_fees(&self, amount: u64) -> Result<TransactionOutcome> {
+        println!(
+            "EVM_CLIENT: Claiming {} USDC execution fees from contract",
+            amount / 1_000_000
+        );
+
+        let call_data = claimExecutionFeesCall {
+            amount: U256::from(amount),
+        }
+        .abi_encode();
+
+        let tx = TransactionRequest::default()
+            .with_to(self.contract_address)
+            .with_input(Bytes::from(call_data))
+            .with_gas_limit(100_000);
+
+        self.send_tx_with_fallback(tx).await
     }
 }

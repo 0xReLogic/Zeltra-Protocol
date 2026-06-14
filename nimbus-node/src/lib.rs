@@ -7,6 +7,7 @@ pub mod config;
 pub mod database;
 pub mod dto;
 pub mod evm_client;
+pub mod execution_fee_claimer;
 pub mod handlers;
 pub mod http;
 pub mod key_rotation;

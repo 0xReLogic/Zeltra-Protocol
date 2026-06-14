@@ -92,6 +92,11 @@ pub async fn handle_x402_verify(
         min_payout: None,
         deadline: None,
         idempotency_key: None,
+        max_execution_fee: None,
+        quote_id: None,
+        quote_expiry: None,
+        quote_signature: None,
+        user_address: None,
     };
 
     let queue_id = match state.db.enqueue_spend(&spend_req).await {

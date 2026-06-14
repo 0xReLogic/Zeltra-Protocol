@@ -139,9 +139,16 @@ impl Nimbus {
         recipient_or_intent_hash: FixedBytes<32>,
         expiry: U256,
         nonce: FixedBytes<32>,
+        max_execution_fee: U256,
+        execution_fee: U256,
     ) -> Result<bool, Vec<u8>> {
         // 1. CHECKS
         self.check_not_paused()?;
+
+        // Execution fee validation: actual fee must not exceed user-signed maximum
+        if execution_fee > max_execution_fee {
+            return Err(b"EXECUTION_FEE_EXCEEDED".to_vec());
+        }
 
         // Expiry check
         let current_time = U256::from(self.block_timestamp());
@@ -227,11 +234,19 @@ impl Nimbus {
             .checked_sub(total_debit)
             .ok_or_else(|| b"INSUFFICIENT_PRINCIPAL".to_vec())?;
 
+        // Accumulate execution fee for later claiming by relayer
+        let new_accumulated_fees = self
+            .accumulated_execution_fees
+            .get()
+            .checked_add(execution_fee)
+            .ok_or_else(|| b"EXECUTION_FEE_OVERFLOW".to_vec())?;
+
         #[cfg(test)]
         {
             // 2. EFFECTS
             self.total_deposited_principal.set(new_principal);
             self.nullifiers.insert(nullifier, true);
+            self.accumulated_execution_fees.set(new_accumulated_fees);
 
             // Enforce invariant: contract_assets >= outstanding_liabilities
             self.check_liability_invariant()?;
@@ -244,6 +259,7 @@ impl Nimbus {
             // 2. EFFECTS
             self.nullifiers.insert(nullifier, true);
             self.total_deposited_principal.set(new_principal);
+            self.accumulated_execution_fees.set(new_accumulated_fees);
 
             // 3. INTERACTIONS
             self.ensure_liquidity(total_debit)?;
@@ -299,6 +315,8 @@ impl Nimbus {
         amount: U256,
         expiry: U256,
         nonce: FixedBytes<32>,
+        max_execution_fee: U256,
+        execution_fee: U256,
     ) -> Result<bool, Vec<u8>> {
         self.check_not_paused()?;
 
@@ -331,6 +349,8 @@ impl Nimbus {
             recipient_or_intent_hash,
             expiry,
             nonce,
+            max_execution_fee,
+            execution_fee,
         )?;
         if !is_valid {
             return Ok(false);
@@ -487,6 +507,7 @@ impl Nimbus {
         nonce.copy_from_slice(&payload[552..584]);
 
         // Execute spend and buy shares on destination chain
+        // Note: CCIP has its own fee mechanism, so we pass zero execution fees here
         let success = self._spend_and_buy_shares(
             FixedBytes::ZERO,
             nullifier.into(),
@@ -498,6 +519,8 @@ impl Nimbus {
             amount,
             expiry,
             nonce.into(),
+            U256::ZERO, // max_execution_fee (CCIP has its own fee structure)
+            U256::ZERO, // execution_fee (CCIP has its own fee structure)
         )?;
 
         if !success {

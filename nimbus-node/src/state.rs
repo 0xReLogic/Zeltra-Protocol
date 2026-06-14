@@ -47,6 +47,9 @@ pub struct AppState {
 
     /// Cache for clean_association_roots: root_hex -> registration timestamp
     pub root_timestamp_cache: Arc<Mutex<HashMap<String, u64>>>,
+
+    /// Relayer Ethereum address (for EIP-712 quote signing)
+    pub relayer_address: String,
 }
 
 impl AppState {
@@ -99,6 +102,8 @@ impl AppState {
                 name: "blockchain-rpc".to_string(),
             }),
             root_timestamp_cache: Arc::new(Mutex::new(HashMap::new())),
+            relayer_address: std::env::var("NIMBUS_RELAYER_ADDRESS")
+                .unwrap_or_else(|_| "0x0000000000000000000000000000000000000000".to_string()),
         }
     }
 

@@ -2,6 +2,9 @@ use crate::dto::{PrivateSpendQuoteRequest, PrivateSpendQuoteResponse};
 use crate::state::AppState;
 use axum::extract::{Query, State};
 use axum::Json;
+use alloy_primitives::{Address, U256};
+use nimbus_sdk::eip712::{compute_quote_hashes, ExecutionQuote};
+use std::str::FromStr;
 
 pub async fn handle_private_spend_quote(
     State(state): State<AppState>,
@@ -48,6 +51,87 @@ pub async fn handle_private_spend_quote(
         ));
     };
 
+    // Generate quote ID and expiry for EIP-712 signing
+    let quote_id_hex = generate_quote_id();
+    let quote_expiry = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs()
+        + 300; // 5 minutes expiry
+
+    // Get contract address and chain ID from state (optional for testing)
+    let (contract_address, chain_id) = match state.evm_client.as_ref() {
+        Some(client) => {
+            let chain_id = match client.chain_id().await {
+                Ok(id) => id,
+                Err(_) => {
+                    // Fallback: return quote without EIP-712 hashes
+                    return Json(PrivateSpendQuoteResponse {
+                        status: "OK".to_string(),
+                        merchant_amount: quote.merchant_amount,
+                        contract_amount: quote.contract_amount,
+                        protocol_fee: quote.protocol_fee,
+                        gas_cost: quote.gas_cost,
+                        relayer_markup: quote.relayer_markup,
+                        execution_fee: quote.execution_fee,
+                        user_total_debit: quote.user_total_debit,
+                        fee_bps,
+                        relayer_markup_bps,
+                        fee_tier,
+                        discount_bps,
+                        quote_id: Some(quote_id_hex),
+                        quote_expiry: Some(quote_expiry),
+                        domain_separator: None,
+                        struct_hash: None,
+                        message: "Quote generated (EIP-712 hashes unavailable)".to_string(),
+                    });
+                }
+            };
+            (client.contract_address(), chain_id)
+        }
+        None => {
+            // Fallback: return quote without EIP-712 hashes (for testing)
+            return Json(PrivateSpendQuoteResponse {
+                status: "OK".to_string(),
+                merchant_amount: quote.merchant_amount,
+                contract_amount: quote.contract_amount,
+                protocol_fee: quote.protocol_fee,
+                gas_cost: quote.gas_cost,
+                relayer_markup: quote.relayer_markup,
+                execution_fee: quote.execution_fee,
+                user_total_debit: quote.user_total_debit,
+                fee_bps,
+                relayer_markup_bps,
+                fee_tier,
+                discount_bps,
+                quote_id: Some(quote_id_hex),
+                quote_expiry: Some(quote_expiry),
+                domain_separator: None,
+                struct_hash: None,
+                message: "Quote generated (EIP-712 hashes unavailable)".to_string(),
+            });
+        }
+    };
+
+    let contract_addr = Address::from_str(&contract_address).unwrap_or(Address::ZERO);
+    let relayer_addr = Address::from_str(&state.relayer_address).unwrap_or(Address::ZERO);
+
+    // Build EIP-712 ExecutionQuote struct
+    let execution_quote = ExecutionQuote {
+        quoteId: U256::from_str(&quote_id_hex).unwrap_or(U256::ZERO),
+        maxExecutionFee: U256::from(quote.execution_fee),
+        merchantAmount: U256::from(quote.merchant_amount),
+        quoteExpiry: U256::from(quote_expiry),
+        relayerAddress: relayer_addr,
+    };
+
+    // Compute EIP-712 hashes for client verification
+    let (domain_separator, struct_hash) = compute_quote_hashes(
+        &execution_quote,
+        chain_id,
+        contract_addr,
+    );
+
     Json(PrivateSpendQuoteResponse {
         status: "OK".to_string(),
         merchant_amount: quote.merchant_amount,
@@ -61,7 +145,11 @@ pub async fn handle_private_spend_quote(
         relayer_markup_bps,
         fee_tier,
         discount_bps,
-        message: "Informational quote only; signed max_execution_fee is not active yet".to_string(),
+        quote_id: Some(quote_id_hex),
+        quote_expiry: Some(quote_expiry),
+        domain_separator: Some(format!("0x{}", hex::encode(domain_separator))),
+        struct_hash: Some(format!("0x{}", hex::encode(struct_hash))),
+        message: "Sign the ExecutionQuote message in your wallet to authorize this spend".to_string(),
     })
 }
 
@@ -153,6 +241,15 @@ fn default_relayer_markup_bps() -> u64 {
         .unwrap_or(nimbus_core::DEFAULT_RELAYER_MARKUP_BPS)
 }
 
+/// Generate a random 32-byte quote ID as hex string
+fn generate_quote_id() -> String {
+    use rand::Rng;
+    let mut rng = rand::thread_rng();
+    let mut bytes = [0u8; 32];
+    rng.fill(&mut bytes);
+    format!("0x{}", hex::encode(bytes))
+}
+
 fn error_response(
     merchant_amount: u64,
     gas_cost: u64,
@@ -174,6 +271,10 @@ fn error_response(
         relayer_markup_bps,
         fee_tier: None,
         discount_bps: None,
+        quote_id: None,
+        quote_expiry: None,
+        domain_separator: None,
+        struct_hash: None,
         message: message.to_string(),
     }
 }

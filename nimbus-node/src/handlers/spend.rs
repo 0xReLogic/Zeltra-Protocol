@@ -84,6 +84,145 @@ pub async fn handle_spend(
         }
     }
 
+    // --- EIP-712 Quote Verification (if signed quote provided) ---
+    if let (Some(max_fee), Some(quote_id), Some(quote_expiry), Some(signature), Some(user_addr)) = (
+        payload.max_execution_fee,
+        payload.quote_id.as_ref(),
+        payload.quote_expiry,
+        payload.quote_signature.as_ref(),
+        payload.user_address.as_ref(),
+    ) {
+        // Check expiry
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs();
+        if now > quote_expiry {
+            return Json(SpendResponse {
+                status: "REJECTED".to_string(),
+                message: format!(
+                    "Quote expired. Quote expiry: {}, Current: {}",
+                    quote_expiry, now
+                ),
+                queue_position: 0,
+                estimated_gas_usdc: None,
+            });
+        }
+
+        // Check quote_id replay protection
+        match state.db.check_and_insert_quote_id(quote_id, user_addr).await {
+            Ok(true) => {
+                // Successfully inserted, not used before
+            }
+            Ok(false) => {
+                return Json(SpendResponse {
+                    status: "REJECTED".to_string(),
+                    message: "Quote ID already used".to_string(),
+                    queue_position: 0,
+                    estimated_gas_usdc: None,
+                });
+            }
+            Err(e) => {
+                eprintln!("RELAYER ERROR: Quote ID check failed: {}", e);
+                return Json(SpendResponse {
+                    status: "ERROR".to_string(),
+                    message: "Database error".to_string(),
+                    queue_position: 0,
+                    estimated_gas_usdc: None,
+                });
+            }
+        }
+
+        // Verify EIP-712 signature
+        use alloy_primitives::{Address, U256};
+        use nimbus_sdk::eip712::{verify_quote_signature, ExecutionQuote};
+        use std::str::FromStr;
+
+        let (contract_address, chain_id) = match state.evm_client.as_ref() {
+            Some(client) => {
+                let chain_id = match client.chain_id().await {
+                    Ok(id) => id,
+                    Err(_) => {
+                        return Json(SpendResponse {
+                            status: "ERROR".to_string(),
+                            message: "Failed to get chain ID".to_string(),
+                            queue_position: 0,
+                            estimated_gas_usdc: None,
+                        });
+                    }
+                };
+                (client.contract_address(), chain_id)
+            }
+            None => {
+                return Json(SpendResponse {
+                    status: "ERROR".to_string(),
+                    message: "EVM client not configured".to_string(),
+                    queue_position: 0,
+                    estimated_gas_usdc: None,
+                });
+            }
+        };
+
+        let contract_addr = Address::from_str(&contract_address).unwrap_or(Address::ZERO);
+        let user_addr_parsed = Address::from_str(user_addr).unwrap_or(Address::ZERO);
+        let relayer_addr = Address::from_str(&state.relayer_address).unwrap_or(Address::ZERO);
+
+        let execution_quote = ExecutionQuote {
+            quoteId: U256::from_str(quote_id).unwrap_or(U256::ZERO),
+            maxExecutionFee: U256::from(max_fee),
+            merchantAmount: U256::from(payload.amount),
+            quoteExpiry: U256::from(quote_expiry),
+            relayerAddress: relayer_addr,
+        };
+
+        // Parse signature (v, r, s concatenated)
+        let sig_bytes = match hex::decode(signature.trim_start_matches("0x")) {
+            Ok(bytes) if bytes.len() == 65 => bytes,
+            _ => {
+                return Json(SpendResponse {
+                    status: "REJECTED".to_string(),
+                    message: "Invalid signature format (expected 65 bytes)".to_string(),
+                    queue_position: 0,
+                    estimated_gas_usdc: None,
+                });
+            }
+        };
+
+        let v = sig_bytes[64];
+        let mut r = [0u8; 32];
+        let mut s = [0u8; 32];
+        r.copy_from_slice(&sig_bytes[0..32]);
+        s.copy_from_slice(&sig_bytes[32..64]);
+
+        match verify_quote_signature(
+            &execution_quote,
+            chain_id,
+            contract_addr,
+            (v, r, s),
+            user_addr_parsed,
+        ) {
+            Ok(true) => {
+                // Signature valid, proceed
+            }
+            Ok(false) => {
+                return Json(SpendResponse {
+                    status: "REJECTED".to_string(),
+                    message: "Invalid quote signature".to_string(),
+                    queue_position: 0,
+                    estimated_gas_usdc: None,
+                });
+            }
+            Err(e) => {
+                return Json(SpendResponse {
+                    status: "ERROR".to_string(),
+                    message: format!("Signature verification failed: {}", e),
+                    queue_position: 0,
+                    estimated_gas_usdc: None,
+                });
+            }
+        }
+    }
+
     // Persist before acknowledging the request. The database queue is the
     // source of truth and also reserves the nullifier while settlement is active.
     let queue_id = match state.db.enqueue_spend(&payload).await {
@@ -279,10 +418,15 @@ async fn process_same_chain_batch(state: &AppState, items: Vec<QueuedSpend>) {
 
             // Storing batch metadata & margin calculation (Finding #10)
             let mut total_revenue_usdc = 0.0;
+            let mut total_execution_fee_usdc = 0u64;
             for item in &items {
                 let amount_usdc = item.request.amount as f64 / 1_000_000.0;
                 let fee_usdc = amount_usdc * 0.0025; // 0.25% standard fee
                 total_revenue_usdc += fee_usdc;
+                // Sum execution fees from signed quotes
+                if let Some(max_fee) = item.request.max_execution_fee {
+                    total_execution_fee_usdc += max_fee;
+                }
             }
 
             let total_cost_eth = (outcome.gas_used as f64 * outcome.effective_gas_price as f64)
@@ -304,6 +448,7 @@ async fn process_same_chain_batch(state: &AppState, items: Vec<QueuedSpend>) {
                     outcome.effective_gas_price,
                     total_cost_eth,
                     margin_usdc,
+                    total_execution_fee_usdc,
                 )
                 .await
             {

@@ -21,27 +21,16 @@ Dokumen ini mendokumentasikan desain teknis, endpoints, dan optimalisasi **Nimbu
 Nimbus Node berjalan sebagai server web API mandiri (ditulis menggunakan **Rust Axum**) yang bertindak sebagai **Paymaster/Relayer** untuk menyelesaikan dua kendala utama UX Web3:
 1.  **Cold Start Barrier (Bebas Gas Fee):** Pengguna tidak memerlukan saldo ETH
     di dompet mereka untuk mentransfer token privat. Relayer menalangi gas fee
-    ETH on-chain. Mekanisme reimbursement stablecoin masih memerlukan desain
-    accounting dan authorization sebelum diaktifkan.
-2.  **EIP-7702 Delegation:** Mengaktifkan fitur smart wallet (seperti tanda tangan gasless dan batching) langsung pada alamat dompet EOA biasa (seperti Metamask tradisional) tanpa biaya deployment kontrak yang mahal.
+    ETH on-chain dan di-reimburse via execution fee (signed quote + batch claim).
+2.  **EIP-7702 Delegation:** DTO mendukung otorisasi EIP-7702, namun settlement
+    saat ini masih melalui jalur standard spend (belum wired ke batchSpend).
 
 ---
 
 ## 2. Inovasi & Optimalisasi Arsitektur (Riset Jurnal 2026)
 
-### A. Alur Delegasi EIP-7702 (Pectra Upgrade)
-Di tahun 2026, Upgrade Pectra Ethereum mengaktifkan **EIP-7702** yang memperkenalkan tipe transaksi `0x04`. 
-
-```mermaid
-graph TD
-    Client[EOA Wallet Client] -->|1. Sign EIP-7702 Auth & Spend Payload| Relayer[Nimbus Relayer Node]
-    Relayer -->|2. Wrap EIP-7702 & Pay Gas| Contract[Nimbus Smart Contract L2]
-    Contract -->|3. Temporarily delegate code to EOA| EOAExecution[Execute private transfer & claim fee]
-```
-
-*   Klien menandatangani berkas otorisasi EIP-7702 off-chain yang mendelegasikan hak eksekusi ke smart contract Nimbus.
-*   Klien mengirim otorisasi tersebut bersama data transfer privat ke `nimbus-node`.
-*   `nimbus-node` mengirimkan transaksi ke blockchain L2, membayar gas fee ETH, dan memotong stablecoin (USDC) dari transaksi untuk biaya relayer.
+### A. EIP-7702 Delegation (DTO-Only)
+Spend DTO mendukung field `eip7702_auth` (EOA address, delegate contract, signature), namun settlement saat ini masih melalui jalur standard spend. Wiring ke batchSpend masih pending.
 
 ### B. Antrean Settlement Persisten
 
@@ -72,20 +61,17 @@ Worker saat ini mengambil item berdasarkan urutan `created_at` dan `id`.
 Timing correlation, traffic analysis, dan strategi batching/shuffling masih perlu
 threat model serta benchmark tersendiri sebelum diklaim sebagai kontrol privasi.
 
-### D. Fixed Execution Quote dan Margin Batch
+### D. Signed Execution Quote dan Batch Claim
 
-Biaya transaksi L2 terdiri dari execution cost dan komponen data/L1. Model
-fixed quote masih memerlukan settlement accounting sebelum aktif:
+Biaya transaksi L2 terdiri dari execution cost dan komponen data/L1. Model signed quote sudah diimplementasikan:
 1.  **Quote Sebelum Tanda Tangan**: User menyetujui execution fee maksimum dan
-    expiry. Quote harus cukup untuk menutup jalur single.
-2.  **Margin Efisiensi**: Jika transaksi berhasil digabungkan, selisih antara
-    execution quote dan biaya batch aktual menjadi margin relayer/protokol.
-3.  **Transparansi**: Biaya disebut `execution fee`, bukan `actual gas`, karena
-    nilainya tidak wajib sama dengan receipt cost setiap user.
-4.  **Status Implementasi**: Runtime settlement saat ini meneruskan `amount`
-    yang telah ditandatangani ke contract tanpa pemotongan kedua oleh relayer.
-    Billing execution fee belum production sampai `max_execution_fee`, expiry,
-    rounding, authorization, dan reconciliation diimplementasikan.
+    expiry via EIP-712 typed data signing (SDK: `eip712.rs`).
+2.  **Contract Enforcement**: `_spend()` menolak jika `execution_fee > max_execution_fee`.
+3.  **Fee Accumulation**: Execution fee diakumulasi di contract (`accumulated_execution_fees`).
+4.  **Batch Claim**: Background worker (`execution_fee_claimer.rs`) klaim berkala
+    via `claimExecutionFees(amount)` saat threshold tercapai ($50 USDC).
+5.  **Margin Batch**: Jika transaksi berhasil digabungkan, selisih antara
+    execution quote dan biaya batch aktual menjadi margin relayer.
 
 ### E. Resilience, Secrets & Request Deduplication
 Mengikuti rekomendasi audit keamanan infrastruktur relayer node 2026:
@@ -96,7 +82,7 @@ Mengikuti rekomendasi audit keamanan infrastruktur relayer node 2026:
 ### F. Security Hardening (DEC-010 & DEC-011)
 *   **Tailscale Network Security (DEC-010)**: Guardian endpoint dibind ke Tailscale interface dengan ACL strict untuk membatasi akses hanya dari node leader. Mencegah public exposure dan scanning. Dikonfigurasi via `NIMBUS_BIND_ADDR` dan `NIMBUS_REQUIRE_TAILSCALE`.
 *   **Session Validation (DEC-011)**: Guardian menolak session expired (1 jam), resolved, atau dengan parameter mismatch. Mencegah signature pada session yang tidak valid. Validasi dilakukan sebelum signing di `/api/sign-share`.
-*   **Key Zeroization (DEC-011)**: Masking key di-zeroize dari database setelah reveal dan untuk session expired secara berkala. Meminimalkan exposure window cryptographic secrets menggunakan `zeroize` crate.
+*   **Key Zeroization (DEC-011)**: Masking key di-zeroize dari database setelah reveal dan untuk session expired secara berkala. Meminimalkan exposure window cryptographic secrets menggunakan `write_volatile`.
 
 ### G. Quorum Failure Monitoring (DEC-012)
 *   **Signing Health Check**: Endpoint `/api/signing-health` untuk detect stalled signing session (deposit confirmed tapi belum resolve).
@@ -111,8 +97,10 @@ Mengikuti rekomendasi audit keamanan infrastruktur relayer node 2026:
 Relayer menyediakan quote informasional deterministik untuk UI dan backend:
 
 ```http
-GET /api/quote/private-spend?merchant_amount=100000000&estimated_gas_cost=20000&relayer_markup_bps=1500
+GET /api/quote/private-spend?merchant_amount=100000000&estimated_gas_cost=20000&relayer_markup_bps=1500&association_root=0x...
 ```
+
+`association_root` opsional — jika disediakan, endpoint cek on-chain `getCleanRootTimestamp` untuk menentukan fee tier berdasarkan holding time.
 
 Response:
 
@@ -130,7 +118,10 @@ Response:
   "relayer_markup_bps": 1500,
   "fee_tier": "default",
   "discount_bps": null,
-  "message": "Informational quote only; signed max_execution_fee is not active yet"
+  "quote_id": "uuid-string",
+  "domain_separator": "0x...",
+  "struct_hash": "0x...",
+  "message": "Sign the ExecutionQuote message in your wallet to authorize this spend"
 }
 ```
 
@@ -157,7 +148,7 @@ Every instance of `nimbus-node` reads configurations from environment variables 
 | `NIMBUS_X402_RECIPIENT` | `None` | Address EVM penerima settlement x402. Endpoint x402 menolak request jika tidak dikonfigurasi. |
 | `NIMBUS_BATCH_ENABLED` | `false` | Aktifkan adaptive same-chain batching setelah kontrak `batchSpend()` dideploy dan diuji. |
 | `NIMBUS_ESTIMATED_GAS_COST_USDC_BASE_UNITS` | `0` | Default estimasi gas dalam base unit USDC untuk endpoint quote informasional. |
-| `NIMBUS_RELAYER_MARKUP_BPS` | `1500` | Markup relayer atas gas quote dalam basis points. `1500` berarti 15% dari estimasi gas. Jangan dipakai sebagai pemotongan production sebelum signed quote aktif. |
+| `NIMBUS_RELAYER_MARKUP_BPS` | `1500` | Markup relayer atas gas quote dalam basis points. `1500` berarti 15% dari estimasi gas. Dipakai sebagai margin relayer di execution fee. |
 | `NIMBUS_BIND_ADDR` | `127.0.0.1` | IP address untuk HTTP server binding. Gunakan Tailscale IP (100.x.x.x) untuk production. |
 | `NIMBUS_REQUIRE_TAILSCALE` | `false` | Enforce Tailscale binding. Jika `true`, node akan fail startup jika `NIMBUS_BIND_ADDR` bukan Tailscale IP. |
 | `PORT` | `8080` | Port untuk HTTP server. |
@@ -272,22 +263,16 @@ nimbus-node/src/
 ├── kms.rs               # OpenBao/Vault KMS integration
 ├── evm_client.rs        # Ethereum transaction broadcasting (single, batch, CCIP)
 ├── ccip_monitor.rs      # CCIP destination tracking background worker
+├── execution_fee_claimer.rs # Execution fee batch claim background worker
 └── handlers/
     ├── mod.rs           # Handler exports
     ├── health.rs        # Health check endpoint
     ├── deposit.rs       # Deposit & reveal handlers
     ├── spend.rs         # Spend + batch processing + CCIP refund
-    ├── quote.rs         # Private spend fee quote calculator
+    ├── quote.rs         # Private spend fee quote calculator (EIP-712)
     ├── x402.rs          # x402 facilitator endpoint
     └── threshold.rs     # Threshold signing handlers
 ```
-
-### Keunggulan Struktur Modular:
-- **Separation of Concerns**: DTOs, state, HTTP, KMS, dan handlers terpisah
-- **Maintainability**: Mudah menambah endpoint baru tanpa mengubah file lain
-- **Security**: KMS integration terisolasi di modul terpisah
-- **Testability**: Setiap modul dapat ditest secara independen
-- **Documentation**: 18 comment lines + 2 doc comments tersebar di semua modul
 
 ### Organisasi Handlers:
 - **health.rs**: Health check untuk monitoring (termasuk status database dan RPC)
@@ -385,7 +370,7 @@ Dihubungi oleh klien untuk meminta kunci masking $k$ setelah deposit stablecoin 
       "masking_key_hex": "k_key_hex_scalar..."
     }
     ```
-*   **Key Zeroization (DEC-011):** Setelah masking key berhasil di-reveal ke client, key di-zeroize dari database secara otomatis untuk meminimalkan exposure window. Session expired juga akan di-zeroize secara berkala oleh background cleanup job.
+*   **Key Zeroization (DEC-011):** Setelah masking key berhasil di-reveal ke client, key di-zeroize dari database menggunakan `write_volatile`. Session expired juga akan di-zeroize secara berkala oleh background cleanup job.
 
 ### E. Pengiriman Pembayaran Gasless & Lintas Rantai
 Dihubungi oleh klien untuk mengirimkan token privat secara anonim, baik secara lokal di rantai asal maupun lintas rantai (Fase B) tanpa menggunakan gas fee ETH.
@@ -408,7 +393,12 @@ Dihubungi oleh klien untuk mengirimkan token privat secara anonim, baik secara l
       },
       "min_payout": 95000000,                      // Opsional: Slippage protection (USDC base units, 6 desimal)
       "deadline": 1780720000,                       // Opsional: Deadline timestamp detik (Unix)
-      "idempotency_key": "optional-uuid-string"      // Opsional: Idempotency key untuk deduplikasi request
+      "idempotency_key": "optional-uuid-string",    // Opsional: Idempotency key untuk deduplikasi request
+      "max_execution_fee": 500000,                  // Opsional: Max execution fee (USDC base units) dari quote EIP-712
+      "quote_id": "uuid-from-quote-endpoint",       // Opsional: Quote ID dari /api/quote/private-spend
+      "quote_expiry": 1780720300,                   // Opsional: Quote expiry timestamp (default 5 menit)
+      "quote_signature": "0x...",                   // Opsional: EIP-712 signature dari wallet user
+      "user_address": "0xsigner_address..."         // Opsional: Address yang sign quote (untuk verify)
     }
     ```
     *   *Catatan*: Objek `cross_chain` bersifat opsional. Jika disediakan,
@@ -626,10 +616,10 @@ Konfigurasi EVM client melalui environment variables berikut:
 
 **Contoh Setup Testnet:**
 ```bash
-export NIMBUS_RPC_URL="wss://arbitrum-sepolia.core.chainstack.com/d18e11a2327c1a17c030975e3e0c8e24"
-export NIMBUS_RPC_FALLBACK_URL="wss://arbitrum-sepolia.infura.io/ws/v3/e0442523234742288f49543cb9e16da9"
-export NIMBUS_RELAYER_PRIVATE_KEY="0xb89bc61712cfa0c890c0967f186c23afdf0b770743bc4f5505300100e8c7226e"
-export NIMBUS_CONTRACT_ADDRESS="0xe6430973795bb1cc3083787e554ef2a559dad7f1"
+export NIMBUS_RPC_URL="wss://arbitrum-sepolia.core.chainstack.com/YOUR_KEY"
+export NIMBUS_RPC_FALLBACK_URL="wss://arbitrum-sepolia.infura.io/ws/v3/YOUR_KEY"
+export NIMBUS_RELAYER_PRIVATE_KEY="0x..."  # jangan commit key asli
+export NIMBUS_CONTRACT_ADDRESS="0x7853df45be072977082d2872e199ac2e405c6d22"
 cargo run
 ```
 

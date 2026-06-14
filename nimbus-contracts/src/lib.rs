@@ -115,6 +115,58 @@ impl Nimbus {
         Ok(())
     }
 
+    /// Set execution fee recipient address (admin only)
+    pub fn set_execution_fee_recipient(&mut self, recipient: Address) -> Result<(), Vec<u8>> {
+        self.check_owner()?;
+        if recipient == Address::ZERO {
+            return Err(b"INVALID_RECIPIENT".to_vec());
+        }
+        self.execution_fee_recipient.set(recipient);
+        Ok(())
+    }
+
+    /// Get total accumulated execution fees (view)
+    pub fn get_accumulated_fees(&self) -> Result<U256, Vec<u8>> {
+        Ok(self.accumulated_execution_fees.get())
+    }
+
+    /// Get execution fee recipient address (view)
+    pub fn get_execution_fee_recipient(&self) -> Result<Address, Vec<u8>> {
+        Ok(self.execution_fee_recipient.get())
+    }
+
+    /// Claim accumulated execution fees (admin only)
+    pub fn claim_execution_fees(&mut self, amount: U256) -> Result<bool, Vec<u8>> {
+        self.check_owner()?;
+        let recipient = self.execution_fee_recipient.get();
+        if recipient == Address::ZERO {
+            return Err(b"NO_RECIPIENT_SET".to_vec());
+        }
+        let accumulated = self.accumulated_execution_fees.get();
+        if amount > accumulated {
+            return Err(b"INSUFFICIENT_ACCUMULATED_FEES".to_vec());
+        }
+        if amount == U256::ZERO {
+            return Err(b"ZERO_AMOUNT".to_vec());
+        }
+        
+        // Transfer USDC to execution_fee_recipient
+        let stablecoin_address = self.stablecoin.get();
+        let erc20 = IErc20::new(stablecoin_address);
+        let host = Self::runtime_host();
+        let success = erc20
+            .transfer(&host, Call::new_mutating(self), recipient, amount)
+            .map_err(|_| b"TRANSFER_FAILED".to_vec())?;
+        if !success {
+            return Err(b"CLAIM_TRANSFER_FAILED".to_vec());
+        }
+        
+        // Update accumulated fees
+        self.accumulated_execution_fees
+            .set(accumulated.checked_sub(amount).unwrap());
+        Ok(true)
+    }
+
     pub fn total_deposited_principal(&self) -> Result<U256, Vec<u8>> {
         Ok(self.total_deposited_principal.get())
     }
@@ -273,6 +325,8 @@ impl Nimbus {
         recipient_or_intent_hash: FixedBytes<32>,
         expiry: U256,
         nonce: FixedBytes<32>,
+        max_execution_fee: U256,
+        execution_fee: U256,
     ) -> Result<bool, Vec<u8>> {
         self._spend(
             root,
@@ -284,6 +338,8 @@ impl Nimbus {
             recipient_or_intent_hash,
             expiry,
             nonce,
+            max_execution_fee,
+            execution_fee,
         )
     }
 
@@ -474,6 +530,8 @@ impl Nimbus {
         amount: U256,
         expiry: U256,
         nonce: FixedBytes<32>,
+        max_execution_fee: U256,
+        execution_fee: U256,
     ) -> Result<bool, Vec<u8>> {
         self._spend_and_buy_shares(
             root,
@@ -486,6 +544,8 @@ impl Nimbus {
             amount,
             expiry,
             nonce,
+            max_execution_fee,
+            execution_fee,
         )
     }
 
@@ -1028,6 +1088,8 @@ mod tests {
                 FixedBytes::ZERO,
                 U256::ZERO,
                 FixedBytes::ZERO,
+                U256::ZERO,
+                U256::ZERO,
             ),
             Err(b"CONTRACT_PAUSED".to_vec())
         );
@@ -1043,6 +1105,8 @@ mod tests {
                 U256::ZERO,
                 U256::ZERO,
                 FixedBytes::ZERO,
+            U256::ZERO,
+            U256::ZERO,
             ),
             Err(b"CONTRACT_PAUSED".to_vec())
         );
@@ -1275,6 +1339,8 @@ mod tests {
                 recipient_or_intent_hash,
                 expiry,
                 nonce,
+            U256::ZERO,
+            U256::ZERO,
             ),
             Err(b"UNTRUSTED_ISSUER_KEY".to_vec())
         );
@@ -1291,6 +1357,8 @@ mod tests {
                 recipient_or_intent_hash,
                 expiry,
                 nonce,
+            U256::ZERO,
+            U256::ZERO,
             ),
             Err(b"NULLIFIER_MESSAGE_MISMATCH".to_vec())
         );
@@ -1322,6 +1390,8 @@ mod tests {
                 FixedBytes::ZERO,
                 U256::ZERO,
                 FixedBytes::ZERO,
+            U256::ZERO,
+            U256::ZERO,
             ),
             Err(b"INVALID_G1_INPUT_LENGTH".to_vec())
         );
@@ -1338,6 +1408,8 @@ mod tests {
                 FixedBytes::ZERO,
                 U256::ZERO,
                 FixedBytes::ZERO,
+            U256::ZERO,
+            U256::ZERO,
             ),
             Err(b"POINT_AT_INFINITY_NOT_ALLOWED".to_vec())
         );
@@ -1354,6 +1426,8 @@ mod tests {
                 FixedBytes::ZERO,
                 U256::ZERO,
                 FixedBytes::ZERO,
+            U256::ZERO,
+            U256::ZERO,
             )
             .unwrap());
         assert!(!contract.nullifiers.get(nullifier));
@@ -1387,6 +1461,8 @@ mod tests {
                 recipient_hash,
                 U256::ZERO,
                 FixedBytes::ZERO,
+            U256::ZERO,
+            U256::ZERO,
             ),
             Err(b"RECIPIENT_INTENT_MISMATCH".to_vec())
         );
@@ -1418,6 +1494,8 @@ mod tests {
                 FixedBytes::ZERO,
                 U256::ZERO,
                 FixedBytes::ZERO,
+            U256::ZERO,
+            U256::ZERO,
             ),
             Err(b"INSUFFICIENT_PRINCIPAL".to_vec())
         );
@@ -1441,6 +1519,8 @@ mod tests {
                 FixedBytes::ZERO,
                 U256::ZERO,
                 FixedBytes::ZERO,
+            U256::ZERO,
+            U256::ZERO,
             )
             .unwrap());
         let principal = contract.total_deposited_principal().unwrap();
@@ -1455,6 +1535,8 @@ mod tests {
                 FixedBytes::ZERO,
                 U256::ZERO,
                 FixedBytes::ZERO,
+            U256::ZERO,
+            U256::ZERO,
             )
             .unwrap());
         assert_eq!(contract.total_deposited_principal().unwrap(), principal);
@@ -1502,6 +1584,8 @@ mod tests {
                 FixedBytes::ZERO,
                 U256::ZERO,
                 FixedBytes::ZERO,
+            U256::ZERO,
+            U256::ZERO,
             )
             .unwrap();
 
@@ -1555,6 +1639,8 @@ mod tests {
                 U256::from(10_000_000),
                 U256::ZERO,
                 FixedBytes::ZERO,
+            U256::ZERO,
+            U256::ZERO,
             )
             .unwrap();
 
@@ -1883,6 +1969,8 @@ mod tests {
                 recipient_hash,
                 U256::ZERO,
                 FixedBytes::ZERO,
+            U256::ZERO,
+            U256::ZERO,
             )
             .unwrap());
 
@@ -1905,6 +1993,8 @@ mod tests {
                 recipient_hash,
                 U256::ZERO,
                 FixedBytes::ZERO,
+            U256::ZERO,
+            U256::ZERO,
             ),
             Ok(false), // spend returns false when nullifier already used
             "Double spend with same nullifier must fail"
@@ -2037,6 +2127,8 @@ mod tests {
                 FixedBytes::ZERO,
                 U256::ZERO,
                 nonce_a,
+            U256::ZERO,
+            U256::ZERO,
             ),
             Err(b"INVALID_ASSOCIATION_ROOT".to_vec())
         );
@@ -2064,6 +2156,8 @@ mod tests {
                 FixedBytes::ZERO,
                 U256::ZERO,
                 nonce_b,
+            U256::ZERO,
+            U256::ZERO,
             )
             .unwrap());
         let after_spend_principal = contract.total_deposited_principal().unwrap();
@@ -2096,6 +2190,8 @@ mod tests {
                 FixedBytes::ZERO,
                 U256::ZERO,
                 nonce_c,
+            U256::ZERO,
+            U256::ZERO,
             )
             .unwrap());
         let after_spend_principal = contract.total_deposited_principal().unwrap();
@@ -2128,6 +2224,8 @@ mod tests {
                 FixedBytes::ZERO,
                 U256::ZERO,
                 nonce_d,
+            U256::ZERO,
+            U256::ZERO,
             )
             .unwrap());
         let after_spend_principal = contract.total_deposited_principal().unwrap();
@@ -2136,5 +2234,151 @@ mod tests {
             initial_principal - after_spend_principal,
             U256::from(10_010_000)
         );
+    }
+
+    // --- Execution Fee Tests ---
+
+    #[test]
+    fn test_execution_fee_exceeded_reverts() {
+        reset_test_state();
+        let mut contract = Nimbus::default();
+        let owner = Address::repeat_byte(0x01);
+        
+        contract.init(owner, Address::repeat_byte(0x02), Address::repeat_byte(0x03)).unwrap();
+        
+        let spend_amount = U256::from(10_000_000);
+        let nonce = FixedBytes::repeat_byte(0x01);
+        let (alpha_neg, _hm, pk_iss, nullifier) = register_mock_issuer_with_nonce(
+            &mut contract,
+            owner,
+            spend_amount,
+            FixedBytes::ZERO,
+            nonce,
+        );
+        
+        // Try to spend with execution_fee > max_execution_fee
+        let result = contract.spend(
+            FixedBytes::ZERO,
+            nullifier,
+            alpha_neg.into(),
+            pk_iss.into(),
+            Address::ZERO,
+            spend_amount,
+            FixedBytes::ZERO,
+            U256::ZERO,
+            nonce,
+            U256::from(100),  // max_execution_fee
+            U256::from(200),  // execution_fee (exceeds max)
+        );
+        
+        assert_eq!(result, Err(b"EXECUTION_FEE_EXCEEDED".to_vec()));
+    }
+
+    #[test]
+    fn test_execution_fee_accumulation() {
+        reset_test_state();
+        let mut contract = Nimbus::default();
+        let owner = Address::repeat_byte(0x01);
+        let fee_recipient = Address::repeat_byte(0x03);
+        
+        contract.init(owner, Address::repeat_byte(0x02), fee_recipient).unwrap();
+        
+        // Set initial principal
+        contract.total_deposited_principal.set(U256::from(100_000_000));
+        
+        let spend_amount = U256::from(10_000_000);
+        let nonce = FixedBytes::repeat_byte(0x01);
+        let (alpha_neg, _hm, pk_iss, nullifier) = register_mock_issuer_with_nonce(
+            &mut contract,
+            owner,
+            spend_amount,
+            FixedBytes::ZERO,
+            nonce,
+        );
+        
+        let initial_fees = contract.get_accumulated_fees().unwrap();
+        
+        // Spend with execution_fee = 500
+        assert!(contract.spend(
+            FixedBytes::ZERO,
+            nullifier,
+            alpha_neg.into(),
+            pk_iss.into(),
+            Address::ZERO,
+            spend_amount,
+            FixedBytes::ZERO,
+            U256::ZERO,
+            nonce,
+            U256::from(1000),  // max_execution_fee
+            U256::from(500),   // execution_fee
+        ).unwrap());
+        
+        let final_fees = contract.get_accumulated_fees().unwrap();
+        assert_eq!(final_fees - initial_fees, U256::from(500));
+    }
+
+    #[test]
+    fn test_set_execution_fee_recipient() {
+        reset_test_state();
+        let mut contract = Nimbus::default();
+        let owner = Address::repeat_byte(0x01);
+        let new_recipient = Address::repeat_byte(0x04);
+        
+        contract.init(owner, Address::repeat_byte(0x02), Address::repeat_byte(0x03)).unwrap();
+        
+        // Set execution fee recipient
+        set_msg_sender(owner);
+        contract.set_execution_fee_recipient(new_recipient).unwrap();
+        
+        let recipient = contract.get_execution_fee_recipient().unwrap();
+        assert_eq!(recipient, new_recipient);
+    }
+
+    #[test]
+    fn test_set_execution_fee_recipient_non_owner_fails() {
+        reset_test_state();
+        let mut contract = Nimbus::default();
+        let owner = Address::repeat_byte(0x01);
+        let non_owner = Address::repeat_byte(0x99);
+        
+        contract.init(owner, Address::repeat_byte(0x02), Address::repeat_byte(0x03)).unwrap();
+        
+        // Try to set execution fee recipient as non-owner
+        set_msg_sender(non_owner);
+        let result = contract.set_execution_fee_recipient(Address::repeat_byte(0x04));
+        
+        assert_eq!(result, Err(b"NOT_OWNER".to_vec()));
+    }
+
+    #[test]
+    fn test_claim_execution_fees_insufficient_balance() {
+        reset_test_state();
+        let mut contract = Nimbus::default();
+        let owner = Address::repeat_byte(0x01);
+        let recipient = Address::repeat_byte(0x04);
+        
+        contract.init(owner, Address::repeat_byte(0x02), Address::repeat_byte(0x03)).unwrap();
+        
+        // Set execution fee recipient
+        set_msg_sender(owner);
+        contract.set_execution_fee_recipient(recipient).unwrap();
+        
+        // Try to claim more than accumulated (0)
+        let result = contract.claim_execution_fees(U256::from(1000));
+        assert_eq!(result, Err(b"INSUFFICIENT_ACCUMULATED_FEES".to_vec()));
+    }
+
+    #[test]
+    fn test_claim_execution_fees_no_recipient_set() {
+        reset_test_state();
+        let mut contract = Nimbus::default();
+        let owner = Address::repeat_byte(0x01);
+        
+        contract.init(owner, Address::repeat_byte(0x02), Address::repeat_byte(0x03)).unwrap();
+        
+        // Try to claim without setting recipient
+        set_msg_sender(owner);
+        let result = contract.claim_execution_fees(U256::from(1000));
+        assert_eq!(result, Err(b"NO_RECIPIENT_SET".to_vec()));
     }
 }

@@ -56,6 +56,12 @@ sol_storage! {
         // --- CCIP Security (DEC-015) ---
         mapping(bytes32 => bool) ccip_processed_messages;
         mapping(bytes32 => bool) ccip_allowed_senders;
+
+        // --- Execution Fee Accumulation (Signed Quote Revenue Engine) ---
+        // Accumulated execution fees from spends, claimable by execution_fee_recipient
+        uint256 accumulated_execution_fees;
+        // Address authorized to claim accumulated execution fees (relayer/operator)
+        address execution_fee_recipient;
     }
 }
 

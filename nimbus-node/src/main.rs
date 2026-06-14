@@ -4,6 +4,7 @@ mod config;
 mod database;
 mod dto;
 mod evm_client;
+mod execution_fee_claimer;
 mod handlers;
 mod http;
 mod key_rotation;
@@ -211,6 +212,12 @@ async fn main() {
     let ccip_config = config::CcipDestinationConfig::from_env();
     tokio::spawn(async move {
         ccip_monitor::ccip_monitor_loop(ccip_db, ccip_config).await;
+    });
+
+    // Spawn execution fee claimer background worker
+    let fee_claimer_state = state.clone();
+    tokio::spawn(async move {
+        execution_fee_claimer::execution_fee_claimer_worker(fee_claimer_state).await;
     });
 
     let app = Router::new()

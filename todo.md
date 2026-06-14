@@ -742,7 +742,7 @@ Decision:
 - [x] Allowlist source chain selector dan sender contract.
 - [ ] Kirim payload valid dengan signature nyata.
 - [ ] Tunggu source receipt sukses.
-- [ ] Parse CCIP message ID asli dari event.
+- [x] Parse CCIP message ID asli dari event.
 - [ ] Pantau CCIP explorer/API atau destination logs.
 - [ ] Tunggu destination receipt sukses.
 - [ ] Verifikasi destination nullifier dan payout.
@@ -1258,14 +1258,14 @@ Fondasi kode yang sudah selesai:
 
 Sisa implementasi wajib:
 
-- [ ] Tambahkan `max_execution_fee`, `quote_expiry`, `quote_id`, chain ID, dan
-  relayer identity ke message/hash yang ditandatangani user.
+- [x] Tambahkan `max_execution_fee`, `quote_expiry`, `quote_id`, chain ID, dan
+  relayer identity ke message/hash yang ditandatangani user. (SDK: eip712.rs, Node: quote endpoint + spend handler, 109 tests pass)
 - [x] Buat endpoint quote deterministik untuk jalur single private spend.
 - [x] Quote endpoint menampilkan fee tier dan diskon berdasarkan holding time
   (`association_root` → `getCleanRootTimestamp` → tier 25/20/10 bps, cached di node).
 - [ ] Tambahkan batch profitability metrics ke health endpoint dan DB queries
   (`batch_count`, `total_batch_margin_usdc`, `avg_batch_size`) untuk internal dashboard.
-- [ ] Pastikan relayer tidak dapat memotong lebih dari fixed quote.
+- [x] Pastikan relayer tidak dapat memotong lebih dari fixed quote. (Contract enforce execution_fee <= max_execution_fee)
 - [ ] Pisahkan accounting: gas cost, reimbursement, gross execution fee,
   relayer margin, protocol share, dan rounding.
 - [x] Simpan quote, batch ID, jumlah item, receipt gas used, effective gas
@@ -1315,14 +1315,14 @@ Node akumulasi execution fee (gas + markup 15%) di DB, klaim berkala via 1 tx.
 
 Kontrak:
 
-- [ ] `claimExecutionFee(uint256 amount)` — owner/relayer only, transfer USDC.
+- [x] `claimExecutionFee(uint256 amount)` — owner/relayer only, transfer USDC.
 
 Node:
 
-- [ ] Track `execution_fee` + kolom `claimed` di `spend_batches`.
-- [ ] Background worker: `SUM(execution_fee) WHERE claimed = false`,
+- [x] Track `execution_fee` + kolom `claimed` di `spend_batches`.
+- [x] Background worker: `SUM(execution_fee) WHERE claimed = false`,
   klaim saat threshold tercapai (amount/count/time-based).
-- [ ] Update `claimed = true` hanya setelah tx sukses.
+- [x] Update `claimed = true` hanya setelah tx sukses.
 - [ ] Gas overhead: ~65k per claim (negligible kalau di-batch).
 
 ### Perbaiki Lifecycle Nullifier
@@ -1359,21 +1359,21 @@ Masalah saat ini:
 Return value `broadcast_ccip_transaction()` adalah source transaction hash,
 bukan CCIP message ID asli.
 
-- [ ] Parse event CCIP dari source transaction receipt.
-- [ ] Ambil message ID asli dari event router.
-- [ ] Simpan source tx hash dan CCIP message ID sebagai field berbeda.
-- [ ] Monitor status message sampai destination execution.
-- [ ] Verifikasi destination receipt dan contract event.
-- [ ] Bedakan status `source_confirmed`, `ccip_in_flight`,
+- [x] Parse event CCIP dari source transaction receipt.
+- [x] Ambil message ID asli dari event router.
+- [x] Simpan source tx hash dan CCIP message ID sebagai field berbeda.
+- [x] Monitor status message sampai destination execution.
+- [x] Verifikasi destination receipt dan contract event.
+- [x] Bedakan status `source_confirmed`, `ccip_in_flight`,
   `destination_success`, dan `destination_failed`.
 - [ ] Jangan menyebut broadcast source sebagai E2E success.
 
 ### Validasi Input Relayer
 
-- [ ] Nullifier wajib tepat 32 byte, jangan silently pad dengan zero.
-- [ ] `alpha_neg` wajib 128 byte.
-- [ ] `hm` wajib 128 byte.
-- [ ] `pk_iss` wajib 256 byte.
+- [x] Nullifier wajib tepat 32 byte, jangan silently pad dengan zero.
+- [x] `alpha_neg` wajib 128 byte.
+- [x] `hm` wajib 128 byte.
+- [x] `pk_iss` wajib 256 byte.
 - [ ] Recipient wajib address EVM valid.
 - [ ] Amount wajib memenuhi minimum dan maximum policy.
 - [ ] Validasi chain selector dan destination contract dengan allowlist.

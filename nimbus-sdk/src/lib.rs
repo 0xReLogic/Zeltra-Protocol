@@ -1,4 +1,5 @@
 mod blind_wasm;
+pub mod eip712;
 mod evm_wasm;
 mod fee_wasm;
 mod threshold_wasm;
@@ -7,6 +8,7 @@ pub mod x402;
 mod zk_wasm;
 
 pub use blind_wasm::*;
+pub use eip712::*;
 pub use evm_wasm::*;
 pub use fee_wasm::*;
 pub use threshold_wasm::*;
