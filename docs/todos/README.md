@@ -4,20 +4,29 @@ Individual todo files untuk AI agents. Setiap file fokus ke satu task/feature de
 
 ## Priority Tiers
 
+### Tier 0: Protocol Accounting (Blocks All Mainnet Work)
+**Selesaikan sebelum kembali ke checklist mainnet lama.**
+
+1. **[private-note-balance.md](private-note-balance.md)** - Private Note Balance + Change Output
+   - Setiap sisa deposit tetap menjadi hak user
+   - Note sekali pakai, partial spend menghasilkan change note baru
+   - Exact value conservation dan execution-fee solvency
+   - Status: Design Gate In Progress
+
 ### Tier 1: Safety + Revenue (Critical)
 **Must have before mainnet. Directly impact user safety and relayer revenue.**
 
-1. **[signed-quote.md](signed-quote.md)** - Signed Quote + Batch Claim
+2. **[signed-quote.md](signed-quote.md)** - Signed Quote + Batch Claim
    - User binding (EIP-712 signature)
    - Relayer revenue (execution fee claim)
    - Status: Not Started
 
-2. **[nullifier-lifecycle.md](nullifier-lifecycle.md)** - Nullifier Lifecycle Management
+3. **[nullifier-lifecycle.md](nullifier-lifecycle.md)** - Nullifier Lifecycle Management
    - 4 status: reserved → submitted → confirmed → released
    - Reconciliation worker setelah restart
    - Status: In Progress (4/6 complete)
 
-3. **[receipt-finality.md](receipt-finality.md)** - Receipt & Finality
+4. **[receipt-finality.md](receipt-finality.md)** - Receipt & Finality
    - Confirmation threshold (prevent reorg)
    - Replacement tx (gas bump)
    - API status exposure
@@ -26,17 +35,17 @@ Individual todo files untuk AI agents. Setiap file fokus ke satu task/feature de
 ### Tier 2: Mainnet Safety
 **Must have before mainnet. Prevent critical failures.**
 
-4. **[ccip-contract.md](ccip-contract.md)** - CCIP Contract Security (On-chain)
+5. **[ccip-contract.md](ccip-contract.md)** - CCIP Contract Security (On-chain)
    - Router validation, allowlist, sender decode
    - Payload audit
    - Status: In Progress (1/7 complete)
 
-5. **[ht06-queue-recovery.md](ht06-queue-recovery.md)** - HT-06: Queue Crash Recovery
+6. **[ht06-queue-recovery.md](ht06-queue-recovery.md)** - HT-06: Queue Crash Recovery
    - 16 test scenarios
    - Prove queue survive crash, no double broadcast
    - Status: Not Started (0/16 complete)
 
-6. **[ht07-rpc-failure.md](ht07-rpc-failure.md)** - HT-07: RPC & Nonce Failure Injection
+7. **[ht07-rpc-failure.md](ht07-rpc-failure.md)** - HT-07: RPC & Nonce Failure Injection
    - 10 test scenarios
    - Fallback RPC, replacement tx, low balance handling
    - Status: Not Started (0/10 complete)
@@ -44,27 +53,29 @@ Individual todo files untuk AI agents. Setiap file fokus ke satu task/feature de
 ### Tier 3: Bisa Nanti
 **Important but can be deferred. Nice to have for production polish.**
 
-7. **[zk-phase-b.md](zk-phase-b.md)** - ZK Compliance Circuit (Fase B)
+8. **[zk-phase-b.md](zk-phase-b.md)** - ZK Compliance Circuit (Fase B)
    - Merkle membership, range check, canonicality
    - Production trusted setup ceremony
    - Status: Not Started (0/5 complete)
 
-8. **[x402.md](x402.md)** - x402 Protocol Implementation
+9. **[x402.md](x402.md)** - x402 Protocol Implementation
    - Fix mock/invalid values
    - Payment verification, idempotency
    - Status: Not Started (0/8 complete)
 
-9. **[kms-tls.md](kms-tls.md)** - KMS & TLS Hardening
+10. **[kms-tls.md](kms-tls.md)** - KMS & TLS Hardening
    - HTTPS client, Vault token rotation
    - Key versioning, zeroization
    - Status: Not Started (0/7 complete)
 
-10. **[governance.md](governance.md)** - Governance & Pause
+11. **[governance.md](governance.md)** - Governance & Pause
     - 10 test scenarios
     - Timelock, pause behavior, zero-address validation
     - Status: Not Started (0/10 complete)
 
 ## Overall Progress
+Snapshot lama sebelum Tier 0 ditambahkan; hitung ulang setelah Gate A dibekukan.
+
 - **Tier 1:** 7/16 items complete (44%)
 - **Tier 2:** 1/33 items complete (3%)
 - **Tier 3:** 0/38 items complete (0%)
@@ -72,10 +83,16 @@ Individual todo files untuk AI agents. Setiap file fokus ke satu task/feature de
 
 ## Recommended Execution Order
 
-### Phase 1: Revenue Engine (Week 1)
-1. `signed-quote.md` - Get relayer revenue working
-2. `nullifier-lifecycle.md` - Fix stuck nullifiers
-3. `receipt-finality.md` - Handle edge cases
+### Phase 0: Private Balance Safety
+1. `private-note-balance.md` - Freeze note/accounting design and complete Gates A-D
+
+Execution-fee monetization and the remaining phases stay blocked until Phase 0
+proves that no user remainder can become orphaned.
+
+### Phase 1: Revenue Engine
+1. `signed-quote.md` - Adapt signed quote to the accepted private-note design
+2. `nullifier-lifecycle.md` - Adapt lifecycle to input and output notes
+3. `receipt-finality.md` - Handle reorg and note-state recovery
 
 ### Phase 2: Mainnet Safety (Week 2-3)
 4. `ccip-contract.md` - CCIP on-chain validation
