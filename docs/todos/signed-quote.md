@@ -168,11 +168,17 @@ Relayer bayar gas sendiri tapi ga ada reimbursement dari user. Quote sekarang cu
 ✅ Signed Quote implementation COMPLETE. Ready for integration testing di testnet.
 
 ## Security Requirements (from research)
-- [ ] ALL fee parameters included in signed hash (prevent Biconomy #492)
-- [ ] Bound gas calculation, jangan rely on `msg.data.length` (prevent Biconomy #535)
-- [ ] Consistent sender resolution untuk semua accounting (prevent DBXen exploit)
-- [ ] Verify actual deduction matches claimed cost (prevent ERC-4337 paymaster attacks)
-- [ ] Domain separator include chain_id + contract_address (prevent cross-chain replay)
+- [x] ALL fee parameters included in signed hash (prevent Biconomy #492)
+  - ExecutionQuote struct: quoteId, maxExecutionFee, merchantAmount, quoteExpiry, relayerAddress
+- [x] Bound gas calculation, jangan rely on `msg.data.length` (prevent Biconomy #535)
+  - Contract uses explicit execution_fee parameter, no msg.data.length dependency
+- [x] Consistent sender resolution untuk semua accounting (prevent DBXen exploit)
+  - claim_execution_fees uses check_owner() which uses msg_sender() consistently
+- [x] Verify actual deduction matches claimed cost (prevent ERC-4337 paymaster attacks)
+  - spend.rs: execution_fee <= max_execution_fee validation
+  - claim_execution_fees: amount <= accumulated validation
+- [x] Domain separator include chain_id + contract_address (prevent cross-chain replay)
+  - eip712.rs: nimbus_domain() includes chain_id and contract_address
 
 ## Post-Implementation
 - [ ] **Security audit** oleh agent sebelum deploy ke mainnet
