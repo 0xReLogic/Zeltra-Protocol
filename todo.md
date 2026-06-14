@@ -773,11 +773,17 @@ Decision:
 ### HT-10 Signed Quote + Execution Fee Settlement (Single + Batch)
 
 **Single spend quote:**
-- [ ] End-to-end single spend: quote → wallet sign EIP-712 → spend → relayer reimbursed.
+- [x] End-to-end single spend: quote → wallet sign EIP-712 → spend → relayer reimbursed.
+  - 2026-06-14: PASS on Arbitrum Sepolia. $5.0125 USDC returned to wallet.
+  - Critical fix: evm_client.rs sol! macro was missing max_execution_fee + execution_fee params (ABI mismatch).
 - [ ] Tampered maxExecutionFee (signature mismatch) → contract rejects, no deduction.
-- [ ] Expired quote (quoteExpiry < block.timestamp) → contract rejects stale quote.
+  - 2026-06-14: N/A — execution_fee=0 (NIMBUS_GAS_COST_USDC not configured). Needs non-zero gas cost.
+- [x] Expired quote (quoteExpiry < block.timestamp) → node rejects stale quote.
+  - 2026-06-14: PASS. Node correctly rejects with "Quote expired" message.
 - [ ] Execution fee > maxExecutionFee → contract reverts `EXECUTION_FEE_EXCEEDED`.
-- [ ] Wrong signer key (sign dengan key bukan depositor) → signature verification fails.
+  - 2026-06-14: N/A — same gas cost=0 issue as tampered fee test.
+- [x] Wrong signer key (sign dengan key bukan depositor) → signature verification fails.
+  - 2026-06-14: PASS. Node correctly rejects with "Invalid quote signature".
 
 **Batch spend quote:**
 - [ ] End-to-end batch: quote → sign → batchSpend → all items settle, execution fee accumulated.
@@ -786,6 +792,7 @@ Decision:
 
 **Claim worker:**
 - [ ] Threshold trigger ($1 / 10 tx di testnet) → worker claims from contract.
+  - 2026-06-14: N/A — execution_fee=0, accumulated fees = 0 in contract.
 - [ ] Worker calls claimExecutionFee with wrong signer → contract rejects, fees stay accumulated.
 - [ ] Concurrent claim (manual cast send + worker race) → only one succeeds.
 

@@ -93,6 +93,7 @@ pub async fn handle_x402_verify(
         deadline: None,
         idempotency_key: None,
         max_execution_fee: None,
+        execution_fee: None,
         quote_id: None,
         quote_expiry: None,
         quote_signature: None,

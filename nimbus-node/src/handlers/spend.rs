@@ -548,6 +548,8 @@ async fn process_single_spend(state: &AppState, item: QueuedSpend) {
                     .unwrap_or(ZERO_WORD),
                 request.expiry.unwrap_or(0),
                 request.nonce_hex.as_deref().unwrap_or(ZERO_WORD),
+                request.max_execution_fee.unwrap_or(0),
+                request.execution_fee.unwrap_or(0),
             )
             .await
     };

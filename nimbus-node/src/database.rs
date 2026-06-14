@@ -1512,6 +1512,7 @@ mod tests {
             deadline: None,
             idempotency_key: Some(format!("idem-{}", nullifier)),
             max_execution_fee: None,
+            execution_fee: None,
             quote_expiry: None,
             quote_id: None,
             quote_signature: None,

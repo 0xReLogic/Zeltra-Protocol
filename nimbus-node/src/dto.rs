@@ -58,6 +58,9 @@ pub struct SpendRequest {
     /// Maximum execution fee user is willing to pay (from signed quote)
     #[serde(default)]
     pub max_execution_fee: Option<u64>,
+    /// Actual execution fee to pass to contract (from quote response)
+    #[serde(default)]
+    pub execution_fee: Option<u64>,
     /// Quote ID from /quote endpoint (for replay protection)
     #[serde(default)]
     pub quote_id: Option<String>,

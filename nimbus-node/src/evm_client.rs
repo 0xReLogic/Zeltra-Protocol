@@ -20,7 +20,9 @@ sol! {
         uint256 amount,
         bytes32 recipient_or_intent_hash,
         uint256 expiry,
-        bytes32 nonce
+        bytes32 nonce,
+        uint256 max_execution_fee,
+        uint256 execution_fee
     ) external returns (bool);
 
     function batchSpend(
@@ -325,6 +327,8 @@ impl EvmClient {
         recipient_or_intent_hash_hex: &str,
         expiry: u64,
         nonce_hex: &str,
+        max_execution_fee: u64,
+        execution_fee: u64,
     ) -> Result<TransactionOutcome> {
         println!("RELAYER: Broadcasting spend transaction");
         println!(
@@ -417,6 +421,8 @@ impl EvmClient {
             recipient_or_intent_hash: recipient_or_intent_hash_fixed.into(),
             expiry: U256::from(expiry),
             nonce: nonce_fixed.into(),
+            max_execution_fee: U256::from(max_execution_fee),
+            execution_fee: U256::from(execution_fee),
         }
         .abi_encode();
 
