@@ -169,6 +169,16 @@ pub struct PrivateSpendQuoteResponse {
     pub message: String,
 }
 
+#[derive(Clone, Debug, Serialize, Deserialize, Default, PartialEq)]
+pub struct BatchMetricsDto {
+    pub batch_count: i64,
+    pub total_batch_margin_usdc: f64,
+    pub avg_batch_size: f64,
+    pub total_execution_fees_usdc: u64,
+    pub claimed_execution_fees_usdc: u64,
+    pub unclaimed_execution_fees_usdc: u64,
+}
+
 #[derive(Serialize)]
 pub struct HealthResponse {
     pub status: String,
@@ -176,6 +186,9 @@ pub struct HealthResponse {
     pub processed_nullifiers: usize,
     pub relayer_wallet_balance_eth: f64,
     pub relayer_accumulated_profit_usdc: f64,
+    /// Batch profitability and operational metrics (DEC-020)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub batch_metrics: Option<BatchMetricsDto>,
     /// CCIP cross-chain spends awaiting destination confirmation
     #[serde(skip_serializing_if = "Option::is_none")]
     pub ccip_pending_count: Option<i64>,

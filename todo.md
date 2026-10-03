@@ -80,7 +80,8 @@ Ref: [`docs/todos/private-note-balance.md`](file:///workspaces/Zeltra-Protocol/d
   - Ref: [`research/decisions/DEC-019-relayer-input-sanitization-safety-limits-and-post-restart-reconciliation.md`](file:///workspaces/Zeltra-Protocol/research/decisions/DEC-019-relayer-input-sanitization-safety-limits-and-post-restart-reconciliation.md)
   - Validasi recipient address EVM valid, batas min/max amount, dan chain selector allowlist.
   - Rekonsiliasi status database dengan nullifier contract setelah node restart.
-- [ ] **Batch & Fee Metrics**:
+- [x] **Batch & Fee Metrics**:
+  - Ref: [`research/decisions/DEC-020-relayer-batch-profitability-and-operational-fee-metrics.md`](file:///workspaces/Zeltra-Protocol/research/decisions/DEC-020-relayer-batch-profitability-and-operational-fee-metrics.md)
   - Tambahkan batch profitability metrics ke health endpoint & DB (`batch_count`, `total_batch_margin_usdc`, `avg_batch_size`).
 
 ---

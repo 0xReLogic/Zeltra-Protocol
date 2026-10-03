@@ -1987,14 +1987,62 @@ impl Database {
                 |row| row.get(0),
             )?;
 
+            let (
+                batch_count,
+                total_batch_margin_usdc,
+                avg_batch_size,
+                total_execution_fees_usdc,
+                claimed_execution_fees_usdc,
+            ): (i64, f64, f64, i64, i64) = conn.query_row(
+                "SELECT 
+                    COUNT(*), 
+                    COALESCE(SUM(margin_usdc), 0.0), 
+                    COALESCE(AVG(item_count), 0.0),
+                    COALESCE(SUM(execution_fee_usdc), 0),
+                    COALESCE(SUM(CASE WHEN claimed = 1 THEN execution_fee_usdc ELSE 0 END), 0)
+                 FROM spend_batches",
+                [],
+                |row| {
+                    Ok((
+                        row.get(0)?,
+                        row.get(1)?,
+                        row.get(2)?,
+                        row.get(3)?,
+                        row.get(4)?,
+                    ))
+                },
+            )?;
+
+            let unclaimed_execution_fees_usdc =
+                total_execution_fees_usdc.saturating_sub(claimed_execution_fees_usdc) as u64;
+
             Ok(DbStats {
                 total_sessions,
                 resolved_sessions,
                 total_nullifiers,
                 queued_spends,
+                batch_count,
+                total_batch_margin_usdc,
+                avg_batch_size,
+                total_execution_fees_usdc: total_execution_fees_usdc as u64,
+                claimed_execution_fees_usdc: claimed_execution_fees_usdc as u64,
+                unclaimed_execution_fees_usdc,
             })
         })
         .await?
+    }
+
+    /// Query batch profitability and operational fee metrics directly (DEC-020)
+    pub async fn get_batch_metrics(&self) -> Result<crate::dto::BatchMetricsDto> {
+        let stats = self.get_stats().await?;
+        Ok(crate::dto::BatchMetricsDto {
+            batch_count: stats.batch_count,
+            total_batch_margin_usdc: stats.total_batch_margin_usdc,
+            avg_batch_size: stats.avg_batch_size,
+            total_execution_fees_usdc: stats.total_execution_fees_usdc,
+            claimed_execution_fees_usdc: stats.claimed_execution_fees_usdc,
+            unclaimed_execution_fees_usdc: stats.unclaimed_execution_fees_usdc,
+        })
     }
 
     /// Cleanup old resolved sessions (default: older than 30 days)
@@ -2135,13 +2183,19 @@ impl Database {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 #[allow(dead_code)]
 pub struct DbStats {
     pub total_sessions: i64,
     pub resolved_sessions: i64,
     pub total_nullifiers: i64,
     pub queued_spends: i64,
+    pub batch_count: i64,
+    pub total_batch_margin_usdc: f64,
+    pub avg_batch_size: f64,
+    pub total_execution_fees_usdc: u64,
+    pub claimed_execution_fees_usdc: u64,
+    pub unclaimed_execution_fees_usdc: u64,
 }
 
 #[cfg(test)]
@@ -2582,5 +2636,74 @@ mod tests {
                 .unwrap(),
             Some(99999)
         );
+    }
+
+    #[tokio::test]
+    async fn test_batch_profitability_metrics() {
+        let tmp = TempDir::new().unwrap();
+        let db_path = tmp.path().join("batch_metrics_test.db");
+        let db = Database::new(&db_path).await.unwrap();
+
+        // 1. Initial empty state metrics
+        let initial_metrics = db.get_batch_metrics().await.unwrap();
+        assert_eq!(initial_metrics.batch_count, 0);
+        assert_eq!(initial_metrics.total_batch_margin_usdc, 0.0);
+        assert_eq!(initial_metrics.avg_batch_size, 0.0);
+        assert_eq!(initial_metrics.total_execution_fees_usdc, 0);
+        assert_eq!(initial_metrics.claimed_execution_fees_usdc, 0);
+        assert_eq!(initial_metrics.unclaimed_execution_fees_usdc, 0);
+
+        // 2. Store first batch (3 items, 5.5 USDC margin, 15,000,000 fee = 15 USDC)
+        db.store_batch_metadata(
+            "batch_001",
+            3,
+            "0xtx1",
+            210_000,
+            20_000_000_000,
+            0.0042,
+            5.5,
+            15_000_000,
+        )
+        .await
+        .unwrap();
+
+        // 3. Store second batch (5 items, 10.5 USDC margin, 25,000,000 fee = 25 USDC)
+        db.store_batch_metadata(
+            "batch_002",
+            5,
+            "0xtx2",
+            350_000,
+            20_000_000_000,
+            0.0070,
+            10.5,
+            25_000_000,
+        )
+        .await
+        .unwrap();
+
+        // 4. Verify aggregated metrics
+        // batch_count: 2
+        // total_batch_margin_usdc: 5.5 + 10.5 = 16.0
+        // avg_batch_size: (3 + 5) / 2 = 4.0
+        // total_execution_fees_usdc: 15_000_000 + 25_000_000 = 40_000_000
+        // unclaimed: 40_000_000 (claimed: 0)
+        let metrics = db.get_batch_metrics().await.unwrap();
+        assert_eq!(metrics.batch_count, 2);
+        assert!((metrics.total_batch_margin_usdc - 16.0).abs() < 1e-6);
+        assert!((metrics.avg_batch_size - 4.0).abs() < 1e-6);
+        assert_eq!(metrics.total_execution_fees_usdc, 40_000_000);
+        assert_eq!(metrics.claimed_execution_fees_usdc, 0);
+        assert_eq!(metrics.unclaimed_execution_fees_usdc, 40_000_000);
+
+        // 5. Claim first batch fees
+        db.mark_batches_claimed(&["batch_001".to_string()])
+            .await
+            .unwrap();
+
+        // 6. Verify updated claimed & unclaimed metrics
+        let updated_metrics = db.get_batch_metrics().await.unwrap();
+        assert_eq!(updated_metrics.claimed_execution_fees_usdc, 15_000_000);
+        assert_eq!(updated_metrics.unclaimed_execution_fees_usdc, 25_000_000);
+        assert_eq!(updated_metrics.total_execution_fees_usdc, 40_000_000);
     }
 }

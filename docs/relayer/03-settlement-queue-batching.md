@@ -163,5 +163,18 @@ Mengacu pada spesifikasi [`DEC-019`](file:///workspaces/Zeltra-Protocol/research
    * Jika nullifier terbukti sudah berstatus *spent* on-chain (misal berhasil ditambang sesaat sebelum crash), relayer menandai antrian lokal sebagai `confirmed` dan mencatat nullifier ke tabel lokal tanpa mengirim transaksi ganda ke mempool.
    * Jika transaksi belum masuk on-chain dan lease kedaluwarsa, relayer mereset status menjadi `queued` untuk diproses worker secara aman.
 
+---
+
+## 10. Batch Profitability & Operational Fee Metrics (DEC-020)
+
+Mengacu pada spesifikasi [`DEC-020`](file:///workspaces/Zeltra-Protocol/research/decisions/DEC-020-relayer-batch-profitability-and-operational-fee-metrics.md):
+
+1. **Database Aggregates (`get_batch_metrics`):**
+   * Menghitung total kumpulan batch (`batch_count`), profit margin bersih akumulatif (`total_batch_margin_usdc`), serta ukuran rata-rata batch (`avg_batch_size`) langsung dari tabel `spend_batches`.
+   * Menelusuri total fee eksekusi yang dihasilkan (`total_execution_fees_usdc`), fee yang sudah diklaim on-chain (`claimed_execution_fees_usdc`), dan piutang relayer yang belum ditarik (`unclaimed_execution_fees_usdc`).
+2. **Eksposur Telemetri & Monitoring (`GET /api/health`):**
+   * Objek `batch_metrics` disertakan pada respons endpoint kesehatan untuk monitoring otomatis (Prometheus / Grafana scraper) guna mendeteksi anomali gas margin dan efisiensi throughput batching secara real-time.
+
+
 
 

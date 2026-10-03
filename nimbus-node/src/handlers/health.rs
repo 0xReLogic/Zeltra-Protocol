@@ -41,6 +41,9 @@ pub async fn health_check(
     let ccip_pending = state.db.ccip_pending_count().await.ok();
     let ccip_failure = state.db.ccip_failure_count().await.ok();
 
+    // 4. Query Batch Profitability & Operational Fee Metrics (DEC-020)
+    let batch_metrics = state.db.get_batch_metrics().await.ok();
+
     let status = if !db_ok {
         "ERROR_DATABASE_DOWN".to_string()
     } else if !rpc_ok {
@@ -55,6 +58,7 @@ pub async fn health_check(
         processed_nullifiers,
         relayer_wallet_balance_eth,
         relayer_accumulated_profit_usdc,
+        batch_metrics,
         ccip_pending_count: ccip_pending,
         ccip_failure_count: ccip_failure,
     })
@@ -114,4 +118,42 @@ pub async fn signing_health(
         check_threshold_seconds: threshold_seconds,
         message,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::database::Database;
+    use tempfile::TempDir;
+
+    #[tokio::test]
+    async fn test_health_check_includes_batch_metrics() {
+        let tmp = TempDir::new().unwrap();
+        let db_path = tmp.path().join("health_test.db");
+        let db = Database::new(&db_path).await.unwrap();
+
+        // Initially empty batch table
+        let metrics0 = db.get_batch_metrics().await.unwrap();
+        assert_eq!(metrics0.batch_count, 0);
+
+        // Record a batch
+        db.store_batch_metadata(
+            "b1",
+            4,
+            "0xtx",
+            100_000,
+            10_000_000_000,
+            0.001,
+            8.0,
+            20_000_000,
+        )
+        .await
+        .unwrap();
+
+        let metrics1 = db.get_batch_metrics().await.unwrap();
+        assert_eq!(metrics1.batch_count, 1);
+        assert_eq!(metrics1.avg_batch_size, 4.0);
+        assert!((metrics1.total_batch_margin_usdc - 8.0).abs() < 1e-6);
+        assert_eq!(metrics1.total_execution_fees_usdc, 20_000_000);
+        assert_eq!(metrics1.unclaimed_execution_fees_usdc, 20_000_000);
+    }
 }
