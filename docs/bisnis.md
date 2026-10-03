@@ -58,45 +58,45 @@ pun yang menerima pembayaran melalui protokol.
 
 ## 4. Alur Pembayaran
 
-### 4.1 Shield
+### 4.1 Shield (Deposit ke Private Note)
 
-Pengguna memasukkan stablecoin ke Nimbus Privacy Pool. Setelah proses issuance
-selesai, pengguna memperoleh kemampuan melakukan private spend tanpa memakai
-funding wallet untuk setiap pembelian.
+Pengguna memasukkan stablecoin (USDC) ke Nimbus Privacy Pool. Setelah proses verifikasi
+deposit dan issuance selesai, pengguna memperoleh **Initial Private Note commitment** yang
+tercatat di dalam on-chain Merkle tree dan dapat dibelanjakan berkali-kali tanpa perlu
+melakukan deposit ulang untuk setiap pembayaran.
 
-Deposit/shield dikenai fee `0,20%`. Saldo bersih setelah fee menjadi liability
-pool dan dapat dipakai sebagai pre-staged balance untuk manusia atau agent.
+Deposit/shield dikenai fee `0,20%`. Nilai bersih setelah fee menjadi private principal
+pengguna yang dienkripsi dan diikat ke spending key privat milik pengguna atau agent.
 
-### 4.2 Private Spend
+### 4.2 Private Spend & Change Output (UTXO Model)
 
-Pengguna atau agent membuat payment payload melalui SDK. Relayer memverifikasi
-payload, membayar gas native, dan mengirim settlement. Merchant menerima nominal
-harga yang diminta.
+Pengguna atau AI agent membuat ZK payment payload melalui Nimbus SDK. Relayer memverifikasi
+proof dan quote, membayar gas native di muka, dan mengeksekusi settlement on-chain.
+Merchant menerima nominal invoice penuh tanpa potongan.
+
+Pada transaksi partial spend (misal: saldo $100, bayar invoice $5):
+1. **Input Note** lama dikonsumsi dan menghasilkan nullifier unik on-chain (mencegah double spend).
+2. **Merchant Payout** dibayarkan penuh ke alamat recipient.
+3. **Protocol & Execution Fee** dipotong sesuai quote terverifikasi.
+4. **Change Note (Kembalian)** secara otomatis dibuat dan di-mint kembali ke Merkle tree
+   secara privat untuk spending key pengirim via ZK-SNARK proof (Value Conservation).
 
 ```text
-Harga merchant + Network Fee = total yang dibayar pengguna
+Input Note Value = Merchant Payout + Protocol Fee + Execution Fee + Output Change Value
 ```
 
-Merchant tidak dipaksa menanggung biaya privasi milik pengirim. Contract
-memperlakukan `amount` sebagai nominal invoice yang harus diterima merchant
-secara penuh. Protocol fee didebit di atas `amount` dari saldo pengirim:
-
-```text
-merchant payout = harga merchant
-protocol fee    = ceil(harga merchant * fee_bps) 
-                  // fee_bps = 0.25% (default), 0.20% (hold >= 7 hari), 0.10% (hold >= 30 hari)
-total debit     = harga merchant + protocol fee + execution fee
-```
-
-Dengan cara ini, fee tetap berasal dari pengirim dan merchant menerima harga
-yang diminta. Jika saldo pengirim hanya cukup untuk harga merchant tetapi tidak
-cukup untuk fee, transaksi harus gagal sebagai `INSUFFICIENT_PRINCIPAL`.
-Pembulatan final harus mengikuti integer stablecoin dan diverifikasi terhadap
-quote kontrak.
+Dengan model ini:
+* Tidak ada sisa dana yang terkunci (*no dead/locked funds*).
+* Pengguna tidak perlu menghitung gas manual sebelum deposit.
+* Sisa kembalian langsung menjadi unspent note baru yang siap dibelanjakan lagi kapan saja.
 
 ### 4.3 Unshield / Withdrawal (Konsolidasi)
 
-Pengguna dapat mengeluarkan saldo dari privacy pool menuju alamat publik. Untuk menjaga kesederhanaan arsitektur (Architectural Simplification) dan menghindari code bloat pada Arbitrum Stylus WASM, fungsi penarikan (`unshield`) terpisah telah **dihapus**. Penarikan dana dari pool kini sepenuhnya dilakukan dengan cara memanggil fungsi **Private Spend (Flow 4)** dengan memasukkan alamat dompet publik milik pengguna sendiri sebagai penerima. Transaksi ini dikenai fee transaksi standar yang sama dengan spend privat biasa.
+Pengguna dapat mengeluarkan saldo dari privacy pool menuju alamat publik kapan saja.
+Untuk menjaga kesederhanaan arsitektur dan efisiensi WASM di Arbitrum Stylus, tidak ada fungsi
+`withdraw()` terpisah. Penarikan saldo dilakukan dengan mengeksekusi **Private Spend**
+ke alamat dompet publik milik pengguna sendiri sebagai recipient. Sisa saldo (jika ada) tetap
+kembali sebagai change note privat.
 
 ## 5. Model Biaya Target
 
@@ -166,54 +166,43 @@ menaikkan biaya setelah persetujuan pengguna.
 
 ## 6. AI Agent Spending Wallet dan SDK
 
-Nimbus tidak membuat atau mengoperasikan AI milik pengguna. Developer memasang
-Nimbus SDK ke agent mereka agar agent dapat membayar merchant atau API secara
-privat.
+Nimbus tidak membuat atau mengoperasikan bot AI pengguna. Developer memasang
+Nimbus SDK ke dalam autonomous agent mereka agar agent dapat melakukan pembayaran API
+atau layanan secara privat dan self-custodial.
 
 ```text
-Pemilik deposit ke Nimbus Privacy Pool
+Pemilik mendanai Initial Private Note untuk Agent
     |
-    | menetapkan Agent Spending Wallet di Layer 7
     v
-Pre-staged state: balance, allowance, policy, nonce
+Nimbus SDK (Client-Side Note & Spending Key Manager)
     |
     v
 AI agent menerima HTTP 402 atau payment request
     |
-    | SDK membuat ephemeral payment payload
+    | SDK membuat Groth16 ZK proof (Spend Note -> Pay Merchant + Change Note)
     v
-Nimbus melakukan instant private settlement
+Nimbus Relayer melakukan instant settlement on-chain
     |
-    v
-API provider menerima stablecoin
+    +---> API provider menerima USDC
+    |
+    +---> Change Note (kembalian) kembali ke SDK agent untuk request berikutnya
 ```
 
-Agent Spending Wallet bukan wallet kustodian baru dan bukan AI milik Nimbus.
-Ini adalah state otorisasi Layer 7 di atas liability pool: owner sudah menaruh
-saldo, lalu agent diberi policy terbatas untuk membelanjakan saldo tersebut.
-Karena saldo sudah pre-staged, agent tidak perlu melakukan deposit baru untuk
-setiap API call. Settlement bisa langsung dibuat, diquote, ditandatangani, dan
-masuk queue relayer.
+Agent Spending Wallet **bukan akun kustodian di server relayer** dan bukan saldo Layer 7 fiktif.
+Ini adalah pengelolaan cryptographic private notes secara mandiri oleh Nimbus SDK:
+1. Pemilik mendelegasikan spending key terisolasi atau mentransfer note dengan nominal tertentu ke agent.
+2. Agent memegang spending key dan unspent notes secara lokal.
+3. Karena sisa pembayaran selalu kembali sebagai change note ke Merkle tree, agent dapat melakukan pembayaran API berulang kali secara instan tanpa perlu bantuan funding wallet manusia setiap kali ada invoice.
 
-Mandat atau pre-staged state agent minimal harus mencakup:
+Untuk mencegah pengeluaran berlebihan oleh AI yang error/halusinasi, SDK menyediakan policy guard:
+- batas nominal maksimum per transaksi;
+- batas pengeluaran harian/per jam;
+- allowlist domain/merchant penerima;
+- expiry dan kill-switch lokal;
+- limit toleransi execution fee.
 
-- batas saldo;
-- maksimum per transaksi;
-- batas pengeluaran harian;
-- merchant atau kategori yang diizinkan;
-- expiry;
-- nonce dan nullifier;
-- maksimum Network Fee.
-- status pause/revoke dari owner.
-
-Model ini menjadi alasan ekonomi agar user menyimpan working balance di pool
-tanpa dipaksa lock. User tetap dapat menarik kembali saldo yang tidak terpakai (via spend ke dompet publik pribadi) dengan
-fee transaksi standar `0,25%`, tetapi agent hanya bisa spend sesuai policy yang sudah
-ditandatangani owner.
-
-Nanopayment tidak boleh mengirim satu transaksi on-chain untuk setiap API call.
-Saldo atau authorization kecil dikumpulkan dan diselesaikan secara batch agar
-biaya jaringan tidak lebih besar daripada nilai pembelian.
+Nanopayment mikro dapat dikumpulkan oleh relayer dan diselesaikan secara batch (2-8 transaksi)
+agar biaya gas on-chain tetap jauh lebih kecil daripada nilai pembayaran.
 
 ## 7. Liquid Reserve (Full Reserve) Model
 
@@ -294,29 +283,21 @@ Metrik utama:
 6. Tunda token, buyback, dan distribusi staking sampai protokol memiliki penggunaan
    serta pendapatan nyata.
 
-## 11. Batas Implementasi Saat Ini
+## 11. Realitas Status Implementasi Saat Ini
 
-Dokumen ini menjelaskan **model bisnis target**, bukan seluruh perilaku kontrak
-yang sudah aktif.
+Dokumen ini menjelaskan **model bisnis target dan roadmap arsitektur**. Status teknis riil di codebase saat ini terbagi menjadi dua fase:
 
-Implementasi saat ini sudah:
+### Yang Sudah Selesai & Teruji di Arbitrum Sepolia (Phase 1 Baseline):
+* **Smart Contract Stylus:** Verifikasi pairing BLS12-381 via EIP-2537 (`0x0f`), 13/13 testnet negative tests lolos.
+* **Jaringan Threshold:** 1 Leader + 4 Guardian (3-of-5 threshold) dengan rilis atomik masking key `k` setelah deposit confirmed.
+* **Settlement Engine:** SQLite/SQLCipher persistent queue dengan auto-retry, status machine durable, dan leasing worker.
+* **Batch Spend:** Entrypoint Stylus `batch_spend()` (2-8 item) terdeploy dengan EIP-712 execution quote validation. Gas benchmark riil tersimpan di `docs/gas_latency_benchmark.md`.
+* **Fee Structure Awal:** Helper fee terpusat di `nimbus-core` dan SDK untuk mencegah invoice short-pay.
 
-- memotong `0,1%` saat deposit;
-- mendebit `0,15%` di atas nominal merchant saat spend/redemption;
-- memiliki helper fee terpusat di `nimbus-core` dan SDK agar merchant menerima
-  nominal exact tanpa short-pay;
-- memiliki helper quote execution fee untuk memisahkan gas reimbursement dan
-  markup relayer.
-
-Implementasi saat ini masih:
-
-- belum menyesuaikan konstanta deposit fee (`0,20%`) dan private spend/withdraw fee (`0,25%`) di level smart contract, SDK, dan relayer;
-- sudah memiliki entrypoint dan broadcaster batch untuk 2 sampai 8 same-chain
-  spend, tetapi penghematan gas belum dibenchmark di testnet;
-- belum menagih fixed execution quote kepada pengguna;
-- belum memiliki signed `max_execution_fee` dan quote expiry;
-- belum membuktikan settlement batch nanopayment dengan beban produksi.
-
-Sebelum mainnet, implementasi fee harus direfaktor menjadi policy terpusat,
-memiliki batas maksimum permanen, timelock, event perubahan, signed quote, dan
-accounting terpisah untuk principal, operator, serta treasury.
+### Yang Sedang Berjalan (Phase 2 - Jalur B: ZK-UTXO Note Balance):
+* **Gate C0 Security Repair (`nimbus-core`):** Pengerjaan sirkuit Groth16 Arkworks untuk private note dengan change output:
+  - Enforce pembuktian Merkle path direction bits terikat ke `input_leaf_index` di sirkuit (mencegah double-spend).
+  - Enforce range constraint 64-bit untuk seluruh nilai nominal (mencegah modular wrap-around field scalar).
+  - Enforce boolean constraint pada `has_change` (mencegah pemalsuan output commitment).
+* **Gate D (Stylus Note Ledger):** Integrasi on-chain Merkle tree append-only dan multi-liability accounting (`user_note_liability`, `refundable_deposit_liability`, `accrued_execution_fee_liability`) di smart contract Stylus setelah Gate C0 lulus.
+* **Tokenomics:** Seluruh desain token $NIMB dibekukan. Protokol beroperasi 100% menggunakan collateral USDC murni (Full Reserve).
