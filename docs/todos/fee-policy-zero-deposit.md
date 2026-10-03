@@ -1,7 +1,7 @@
 # Deposit Fee vs Zero-Fee Inflow Policy Evaluation
 
 **Priority:** Tier 1 (Product & Tokenomics / Mainnet Readiness)  
-**Status:** Under Evaluation  
+**Status:** Completed & Adopted (Zero-Deposit & Fixed Mathematical Constants)  
 **Reference:** [`docs/bisnis.md`](file:///workspaces/Zeltra-Protocol/docs/bisnis.md) §5, [`todo.md`](file:///workspaces/Zeltra-Protocol/todo.md) Section 2 (Fee & Events)
 
 ---
@@ -77,10 +77,12 @@ uint256 deposit_fee_bps;
 
 ---
 
-## 5. Checklist Pelaksanaan di Contract
+## 5. Checklist Pelaksanaan di Contract & Ecosystem
 
-- [ ] Tambahkan field storage `deposit_fee_bps` di [`nimbus-contracts/src/storage.rs`](file:///workspaces/Zeltra-Protocol/nimbus-contracts/src/storage.rs).
-- [ ] Buat fungsi admin `set_deposit_fee_bps(new_fee_bps)` dengan validasi `new_fee_bps <= 50` (maks 0,50%) dan two-step timelock.
-- [ ] Ganti perkalian hardcoded `20` di [`nimbus-contracts/src/deposit.rs`](file:///workspaces/Zeltra-Protocol/nimbus-contracts/src/deposit.rs) dengan membaca `self.deposit_fee_bps.get()`.
-- [ ] Tambahkan unit test: deposit dengan fee 0 bps menghasilkan `net_amount == amount`.
-- [ ] Update SDK quote endpoint agar merefleksikan tier fee deposit dinamis.
+- [x] Tambahkan field storage `deposit_fee_bps` di [`nimbus-contracts/src/storage.rs`](file:///workspaces/Zeltra-Protocol/nimbus-contracts/src/storage.rs).
+- [x] Default deposit fee: 0 bps (0.00%) permanently (`get_deposit_fee_bps()` returns `U256::ZERO`).
+- [x] Bypass formula di [`nimbus-contracts/src/deposit.rs`](file:///workspaces/Zeltra-Protocol/nimbus-contracts/src/deposit.rs) saat `fee_bps == 0`, menghasilkan `net_amount == amount`.
+- [x] Update fee spend ke 45 bps (default) dan 40 bps (≥ 30 hari hold) di [`nimbus-contracts/src/spend.rs`](file:///workspaces/Zeltra-Protocol/nimbus-contracts/src/spend.rs) dan `batch_spend`.
+- [x] Update core fees (`fees.rs`, `accounting.rs`) dan node quote handler (`quote.rs`).
+- [x] Semua 45 contract test, 23 accounting test core, dan 43 node test pass 100%.
+- [x] Eliminasi DAO fee attack vector demi immutability and mathematical solvency.

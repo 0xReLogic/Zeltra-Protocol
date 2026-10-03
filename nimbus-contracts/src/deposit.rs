@@ -13,12 +13,12 @@ use crate::interfaces::IErc20;
 use crate::storage::Nimbus;
 
 impl Nimbus {
-    /// Returns the current deposit fee in basis points (defaults to 20 bps = 0.20% if uninitialized)
+    /// Returns the current deposit fee in basis points (defaults to 0 bps = 0.00% if uninitialized)
     pub fn get_deposit_fee_bps(&self) -> U256 {
         if self.deposit_fee_initialized.get() {
             self.deposit_fee_bps.get()
         } else {
-            U256::from(20)
+            U256::ZERO
         }
     }
 

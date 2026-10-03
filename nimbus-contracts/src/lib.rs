@@ -611,7 +611,7 @@ impl Nimbus {
 
         // 3. EXECUTE EFFECTS AND INTERACTIONS
         for i in 0..len {
-            let mut fee_bps = U256::from(25); // 0.25%
+            let mut fee_bps = U256::from(45); // 0.45%
 
             if roots[i] != FixedBytes::ZERO {
                 let root_timestamp = self.clean_association_roots.get(roots[i]);
@@ -621,13 +621,10 @@ impl Nimbus {
                 let delta_t = current_time
                     .checked_sub(root_timestamp)
                     .unwrap_or(U256::ZERO);
-                let seven_days = U256::from(7 * 24 * 60 * 60);
                 let thirty_days = U256::from(30 * 24 * 60 * 60);
 
                 if delta_t >= thirty_days {
-                    fee_bps = U256::from(10); // 0.10% (1 month hold)
-                } else if delta_t >= seven_days {
-                    fee_bps = U256::from(20); // 0.20% (7 days hold)
+                    fee_bps = U256::from(40); // 0.40% (1 month hold)
                 }
             }
 
@@ -1783,11 +1780,11 @@ mod tests {
             .deposit(sid, vec![0x42; 256].into(), U256::from(20_000_000))
             .unwrap();
 
-        // fee = (20,000,000 * 20 + 9999) / 10000 = 40,000
-        // net_amount = 20,000,000 - 40,000 = 19_960_000 net
+        // fee = 0 (0% deposit fee policy)
+        // net_amount = 20,000,000 net
         assert_eq!(
             contract.total_deposited_principal().unwrap(),
-            U256::from(19_960_000)
+            U256::from(20_000_000)
         );
 
         // Test spend decreases principal
@@ -1814,12 +1811,12 @@ mod tests {
             .unwrap();
 
         assert!(is_valid);
-        // spend fee = (10,000,000 * 25 + 9999) / 10000 = 25,000
-        // total debit = 10,025_000
-        // new principal = 19_960_000 - 10,025_000 = 9_935_000
+        // spend fee = (10,000,000 * 45 + 9999) / 10000 = 45_000
+        // total debit = 10_045_000
+        // new principal = 20_000_000 - 10_045_000 = 9_955_000
         assert_eq!(
             contract.total_deposited_principal().unwrap(),
-            U256::from(9_935_000)
+            U256::from(9_955_000)
         );
 
         // Test yield claim under test (where total assets = principal, so yield is 0)
@@ -2050,13 +2047,13 @@ mod tests {
         assert!(contract.nullifiers.get(nullifier2));
 
         // Verify principal reduction:
-        // deposit net principal: 49,900,000
-        // spend 1: 10,000,000 + fee (25,000) = 10,025,000 debit
-        // spend 2: 10,000,000 + fee (25,000) = 10,025,000 debit
-        // expected final principal: 49,900,000 - 20,050,000 = 29,850,000
+        // deposit net principal: 50,000,000 (0% deposit fee)
+        // spend 1: 10,000,000 + fee (45,000) = 10,045,000 debit
+        // spend 2: 10,000,000 + fee (45,000) = 10,045,000 debit
+        // expected final principal: 50,000,000 - 20,090,000 = 29,910,000
         assert_eq!(
             contract.total_deposited_principal().unwrap(),
-            U256::from(29_850_000)
+            U256::from(29_910_000)
         );
     }
 
@@ -2121,7 +2118,7 @@ mod tests {
         assert!(!contract.nullifiers.get(nullifier2));
         assert_eq!(
             contract.total_deposited_principal().unwrap(),
-            U256::from(49_900_000)
+            U256::from(50_000_000)
         );
     }
 
@@ -2147,10 +2144,10 @@ mod tests {
             .deposit(sid, commitment.clone().into(), deposit_amount)
             .unwrap();
         let after_deposit_principal = contract.total_deposited_principal().unwrap();
-        // Fee is 0.20%, so net amount = 10_000_000 - 20_000 = 9_980_000
+        // Fee is 0% (0 bps), so net amount = 10_000_000
         assert!(after_deposit_principal > initial_principal);
         let net_amount = after_deposit_principal - initial_principal;
-        assert_eq!(net_amount, U256::from(9_980_000));
+        assert_eq!(net_amount, U256::from(10_000_000));
 
         // 2. Reveal - principal should NOT decrease (DEC-001)
         set_msg_sender(owner);
@@ -2175,8 +2172,8 @@ mod tests {
         recipient_hash[12..].copy_from_slice(recipient.as_slice());
         let recipient_hash = FixedBytes::from(recipient_hash);
         let spend_amount = U256::from(5_000_000);
-        // flat 0.25% fee: (5_000_000 * 25 + 9999) / 10000 = 12_500
-        let spend_fee = U256::from(12_500);
+        // flat 0.45% fee: (5_000_000 * 45 + 9999) / 10000 = 22_500
+        let spend_fee = U256::from(22_500);
         let total_spend_debit = spend_amount + spend_fee;
         let (alpha_neg, hm, pk_iss, nullifier) =
             register_mock_issuer(&mut contract, owner, spend_amount, recipient_hash);
@@ -2356,9 +2353,8 @@ mod tests {
             ),
             Err(b"INVALID_ASSOCIATION_ROOT".to_vec())
         );
-
-        // Scenario B: Spend using valid root but with delta_t < 7 days
-        // block_timestamp = 1000 + 100 = 1100 (delta_t = 100) -> 0.25% fee (25,000)
+        // Scenario B: Spend using valid root but with delta_t < 30 days
+        // block_timestamp = 1000 + 100 = 1100 (delta_t = 100) -> 0.45% fee (45,000)
         set_block_timestamp(1100);
         let nonce_b = FixedBytes::repeat_byte(0x02);
         let (alpha_neg2, _hm2, pk_iss2, nullifier2) = register_mock_issuer_with_nonce(
@@ -2385,14 +2381,14 @@ mod tests {
             )
             .unwrap());
         let after_spend_principal = contract.total_deposited_principal().unwrap();
-        // spend_fee = (10,000,000 * 25 + 9999) / 10000 = 25,000
+        // spend_fee = (10,000,000 * 45 + 9999) / 10000 = 45,000
         assert_eq!(
             initial_principal - after_spend_principal,
-            U256::from(10_025_000)
+            U256::from(10_045_000)
         );
 
-        // Scenario C: Spend using valid root with delta_t = 8 days (>= 7 days, < 30 days)
-        // registration = 1000, current = 1000 + 8 * 86400 = 692200 (delta_t = 691200) -> 0.20% fee (20,000)
+        // Scenario C: Spend using valid root with delta_t = 8 days (< 30 days) -> still standard 0.45% fee (45,000)
+        // registration = 1000, current = 1000 + 8 * 86400 = 692200 (delta_t = 691200) -> 0.45% fee (45,000)
         set_block_timestamp(1000 + 8 * 86400);
         let nonce_c = FixedBytes::repeat_byte(0x03);
         let (alpha_neg3, _hm3, pk_iss3, nullifier3) = register_mock_issuer_with_nonce(
@@ -2419,14 +2415,14 @@ mod tests {
             )
             .unwrap());
         let after_spend_principal = contract.total_deposited_principal().unwrap();
-        // spend_fee = (10,000,000 * 20 + 9999) / 10000 = 20,000
+        // spend_fee = (10,000,000 * 45 + 9999) / 10000 = 45,000
         assert_eq!(
             initial_principal - after_spend_principal,
-            U256::from(10_020_000)
+            U256::from(10_045_000)
         );
 
         // Scenario D: Spend using valid root with delta_t = 31 days (>= 30 days)
-        // registration = 1000, current = 1000 + 31 * 86400 = 2679400 -> 0.10% fee (10,000)
+        // registration = 1000, current = 1000 + 31 * 86400 = 2679400 -> 0.40% fee (40,000)
         set_block_timestamp(1000 + 31 * 86400);
         let nonce_d = FixedBytes::repeat_byte(0x04);
         let (alpha_neg4, _hm4, pk_iss4, nullifier4) = register_mock_issuer_with_nonce(
@@ -2453,10 +2449,10 @@ mod tests {
             )
             .unwrap());
         let after_spend_principal = contract.total_deposited_principal().unwrap();
-        // spend_fee = (10,000,000 * 10 + 9999) / 10000 = 10,000
+        // spend_fee = (10,000,000 * 40 + 9999) / 10000 = 40,000
         assert_eq!(
             initial_principal - after_spend_principal,
-            U256::from(10_010_000)
+            U256::from(10_040_000)
         );
     }
 
@@ -2664,8 +2660,8 @@ mod tests {
             .deposit(sid, dummy_com_k.clone(), deposit_amount)
             .unwrap();
 
-        // 0.20% fee on 100_000_000 is 200_000. Net deposit = 99_800_000
-        let net_deposit = U256::from(99_800_000);
+        // 0% deposit fee on 100_000_000. Net deposit = 100_000_000
+        let net_deposit = U256::from(100_000_000);
         assert_eq!(
             contract.refundable_deposit_liability().unwrap(),
             net_deposit
@@ -2715,8 +2711,8 @@ mod tests {
             )
             .unwrap());
 
-        // 0.25% protocol fee on 10_000_000 is 25_000
-        let protocol_share = U256::from(25_000);
+        // 0.45% protocol fee on 10_000_000 is 45_000
+        let protocol_share = U256::from(45_000);
         let exec_fee = U256::from(500);
         let total_user_debit = spend_amount + protocol_share + exec_fee;
 
@@ -2927,7 +2923,7 @@ mod tests {
         assert_eq!(contract.refundable_deposit_liability().unwrap(), U256::ZERO);
         assert_eq!(
             contract.user_note_liability().unwrap(),
-            U256::from(99_800_000)
+            U256::from(100_000_000)
         );
     }
 
@@ -3117,7 +3113,7 @@ mod tests {
     fn test_default_uninitialized_deposit_fee() {
         reset_test_state();
         let contract = Nimbus::default();
-        // Defaults to 20 bps (0.20%) when uninitialized
-        assert_eq!(contract.deposit_fee_bps().unwrap(), U256::from(20));
+        // Defaults to 0 bps (0.00%) when uninitialized (zero deposit fee policy)
+        assert_eq!(contract.deposit_fee_bps().unwrap(), U256::ZERO);
     }
 }

@@ -368,12 +368,12 @@ mod tests {
         let s = fresh_state();
         let r = s.deposit(100_000_000).unwrap(); // 100 USDC
 
-        // Deposit fee = ceil(100_000_000 * 20 / 10000) = 200_000 (0.2 USDC)
-        // Net amount = 100_000_000 - 200_000 = 99_800_000 (99.8 USDC)
-        assert_eq!(r.new_state.assets, 99_800_000);
-        assert_eq!(r.new_state.refundable_deposit_liability, 99_800_000);
+        // Deposit fee = 0 (0% deposit policy)
+        // Net amount = 100_000_000 (100 USDC )
+        assert_eq!(r.new_state.assets, 100_000_000);
+        assert_eq!(r.new_state.refundable_deposit_liability, 100_000_000);
         assert_eq!(r.new_state.user_note_liability, 0);
-        assert_eq!(r.protocol_fee_realized, 200_000);
+        assert_eq!(r.protocol_fee_realized, 0);
         assert!(r.new_state.check_solvency());
     }
 
@@ -387,11 +387,11 @@ mod tests {
     fn test_reveal_after_deposit() {
         let s = fresh_state();
         let r1 = s.deposit(100_000_000).unwrap();
-        let r2 = r1.new_state.reveal(99_800_000).unwrap();
+        let r2 = r1.new_state.reveal(100_000_000).unwrap();
 
         assert_eq!(r2.new_state.refundable_deposit_liability, 0);
-        assert_eq!(r2.new_state.user_note_liability, 99_800_000);
-        assert_eq!(r2.new_state.assets, 99_800_000);
+        assert_eq!(r2.new_state.user_note_liability, 100_000_000);
+        assert_eq!(r2.new_state.assets, 100_000_000);
         assert!(r2.new_state.check_solvency());
     }
 
@@ -399,7 +399,7 @@ mod tests {
     fn test_refund_before_reveal() {
         let s = fresh_state();
         let r1 = s.deposit(100_000_000).unwrap();
-        let r2 = r1.new_state.refund(99_800_000).unwrap();
+        let r2 = r1.new_state.refund(100_000_000).unwrap();
 
         assert_eq!(r2.new_state.assets, 0);
         assert_eq!(r2.new_state.refundable_deposit_liability, 0);
@@ -410,27 +410,27 @@ mod tests {
     fn test_refund_after_reveal_rejected() {
         let s = fresh_state();
         let r1 = s.deposit(100_000_000).unwrap();
-        let r2 = r1.new_state.reveal(99_800_000).unwrap();
+        let r2 = r1.new_state.reveal(100_000_000).unwrap();
         // After reveal, refundable is 0, so refund should fail
-        assert!(r2.new_state.refund(99_800_000).is_none());
+        assert!(r2.new_state.refund(100_000_000).is_none());
     }
 
     #[test]
     fn test_spend_after_reveal() {
         let s = fresh_state();
         let r1 = s.deposit(100_000_000).unwrap();
-        let r2 = r1.new_state.reveal(99_800_000).unwrap();
+        let r2 = r1.new_state.reveal(100_000_000).unwrap();
 
-        // Spend 5 USDC: merchant=5M, protocol_fee=12500, exec_fee=23000
-        // Change = 99_800_000 - 5_000_000 - 12_500 - 23_000 = 94_764_500
+        // Spend 5 USDC: merchant=5M, protocol_fee=22500 (45 bps), exec_fee=23000
+        // Change = 100_000_000 - 5_000_000 - 22_500 - 23_000 = 94_954_500
         let r3 = r2
             .new_state
-            .spend(99_800_000, 5_000_000, 12_500, 23_000, 94_764_500)
+            .spend(100_000_000, 5_000_000, 22_500, 23_000, 94_954_500)
             .unwrap();
 
-        assert_eq!(r3.new_state.user_note_liability, 94_764_500);
-        // Assets: 99_800_000 - 5_000_000 - 12_500 = 94_787_500
-        assert_eq!(r3.new_state.assets, 94_787_500);
+        assert_eq!(r3.new_state.user_note_liability, 94_954_500);
+        // Assets: 100_000_000 - 5_000_000 - 22_500 = 94_977_500
+        assert_eq!(r3.new_state.assets, 94_977_500);
         assert_eq!(r3.new_state.accrued_execution_fee_liability, 23_000);
         assert_eq!(r3.execution_fee_accrued, 23_000);
         assert!(r3.new_state.check_solvency());
@@ -440,12 +440,12 @@ mod tests {
     fn test_spend_value_conservation_violated() {
         let s = fresh_state();
         let r1 = s.deposit(100_000_000).unwrap();
-        let r2 = r1.new_state.reveal(99_800_000).unwrap();
+        let r2 = r1.new_state.reveal(100_000_000).unwrap();
 
         // Wrong change value (too high) — should be rejected
         let result = r2
             .new_state
-            .spend(99_800_000, 5_000_000, 12_500, 23_000, 95_000_000);
+            .spend(100_000_000, 5_000_000, 22_500, 23_000, 95_000_000);
         assert!(result.is_none(), "Value conservation must be enforced");
     }
 
@@ -453,12 +453,12 @@ mod tests {
     fn test_spend_value_conservation_too_low() {
         let s = fresh_state();
         let r1 = s.deposit(100_000_000).unwrap();
-        let r2 = r1.new_state.reveal(99_800_000).unwrap();
+        let r2 = r1.new_state.reveal(100_000_000).unwrap();
 
         // Wrong change value (too low) — should be rejected
         let result = r2
             .new_state
-            .spend(99_800_000, 5_000_000, 12_500, 23_000, 94_000_000);
+            .spend(100_000_000, 5_000_000, 22_500, 23_000, 94_000_000);
         assert!(result.is_none(), "Value conservation must be enforced");
     }
 
@@ -466,17 +466,17 @@ mod tests {
     fn test_claim_execution_fee() {
         let s = fresh_state();
         let r1 = s.deposit(100_000_000).unwrap();
-        let r2 = r1.new_state.reveal(99_800_000).unwrap();
+        let r2 = r1.new_state.reveal(100_000_000).unwrap();
         let r3 = r2
             .new_state
-            .spend(99_800_000, 5_000_000, 12_500, 23_000, 94_764_500)
+            .spend(100_000_000, 5_000_000, 22_500, 23_000, 94_954_500)
             .unwrap();
         let r4 = r3.new_state.claim_execution_fee(23_000).unwrap();
 
         assert_eq!(r4.new_state.accrued_execution_fee_liability, 0);
-        // Assets: 94_787_500 - 23_000 = 94_764_500
-        assert_eq!(r4.new_state.assets, 94_764_500);
-        assert_eq!(r4.new_state.user_note_liability, 94_764_500);
+        // Assets: 94_977_500 - 23_000 = 94_954_500
+        assert_eq!(r4.new_state.assets, 94_954_500);
+        assert_eq!(r4.new_state.user_note_liability, 94_954_500);
         assert!(r4.new_state.check_solvency());
         assert_eq!(r4.new_state.surplus(), Some(0)); // exact balance
     }
@@ -485,10 +485,10 @@ mod tests {
     fn test_claim_more_than_accrued_rejected() {
         let s = fresh_state();
         let r1 = s.deposit(100_000_000).unwrap();
-        let r2 = r1.new_state.reveal(99_800_000).unwrap();
+        let r2 = r1.new_state.reveal(100_000_000).unwrap();
         let r3 = r2
             .new_state
-            .spend(99_800_000, 5_000_000, 12_500, 23_000, 94_764_500)
+            .spend(100_000_000, 5_000_000, 22_500, 23_000, 94_954_500)
             .unwrap();
         // Try to claim more than accrued
         assert!(r3.new_state.claim_execution_fee(24_000).is_none());
@@ -504,18 +504,18 @@ mod tests {
     fn test_claim_cannot_touch_user_funds() {
         // Build a valid state through normal transitions
         let s = fresh_state();
-        let r1 = s.deposit(100_000_000).unwrap(); // net 99_800_000
-        let r2 = r1.new_state.reveal(99_800_000).unwrap();
+        let r1 = s.deposit(100_000_000).unwrap(); // net 100_000_000
+        let r2 = r1.new_state.reveal(100_000_000).unwrap();
         let r3 = r2
             .new_state
-            .spend(99_800_000, 5_000_000, 12_500, 23_000, 94_764_500)
+            .spend(100_000_000, 5_000_000, 22_500, 23_000, 94_954_500)
             .unwrap();
 
-        // State: assets=94_787_500, user_note=94_764_500, accrued=23_000
-        // Claiming 23_000 leaves assets=94_764_500 == user_note (exact, valid)
+        // State: assets=94_977_500, user_note=94_954_500, accrued=23_000
+        // Claiming 23_000 leaves assets=94_954_500 == user_note (exact, valid)
         let r4 = r3.new_state.claim_execution_fee(23_000).unwrap();
-        assert_eq!(r4.new_state.assets, 94_764_500);
-        assert_eq!(r4.new_state.user_note_liability, 94_764_500);
+        assert_eq!(r4.new_state.assets, 94_954_500);
+        assert_eq!(r4.new_state.user_note_liability, 94_954_500);
         assert_eq!(r4.new_state.accrued_execution_fee_liability, 0);
         assert!(r4.new_state.check_solvency());
 
@@ -527,21 +527,21 @@ mod tests {
     fn test_failed_settlement_reverses_spend() {
         let s = fresh_state();
         let r1 = s.deposit(100_000_000).unwrap();
-        let r2 = r1.new_state.reveal(99_800_000).unwrap();
+        let r2 = r1.new_state.reveal(100_000_000).unwrap();
         let r3 = r2
             .new_state
-            .spend(99_800_000, 5_000_000, 12_500, 23_000, 94_764_500)
+            .spend(100_000_000, 5_000_000, 22_500, 23_000, 94_954_500)
             .unwrap();
 
         // Now the settlement fails — reverse everything
         let r4 = r3
             .new_state
-            .failed_settlement(99_800_000, 5_000_000, 12_500, 23_000, 94_764_500)
+            .failed_settlement(100_000_000, 5_000_000, 22_500, 23_000, 94_954_500)
             .unwrap();
 
         // State should be identical to before the spend
-        assert_eq!(r4.new_state.user_note_liability, 99_800_000);
-        assert_eq!(r4.new_state.assets, 99_800_000);
+        assert_eq!(r4.new_state.user_note_liability, 100_000_000);
+        assert_eq!(r4.new_state.assets, 100_000_000);
         assert_eq!(r4.new_state.accrued_execution_fee_liability, 0);
         assert!(r4.new_state.check_solvency());
     }
@@ -554,22 +554,22 @@ mod tests {
 
         // Deposit 100 USDC
         let r1 = s.deposit(100_000_000).unwrap();
-        let r2 = r1.new_state.reveal(99_800_000).unwrap();
+        let r2 = r1.new_state.reveal(100_000_000).unwrap();
 
         // Spend 5 USDC
         let r3 = r2
             .new_state
-            .spend(99_800_000, 5_000_000, 12_500, 23_000, 94_764_500)
+            .spend(100_000_000, 5_000_000, 22_500, 23_000, 94_954_500)
             .unwrap();
 
         // Spend remaining (withdraw all) — full balance spend, no change
         let r4 = r3
             .new_state
-            .spend(94_764_500, 94_527_594, 236_906, 0, 0)
+            .spend(94_954_500, 94_529_118, 425_382, 0, 0)
             .unwrap();
 
         assert_eq!(r4.new_state.user_note_liability, 0);
-        // Assets: 94_787_500 - 94_527_594 - 236_906 = 23_000 (only exec fee remains)
+        // Assets: 94_977_500 - 94_529_118 - 425_382 = 23_000 (only exec fee remains)
         assert_eq!(r4.new_state.assets, 23_000);
         assert_eq!(r4.new_state.accrued_execution_fee_liability, 23_000);
 
@@ -588,25 +588,25 @@ mod tests {
 
         // Deposit 1: 50 USDC
         let r1 = s.deposit(50_000_000).unwrap();
-        let r2 = r1.new_state.reveal(49_900_000).unwrap();
+        let r2 = r1.new_state.reveal(50_000_000).unwrap();
 
         // Deposit 2: 30 USDC
         let r3 = r2.new_state.deposit(30_000_000).unwrap();
-        let r4 = r3.new_state.reveal(29_940_000).unwrap();
+        let r4 = r3.new_state.reveal(30_000_000).unwrap();
 
-        // Total user notes: 49_900_000 + 29_940_000 = 79_840_000
-        assert_eq!(r4.new_state.user_note_liability, 79_840_000);
-        // Total assets: 49_900_000 + 29_940_000 = 79_840_000
-        assert_eq!(r4.new_state.assets, 79_840_000);
+        // Total user notes: 50_000_000 + 30_000_000 = 80_000_000
+        assert_eq!(r4.new_state.user_note_liability, 80_000_000);
+        // Total assets: 50_000_000 + 30_000_000 = 80_000_000
+        assert_eq!(r4.new_state.assets, 80_000_000);
         assert!(r4.new_state.check_solvency());
 
-        // Spend from first note: 10 USDC
+        // Spend from first note: 10 USDC (fee 45 bps = 45_000)
         let r5 = r4
             .new_state
-            .spend(49_900_000, 10_000_000, 25_000, 50_000, 39_825_000)
+            .spend(50_000_000, 10_000_000, 45_000, 50_000, 39_905_000)
             .unwrap();
 
-        assert_eq!(r5.new_state.user_note_liability, 39_825_000 + 29_940_000);
+        assert_eq!(r5.new_state.user_note_liability, 39_905_000 + 30_000_000);
         assert!(r5.new_state.check_solvency());
     }
 
@@ -616,7 +616,7 @@ mod tests {
     fn test_adversarial_claim_before_accrual() {
         let s = fresh_state();
         let r1 = s.deposit(100_000_000).unwrap();
-        let r2 = r1.new_state.reveal(99_800_000).unwrap();
+        let r2 = r1.new_state.reveal(100_000_000).unwrap();
         // No spend yet — nothing accrued
         assert!(r2.new_state.claim_execution_fee(1).is_none());
     }
@@ -625,10 +625,10 @@ mod tests {
     fn test_adversarial_double_claim() {
         let s = fresh_state();
         let r1 = s.deposit(100_000_000).unwrap();
-        let r2 = r1.new_state.reveal(99_800_000).unwrap();
+        let r2 = r1.new_state.reveal(100_000_000).unwrap();
         let r3 = r2
             .new_state
-            .spend(99_800_000, 5_000_000, 12_500, 23_000, 94_764_500)
+            .spend(100_000_000, 5_000_000, 22_500, 23_000, 94_954_500)
             .unwrap();
         let r4 = r3.new_state.claim_execution_fee(23_000).unwrap();
         // Second claim of same amount should fail
@@ -640,12 +640,12 @@ mod tests {
         // Spend and claim happen in close succession
         let s = fresh_state();
         let r1 = s.deposit(100_000_000).unwrap();
-        let r2 = r1.new_state.reveal(99_800_000).unwrap();
+        let r2 = r1.new_state.reveal(100_000_000).unwrap();
 
         // First spend
         let r3 = r2
             .new_state
-            .spend(99_800_000, 5_000_000, 12_500, 23_000, 94_764_500)
+            .spend(100_000_000, 5_000_000, 22_500, 23_000, 94_954_500)
             .unwrap();
 
         // Claim immediately
@@ -654,7 +654,7 @@ mod tests {
         // Second spend from change
         let r5 = r4
             .new_state
-            .spend(94_764_500, 5_000_000, 12_500, 23_000, 89_729_000)
+            .spend(94_954_500, 5_000_000, 22_500, 23_000, 89_909_000)
             .unwrap();
 
         // Claim second exec fee
@@ -670,17 +670,17 @@ mod tests {
         let s = fresh_state();
         // Deposit 1 USDC (minimum)
         let r1 = s.deposit(1_000_000).unwrap();
-        // Deposit fee = ceil(1_000_000 * 20 / 10000) = 2000
-        // Net = 998_000
-        assert_eq!(r1.protocol_fee_realized, 2_000);
+        // Deposit fee = 0
+        // Net = 1_000_000
+        assert_eq!(r1.protocol_fee_realized, 0);
 
-        let r2 = r1.new_state.reveal(998_000).unwrap();
+        let r2 = r1.new_state.reveal(1_000_000).unwrap();
 
         // Spend 1 micro-USDC (the absolute minimum)
-        // Protocol fee = ceil(1 * 25 / 10000) = 1
+        // Protocol fee = ceil(1 * 45 / 10000) = 1
         // Exec fee = 0
-        // Change = 998_000 - 1 - 1 - 0 = 997_998
-        let r3 = r2.new_state.spend(998_000, 1, 1, 0, 997_998).unwrap();
+        // Change = 1_000_000 - 1 - 1 - 0 = 999_998
+        let r3 = r2.new_state.spend(1_000_000, 1, 1, 0, 999_998).unwrap();
         assert!(r3.new_state.check_solvency());
     }
 
@@ -701,18 +701,18 @@ mod tests {
     fn test_adversarial_fee_overflow() {
         let s = fresh_state();
         let r1 = s.deposit(100_000_000).unwrap();
-        let _r2 = r1.new_state.reveal(99_800_000).unwrap();
+        let _r2 = r1.new_state.reveal(100_000_000).unwrap();
 
         // Execution fee that would overflow when added to accrued
         let s2 = ContractAccounting {
             assets: u64::MAX,
-            user_note_liability: 99_800_000,
+            user_note_liability: 100_000_000,
             refundable_deposit_liability: 0,
             accrued_execution_fee_liability: u64::MAX - 100,
             realized_protocol_fees: 0,
         };
         assert!(s2
-            .spend(99_800_000, 5_000_000, 12_500, 200, 94_787_300)
+            .spend(100_000_000, 5_000_000, 22_500, 200, 94_977_300)
             .is_none());
     }
 

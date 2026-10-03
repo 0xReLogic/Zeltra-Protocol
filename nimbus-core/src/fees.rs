@@ -1,18 +1,14 @@
 pub const FEE_DENOMINATOR_BPS: u64 = 10_000;
-pub const DEPOSIT_FEE_BPS: u64 = 20;
-pub const PRIVATE_SPEND_FEE_BPS: u64 = 25;
-pub const DEFAULT_RELAYER_MARKUP_BPS: u64 = 1_500;
+pub const DEPOSIT_FEE_BPS: u64 = 0; // 0% Deposit Fee (Immutable Zero-Friction Inflow)
+pub const PRIVATE_SPEND_FEE_BPS: u64 = 45; // 0.45% (< 30 days)
+pub const DEFAULT_RELAYER_MARKUP_BPS: u64 = 1_500; // 15%
 
-pub const SEVEN_DAYS_SECS: u64 = 7 * 24 * 60 * 60;
 pub const THIRTY_DAYS_SECS: u64 = 30 * 24 * 60 * 60;
-pub const SPEND_FEE_7DAY_BPS: u64 = 20;
-pub const SPEND_FEE_30DAY_BPS: u64 = 10;
+pub const SPEND_FEE_30DAY_BPS: u64 = 40; // 0.40% (>= 30 days / 1 month hold)
 
 pub fn spend_fee_bps_for_holding(holding_secs: u64) -> u64 {
     if holding_secs >= THIRTY_DAYS_SECS {
         SPEND_FEE_30DAY_BPS
-    } else if holding_secs >= SEVEN_DAYS_SECS {
-        SPEND_FEE_7DAY_BPS
     } else {
         PRIVATE_SPEND_FEE_BPS
     }
@@ -132,15 +128,15 @@ mod tests {
 
     #[test]
     fn deposit_fee_matches_contract_rounding() {
-        assert_eq!(deposit_fee(10_000_000), Some(20_000));
-        assert_eq!(deposit_fee(20_000_000), Some(40_000));
-        assert_eq!(deposit_fee(1), Some(1));
+        assert_eq!(deposit_fee(10_000_000), Some(0));
+        assert_eq!(deposit_fee(20_000_000), Some(0));
+        assert_eq!(deposit_fee(1), Some(0));
         assert_eq!(deposit_fee(0), Some(0));
     }
 
     #[test]
     fn private_spend_fee_matches_contract_rounding() {
-        assert_eq!(private_spend_fee(10_000_000), Some(25_000));
+        assert_eq!(private_spend_fee(10_000_000), Some(45_000));
         assert_eq!(private_spend_fee(1), Some(1));
         assert_eq!(private_spend_fee(0), Some(0));
     }
@@ -151,11 +147,11 @@ mod tests {
 
         assert_eq!(quote.merchant_amount, 100_000_000);
         assert_eq!(quote.contract_amount, 100_000_000);
-        assert_eq!(quote.protocol_fee, 250_000);
+        assert_eq!(quote.protocol_fee, 450_000);
         assert_eq!(quote.gas_cost, 20_000);
         assert_eq!(quote.relayer_markup, 3_000);
         assert_eq!(quote.execution_fee, 23_000);
-        assert_eq!(quote.user_total_debit, 100_273_000);
+        assert_eq!(quote.user_total_debit, 100_473_000);
     }
 
     #[test]
@@ -178,23 +174,19 @@ mod tests {
 
     #[test]
     fn holding_time_fee_tiers() {
-        assert_eq!(spend_fee_bps_for_holding(0), 25);
-        assert_eq!(spend_fee_bps_for_holding(59), 25);
-        assert_eq!(spend_fee_bps_for_holding(SEVEN_DAYS_SECS), 20);
-        assert_eq!(spend_fee_bps_for_holding(SEVEN_DAYS_SECS + 1), 20);
-        assert_eq!(spend_fee_bps_for_holding(THIRTY_DAYS_SECS), 10);
-        assert_eq!(spend_fee_bps_for_holding(THIRTY_DAYS_SECS + 1), 10);
+        assert_eq!(spend_fee_bps_for_holding(0), 45);
+        assert_eq!(spend_fee_bps_for_holding(59), 45);
+        assert_eq!(spend_fee_bps_for_holding(THIRTY_DAYS_SECS - 1), 45);
+        assert_eq!(spend_fee_bps_for_holding(THIRTY_DAYS_SECS), 40);
+        assert_eq!(spend_fee_bps_for_holding(THIRTY_DAYS_SECS + 1), 40);
     }
 
     #[test]
     fn quote_with_custom_fee_bps() {
-        let q25 = quote_private_spend_with_fee(100_000_000, 0, 0, 25).unwrap();
-        assert_eq!(q25.protocol_fee, 250_000);
+        let q45 = quote_private_spend_with_fee(100_000_000, 0, 0, 45).unwrap();
+        assert_eq!(q45.protocol_fee, 450_000);
 
-        let q20 = quote_private_spend_with_fee(100_000_000, 0, 0, 20).unwrap();
-        assert_eq!(q20.protocol_fee, 200_000);
-
-        let q10 = quote_private_spend_with_fee(100_000_000, 0, 0, 10).unwrap();
-        assert_eq!(q10.protocol_fee, 100_000);
+        let q40 = quote_private_spend_with_fee(100_000_000, 0, 0, 40).unwrap();
+        assert_eq!(q40.protocol_fee, 400_000);
     }
 }

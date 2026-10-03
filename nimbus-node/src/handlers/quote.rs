@@ -180,9 +180,7 @@ async fn resolve_fee_tier(
     let discount = nimbus_core::PRIVATE_SPEND_FEE_BPS.saturating_sub(fee_bps);
 
     let tier = if fee_bps == nimbus_core::SPEND_FEE_30DAY_BPS {
-        "30+ days (whale discount)"
-    } else if fee_bps == nimbus_core::SPEND_FEE_7DAY_BPS {
-        "7+ days"
+        "30+ days (long-term discount)"
     } else {
         "default"
     };
@@ -314,11 +312,11 @@ mod tests {
 
         assert_eq!(response.0.status, "OK");
         assert_eq!(response.0.contract_amount, 100_000_000);
-        assert_eq!(response.0.protocol_fee, 250_000);
+        assert_eq!(response.0.protocol_fee, 450_000);
         assert_eq!(response.0.gas_cost, 20_000);
         assert_eq!(response.0.relayer_markup, 3_000);
         assert_eq!(response.0.execution_fee, 23_000);
-        assert_eq!(response.0.user_total_debit, 100_273_000);
+        assert_eq!(response.0.user_total_debit, 100_473_000);
         assert!(response.0.fee_tier.is_none());
         assert!(response.0.discount_bps.is_none());
     }

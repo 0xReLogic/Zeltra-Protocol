@@ -112,18 +112,18 @@ kembali sebagai change note privat.
 Jika pengguna mengalami kendala teknis pada cluster relayer, atau jika transaksi mereka ditolak oleh kebijakan ASP merchant tertentu, pengguna **tidak akan pernah kehilangan hak atas dananya**. 
 Pengguna dapat memanfaatkan jalur `claim_refund()` setelah timelock 24 jam untuk menarik 100% principal deposit mereka kembali ke alamat dompet penyetor asli secara transparan on-chain. Ini memberikan jaminan bahwa dana pengguna tidak dapat tertahan selamanya di dalam protokol.
 
-## 5. Model Biaya Target
+## 5. Model Biaya Target (Zero-Deposit & Fixed Mathematical Constants)
 
-| Aktivitas | Biaya target | Penerima |
-|---|---:|---|
-| Deposit/shield | 0,20% dari nominal | Protocol treasury |
-| Private spend/transaction | 0,25% dari nominal (Diskon ke 0,20% jika hold >= 7 hari; 0,10% jika hold >= 30 hari) | Protocol treasury |
-| Execution fee | Gas quote + markup relayer | Relayer |
-| Fast/cross-chain settlement | Quote dinamis | Relayer/LP, jaringan, treasury |
-| SDK dan integrasi | Gratis | N/A |
+Untuk meminimalkan celah eksploitasi dan serangan governance DAO (seperti insiden flashloan/governance takeover The DAO 2016 atau Tornado Cash 2023), Nimbus mengadopsi **konstanta matematis protokol yang terjamin (*hardcoded immutable constants*)**:
 
-Persentase tersebut adalah hipotesis awal yang harus diuji di testnet dan kepada
-calon integrator. Governance tidak boleh dapat menaikkannya tanpa batas.
+| Aktivitas | Biaya target | Penerima | Keterangan |
+|---|---:|---|---|
+| **Deposit / Shield** | **0,00% (0 bps)** | N/A | **Zero-Friction Inflow**. 100% dana masuk ke saldo note, refund darurat kembali 100% utuh tanpa potongan. |
+| **Private Spend (< 30 hari)** | **0,45% (45 bps)** | Protocol treasury | Mengkompensasi 0% fee deposit dengan biaya transaksi wajar saat belanja/transfer. |
+| **Private Spend (≥ 30 hari)** | **0,40% (40 bps)** | Protocol treasury | **Diskon 5 bps** bagi penyimpan saldo jangka panjang (insentif likuiditas pool). |
+| **Execution Fee** | Gas aktual + 15% markup | Relayer | Penggantian gas L2 Arbitrum (~$0,02) + markup margin operasional node relayer. |
+| **Fast / Cross-Chain Settlement** | Quote dinamis | Relayer/LP, jaringan, treasury | Ditetapkan per rute CCIP. |
+| **SDK & Integrasi** | Gratis | N/A | Open-source client libraries. |
 
 ### 5.1 Network Fee
 
@@ -131,32 +131,27 @@ Biaya pengguna terdiri dari protocol fee dan fixed execution quote:
 
 ```text
 Network Fee =
-    protocol fee 0,25% dari nominal transaksi (default)
+    protocol fee 0,45% dari nominal transaksi (default) / 0,40% (hold >= 30 hari)
   + gas reimbursement
   + relayer markup
 ```
 
-Contoh ilustratif (dengan default fee 0,25%), bukan harga tetap:
+Contoh ilustratif (dengan default spend fee 0,45%):
 
 ```text
-Harga merchant                  100,0000 USDC
-Protocol fee 0,25%                0,2500 USDC
-Gas quote                         0,0200 USDC
-Relayer markup 15% gas            0,0030 USDC
-                                -------------
-Total pengguna                  100,2730 USDC
-Merchant menerima              100,0000 USDC
+Harga merchant / payout           100,0000 USDC
+Protocol fee 0,45%                  0,4500 USDC
+Gas quote                           0,0200 USDC
+Relayer markup 15% gas              0,0030 USDC
+                                  -------------
+Total debit pengguna              100,4730 USDC
+Merchant menerima                 100,0000 USDC
 ```
 
 Relayer membayar gas dalam ETH terlebih dahulu. Execution quote ditetapkan
 sebelum user menandatangani dan terdiri dari estimasi gas dalam stablecoin plus
-markup relayer, misalnya 15% dari gas quote. Jika beberapa transaksi berhasil
-dibatch dengan biaya aktual lebih rendah, selisihnya menjadi margin efisiensi
-relayer/protokol.
-
-Protocol fee `0,15%` masuk ke treasury. Treasury kemudian membiayai guardian,
-domain, RPC, audit, pengembangan, monitoring, dan cadangan keamanan. User tidak
-ditagih guardian fee atau hosting fee sebagai komponen terpisah.
+markup relayer (misal 15% dari gas quote). Jika beberapa transaksi berhasil
+dibatch dengan biaya aktual lebih rendah, selisihnya menjadi margin efisiensi relayer.
 
 ### 5.2 Execution Quote dan Margin Batch
 
@@ -170,13 +165,11 @@ Karena itu:
 - batch menambah waktu tunggu normal maksimal sekitar 1 detik dan hard timeout
   sekitar 2 detik sebelum broadcast;
 - cross-chain dan transaksi dengan deadline dekat tidak dipaksa menunggu batch;
-- pendapatan protokol berasal dari fee deposit `0,10%`, withdraw `0,10%`, dan
-  transaksi `0,15%`;
-- pendapatan relayer berasal dari reimbursement gas, markup gas, dan margin batch;
-- biaya harus ditampilkan sebagai satu quote sebelum pengguna menandatangani.
+- pendapatan protokol berasal dari transaksi spend `0,45%` (atau `0,40%` untuk hold ≥ 30 hari);
+- pendapatan relayer berasal dari reimbursement gas, markup gas 15%, dan margin batch;
+- biaya harus ditampilkan sebagai satu quote transparan sebelum pengguna menandatangani.
 
-Payload harus memuat `max_fee` dan expiry agar relayer atau governance tidak dapat
-menaikkan biaya setelah persetujuan pengguna.
+Payload memuat `max_fee` dan expiry agar relayer tidak dapat menaikkan biaya setelah persetujuan pengguna.
 
 ## 6. AI Agent Spending Wallet dan SDK
 
