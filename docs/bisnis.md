@@ -42,6 +42,14 @@ source, gas payer, dan pola withdrawal masih dapat menimbulkan korelasi. Produk
 harus diposisikan sebagai **confidential settlement**, bukan alat untuk menghindari
 hukum.
 
+### 2.1 Netralitas Kepatuhan & Verifiable Provenance (Association Sets)
+
+Nimbus dirancang dengan arsitektur **pembuktian selektif mandiri (self-provable innocence)**:
+1. **Non-Custodial Absolut:** Protokol, smart contract, relayer, dan pengembang **tidak pernah memegang private spend key atau viewing key pengguna**. Tidak ada master key atau backdoor untuk membuka identitas secara sepihak.
+2. **Beban Pembuktian di Tangan Pengguna:** Pengguna jujur memiliki kemampuan matematis untuk membuktikan bahwa deposit mereka berasal dari himpunan bersih (*Association Set*) yang diterbitkan oleh pihak ketiga independen (*Association Set Provider / ASP*), tanpa membocorkan riwayat dompet pribadi mereka ke publik.
+3. **Penyaringan Otomatis di Pintu Masuk:** Aktor jahat atau dana hasil eksploitasi tidak akan dapat membuktikan keanggotaan dalam *clean association set*. Akibatnya, dana mereka akan otomatis ditolak oleh exchange atau merchant yang mewajibkan verifikasi kepatuhan.
+4. **Netralitas Infrastruktur:** Nimbus adalah rel pembayaran publik yang netral. Kewajiban pemilihan kebijakan verifikasi dan penegakan hukum berada di pihak verifier (exchange/merchant), bukan di tangan protokol.
+
 ## 3. Pihak dalam Jaringan
 
 | Pihak | Peran |
@@ -51,6 +59,7 @@ hukum.
 | Merchant | API provider, dApp, marketplace, game, atau penerima pembayaran |
 | Relayer | Membayar gas native terlebih dahulu dan mengirim transaksi |
 | Guardian | Menjalankan threshold signing dan menjaga availability |
+| Association Set Provider (ASP) | Pihak independen yang menerbitkan daftar deposit bersih (Merkle root) |
 | Protocol treasury | Membiayai pengembangan, RPC, domain, audit, monitoring, dan bug bounty |
 
 Merchant bukan hanya toko retail. Dalam konteks Nimbus, merchant adalah pihak mana
@@ -97,6 +106,11 @@ Untuk menjaga kesederhanaan arsitektur dan efisiensi WASM di Arbitrum Stylus, ti
 `withdraw()` terpisah. Penarikan saldo dilakukan dengan mengeksekusi **Private Spend**
 ke alamat dompet publik milik pengguna sendiri sebagai recipient. Sisa saldo (jika ada) tetap
 kembali sebagai change note privat.
+
+### 4.4 Emergency Exit / Ragequit (Penarikan Darurat Non-Privat)
+
+Jika pengguna mengalami kendala teknis pada cluster relayer, atau jika transaksi mereka ditolak oleh kebijakan ASP merchant tertentu, pengguna **tidak akan pernah kehilangan hak atas dananya**. 
+Pengguna dapat memanfaatkan jalur `claim_refund()` setelah timelock 24 jam untuk menarik 100% principal deposit mereka kembali ke alamat dompet penyetor asli secara transparan on-chain. Ini memberikan jaminan bahwa dana pengguna tidak dapat tertahan selamanya di dalam protokol.
 
 ## 5. Model Biaya Target
 
@@ -217,6 +231,7 @@ Seluruh collateral stablecoin milik pengguna disimpan dalam kas likuid aktif lan
 - deposit/shield fee `0,20%`;
 - private spend/transaction fee `0,25%` (dapat didiskon ke `0,20%` jika hold >= 7 hari; atau `0,10%` jika hold >= 30 hari);
 - bagian yang transparan dari fast/cross-chain settlement;
+- **B2B Institutional PaidGate (opsional):** Biaya query verifikasi on-chain per panggilan atau langganan SLA bagi institusi (exchange, bank, atau fintech berlisensi) yang memerlukan on-chain audit log dan manajemen nonce otomatis;
 
 ### Protocol treasury membayar
 
