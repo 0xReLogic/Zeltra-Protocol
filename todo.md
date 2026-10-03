@@ -25,11 +25,11 @@ Pilih salah satu dari 2 arah berikut sebelum mulai ngoding:
 ### Gate C0 - Security Repair Private Note Circuit (Jika Memilih Arah B)
 Ref: [`docs/todos/private-note-balance.md`](file:///workspaces/Zeltra-Protocol/docs/todos/private-note-balance.md) & [`DEC-016B`](file:///workspaces/Zeltra-Protocol/research/decisions/DEC-016B-mvp-circuit-shortcuts.md)
 
-- [ ] **Bind Merkle path bits ke `input_leaf_index` di circuit**:
+- [x] **Bind Merkle path bits ke `input_leaf_index` di circuit**:
   - Dekomposisi indeks menjadi tepat `MERKLE_TREE_DEPTH` boolean bits.
   - Enforce `input_leaf_index == sum(bit_i * 2^i)` dan `< 2^MERKLE_TREE_DEPTH`.
   - Buktikan note yang sama tidak dapat menghasilkan dua nullifier valid hanya dengan mengganti leaf index.
-- [ ] **Integer value & range safety**:
+- [x] **Integer value & range safety**:
   - Range constrain input value, merchant payout, protocol fee, execution fee, dan change ke `[0, 2^64)`.
   - Pastikan value conservation adalah integer USDC (cegah modular wrap modulo scalar field Fr).
   - Boolean-constrain `has_change` ke `{0, 1}` (cegah prover nge-scale output commitment).

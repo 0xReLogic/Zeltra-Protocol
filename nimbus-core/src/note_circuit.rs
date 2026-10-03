@@ -1,38 +1,6 @@
-//! Private Note Spend Circuit — DEC-016A Gate C
-//!
-//! Groth16 circuit proving valid private note spend with change output.
-//!
-//! MVP: 1 input note, 1 change output note.
-//!
-//! Public inputs (17 total, matching DEC-016A §11):
-//!   1. note_root              — Merkle root (from accepted history)
-//!   2. input_nullifier        — nullifier of consumed note
-//!   3-5. (reserved, 0)        — unused input nullifier slots
-//!   6. output_commitment      — change note commitment (0 if no change)
-//!   7. (reserved, 0)          — unused output commitment slot
-//!   8. recipient              — merchant address (Fr)
-//!   9. merchant_amount        — exact payout (Fr)
-//!  10. protocol_fee           — protocol fee (Fr)
-//!  11. execution_fee          — relayer execution fee (Fr)
-//!  12. quote_hash             — signed quote binding (Fr)
-//!  13. chain_id               — EVM chain ID (Fr)
-//!  14. contract_address       — contract address (Fr)
-//!  15. expiry                 — transaction expiry (Fr)
-//!  16. has_change             — 1 if change note exists, 0 otherwise
-//!
-//! Private witnesses:
-//!  - Input note: value, owner_key, rho, randomness, leaf_index, merkle_path[20]
-//!  - Change note: value, owner_key, rho, randomness
-//!
-//! Circuit proves:
-//!  1. Input commitment is in Merkle tree (membership)
-//!  2. Prover owns the input note (nullifier key derivation)
-//!  3. Nullifier is correctly derived
-//!  4. Change commitment is correctly derived
-//!  5. Value conservation: input = merchant + protocol_fee + execution_fee + change
-//!  6. Range: input_value and change_value fit in 64 bits
-//!  7. Input value > 0
-//!  8. All public inputs are constrained (no unconstrained pass-throughs)
+//! Private Note Spend Circuit (Groth16 ZK-UTXO) — DEC-016A / Gate C0.
+//! Proves 1-in 1-out private spend: Merkle membership, nullifier derivation,
+//! 64-bit integer range safety, boolean has_change, and exact value conservation.
 
 use ark_bls12_381::{Bls12_381, Fr};
 use ark_ff::{Field, PrimeField};
@@ -112,6 +80,41 @@ fn private_witness(
 ) -> Result<FpVar<Fr>, SynthesisError> {
     let var = cs.new_witness_variable(|| value.ok_or(SynthesisError::AssignmentMissing))?;
     Ok(alloc_fp(cs, var, value))
+}
+
+/// Enforce that `val` is in [0, 2^64) by decomposing into 64 boolean bits.
+fn enforce_u64_range(
+    cs: &ConstraintSystemRef<Fr>,
+    val: &FpVar<Fr>,
+    val_witness: Option<Fr>,
+) -> Result<(), SynthesisError> {
+    use ark_r1cs_std::eq::EqGadget;
+
+    let zero = FpVar::Constant(Fr::from(0u64));
+    let one = FpVar::Constant(Fr::from(1u64));
+    let mut reconstructed = zero.clone();
+    let mut two_power = Fr::from(1u64);
+
+    let bigint_opt = val_witness.map(|w| w.into_bigint());
+
+    for bit_idx in 0..64 {
+        let bit_val = bigint_opt.as_ref().map(|bi| {
+            let word = bi.as_ref()[0];
+            Fr::from((word >> bit_idx) & 1u64)
+        });
+        let bit_var = private_witness(cs, bit_val)?;
+
+        // bit * (1 - bit) == 0
+        let one_minus_bit = &one - &bit_var;
+        let bit_check = &bit_var * &one_minus_bit;
+        bit_check.enforce_equal(&zero)?;
+
+        reconstructed += &bit_var * FpVar::Constant(two_power);
+        two_power = two_power + two_power;
+    }
+
+    reconstructed.enforce_equal(val)?;
+    Ok(())
 }
 
 impl ConstraintSynthesizer<Fr> for PrivateNoteCircuit {
@@ -195,12 +198,14 @@ impl ConstraintSynthesizer<Fr> for PrivateNoteCircuit {
         // ═══════════════════════════════════════════════════════════════
 
         let mut current = in_commitment.clone();
-        let mut index = in_index.clone();
         let zero = FpVar::Constant(Fr::from(0u64));
+        let one = FpVar::Constant(Fr::from(1u64));
+
+        let mut reconstructed_index = zero.clone();
+        let mut two_power = Fr::from(1u64);
 
         for (level, sibling) in merkle_path.iter().enumerate().take(MERKLE_TREE_DEPTH) {
-
-            // Allocate index_bit as witness and constrain to boolean
+            // Allocate index_bit as witness
             let index_bit = private_witness(
                 &cs,
                 self.input_leaf_index.map(|idx| {
@@ -209,9 +214,14 @@ impl ConstraintSynthesizer<Fr> for PrivateNoteCircuit {
                 }),
             )?;
 
-            let one_minus_bit = FpVar::Constant(Fr::from(1u64)) - &index_bit;
+            // Enforce boolean: index_bit * (1 - index_bit) == 0
+            let one_minus_bit = &one - &index_bit;
             let bit_check = &index_bit * &one_minus_bit;
             bit_check.enforce_equal(&zero)?;
+
+            // Accumulate reconstructed index from the 20 direction bits
+            reconstructed_index += &index_bit * FpVar::Constant(two_power);
+            two_power = two_power + two_power;
 
             // Conditional swap based on index bit
             let diff_cs = sibling - &current;
@@ -225,10 +235,11 @@ impl ConstraintSynthesizer<Fr> for PrivateNoteCircuit {
                 &w5_rc,
                 &w5_mds,
             )?;
-
-            let inv2 = Fr::from(2u64).inverse().unwrap();
-            index = (&index - &index_bit) * FpVar::Constant(inv2);
         }
+
+        // Gate C0 Fix 1: Enforce reconstructed_index == in_index.
+        // Binds path direction strictly to leaf index, prevents index substitution & double spending.
+        reconstructed_index.enforce_equal(&in_index)?;
 
         // Constrain: computed root == public note_root
         current.enforce_equal(&note_root_var)?;
@@ -256,7 +267,7 @@ impl ConstraintSynthesizer<Fr> for PrivateNoteCircuit {
         computed_nf.enforce_equal(&nullifier_var)?;
 
         // ═══════════════════════════════════════════════════════════════
-        // 7. Compute change note commitment
+        // 7. Compute change note commitment & enforce has_change rules
         //    change_cm = Poseidon_W5(ch_value, ch_owner, ch_rho, ch_rand; domain_note)
         // ═══════════════════════════════════════════════════════════════
 
@@ -267,17 +278,32 @@ impl ConstraintSynthesizer<Fr> for PrivateNoteCircuit {
             &w5_mds,
         )?;
 
-        // Conditional: if has_change == 1, output_commitment == change_cm
-        //              if has_change == 0, output_commitment == 0
-        // Enforce: output_cm == has_change * change_cm
+        // Gate C0 Fix 2:
+        // a. Boolean constrain has_change: has_change * (1 - has_change) == 0
+        let one_minus_has_change = &one - &has_change_var;
+        let has_change_bool = &has_change_var * &one_minus_has_change;
+        has_change_bool.enforce_equal(&zero)?;
+
+        // b. Zero-change enforcement: if has_change == 0 => change_value must be 0
+        let ch_value_zero_check = &ch_value * &one_minus_has_change;
+        ch_value_zero_check.enforce_equal(&zero)?;
+
+        // c. Output commitment: output_cm == has_change * change_cm
         let expected_output = &has_change_var * &change_cm;
         expected_output.enforce_equal(&output_cm_var)?;
 
         // ═══════════════════════════════════════════════════════════════
-        // 8. Value conservation
-        //    input_value == merchant + protocol_fee + execution_fee + change_value
+        // 8. 64-bit integer range safety and exact value conservation
         // ═══════════════════════════════════════════════════════════════
 
+        // Gate C0 Fix 3: Range constrain all 5 amounts to [0, 2^64)
+        enforce_u64_range(&cs, &in_value, self.input_value)?;
+        enforce_u64_range(&cs, &merchant_var, self.merchant_amount)?;
+        enforce_u64_range(&cs, &protocol_fee_var, self.protocol_fee)?;
+        enforce_u64_range(&cs, &exec_fee_var, self.execution_fee)?;
+        enforce_u64_range(&cs, &ch_value, self.change_value)?;
+
+        // Value conservation: input_value == merchant + protocol_fee + execution_fee + change_value
         let total_debits = &merchant_var + &protocol_fee_var + &exec_fee_var + &ch_value;
         in_value.enforce_equal(&total_debits)?;
 
@@ -467,10 +493,7 @@ pub fn extract_public_inputs(circuit: &PrivateNoteCircuit) -> Vec<Fr> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::note::{
-        compute_empty_hashes, compute_merkle_root, derive_nullifier, derive_nullifier_key,
-        note_commitment, PrivateNoteV1,
-    };
+    use crate::note::compute_merkle_root;
 
     fn setup_valid_circuit() -> PrivateNoteCircuit {
         create_dummy_circuit()
@@ -662,4 +685,74 @@ mod tests {
         let is_valid = verify_note_proof(&proof, &keys.verifying_key, &public_inputs);
         assert!(is_valid, "Full spend (no change) must verify");
     }
+
+    #[test]
+    fn test_gate_c0_tampered_leaf_index_fails_proving() {
+        let keys = generate_note_circuit_keys().unwrap();
+        let mut circuit = setup_valid_circuit();
+
+        // Tamper leaf index from 0 to 1 while leaving Merkle path intact
+        circuit.input_leaf_index = Some(Fr::from(1u64));
+
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            generate_note_proof(circuit, &keys.proving_key)
+        }));
+        assert!(
+            result.is_err() || result.unwrap().is_err(),
+            "Tampered leaf index must fail proof generation (reconstructed_index != in_index)"
+        );
+    }
+
+    #[test]
+    fn test_gate_c0_non_boolean_has_change_fails_proving() {
+        let keys = generate_note_circuit_keys().unwrap();
+        let mut circuit = setup_valid_circuit();
+
+        // Non-boolean has_change = 2 must violate has_change * (1 - has_change) == 0
+        circuit.has_change = Some(Fr::from(2u64));
+
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            generate_note_proof(circuit, &keys.proving_key)
+        }));
+        assert!(
+            result.is_err() || result.unwrap().is_err(),
+            "Non-boolean has_change must fail proof generation"
+        );
+    }
+
+    #[test]
+    fn test_gate_c0_zero_change_with_positive_change_value_fails_proving() {
+        let keys = generate_note_circuit_keys().unwrap();
+        let mut circuit = setup_valid_circuit();
+
+        // has_change = 0 but change_value > 0 must violate ch_value * (1 - has_change) == 0
+        circuit.has_change = Some(Fr::from(0u64));
+        circuit.output_commitment = Some(Fr::from(0u64));
+
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            generate_note_proof(circuit, &keys.proving_key)
+        }));
+        assert!(
+            result.is_err() || result.unwrap().is_err(),
+            "Positive change value with has_change=0 must fail proof generation"
+        );
+    }
+
+    #[test]
+    fn test_gate_c0_overflow_amount_fails_proving() {
+        let keys = generate_note_circuit_keys().unwrap();
+        let mut circuit = setup_valid_circuit();
+
+        // Amount outside [0, 2^64) must violate 64-bit range decomposition
+        circuit.merchant_amount = Some(-Fr::from(1u64));
+
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            generate_note_proof(circuit, &keys.proving_key)
+        }));
+        assert!(
+            result.is_err() || result.unwrap().is_err(),
+            "Field overflow amount (> 2^64 - 1) must fail 64-bit range check"
+        );
+    }
 }
+

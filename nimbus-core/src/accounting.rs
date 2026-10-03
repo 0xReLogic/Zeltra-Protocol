@@ -701,7 +701,7 @@ mod tests {
     fn test_adversarial_fee_overflow() {
         let s = fresh_state();
         let r1 = s.deposit(100_000_000).unwrap();
-        let r2 = r1.new_state.reveal(99_800_000).unwrap();
+        let _r2 = r1.new_state.reveal(99_800_000).unwrap();
 
         // Execution fee that would overflow when added to accrued
         let s2 = ContractAccounting {

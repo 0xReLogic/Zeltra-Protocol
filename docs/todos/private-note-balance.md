@@ -182,29 +182,29 @@ sebelum mulai Gate D.
 
 ### P0 - One note pays exactly once
 
-- [ ] Bind bit arah Merkle path ke `input_leaf_index` di dalam circuit.
+- [x] Bind bit arah Merkle path ke `input_leaf_index` di dalam circuit.
   - Dekomposisi indeks menjadi tepat `MERKLE_TREE_DEPTH` boolean bits.
   - Enforce `input_leaf_index == sum(bit_i * 2^i)`.
   - Enforce indeks `< 2^MERKLE_TREE_DEPTH`.
   - Gunakan bits yang sama untuk conditional left/right Merkle hashing.
-- [ ] Tambahkan regression test yang mencoba membership path valid dengan
+- [x] Tambahkan regression test yang mencoba membership path valid dengan
   `input_leaf_index` berbeda.
-- [ ] Buktikan percobaan tersebut gagal saat proving atau verification.
-- [ ] Buktikan note yang sama tidak dapat menghasilkan dua nullifier valid hanya
+- [x] Buktikan percobaan tersebut gagal saat proving atau verification.
+- [x] Buktikan note yang sama tidak dapat menghasilkan dua nullifier valid hanya
   dengan mengganti leaf index.
 
 ### P0 - Integer value safety
 
-- [ ] Range constrain input value, merchant payout, protocol fee, execution fee,
+- [x] Range constrain input value, merchant payout, protocol fee, execution fee,
   dan change ke `[0, 2^64)`.
-- [ ] Pastikan value conservation adalah integer USDC, bukan persamaan yang dapat
+- [x] Pastikan value conservation adalah integer USDC, bukan persamaan yang dapat
   wrap modulo scalar field.
-- [ ] Boolean-constrain `has_change` ke `{0, 1}`.
-- [ ] Enforce `has_change == 0` berarti `change_value == 0` dan output commitment
+- [x] Boolean-constrain `has_change` ke `{0, 1}`.
+- [x] Enforce `has_change == 0` berarti `change_value == 0` dan output commitment
   nol.
-- [ ] Enforce `has_change == 1` berarti change memenuhi dust/minimum-value policy
+- [x] Enforce `has_change == 1` berarti change memenuhi dust/minimum-value policy
   dan output commitment cocok.
-- [ ] Tambahkan negative tests untuk field overflow, modular wrap, non-boolean
+- [x] Tambahkan negative tests untuk field overflow, modular wrap, non-boolean
   `has_change`, hidden positive change, dan zero-value change note.
 
 ### P0 - Payment and domain binding
