@@ -72,3 +72,57 @@ Jika sebuah transaksi batch mengalami revert di on-chain:
 * Relayer **tidak membatalkan seluruh isi batch**.
 * Relayer secara otomatis **memecah batch (*unbundle*)** dan menandai setiap item kembali ke status `retryable`.
 * Pada siklus pengiriman berikutnya, item-item tersebut diuji secara independen sehingga satu transaksi invalid/bermasalah tidak menyandera transaksi valid milik pengguna lain.
+
+---
+
+## 5. Manajemen Nonce & Transaksi Pengganti (*Transaction Replacement*)
+
+Mengacu pada spesifikasi [`DEC-017`](file:///workspaces/Zeltra-Protocol/research/decisions/DEC-017-relayer-receipt-finality-and-nonce-management.md), relayer mencegah kegagalan nonce dan transaksi tersangkut di mempool melalui dua mekanisme:
+
+1. **Alokasi Nonce Atomik (*Thread-Safe Lock*):**
+   * Di dalam [`nimbus-node/src/evm_client.rs`](file:///workspaces/Zeltra-Protocol/nimbus-node/src/evm_client.rs), pengiriman transaksi diamankan oleh `nonce_lock: Arc<Mutex<Option<u64>>>`.
+   * Mencegah dua worker konkuren mengambil nonce yang sama atau melompati nonce (*nonce gap*) yang memicu penolakan sequencer Arbitrum Nitro.
+   * **Pemulihan Otomatis (*Auto-Resync*):** Jika RPC merespons error `nonce too low`, `nonce too high`, atau `already known`, relayer seketika melakukan query ulang ke pending count on-chain dan menyiarkan ulang transaksi secara transparan.
+
+2. **Watchdog Mempool & Eskalasi Gas (+15%):**
+   * Jika transaksi belum terinklusi dalam blok setelah batas waktu `NIMBUS_TX_TIMEOUT_SECS` (default: 30 detik), sistem secara otomatis membuat transaksi pengganti (*replacement transaction*).
+   * **Aturan Penggantian:** Transaksi pengganti menggunakan **nonce yang sama persis** dengan parameter gas dinaikkan minimal **+15%** (`maxFeePerGas` dan `maxPriorityFeePerGas`) sesuai standar EIP-1559.
+   * Transaksi pengganti dapat dieskalasi hingga batas `NIMBUS_MAX_GAS_BUMPS` (default: 3 kali).
+
+---
+
+## 6. Ambang Batas Konfirmasi (*Confirmation Threshold*) & Reorg Protection
+
+Untuk melindungi relayer dari risiko chain reorganization:
+* Status transaksi tidak ditandai `confirmed` hanya berdasarkan ketersediaan receipt awal.
+* Relayer memverifikasi kedalaman blok konfirmasi:
+  $$\text{current\_block} - \text{receipt\_block} + 1 \ge \text{confirmation\_threshold}$$
+* Nilai ambang batas dapat dikonfigurasi melalui `NIMBUS_CONFIRMATION_THRESHOLD`:
+  * **Arbitrum:** 1 blok (fast-finality L2).
+  * **Ethereum L1:** 12 blok (~2.5 menit untuk PoS Casper finality).
+
+---
+
+## 7. Endpoint Status Transaksi Publik
+
+Klien SDK, antarmuka pengguna, dan merchant dapat memantau status penyelesaian transaksi secara real-time:
+
+```http
+GET /api/tx-status?tx_hash=0x1234...
+```
+
+**Respons JSON:**
+```json
+{
+  "tx_hash": "0x1234...",
+  "status": "confirmed",
+  "block_number": 21854930,
+  "gas_used": 142500,
+  "effective_gas_price": 20000000,
+  "confirmations": 4,
+  "error_reason": null
+}
+```
+
+*Status yang didukung:* `pending` (termasuk broadcasting & replacement), `confirmed`, `failed`, dan `not_found`. Jika transaksi telah masuk blok, counter `confirmations` dihitung secara dinamis terhadap tinggi blok blockchain saat ini.
+

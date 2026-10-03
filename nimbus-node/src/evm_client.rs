@@ -9,6 +9,8 @@ use alloy::{
 };
 use anyhow::{Context, Result};
 use std::str::FromStr;
+use std::sync::Arc;
+use tokio::sync::Mutex;
 
 sol! {
     function spend(
@@ -72,6 +74,9 @@ pub struct EvmClient {
     contract_address: Address,
     ccip_router_address: Address,
     pub signer: PrivateKeySigner,
+    nonce_lock: Arc<Mutex<Option<u64>>>,
+    finality_config: crate::config::ReceiptFinalityConfig,
+    db: Option<Arc<crate::database::Database>>,
 }
 
 #[derive(Clone, Debug)]
@@ -83,6 +88,8 @@ pub struct TransactionOutcome {
     pub effective_gas_price: u128,
     /// CCIP message ID extracted from CCIPMessageSent event (if CCIP transaction)
     pub ccip_message_id: Option<String>,
+    #[allow(dead_code)]
+    pub confirmations: u64,
 }
 
 #[derive(Clone, Debug)]
@@ -172,6 +179,9 @@ impl EvmClient {
             Address::from_str("0x2a9C5afB0d0e4BAb2BCdaE109EC4b0c4Be15a165").unwrap()
         };
 
+        let nonce_lock = Arc::new(Mutex::new(None));
+        let finality_config = crate::config::ReceiptFinalityConfig::from_env();
+
         Ok(Self {
             provider,
             fallback_provider,
@@ -179,20 +189,84 @@ impl EvmClient {
             contract_address: contract_addr,
             ccip_router_address,
             signer,
+            nonce_lock,
+            finality_config,
+            db: None,
         })
     }
 
-    async fn send_tx_with_fallback(
+    pub fn with_db(mut self, db: Arc<crate::database::Database>) -> Self {
+        self.db = Some(db);
+        self
+    }
+
+    #[allow(dead_code)]
+    pub fn with_finality_config(mut self, config: crate::config::ReceiptFinalityConfig) -> Self {
+        self.finality_config = config;
+        self
+    }
+
+    pub fn finality_config(&self) -> &crate::config::ReceiptFinalityConfig {
+        &self.finality_config
+    }
+
+    pub async fn get_block_number(&self) -> Result<u64> {
+        match self.provider.get_block_number().await {
+            Ok(b) => Ok(b),
+            Err(e) => {
+                if let Some(ref fallback) = self.fallback_provider {
+                    fallback
+                        .get_block_number()
+                        .await
+                        .context("Fallback RPC get_block_number also failed")
+                } else {
+                    Err(anyhow::anyhow!(
+                        "Failed to get block number from primary RPC: {}",
+                        e
+                    ))
+                }
+            }
+        }
+    }
+
+    pub async fn get_receipt(
         &self,
-        mut tx: TransactionRequest,
-    ) -> Result<TransactionOutcome> {
-        // Fetch the latest transaction count dynamically to avoid local nonce cache issues
-        let nonce = match self
+        tx_hash: &str,
+    ) -> Result<Option<alloy::rpc::types::TransactionReceipt>> {
+        let hash = alloy::primitives::TxHash::from_str(tx_hash)
+            .map_err(|e| anyhow::anyhow!("Invalid tx hash '{}': {}", tx_hash, e))?;
+        match self.provider.get_transaction_receipt(hash).await {
+            Ok(Some(r)) => Ok(Some(r)),
+            Ok(None) => {
+                if let Some(ref fallback) = self.fallback_provider {
+                    fallback
+                        .get_transaction_receipt(hash)
+                        .await
+                        .context("Fallback get_transaction_receipt failed")
+                } else {
+                    Ok(None)
+                }
+            }
+            Err(e) => {
+                if let Some(ref fallback) = self.fallback_provider {
+                    fallback
+                        .get_transaction_receipt(hash)
+                        .await
+                        .context("Fallback get_transaction_receipt failed")
+                } else {
+                    Err(anyhow::anyhow!("Failed to get receipt: {}", e))
+                }
+            }
+        }
+    }
+
+    async fn fetch_transaction_count(&self) -> Result<u64> {
+        match self
             .provider
             .get_transaction_count(self.signer_address)
             .await
         {
-            Ok(n) => n,
+            Ok(n) => Ok(n),
             Err(e) => {
                 eprintln!("PRIMARY RPC ERROR (get_transaction_count): {}", e);
                 if let Some(ref fallback) = self.fallback_provider {
@@ -200,64 +274,322 @@ impl EvmClient {
                     fallback
                         .get_transaction_count(self.signer_address)
                         .await
-                        .context("Fallback RPC get_transaction_count also failed")?
+                        .context("Fallback RPC get_transaction_count also failed")
                 } else {
-                    return Err(anyhow::anyhow!(
+                    Err(anyhow::anyhow!(
                         "Failed to get transaction count from primary RPC and no fallback: {}",
                         e
-                    ));
+                    ))
                 }
             }
-        };
+        }
+    }
 
-        tx = tx.with_nonce(nonce);
-
-        // Try primary provider
-        let result = self.provider.send_transaction(tx.clone()).await;
-
-        let pending_tx = match result {
-            Ok(pending) => pending,
+    async fn broadcast_tx(
+        &self,
+        tx: TransactionRequest,
+    ) -> Result<alloy::providers::PendingTransactionBuilder<alloy::network::Ethereum>> {
+        match self.provider.send_transaction(tx.clone()).await {
+            Ok(pending) => Ok(pending),
             Err(e) => {
-                eprintln!("PRIMARY RPC ERROR: {}", e);
-
-                // Fallback ke secondary provider
+                eprintln!("PRIMARY RPC ERROR (send_transaction): {}", e);
                 if let Some(ref fallback) = self.fallback_provider {
                     println!("FALLBACK: Switching to secondary RPC provider...");
                     fallback
                         .send_transaction(tx)
                         .await
-                        .context("Fallback RPC juga gagal")?
+                        .context("Fallback RPC send_transaction also failed")
                 } else {
-                    return Err(anyhow::anyhow!(
-                        "Primary RPC gagal dan no fallback configured: {}",
+                    Err(anyhow::anyhow!(
+                        "Primary RPC failed and no fallback configured: {}",
                         e
-                    ));
+                    ))
+                }
+            }
+        }
+    }
+
+    async fn send_tx_with_fallback(
+        &self,
+        mut tx: TransactionRequest,
+    ) -> Result<TransactionOutcome> {
+        let mut nonce_guard = self.nonce_lock.lock().await;
+
+        // 1. Determine nonce atomically (cached -> RPC on-chain -> DB max)
+        let rpc_nonce = self.fetch_transaction_count().await?;
+        let db_max_nonce = if let Some(ref db) = self.db {
+            db.get_max_relayer_nonce(&format!("0x{:x}", self.signer_address))
+                .await
+                .unwrap_or(None)
+        } else {
+            None
+        };
+        let on_chain_base = match db_max_nonce {
+            Some(db_n) => rpc_nonce.max(db_n + 1),
+            None => rpc_nonce,
+        };
+        let mut nonce = match *nonce_guard {
+            Some(cached) => cached.max(on_chain_base),
+            None => on_chain_base,
+        };
+
+        // Track initial gas parameters for replacement bumps
+        let mut current_max_fee = tx.max_fee_per_gas;
+        let mut current_priority_fee = tx.max_priority_fee_per_gas;
+        let mut current_gas_price = tx.gas_price;
+
+        tx = tx.with_nonce(nonce);
+
+        // 2. Broadcast with nonce collision auto-recovery
+        let pending_tx = match self.broadcast_tx(tx.clone()).await {
+            Ok(p) => p,
+
+            Err(e) => {
+                let err_str = e.to_string();
+                if is_nonce_error(&err_str) {
+                    println!(
+                        "RELAYER NONCE CONFLICT ({}). Resynchronizing with on-chain nonce...",
+                        err_str
+                    );
+                    let fresh_nonce = self.fetch_transaction_count().await?;
+                    nonce = fresh_nonce;
+                    *nonce_guard = Some(nonce);
+                    tx = tx.with_nonce(nonce);
+                    self.broadcast_tx(tx.clone()).await.context(
+                        "Failed to broadcast transaction even after nonce resynchronization",
+                    )?
+                } else {
+                    *nonce_guard = None; // Reset cache on unknown broadcast failure
+                    return Err(e);
                 }
             }
         };
 
-        let tx_hash = format!("0x{:x}", pending_tx.tx_hash());
-        let receipt = pending_tx
-            .get_receipt()
-            .await
-            .context("transaction broadcasted but receipt was not confirmed")?;
-        let block_number = receipt.block_number.unwrap_or(0);
-        let success = receipt.status();
-        println!("RELAYER: Confirmed in block {}", block_number);
-        println!("  Gas Used    : {}", receipt.gas_used);
+        let mut current_tx_hash = format!("0x{:x}", pending_tx.tx_hash());
         println!(
-            "  Status      : {}",
+            "RELAYER: Broadcasted tx {} (nonce {})",
+            current_tx_hash, nonce
+        );
+
+        // Record initial pending transaction in database
+        if let Some(ref db) = self.db {
+            let _ = db
+                .record_relayer_tx(
+                    &current_tx_hash,
+                    nonce,
+                    "pending",
+                    &format!("0x{:x}", self.signer_address),
+                )
+                .await;
+        }
+
+        // 3. Receipt polling with replacement watchdog (stuck transaction speed-up)
+        let timeout_secs = self.finality_config.tx_timeout_secs;
+        let timeout_duration = std::time::Duration::from_secs(timeout_secs);
+        let bump_pct = self.finality_config.gas_bump_percent;
+        let max_bumps = self.finality_config.max_gas_bumps;
+        let mut bump_count = 0;
+        let mut pending_tx_opt = Some(pending_tx);
+
+        let receipt = loop {
+            let timeout_res = if let Some(p) = pending_tx_opt.take() {
+                match tokio::time::timeout(timeout_duration, p.get_receipt()).await {
+                    Ok(Ok(rcpt)) => Ok(rcpt),
+                    Ok(Err(e)) => {
+                        if let Ok(Some(rcpt)) = self.get_receipt(&current_tx_hash).await {
+                            Ok(rcpt)
+                        } else {
+                            return Err(anyhow::anyhow!(
+                                "Transaction receipt error for {}: {}",
+                                current_tx_hash,
+                                e
+                            ));
+                        }
+                    }
+                    Err(_) => Err(()), // timeout
+                }
+            } else {
+                let start = std::time::Instant::now();
+                let mut found = None;
+                while start.elapsed() < timeout_duration {
+                    if let Ok(Some(rcpt)) = self.get_receipt(&current_tx_hash).await {
+                        found = Some(rcpt);
+                        break;
+                    }
+                    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+                }
+                match found {
+                    Some(rcpt) => Ok(rcpt),
+                    None => Err(()), // timeout
+                }
+            };
+
+            match timeout_res {
+                Ok(rcpt) => break rcpt,
+                Err(_) => {
+                    println!(
+                        "RELAYER WATCHDOG: Tx {} stuck in mempool (> {}s)",
+                        current_tx_hash, timeout_secs
+                    );
+
+                    // Check if transaction confirmed right around timeout
+                    if let Ok(Some(rcpt)) = self.get_receipt(&current_tx_hash).await {
+                        println!(
+                            "RELAYER: Tx {} confirmed during timeout check",
+                            current_tx_hash
+                        );
+                        break rcpt;
+                    }
+
+                    if bump_count < max_bumps {
+                        bump_count += 1;
+                        println!(
+                            "RELAYER: Escalating gas for stuck tx (bump #{}/{}, +{}% gas) with same nonce {}",
+                            bump_count, max_bumps, bump_pct, nonce
+                        );
+
+                        // Bump gas fees by at least +bump_pct% (EIP-1559 compliance)
+                        if let Some(mf) = current_max_fee {
+                            let bumped_mf = calculate_gas_bump(mf, bump_pct);
+                            current_max_fee = Some(bumped_mf);
+                            tx = tx.clone().with_max_fee_per_gas(bumped_mf);
+                        }
+                        if let Some(pf) = current_priority_fee {
+                            let bumped_pf = calculate_gas_bump(pf, bump_pct);
+                            current_priority_fee = Some(bumped_pf);
+                            tx = tx.clone().with_max_priority_fee_per_gas(bumped_pf);
+                        }
+                        if let Some(gp) = current_gas_price {
+                            let bumped_gp = calculate_gas_bump(gp, bump_pct);
+                            current_gas_price = Some(bumped_gp);
+                            tx = tx.clone().with_gas_price(bumped_gp);
+                        }
+                        if current_max_fee.is_none() && current_gas_price.is_none() {
+                            let gp = self.get_gas_price().await.unwrap_or(20_000_000);
+                            let bumped_mf = calculate_gas_bump(gp * 125 / 100, bump_pct);
+                            let bumped_pf = calculate_gas_bump(1_000_000, bump_pct);
+                            current_max_fee = Some(bumped_mf);
+                            current_priority_fee = Some(bumped_pf);
+                            tx = tx
+                                .clone()
+                                .with_max_fee_per_gas(bumped_mf)
+                                .with_max_priority_fee_per_gas(bumped_pf);
+                        }
+
+                        // Maintain the exact same nonce for replacement
+                        tx = tx.clone().with_nonce(nonce);
+
+                        match self.broadcast_tx(tx.clone()).await {
+                            Ok(replacement_pending) => {
+                                let new_hash = format!("0x{:x}", replacement_pending.tx_hash());
+                                println!("RELAYER: Replacement tx broadcasted: {}", new_hash);
+                                current_tx_hash = new_hash.clone();
+                                pending_tx_opt = Some(replacement_pending);
+                                if let Some(ref db) = self.db {
+                                    let _ = db
+                                        .record_relayer_tx(
+                                            &new_hash,
+                                            nonce,
+                                            "pending",
+                                            &format!("0x{:x}", self.signer_address),
+                                        )
+                                        .await;
+                                }
+                            }
+                            Err(e) => {
+                                eprintln!(
+                                    "RELAYER WARNING: Replacement broadcast failed: {}. Checking if original landed...",
+                                    e
+                                );
+                                if let Ok(Some(rcpt)) = self.get_receipt(&current_tx_hash).await {
+                                    break rcpt;
+                                }
+                            }
+                        }
+                    } else {
+                        eprintln!(
+                            "RELAYER WARNING: Max gas bumps ({}) reached for nonce {}. Continuing to wait...",
+                            max_bumps, nonce
+                        );
+                        if let Ok(Some(rcpt)) = self.get_receipt(&current_tx_hash).await {
+                            break rcpt;
+                        }
+                        tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+                    }
+                }
+            }
+        };
+
+        // 4. Confirmation Threshold Verification (reorg protection)
+        let receipt_block = receipt.block_number.unwrap_or(0);
+        let mut confirmations = 1u64;
+        let target_confirmations = self.finality_config.confirmation_threshold;
+
+        if target_confirmations > 1 && receipt_block > 0 {
+            println!(
+                "RELAYER: Waiting for {} confirmations (mined in block {})...",
+                target_confirmations, receipt_block
+            );
+            for _ in 0..60 {
+                let current_block = self.get_block_number().await.unwrap_or(receipt_block);
+                confirmations = current_block.saturating_sub(receipt_block) + 1;
+                if confirmations >= target_confirmations {
+                    println!(
+                        "RELAYER: Target confirmations achieved: {}/{} (current block: {})",
+                        confirmations, target_confirmations, current_block
+                    );
+                    break;
+                }
+                tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+            }
+        }
+
+        // 5. Update local nonce counter & DB record
+        *nonce_guard = Some(nonce + 1);
+
+        let success = receipt.status();
+        let gas_used = receipt.gas_used;
+        let effective_gas_price = receipt.effective_gas_price;
+
+        println!("RELAYER: Confirmed in block {}", receipt_block);
+        println!("  Gas Used     : {}", gas_used);
+        println!("  Confirmations: {}", confirmations);
+        println!(
+            "  Status       : {}",
             if success { "SUCCESS" } else { "FAILED" }
         );
 
-        let effective_gas_price = receipt.effective_gas_price;
+        if let Some(ref db) = self.db {
+            if success {
+                let _ = db
+                    .update_relayer_tx_confirmed(
+                        &current_tx_hash,
+                        receipt_block,
+                        gas_used,
+                        effective_gas_price,
+                        confirmations,
+                    )
+                    .await;
+            } else {
+                let _ = db
+                    .update_relayer_tx_failed(
+                        &current_tx_hash,
+                        Some(receipt_block),
+                        Some(gas_used),
+                        "transaction reverted on-chain",
+                    )
+                    .await;
+            }
+        }
+
         Ok(TransactionOutcome {
-            tx_hash,
-            block_number,
+            tx_hash: current_tx_hash,
+            block_number: receipt_block,
             success,
-            gas_used: receipt.gas_used,
+            gas_used,
             effective_gas_price,
             ccip_message_id: None,
+            confirmations,
         })
     }
 
@@ -316,6 +648,7 @@ impl EvmClient {
         Ok(eth)
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub async fn broadcast_spend_transaction(
         &self,
         root_hex: &str,
@@ -524,11 +857,11 @@ impl EvmClient {
         let call_data = batchSpendCall {
             roots,
             nullifiers,
-            alpha_neg_items: alpha_neg_items,
-            pk_iss_items: pk_iss_items,
+            alpha_neg_items,
+            pk_iss_items,
             recipients,
             amounts,
-            recipient_or_intent_hashes: recipient_or_intent_hashes,
+            recipient_or_intent_hashes,
             expiries,
             nonces,
         }
@@ -553,6 +886,7 @@ impl EvmClient {
         self.send_tx_with_fallback(tx).await
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub async fn broadcast_ccip_transaction(
         &self,
         destination_chain_selector: u64,
@@ -769,6 +1103,7 @@ impl EvmClient {
     }
 
     #[allow(dead_code)]
+    #[allow(clippy::too_many_arguments)]
     pub async fn sign_leader_payload(
         &self,
         session_id: &str,
@@ -848,5 +1183,79 @@ impl EvmClient {
             .with_gas_limit(100_000);
 
         self.send_tx_with_fallback(tx).await
+    }
+}
+
+/// Detects whether an error message indicates an EVM transaction nonce conflict or mismatch.
+pub fn is_nonce_error(err_str: &str) -> bool {
+    let lower = err_str.to_lowercase();
+    lower.contains("nonce too low")
+        || lower.contains("nonce too high")
+        || lower.contains("already known")
+        || lower.contains("transaction already exists")
+        || lower.contains("replacement transaction underpriced")
+        || lower.contains("nonce has already been used")
+        || lower.contains("invalid transaction nonce")
+}
+
+/// Calculates the escalated gas fee for transaction replacement, ensuring at least +1 wei increase.
+pub fn calculate_gas_bump(base: u128, bump_pct: u64) -> u128 {
+    let bump = (base.saturating_mul(bump_pct as u128)) / 100;
+    base.saturating_add(bump.max(1))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_is_nonce_error_detection() {
+        assert!(is_nonce_error("execution reverted: nonce too low"));
+        assert!(is_nonce_error(
+            "nonce too high (gap in Nitro sequencer buffer)"
+        ));
+        assert!(is_nonce_error("transaction already exists in mempool"));
+        assert!(is_nonce_error("replacement transaction underpriced"));
+        assert!(is_nonce_error("ALREADY KNOWN"));
+        assert!(!is_nonce_error(
+            "insufficient funds for gas * price + value"
+        ));
+        assert!(!is_nonce_error("execution reverted: invalid proof"));
+    }
+
+    #[test]
+    fn test_calculate_gas_bump_minimum_and_percentage() {
+        // Zero or small base gets at least +1 wei
+        assert_eq!(calculate_gas_bump(0, 15), 1);
+        assert_eq!(calculate_gas_bump(1, 15), 2);
+
+        // Standard gas price: 20 Gwei + 15% bump = 23 Gwei
+        let twenty_gwei = 20_000_000_000u128;
+        let expected_twenty_three = 23_000_000_000u128;
+        assert_eq!(calculate_gas_bump(twenty_gwei, 15), expected_twenty_three);
+
+        // 100 + 10% = 110
+        assert_eq!(calculate_gas_bump(100, 10), 110);
+    }
+
+    #[test]
+    fn test_transaction_outcome_confirmations_and_config() {
+        let outcome = TransactionOutcome {
+            tx_hash: "0x123".to_string(),
+            block_number: 100,
+            success: true,
+            gas_used: 50_000,
+            effective_gas_price: 20_000_000,
+            ccip_message_id: None,
+            confirmations: 5,
+        };
+        assert_eq!(outcome.confirmations, 5);
+        assert!(outcome.success);
+
+        let cfg = crate::config::ReceiptFinalityConfig::default();
+        assert_eq!(cfg.confirmation_threshold, 1);
+        assert_eq!(cfg.tx_timeout_secs, 30);
+        assert_eq!(cfg.gas_bump_percent, 15);
+        assert_eq!(cfg.max_gas_bumps, 3);
     }
 }

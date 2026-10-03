@@ -66,7 +66,7 @@ Ref: [`docs/todos/private-note-balance.md`](file:///workspaces/Zeltra-Protocol/d
 
 ## 3. Relayer & Node Settlement (`nimbus-node`)
 
-- [ ] **Receipt Finality & Nonce Handling**:
+- [x] **Receipt Finality & Nonce Handling**:
   - Ref: [`docs/todos/receipt-finality.md`](file:///workspaces/Zeltra-Protocol/docs/todos/receipt-finality.md)
   - Terapkan confirmation threshold sesuai chain.
   - Tangani replacement transaction otomatis jika transaksi stuck di mempool.

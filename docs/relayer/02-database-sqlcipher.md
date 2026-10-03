@@ -75,3 +75,20 @@ Merekam seluruh nullifier yang sudah mendapatkan konfirmasi receipt sukses di on
 * `item_count`: Jumlah transaksi yang digabungkan (2 s/d 8).
 * `execution_fee`: Total komisi gas yang berhak diklaim oleh relayer.
 * `claimed`: Status apakah komisi ini sudah ditarik via `claimExecutionFee()` di smart contract.
+
+### E. Tabel `quote_ids_used` (Pencegah Replay Quote EIP-712)
+* `quote_id`: ID unik signed quote (PRIMARY KEY).
+* `user_address`: Alamat pengirim/signer quote.
+* `used_at`: Timestamp saat kuotasi dikonsumsi oleh transaksi spend.
+
+### F. Tabel `relayer_transactions` (Pelacakan Nonce & Finalitas Receipt - DEC-017)
+Merekam seluruh transaksi on-chain yang dibroadcast oleh relayer untuk pelacakan nonce atomik, eskalasi gas, dan verifikasi receipt:
+* `tx_hash`: Hash transaksi on-chain (PRIMARY KEY).
+* `nonce`: Nomor urut transaksi EVM relayer yang di-lock secara atomik.
+* `signer_address`: Alamat akun relayer penandatangan transaksi.
+* `status`: Status eksekusi transaksi (`pending`, `confirmed`, `failed`).
+* `block_number`: Tinggi blok tempat transaksi dieksekusi.
+* `gas_used` & `effective_gas_price`: Biaya gas riil untuk pembukuan dan margin tracking.
+* `confirmations`: Jumlah blok konfirmasi yang telah dilewati.
+* `error_reason`: Pesan revert atau kegagalan jika transaksi gagal di on-chain.
+* `created_at` & `updated_at`: Timestamp untuk keperluan timeout watchdog & gas bump replacement.

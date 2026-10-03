@@ -29,8 +29,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     while let Some(row) = rows.next()? {
         let mut row_map = Map::new();
-        for i in 0..col_count {
-            let col_name = &col_names[i];
+        for (i, col_name) in col_names.iter().enumerate().take(col_count) {
             let value_ref = row.get_ref(i)?;
             let value = match value_ref {
                 rusqlite::types::ValueRef::Null => Value::Null,

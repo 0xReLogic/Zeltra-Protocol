@@ -61,10 +61,17 @@ async fn main() {
     ) {
         match EvmClient::new(&rpc_url, &private_key, &contract_addr).await {
             Ok(client) => {
+                let client = client.with_db(Arc::new(db.clone()));
                 println!("EVM client initialized");
                 println!("  RPC URL:    {}", rpc_url);
                 println!("  Contract:   {}", contract_addr);
                 println!("  Signer:     {}", client.signer_address());
+                println!(
+                    "  Finality:   {} block(s) threshold, {}s timeout, +{}% gas bump",
+                    client.finality_config().confirmation_threshold,
+                    client.finality_config().tx_timeout_secs,
+                    client.finality_config().gas_bump_percent
+                );
                 Some(Arc::new(client))
             }
             Err(e) => {
@@ -227,6 +234,7 @@ async fn main() {
         .route("/api/reveal", post(handle_reveal))
         .route("/api/spend", post(handle_spend))
         .route("/api/quote/private-spend", get(handle_private_spend_quote))
+        .route("/api/tx-status", get(handle_tx_status))
         .route("/api/x402/verify", post(handle_x402_verify))
         .route("/api/sign-share", post(handle_sign_share))
         .route("/api/leader/sign", post(handle_leader_sign))

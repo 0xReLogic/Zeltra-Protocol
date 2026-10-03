@@ -285,3 +285,24 @@ pub struct LeaderSignResponse {
     pub com_k_hex: String,
     pub partial_signatures: Vec<PartialSignatureInfo>,
 }
+
+// Transaction Status DTOs (DEC-017 / Receipt Finality)
+#[derive(Debug, Deserialize)]
+pub struct TxStatusQuery {
+    pub tx_hash: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TxStatusResponse {
+    pub tx_hash: String,
+    pub status: String, // "pending", "confirmed", "failed", "not_found"
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub block_number: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub gas_used: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub effective_gas_price: Option<u128>,
+    pub confirmations: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error_reason: Option<String>,
+}

@@ -124,6 +124,61 @@ impl CcipDestinationConfig {
     }
 }
 
+/// Configuration for receipt polling, confirmation depth, and replacement transactions.
+#[derive(Debug, Clone)]
+pub struct ReceiptFinalityConfig {
+    /// Number of block confirmations to wait before marking transaction confirmed (default 1 for Arbitrum)
+    pub confirmation_threshold: u64,
+    /// Timeout in seconds before replacing stuck mempool transaction (default 30s)
+    pub tx_timeout_secs: u64,
+    /// Percentage to bump gas price on replacement transaction (default 15%)
+    pub gas_bump_percent: u64,
+    /// Maximum number of gas bump replacements before stopping (default 3)
+    pub max_gas_bumps: u32,
+}
+
+impl Default for ReceiptFinalityConfig {
+    fn default() -> Self {
+        Self {
+            confirmation_threshold: 1,
+            tx_timeout_secs: 30,
+            gas_bump_percent: 15,
+            max_gas_bumps: 3,
+        }
+    }
+}
+
+impl ReceiptFinalityConfig {
+    pub fn from_env() -> Self {
+        let confirmation_threshold = std::env::var("NIMBUS_CONFIRMATION_THRESHOLD")
+            .ok()
+            .and_then(|v| v.parse::<u64>().ok())
+            .unwrap_or(1);
+
+        let tx_timeout_secs = std::env::var("NIMBUS_TX_TIMEOUT_SECS")
+            .ok()
+            .and_then(|v| v.parse::<u64>().ok())
+            .unwrap_or(30);
+
+        let gas_bump_percent = std::env::var("NIMBUS_GAS_BUMP_PERCENT")
+            .ok()
+            .and_then(|v| v.parse::<u64>().ok())
+            .unwrap_or(15);
+
+        let max_gas_bumps = std::env::var("NIMBUS_MAX_GAS_BUMPS")
+            .ok()
+            .and_then(|v| v.parse::<u32>().ok())
+            .unwrap_or(3);
+
+        Self {
+            confirmation_threshold,
+            tx_timeout_secs,
+            gas_bump_percent,
+            max_gas_bumps,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

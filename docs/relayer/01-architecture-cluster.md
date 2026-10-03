@@ -59,4 +59,5 @@ Semua endpoint dibangun menggunakan framework async **Axum 0.8**:
 | `/api/reveal` | `POST` | Merilis kunci masking $k$ ke client setelah deposit terkonfirmasi di on-chain. |
 | `/api/quote/private-spend` | `GET` | Memberikan signed quote EIP-712 (estimasi gas, markup 15%, & diskon holding time). |
 | `/api/spend` | `POST` | Menerima spend payload dari client dan memasukkannya ke antrian persisten. |
+| `/api/tx-status` | `GET` | Memantau status transaksi on-chain relayer (`pending`, `confirmed`, `failed`), konfirmasi blok dinamis, dan gas used. |
 | `/health` | `GET` | Health check liveness relayer, saldo ETH gas, dan kedalaman antrian database. |

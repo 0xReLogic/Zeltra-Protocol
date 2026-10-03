@@ -7,7 +7,7 @@
 
 use anyhow::{Context, Result};
 use rusqlite::{params, Connection, OptionalExtension, TransactionBehavior};
-use serde_json;
+use serde::{Deserialize, Serialize};
 use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
 use tokio::task;
@@ -23,6 +23,21 @@ pub struct QueuedSpend {
     pub id: i64,
     pub request: crate::dto::SpendRequest,
     pub retry_count: u32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RelayerTxRecord {
+    pub tx_hash: String,
+    pub nonce: u64,
+    pub signer_address: String,
+    pub status: String, // "pending", "confirmed", "failed"
+    pub block_number: Option<u64>,
+    pub gas_used: Option<u64>,
+    pub effective_gas_price: Option<u128>,
+    pub confirmations: u64,
+    pub error_reason: Option<String>,
+    pub created_at: u64,
+    pub updated_at: u64,
 }
 
 #[derive(Debug, Clone)]
@@ -186,6 +201,24 @@ impl Database {
                     used_at INTEGER NOT NULL
                 );
                 CREATE INDEX IF NOT EXISTS idx_quote_ids_used_at ON quote_ids_used(used_at);
+
+                -- Relayer transactions tracking (DEC-017 / Receipt Finality & Nonce Tracking)
+                CREATE TABLE IF NOT EXISTS relayer_transactions (
+                    tx_hash TEXT PRIMARY KEY,
+                    nonce INTEGER NOT NULL,
+                    signer_address TEXT NOT NULL DEFAULT '',
+                    status TEXT NOT NULL,
+                    block_number INTEGER,
+                    gas_used INTEGER,
+                    effective_gas_price TEXT,
+                    confirmations INTEGER NOT NULL DEFAULT 0,
+                    error_reason TEXT,
+                    created_at INTEGER NOT NULL,
+                    updated_at INTEGER NOT NULL
+                );
+                CREATE INDEX IF NOT EXISTS idx_relayer_tx_status ON relayer_transactions(status);
+                CREATE INDEX IF NOT EXISTS idx_relayer_tx_nonce ON relayer_transactions(nonce);
+                CREATE INDEX IF NOT EXISTS idx_relayer_tx_signer ON relayer_transactions(signer_address);
             ",
             )?;
 
@@ -222,6 +255,35 @@ impl Database {
             for migration in batch_migrations {
                 let _ = conn.execute(migration, params![]);
             }
+            // Relayer transactions table migration for existing databases
+            let _ = conn.execute(
+                "CREATE TABLE IF NOT EXISTS relayer_transactions (
+                    tx_hash TEXT PRIMARY KEY,
+                    nonce INTEGER NOT NULL,
+                    signer_address TEXT NOT NULL DEFAULT '',
+                    status TEXT NOT NULL,
+                    block_number INTEGER,
+                    gas_used INTEGER,
+                    effective_gas_price TEXT,
+                    confirmations INTEGER NOT NULL DEFAULT 0,
+                    error_reason TEXT,
+                    created_at INTEGER NOT NULL,
+                    updated_at INTEGER NOT NULL
+                )",
+                params![],
+            );
+            let _ = conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_relayer_tx_status ON relayer_transactions(status)",
+                params![],
+            );
+            let _ = conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_relayer_tx_nonce ON relayer_transactions(nonce)",
+                params![],
+            );
+            let _ = conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_relayer_tx_signer ON relayer_transactions(signer_address)",
+                params![],
+            );
             conn.execute_batch(
                 "
                 CREATE INDEX IF NOT EXISTS idx_spend_queue_claim
@@ -474,6 +536,7 @@ impl Database {
         .await?
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub async fn store_batch_metadata(
         &self,
         batch_id: &str,
@@ -780,6 +843,285 @@ impl Database {
             Ok(timestamp)
         })
         .await?
+    }
+
+    // --- Relayer Transactions Tracking (DEC-017 / Receipt Finality & Nonce Tracking) ---
+
+    pub async fn record_relayer_tx(
+        &self,
+        tx_hash: &str,
+        nonce: u64,
+        status: &str,
+        signer_address: &str,
+    ) -> Result<()> {
+        let path = self.path.clone();
+        let db_key = database_key()?;
+        let tx_hash = tx_hash.to_string();
+        let status = status.to_string();
+        let signer_address = signer_address.to_string();
+        task::spawn_blocking(move || -> Result<()> {
+            let conn = open_connection(&path, &db_key)?;
+            let now = unix_timestamp()?;
+            conn.execute(
+                "INSERT INTO relayer_transactions (
+                    tx_hash, nonce, signer_address, status, confirmations, created_at, updated_at
+                 ) VALUES (?, ?, ?, ?, 0, ?, ?)
+                 ON CONFLICT(tx_hash) DO UPDATE SET
+                    status = excluded.status,
+                    updated_at = excluded.updated_at",
+                params![tx_hash, nonce as i64, signer_address, status, now, now],
+            )?;
+            Ok(())
+        })
+        .await?
+    }
+
+    pub async fn update_relayer_tx_confirmed(
+        &self,
+        tx_hash: &str,
+        block_number: u64,
+        gas_used: u64,
+        effective_gas_price: u128,
+        confirmations: u64,
+    ) -> Result<()> {
+        let path = self.path.clone();
+        let db_key = database_key()?;
+        let tx_hash = tx_hash.to_string();
+        task::spawn_blocking(move || -> Result<()> {
+            let conn = open_connection(&path, &db_key)?;
+            let now = unix_timestamp()?;
+            let eff_price_str = effective_gas_price.to_string();
+            conn.execute(
+                "UPDATE relayer_transactions
+                 SET status = 'confirmed',
+                     block_number = ?,
+                     gas_used = ?,
+                     effective_gas_price = ?,
+                     confirmations = ?,
+                     updated_at = ?
+                 WHERE tx_hash = ?",
+                params![
+                    block_number as i64,
+                    gas_used as i64,
+                    eff_price_str,
+                    confirmations as i64,
+                    now,
+                    tx_hash
+                ],
+            )?;
+            Ok(())
+        })
+        .await?
+    }
+
+    pub async fn update_relayer_tx_failed(
+        &self,
+        tx_hash: &str,
+        block_number: Option<u64>,
+        gas_used: Option<u64>,
+        error_reason: &str,
+    ) -> Result<()> {
+        let path = self.path.clone();
+        let db_key = database_key()?;
+        let tx_hash = tx_hash.to_string();
+        let error_reason = error_reason.to_string();
+        task::spawn_blocking(move || -> Result<()> {
+            let conn = open_connection(&path, &db_key)?;
+            let now = unix_timestamp()?;
+            conn.execute(
+                "UPDATE relayer_transactions
+                 SET status = 'failed',
+                     block_number = ?,
+                     gas_used = ?,
+                     error_reason = ?,
+                     updated_at = ?
+                 WHERE tx_hash = ?",
+                params![
+                    block_number.map(|b| b as i64),
+                    gas_used.map(|g| g as i64),
+                    error_reason,
+                    now,
+                    tx_hash
+                ],
+            )?;
+            Ok(())
+        })
+        .await?
+    }
+
+    #[allow(dead_code)]
+    pub async fn update_relayer_tx_confirmations(
+        &self,
+        tx_hash: &str,
+        confirmations: u64,
+    ) -> Result<()> {
+        let path = self.path.clone();
+        let db_key = database_key()?;
+        let tx_hash = tx_hash.to_string();
+        task::spawn_blocking(move || -> Result<()> {
+            let conn = open_connection(&path, &db_key)?;
+            let now = unix_timestamp()?;
+            conn.execute(
+                "UPDATE relayer_transactions
+                 SET confirmations = ?,
+                     updated_at = ?
+                 WHERE tx_hash = ?",
+                params![confirmations as i64, now, tx_hash],
+            )?;
+            Ok(())
+        })
+        .await?
+    }
+
+    pub async fn get_max_relayer_nonce(&self, signer_address: &str) -> Result<Option<u64>> {
+        let path = self.path.clone();
+        let db_key = database_key()?;
+        let signer_address = signer_address.to_string();
+        task::spawn_blocking(move || -> Result<Option<u64>> {
+            let conn = open_connection(&path, &db_key)?;
+            let mut stmt = conn.prepare(
+                "SELECT MAX(nonce) FROM relayer_transactions
+                 WHERE signer_address = ? AND status IN ('pending', 'confirmed')",
+            )?;
+            let max_nonce: Option<i64> =
+                stmt.query_row(params![signer_address], |row| row.get(0))?;
+            Ok(max_nonce.map(|n| n as u64))
+        })
+        .await?
+    }
+
+    pub async fn get_relayer_tx(&self, tx_hash: &str) -> Result<Option<RelayerTxRecord>> {
+        let path = self.path.clone();
+        let db_key = database_key()?;
+        let tx_hash = tx_hash.to_string();
+        task::spawn_blocking(move || -> Result<Option<RelayerTxRecord>> {
+            let conn = open_connection(&path, &db_key)?;
+            let mut stmt = conn.prepare(
+                "SELECT tx_hash, nonce, signer_address, status, block_number, gas_used,
+                        effective_gas_price, confirmations, error_reason, created_at, updated_at
+                 FROM relayer_transactions WHERE tx_hash = ?",
+            )?;
+            let record = stmt
+                .query_row(params![tx_hash], |row| {
+                    let eff_gas_price: Option<String> = row.get(6)?;
+                    let eff_gas_price_u128 = eff_gas_price.and_then(|s| s.parse::<u128>().ok());
+                    let block_num: Option<i64> = row.get(4)?;
+                    let gas_u: Option<i64> = row.get(5)?;
+                    let confs: i64 = row.get(7)?;
+                    let c_at: i64 = row.get(9)?;
+                    let u_at: i64 = row.get(10)?;
+                    Ok(RelayerTxRecord {
+                        tx_hash: row.get(0)?,
+                        nonce: row.get::<_, i64>(1)? as u64,
+                        signer_address: row.get(2)?,
+                        status: row.get(3)?,
+                        block_number: block_num.map(|b| b as u64),
+                        gas_used: gas_u.map(|g| g as u64),
+                        effective_gas_price: eff_gas_price_u128,
+                        confirmations: confs as u64,
+                        error_reason: row.get(8)?,
+                        created_at: c_at as u64,
+                        updated_at: u_at as u64,
+                    })
+                })
+                .optional()?;
+            Ok(record)
+        })
+        .await?
+    }
+
+    pub async fn get_tx_status_any(
+        &self,
+        tx_hash: &str,
+    ) -> Result<Option<crate::dto::TxStatusResponse>> {
+        // 1. Check relayer_transactions table
+        if let Some(record) = self.get_relayer_tx(tx_hash).await? {
+            return Ok(Some(crate::dto::TxStatusResponse {
+                tx_hash: record.tx_hash,
+                status: record.status,
+                block_number: record.block_number,
+                gas_used: record.gas_used,
+                effective_gas_price: record.effective_gas_price,
+                confirmations: record.confirmations,
+                error_reason: record.error_reason,
+            }));
+        }
+
+        // 2. Check spend_queue table
+        let path = self.path.clone();
+        let db_key = database_key()?;
+        let hash = tx_hash.to_string();
+        let queue_match = task::spawn_blocking(move || -> Result<Option<crate::dto::TxStatusResponse>> {
+            let conn = open_connection(&path, &db_key)?;
+            let mut stmt = conn.prepare(
+                "SELECT status, block_number, last_error FROM spend_queue WHERE tx_hash = ? LIMIT 1",
+            )?;
+            let row = stmt.query_row(params![hash], |r| {
+                let status_str: String = r.get(0)?;
+                let block_num: Option<i64> = r.get(1)?;
+                let last_err: Option<String> = r.get(2)?;
+                Ok((status_str, block_num, last_err))
+            }).optional()?;
+
+            if let Some((raw_status, b_num, err)) = row {
+                let status = match raw_status.as_str() {
+                    "confirmed" => "confirmed",
+                    "failed" => "failed",
+                    _ => "pending",
+                };
+                let confirmations = if status == "confirmed" { 1 } else { 0 };
+                return Ok(Some(crate::dto::TxStatusResponse {
+                    tx_hash: hash,
+                    status: status.to_string(),
+                    block_number: b_num.map(|b| b as u64),
+                    gas_used: None,
+                    effective_gas_price: None,
+                    confirmations,
+                    error_reason: err,
+                }));
+            }
+            Ok(None)
+        })
+        .await??;
+
+        if queue_match.is_some() {
+            return Ok(queue_match);
+        }
+
+        // 3. Check spend_batches table
+        let path = self.path.clone();
+        let db_key = database_key()?;
+        let hash = tx_hash.to_string();
+        let batch_match =
+            task::spawn_blocking(move || -> Result<Option<crate::dto::TxStatusResponse>> {
+                let conn = open_connection(&path, &db_key)?;
+                let mut stmt = conn.prepare(
+                "SELECT gas_used, effective_gas_price FROM spend_batches WHERE tx_hash = ? LIMIT 1",
+            )?;
+                let row = stmt
+                    .query_row(params![hash], |r| {
+                        let gas_u: i64 = r.get(0)?;
+                        let eff_p: i64 = r.get(1)?;
+                        Ok((gas_u, eff_p))
+                    })
+                    .optional()?;
+
+                if let Some((gas_u, eff_p)) = row {
+                    return Ok(Some(crate::dto::TxStatusResponse {
+                        tx_hash: hash,
+                        status: "confirmed".to_string(),
+                        block_number: None,
+                        gas_used: Some(gas_u as u64),
+                        effective_gas_price: Some(eff_p as u128),
+                        confirmations: 1,
+                        error_reason: None,
+                    }));
+                }
+                Ok(None)
+            })
+            .await??;
+
+        Ok(batch_match)
     }
 
     /// Insert session (deposit)
@@ -1778,5 +2120,60 @@ mod tests {
         // Test get_db_size
         let size = db.get_db_size().await.unwrap();
         assert!(size > 0, "DB file should exist and have size");
+    }
+
+    #[tokio::test]
+    async fn test_relayer_transactions_lifecycle() {
+        std::env::set_var("NIMBUS_DB_KEY", "test-encryption-key");
+        let tmp = TempDir::new().unwrap();
+        let db_path = tmp.path().join("relayer_tx_test.db");
+        let db = Database::new(&db_path).await.unwrap();
+
+        let signer = "0x1111111111111111111111111111111111111111";
+        let tx1 = "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+        let tx2 = "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+
+        // Initial state: no transactions
+        assert_eq!(db.get_max_relayer_nonce(signer).await.unwrap(), None);
+
+        // Record first transaction
+        db.record_relayer_tx(tx1, 5, "pending", signer)
+            .await
+            .unwrap();
+        assert_eq!(db.get_max_relayer_nonce(signer).await.unwrap(), Some(5));
+
+        // Update confirmations
+        db.update_relayer_tx_confirmations(tx1, 2).await.unwrap();
+        let rec = db.get_relayer_tx(tx1).await.unwrap().unwrap();
+        assert_eq!(rec.confirmations, 2);
+        assert_eq!(rec.status, "pending");
+
+        // Mark confirmed
+        db.update_relayer_tx_confirmed(tx1, 100, 21_000, 30_000_000, 4)
+            .await
+            .unwrap();
+        let rec_confirmed = db.get_relayer_tx(tx1).await.unwrap().unwrap();
+        assert_eq!(rec_confirmed.status, "confirmed");
+        assert_eq!(rec_confirmed.block_number, Some(100));
+        assert_eq!(rec_confirmed.gas_used, Some(21_000));
+        assert_eq!(rec_confirmed.effective_gas_price, Some(30_000_000));
+        assert_eq!(rec_confirmed.confirmations, 4);
+
+        // Query via get_tx_status_any
+        let any_status = db.get_tx_status_any(tx1).await.unwrap().unwrap();
+        assert_eq!(any_status.status, "confirmed");
+        assert_eq!(any_status.block_number, Some(100));
+
+        // Record replacement or second tx with failure
+        db.record_relayer_tx(tx2, 6, "pending", signer)
+            .await
+            .unwrap();
+        assert_eq!(db.get_max_relayer_nonce(signer).await.unwrap(), Some(6));
+        db.update_relayer_tx_failed(tx2, Some(101), Some(50_000), "reverted")
+            .await
+            .unwrap();
+        let rec_failed = db.get_relayer_tx(tx2).await.unwrap().unwrap();
+        assert_eq!(rec_failed.status, "failed");
+        assert_eq!(rec_failed.error_reason, Some("reverted".to_string()));
     }
 }
