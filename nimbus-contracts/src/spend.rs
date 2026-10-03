@@ -487,7 +487,7 @@ impl Nimbus {
         sender: Bytes,
         payload: Bytes,
     ) -> Result<(), Vec<u8>> {
-        // Enforce caller verification if CCIP Router address is configured (Production Best Practice)
+        // Enforce caller verification: CCIP Router MUST be configured and non-zero
         let caller = self.msg_sender();
         let configured_router = self.ccip_router.get();
         if configured_router == Address::ZERO {
@@ -497,9 +497,22 @@ impl Nimbus {
             return Err(b"ONLY_CCIP_ROUTER_ALLOWED".to_vec());
         }
 
+        // Validate CCIP message_id is non-zero
+        if message_id == FixedBytes::ZERO {
+            return Err(b"INVALID_CCIP_MESSAGE_ID".to_vec());
+        }
+
         // Replay protection: Check if message has already been processed
         if self.ccip_processed_messages.get(message_id) {
             return Err(b"CCIP_MESSAGE_ALREADY_PROCESSED".to_vec());
+        }
+
+        // Validate source chain selector and sender
+        if source_chain_selector == 0 {
+            return Err(b"INVALID_SOURCE_CHAIN_SELECTOR".to_vec());
+        }
+        if sender.is_empty() {
+            return Err(b"EMPTY_CCIP_SENDER".to_vec());
         }
 
         // Verify sender and source chain selector are on the allowlist

@@ -52,7 +52,7 @@ Ref: [`docs/todos/private-note-balance.md`](file:///workspaces/Zeltra-Protocol/d
 - [x] **Append-only Note Commitment Tree (Gate D)**:
   - Tambahkan state Merkle tree on-chain dan bounded accepted-root history di Stylus.
   - Initial commitment hanya bisa di-mint dari deposit confirmed sebesar net deposit.
-- [ ] **CCIP Contract Hardening**:
+- [x] **CCIP Contract Hardening**:
   - Wajibkan `ccip_router != Address::ZERO` sebelum menerima message.
   - Tolak semua caller jika router belum dikonfigurasi.
   - Validasi `source_chain_selector` dan bind sender contract yang sah untuk setiap chain.
