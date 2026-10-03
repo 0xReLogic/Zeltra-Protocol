@@ -146,4 +146,22 @@ Mengacu pada spesifikasi [`DEC-018`](file:///workspaces/Zeltra-Protocol/research
         $$k \cdot \text{pk}_{\text{iss}} == \text{com}_k$$
    * Jika $k$ atau $\text{com}_k$ rusak, dimanipulasi, atau tidak cocok, endpoint seketika mengembalikan respons `REJECTED`, sesi tetap terkunci (`resolved == false`), dan tidak ada rahasia yang bocor ke publik.
 
+---
+
+## 9. Input Sanitization & Post-Restart Nullifier Reconciliation (DEC-019)
+
+Mengacu pada spesifikasi [`DEC-019`](file:///workspaces/Zeltra-Protocol/research/decisions/DEC-019-relayer-input-sanitization-safety-limits-and-post-restart-reconciliation.md):
+
+1. **Ingress Input & Financial Safety Bounds (`validation.rs`):**
+   * **Recipient Address:** Wajib format alamat EVM 20-byte valid dan secara tegas menolak zero address (`0x000...000`).
+   * **Spend Amount Bounds:** Menolak transaksi debu spam di bawah minimum on-chain 5 USDC (`5_000_000` base units) dan transaksi di atas batas circuit breaker 50,000 USDC (`50_000_000_000` base units).
+   * **CCIP Destination Allowlist:** Memvalidasi `destination_chain_selector` terhadap rantai terotorisasi (Arbitrum Sepolia, Ethereum Sepolia, Base Sepolia, Optimism Sepolia) dan memverifikasi `destination_contract` non-zero.
+2. **On-Chain View Function `isNullifierSpent(bytes32)`:**
+   * Smart contract Stylus mengekspos public view function `is_nullifier_spent(nullifier)` untuk inspeksi status langsung via RPC.
+3. **Crash Recovery & Post-Restart Reconciliation:**
+   * Saat node menyala kembali pasca restart atau crash, relayer memeriksa seluruh transaksi berstatus `queued`, `retryable`, `broadcasting`, atau `submitted` terhadap kontrak on-chain.
+   * Jika nullifier terbukti sudah berstatus *spent* on-chain (misal berhasil ditambang sesaat sebelum crash), relayer menandai antrian lokal sebagai `confirmed` dan mencatat nullifier ke tabel lokal tanpa mengirim transaksi ganda ke mempool.
+   * Jika transaksi belum masuk on-chain dan lease kedaluwarsa, relayer mereset status menjadi `queued` untuk diproses worker secara aman.
+
+
 

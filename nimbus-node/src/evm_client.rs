@@ -52,6 +52,7 @@ sol! {
     function claimExecutionFees(uint256 amount) external;
 
     function getCleanRootTimestamp(bytes32 root) external view returns (uint256);
+    function isNullifierSpent(bytes32 nullifier) external view returns (bool);
 
     struct EVMTokenAmount {
         address token;
@@ -1158,6 +1159,40 @@ impl EvmClient {
             Ok(U256::from_be_slice(&result[..32]).to::<u64>())
         } else {
             Ok(0)
+        }
+    }
+
+    /// Check if a nullifier has already been spent on-chain (DEC-019)
+    pub async fn is_nullifier_spent(&self, nullifier_hex: &str) -> Result<bool> {
+        let clean_hex = nullifier_hex.trim_start_matches("0x");
+        let nullifier_bytes =
+            hex::decode(clean_hex).map_err(|e| anyhow::anyhow!("Invalid nullifier hex: {}", e))?;
+        if nullifier_bytes.len() != 32 {
+            anyhow::bail!("Nullifier must be 32 bytes, got {}", nullifier_bytes.len());
+        }
+        let mut nullifier = [0u8; 32];
+        nullifier.copy_from_slice(&nullifier_bytes);
+
+        let call_data = isNullifierSpentCall {
+            nullifier: nullifier.into(),
+        }
+        .abi_encode();
+
+        let tx = TransactionRequest::default()
+            .with_to(self.contract_address)
+            .with_input(Bytes::from(call_data));
+
+        let result = self
+            .provider
+            .call(tx)
+            .await
+            .context("Failed to call isNullifierSpent on-chain")?;
+
+        if !result.is_empty() {
+            // ABI bool is decoded as a 32-byte word with last byte 0 or 1
+            Ok(result.last().copied().unwrap_or(0) != 0)
+        } else {
+            Ok(false)
         }
     }
 

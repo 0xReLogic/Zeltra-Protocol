@@ -11,6 +11,7 @@ mod http;
 mod key_rotation;
 mod kms;
 mod state;
+mod validation;
 
 use axum::{
     body::Body,
@@ -119,6 +120,71 @@ async fn main() {
     // Securely zero out the key in the main stack frame immediately
     unsafe {
         std::ptr::write_volatile(&mut share_sk, nimbus_core::Fr::from(0u64));
+    }
+
+    // --- Post-Restart Nullifier Reconciliation (DEC-019) ---
+    if let Some(ref evm) = state.evm_client {
+        println!(
+            "RECONCILIATION: Checking active/in-flight spends against on-chain contract state..."
+        );
+        match state.db.get_unreconciled_spends().await {
+            Ok(unreconciled) if !unreconciled.is_empty() => {
+                println!(
+                    "RECONCILIATION: Found {} active/in-flight spend(s) to verify.",
+                    unreconciled.len()
+                );
+                for spend in unreconciled {
+                    match evm.is_nullifier_spent(&spend.nullifier).await {
+                        Ok(true) => {
+                            println!(
+                                "RECONCILIATION: Spend {} (nullifier {}...) was ALREADY SPENT on-chain! Marking local spend as confirmed.",
+                                spend.id,
+                                &spend.nullifier[..8.min(spend.nullifier.len())]
+                            );
+                            if let Err(e) = state
+                                .db
+                                .reconcile_spend_as_confirmed(
+                                    spend.id,
+                                    &spend.nullifier,
+                                    spend.tx_hash.as_deref(),
+                                )
+                                .await
+                            {
+                                eprintln!(
+                                    "RECONCILIATION ERROR: Failed to confirm spend {}: {}",
+                                    spend.id, e
+                                );
+                            }
+                        }
+                        Ok(false) => {
+                            if spend.status == "broadcasting" || spend.status == "submitted" {
+                                println!(
+                                    "RECONCILIATION: Spend {} in '{}' state not yet spent on-chain. Resetting lease for retry.",
+                                    spend.id, spend.status
+                                );
+                                let _ = state.db.reset_unspent_lease(spend.id).await;
+                            }
+                        }
+                        Err(e) => {
+                            eprintln!(
+                                "RECONCILIATION WARNING: Failed to query on-chain nullifier status for spend {}: {}",
+                                spend.id, e
+                            );
+                        }
+                    }
+                }
+                println!("RECONCILIATION: Startup check complete.");
+            }
+            Ok(_) => {
+                println!("RECONCILIATION: No active/in-flight spends found in queue.");
+            }
+            Err(e) => {
+                eprintln!(
+                    "RECONCILIATION ERROR: Failed to fetch unreconciled spends: {}",
+                    e
+                );
+            }
+        }
     }
 
     // Spawn key rotation background task (Finding #12)

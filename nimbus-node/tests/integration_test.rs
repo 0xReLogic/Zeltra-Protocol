@@ -116,3 +116,100 @@ async fn test_concurrent_double_spend_attempts() {
     println!("   - Successes: {} (expected 1)", successes);
     println!("   - Rejected: {} (expected 9)", failures);
 }
+
+#[tokio::test]
+async fn test_startup_nullifier_reconciliation() {
+    let tmp = TempDir::new().unwrap();
+    let db_path = tmp.path().join("reconciliation_test.db");
+    let db = nimbus_node::database::Database::new(&db_path)
+        .await
+        .unwrap();
+
+    let req1 = nimbus_node::dto::SpendRequest {
+        nullifier: "0xreconcile_nullifier_already_spent".to_string(),
+        sig_hex: "0xsig1".to_string(),
+        recipient: "0x1111111111111111111111111111111111111111".to_string(),
+        amount: 10_000_000,
+        eip7702_auth: None,
+        cross_chain: None,
+        association_root_hex: None,
+        alpha_neg_hex: "0xalpha1".to_string(),
+        hm_hex: "0xhm1".to_string(),
+        pk_iss_hex: "0xpk1".to_string(),
+        recipient_or_intent_hash_hex: None,
+        expiry: None,
+        nonce_hex: None,
+        min_payout: None,
+        deadline: None,
+        idempotency_key: None,
+        max_execution_fee: None,
+        execution_fee: None,
+        quote_id: None,
+        quote_expiry: None,
+        quote_signature: None,
+        user_address: None,
+    };
+
+    let req2 = nimbus_node::dto::SpendRequest {
+        nullifier: "0xreconcile_nullifier_not_yet_spent".to_string(),
+        sig_hex: "0xsig2".to_string(),
+        recipient: "0x2222222222222222222222222222222222222222".to_string(),
+        amount: 15_000_000,
+        eip7702_auth: None,
+        cross_chain: None,
+        association_root_hex: None,
+        alpha_neg_hex: "0xalpha2".to_string(),
+        hm_hex: "0xhm2".to_string(),
+        pk_iss_hex: "0xpk2".to_string(),
+        recipient_or_intent_hash_hex: None,
+        expiry: None,
+        nonce_hex: None,
+        min_payout: None,
+        deadline: None,
+        idempotency_key: None,
+        max_execution_fee: None,
+        execution_fee: None,
+        quote_id: None,
+        quote_expiry: None,
+        quote_signature: None,
+        user_address: None,
+    };
+
+    // Enqueue both spends
+    let id1 = db
+        .enqueue_spend(&req1)
+        .await
+        .unwrap()
+        .expect("id1 should be inserted");
+    let id2 = db
+        .enqueue_spend(&req2)
+        .await
+        .unwrap()
+        .expect("id2 should be inserted");
+
+    // Verify both are returned by get_unreconciled_spends
+    let pending = db.get_unreconciled_spends().await.unwrap();
+    assert_eq!(pending.len(), 2);
+
+    // Simulate scenario:
+    // spend 1 is detected as ALREADY SPENT on-chain -> reconcile as confirmed
+    db.reconcile_spend_as_confirmed(id1, &req1.nullifier, Some("0xactual_tx_hash"))
+        .await
+        .unwrap();
+
+    // Verify nullifier 1 is now marked in database nullifiers table
+    assert!(db.is_nullifier_spent(&req1.nullifier).await.unwrap());
+
+    // Simulate scenario:
+    // spend 2 was broadcasting when node died -> lease reset back to queued
+    db.reset_unspent_lease(id2).await.unwrap();
+
+    // Now unreconciled spends should only contain spend 2 (spend 1 is confirmed)
+    let remaining = db.get_unreconciled_spends().await.unwrap();
+    assert_eq!(remaining.len(), 1);
+    assert_eq!(remaining[0].id, id2);
+    assert_eq!(remaining[0].nullifier, req2.nullifier);
+    assert_eq!(remaining[0].status, "queued");
+
+    println!("✅ Post-restart reconciliation test passed!");
+}

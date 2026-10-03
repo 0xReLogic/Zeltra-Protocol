@@ -14,3 +14,4 @@ pub mod http;
 pub mod key_rotation;
 pub mod kms;
 pub mod state;
+pub mod validation;

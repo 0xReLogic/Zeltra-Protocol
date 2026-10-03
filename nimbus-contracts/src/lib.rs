@@ -353,6 +353,11 @@ impl Nimbus {
         Ok(self.clean_association_roots.get(root))
     }
 
+    /// Returns whether a nullifier has already been spent on-chain (DEC-019).
+    pub fn is_nullifier_spent(&self, nullifier: FixedBytes<32>) -> Result<bool, Vec<u8>> {
+        Ok(self.nullifiers.get(nullifier))
+    }
+
     pub fn register_issuer_key(&mut self, pk_iss_bytes: Bytes) -> Result<(), Vec<u8>> {
         self.check_owner()?;
         if pk_iss_bytes.len() != 256 {
@@ -2058,6 +2063,11 @@ mod tests {
         // Verify nullifiers are marked spent
         assert!(contract.nullifiers.get(nullifier1));
         assert!(contract.nullifiers.get(nullifier2));
+        assert!(contract.is_nullifier_spent(nullifier1).unwrap());
+        assert!(contract.is_nullifier_spent(nullifier2).unwrap());
+        assert!(!contract
+            .is_nullifier_spent(FixedBytes::repeat_byte(0x99))
+            .unwrap());
 
         // Verify principal reduction:
         // deposit net principal: 50,000,000 (0% deposit fee)

@@ -76,7 +76,8 @@ Ref: [`docs/todos/private-note-balance.md`](file:///workspaces/Zeltra-Protocol/d
   - Ref: [`research/decisions/DEC-018-on-chain-deposit-indexer-and-cryptographic-reveal-verification.md`](file:///workspaces/Zeltra-Protocol/research/decisions/DEC-018-on-chain-deposit-indexer-and-cryptographic-reveal-verification.md)
   - Gantikan pencatatan deposit berbasis API murni dengan event listener on-chain dari smart contract.
   - Verifikasi `k * pk_iss == stored com_k` sebelum resolve session.
-- [ ] **Input & Safety Validation**:
+- [x] **Input & Safety Validation**:
+  - Ref: [`research/decisions/DEC-019-relayer-input-sanitization-safety-limits-and-post-restart-reconciliation.md`](file:///workspaces/Zeltra-Protocol/research/decisions/DEC-019-relayer-input-sanitization-safety-limits-and-post-restart-reconciliation.md)
   - Validasi recipient address EVM valid, batas min/max amount, dan chain selector allowlist.
   - Rekonsiliasi status database dengan nullifier contract setelah node restart.
 - [ ] **Batch & Fee Metrics**:

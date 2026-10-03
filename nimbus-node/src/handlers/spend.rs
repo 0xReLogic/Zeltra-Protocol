@@ -60,6 +60,28 @@ pub async fn handle_spend(
         }
     }
 
+    // --- Input Validation & Safety Bounds (DEC-019) ---
+    let safety_limits = crate::validation::SafetyLimits::default();
+    if let Err(val_err) = crate::validation::validate_spend_request(
+        &payload.recipient,
+        payload.amount,
+        payload.cross_chain.as_ref(),
+        &safety_limits,
+    ) {
+        let response = SpendResponse {
+            status: "REJECTED".to_string(),
+            message: format!("Input validation failed: {}", val_err),
+            queue_position: 0,
+            estimated_gas_usdc: None,
+        };
+        if let Some(ref idem_key) = payload.idempotency_key {
+            if let Ok(json) = serde_json::to_string(&response) {
+                let _ = state.db.store_idempotency(idem_key, "spend", &json).await;
+            }
+        }
+        return Json(response);
+    }
+
     // --- Double-spend check ---
     match state.db.is_nullifier_spent(&payload.nullifier).await {
         Ok(true) => {

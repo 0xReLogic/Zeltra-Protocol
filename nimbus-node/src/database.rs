@@ -25,6 +25,14 @@ pub struct QueuedSpend {
     pub retry_count: u32,
 }
 
+#[derive(Debug, Clone)]
+pub struct UnreconciledSpend {
+    pub id: i64,
+    pub nullifier: String,
+    pub tx_hash: Option<String>,
+    pub status: String,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RelayerTxRecord {
     pub tx_hash: String,
@@ -688,6 +696,89 @@ impl Database {
                 |row| row.get::<_, i64>(0),
             )?;
             Ok(count as usize)
+        })
+        .await?
+    }
+
+    /// Retrieve active/in-flight spends for startup reconciliation (DEC-019).
+    pub async fn get_unreconciled_spends(&self) -> Result<Vec<UnreconciledSpend>> {
+        let path = self.path.clone();
+        let db_key = database_key()?;
+        task::spawn_blocking(move || -> Result<Vec<UnreconciledSpend>> {
+            let conn = open_connection(&path, &db_key)?;
+            let mut stmt = conn.prepare(
+                "SELECT id, nullifier, tx_hash, status
+                 FROM spend_queue
+                 WHERE status IN ('queued', 'retryable', 'broadcasting', 'submitted')",
+            )?;
+            let rows = stmt.query_map([], |row| {
+                Ok(UnreconciledSpend {
+                    id: row.get::<_, i64>(0)?,
+                    nullifier: row.get::<_, String>(1)?,
+                    tx_hash: row.get::<_, Option<String>>(2)?,
+                    status: row.get::<_, String>(3)?,
+                })
+            })?;
+            let mut results = Vec::new();
+            for r in rows {
+                results.push(r?);
+            }
+            Ok(results)
+        })
+        .await?
+    }
+
+    /// Mark spend as confirmed during reconciliation because nullifier was already spent on-chain (DEC-019).
+    pub async fn reconcile_spend_as_confirmed(
+        &self,
+        id: i64,
+        nullifier: &str,
+        tx_hash: Option<&str>,
+    ) -> Result<()> {
+        let path = self.path.clone();
+        let db_key = database_key()?;
+        let nullifier = nullifier.to_string();
+        let tx_hash = tx_hash.unwrap_or("0x_reconciled_onchain_spend").to_string();
+
+        task::spawn_blocking(move || -> Result<()> {
+            let mut conn = open_connection(&path, &db_key)?;
+            let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+            let now = unix_timestamp()?;
+
+            tx.execute(
+                "INSERT OR IGNORE INTO nullifiers (nullifier, spent_at, tx_hash)
+                 VALUES (?, ?, ?)",
+                params![nullifier, now, tx_hash],
+            )?;
+
+            tx.execute(
+                "UPDATE spend_queue
+                 SET status = 'confirmed', processed = 1, tx_hash = COALESCE(tx_hash, ?),
+                     lease_until = NULL, updated_at = ?
+                 WHERE id = ?",
+                params![tx_hash, now, id],
+            )?;
+
+            tx.commit()?;
+            Ok(())
+        })
+        .await?
+    }
+
+    /// Release expired lease on restart if spend is not yet spent on-chain (DEC-019).
+    pub async fn reset_unspent_lease(&self, id: i64) -> Result<()> {
+        let path = self.path.clone();
+        let db_key = database_key()?;
+        task::spawn_blocking(move || -> Result<()> {
+            let conn = open_connection(&path, &db_key)?;
+            let now = unix_timestamp()?;
+            conn.execute(
+                "UPDATE spend_queue
+                 SET status = 'queued', lease_until = NULL, updated_at = ?
+                 WHERE id = ? AND status IN ('broadcasting', 'submitted')",
+                params![now, id],
+            )?;
+            Ok(())
         })
         .await?
     }
