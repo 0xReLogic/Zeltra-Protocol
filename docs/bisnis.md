@@ -257,10 +257,10 @@ dapat diukur sebelum operator eksternal dibuka.
 Contoh tahunan:
 
 ```text
-Deposit volume     100.000.000 USDC x 0,20% = 200.000 USDC
-Spend volume       100.000.000 USDC x 0,25% = 250.000 USDC
-                                             ------------
-Gross protocol revenue                       450.000 USDC
+Deposit volume     100.000.000 USDC x 0,00% =          0 USDC (Zero-Friction Inflow)
+Spend volume       100.000.000 USDC x 0,45% =    450.000 USDC (Default Spend Fee)
+                                              ------------
+Gross protocol revenue                           450.000 USDC
 ```
 
 Bagian execution quote yang mengganti gas bukan revenue bersih. Markup gas dan
@@ -288,8 +288,7 @@ Metrik utama:
 4. Buka relayer dan guardian eksternal setelah reward serta slashing teruji.
 5. Aktifkan fast path dan cross-chain hanya setelah quote, reimbursement, dan
    accounting aman.
-6. Tunda token, buyback, dan distribusi staking sampai protokol memiliki penggunaan
-   serta pendapatan nyata.
+6. **Tata Kelola & Token Roadmap (DAO Setelah Token):** Seluruh pembentukan DAO dan peluncuran token ditunda sampai protokol memiliki volume penggunaan, pendapatan riil, dan model keamanan yang terbukti. Pada Phase 1 & 2, protokol beroperasi dengan **konstanta matematis immutable** tanpa celah governance setter, guna menutup total risiko eksploitasi tata kelola (*governance takeover*, flashloan attack seperti The DAO 2016 atau Tornado Cash 2023). DAO baru dibentuk pada Phase 3 ketika token governance telah resmi diluncurkan dan didistribusikan secara terdesentralisasi.
 
 ## 11. Realitas Status Implementasi Saat Ini
 
@@ -300,7 +299,7 @@ Dokumen ini menjelaskan **model bisnis target dan roadmap arsitektur**. Status t
 * **Jaringan Threshold:** 1 Leader + 4 Guardian (3-of-5 threshold) dengan rilis atomik masking key `k` setelah deposit confirmed.
 * **Settlement Engine:** SQLite/SQLCipher persistent queue dengan auto-retry, status machine durable, dan leasing worker.
 * **Batch Spend:** Entrypoint Stylus `batch_spend()` (2-8 item) terdeploy dengan EIP-712 execution quote validation. Gas benchmark riil tersimpan di `docs/gas_latency_benchmark.md`.
-* **Fee Structure Awal:** Helper fee terpusat di `nimbus-core` dan SDK untuk mencegah invoice short-pay.
+* **Fee Structure & Immutability:** Deposit 0% (zero-friction), spend 45 bps (default) / 40 bps (≥ 30 hari hold), relayer gas + 15% markup. Tanpa DAO attack surface.
 
 ### Yang Sedang Berjalan (Phase 2 - Jalur B: ZK-UTXO Note Balance):
 * **Gate C0 Security Repair (`nimbus-core`):** Pengerjaan sirkuit Groth16 Arkworks untuk private note dengan change output:
@@ -308,4 +307,4 @@ Dokumen ini menjelaskan **model bisnis target dan roadmap arsitektur**. Status t
   - Enforce range constraint 64-bit untuk seluruh nilai nominal (mencegah modular wrap-around field scalar).
   - Enforce boolean constraint pada `has_change` (mencegah pemalsuan output commitment).
 * **Gate D (Stylus Note Ledger):** Integrasi on-chain Merkle tree append-only dan multi-liability accounting (`user_note_liability`, `refundable_deposit_liability`, `accrued_execution_fee_liability`) di smart contract Stylus setelah Gate C0 lulus.
-* **Tokenomics:** Seluruh desain token $NIMB dibekukan. Protokol beroperasi 100% menggunakan collateral USDC murni (Full Reserve).
+* **Tokenomics & DAO:** Seluruh desain token $NIMB dan mekanisme voting DAO dibekukan hingga Mainnet Phase 3. Protokol saat ini beroperasi 100% menggunakan collateral USDC murni (Full Reserve) dengan aturan matematis yang terjamin.
