@@ -28,13 +28,12 @@ pub async fn handle_private_spend_quote(
         None => (None, None),
     };
 
-    // Total gas cost passed into execution quote calculation = relayer gas + ccip network fee
-    let total_gas_cost = relayer_gas_cost.saturating_add(ccip_network_fee.unwrap_or(0));
-
     if query.merchant_amount == 0 {
         return Json(error_response(
             query.merchant_amount,
-            total_gas_cost,
+            relayer_gas_cost,
+            ccip_network_fee,
+            destination_chain_selector,
             relayer_markup_bps,
             "merchant_amount must be greater than zero",
         ));
@@ -47,22 +46,38 @@ pub async fn handle_private_spend_quote(
             Err(msg) => {
                 return Json(error_response(
                     query.merchant_amount,
-                    total_gas_cost,
+                    relayer_gas_cost,
+                    ccip_network_fee,
+                    destination_chain_selector,
                     relayer_markup_bps,
                     &msg,
                 ));
             }
         };
 
-    let Some(quote) = nimbus_core::quote_private_spend_with_fee(
-        query.merchant_amount,
-        total_gas_cost,
-        relayer_markup_bps,
-        fee_bps,
-    ) else {
+    // Calculate spend quote: markup is applied ONLY to relayer gas, CCIP fee is pass-through
+    let quote_opt = match ccip_network_fee {
+        Some(ccip_fee) => nimbus_core::quote_cross_chain_private_spend_with_fee(
+            query.merchant_amount,
+            relayer_gas_cost,
+            ccip_fee,
+            relayer_markup_bps,
+            fee_bps,
+        ),
+        None => nimbus_core::quote_private_spend_with_fee(
+            query.merchant_amount,
+            relayer_gas_cost,
+            relayer_markup_bps,
+            fee_bps,
+        ),
+    };
+
+    let Some(quote) = quote_opt else {
         return Json(error_response(
             query.merchant_amount,
-            total_gas_cost,
+            relayer_gas_cost,
+            ccip_network_fee,
+            destination_chain_selector,
             relayer_markup_bps,
             "quote amount overflow",
         ));
@@ -274,12 +289,24 @@ fn generate_quote_id() -> String {
 
 fn error_response(
     merchant_amount: u64,
-    gas_cost: u64,
+    relayer_gas_cost: u64,
+    ccip_network_fee: Option<u64>,
+    destination_chain_selector: Option<u64>,
     relayer_markup_bps: u64,
     message: &str,
 ) -> PrivateSpendQuoteResponse {
-    let (relayer_markup, execution_fee) =
-        nimbus_core::quote_execution_fee(gas_cost, relayer_markup_bps).unwrap_or((0, 0));
+    let (relayer_markup, execution_fee) = match ccip_network_fee {
+        Some(ccip_fee) => nimbus_core::quote_execution_fee_with_pass_through(
+            relayer_gas_cost,
+            ccip_fee,
+            relayer_markup_bps,
+        )
+        .unwrap_or((0, 0)),
+        None => {
+            nimbus_core::quote_execution_fee(relayer_gas_cost, relayer_markup_bps).unwrap_or((0, 0))
+        }
+    };
+    let gas_cost = relayer_gas_cost.saturating_add(ccip_network_fee.unwrap_or(0));
     PrivateSpendQuoteResponse {
         status: "ERROR".to_string(),
         merchant_amount,
@@ -291,9 +318,9 @@ fn error_response(
         user_total_debit: 0,
         fee_bps: nimbus_core::PRIVATE_SPEND_FEE_BPS,
         relayer_markup_bps,
-        relayer_gas_cost: None,
-        ccip_network_fee: None,
-        destination_chain_selector: None,
+        relayer_gas_cost: Some(relayer_gas_cost),
+        ccip_network_fee,
+        destination_chain_selector,
         fee_tier: None,
         discount_bps: None,
         quote_id: None,
@@ -382,12 +409,12 @@ mod tests {
             Some(base_sepolia_selector)
         );
         assert_eq!(response.0.gas_cost, 820_000);
-        // 15% markup on 820_000 = 123_000
-        assert_eq!(response.0.relayer_markup, 123_000);
-        assert_eq!(response.0.execution_fee, 820_000 + 123_000);
+        // Relayer markup applies ONLY to relayer gas (15% of 20_000 = 3_000), NOT to CCIP fee!
+        assert_eq!(response.0.relayer_markup, 3_000);
+        assert_eq!(response.0.execution_fee, 20_000 + 3_000 + 800_000);
         assert_eq!(
             response.0.user_total_debit,
-            100_000_000 + 450_000 + 820_000 + 123_000
+            100_000_000 + 450_000 + 20_000 + 3_000 + 800_000
         );
     }
 

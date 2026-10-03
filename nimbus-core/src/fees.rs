@@ -75,6 +75,20 @@ pub fn quote_execution_fee(gas_cost: u64, relayer_markup_bps: u64) -> Option<(u6
     Some((relayer_markup, execution_fee))
 }
 
+/// Quotes execution fee with a pass-through fee (such as Chainlink CCIP network fee).
+/// Relayer markup is applied ONLY to the relayer gas cost, never to the pass-through fee.
+pub fn quote_execution_fee_with_pass_through(
+    relayer_gas: u64,
+    pass_through: u64,
+    relayer_markup_bps: u64,
+) -> Option<(u64, u64)> {
+    let relayer_markup = fee_round_up(relayer_gas, relayer_markup_bps)?;
+    let execution_fee = relayer_gas
+        .checked_add(relayer_markup)?
+        .checked_add(pass_through)?;
+    Some((relayer_markup, execution_fee))
+}
+
 pub fn quote_private_spend(
     merchant_amount: u64,
     gas_cost: u64,
@@ -107,6 +121,38 @@ pub fn quote_private_spend_with_fee(
     let contract_amount = merchant_amount;
     let protocol_fee = fee_round_up(merchant_amount, fee_bps)?;
     let (relayer_markup, execution_fee) = quote_execution_fee(gas_cost, relayer_markup_bps)?;
+    let user_total_debit = contract_amount
+        .checked_add(protocol_fee)?
+        .checked_add(execution_fee)?;
+
+    Some(SpendQuote {
+        merchant_amount,
+        contract_amount,
+        protocol_fee,
+        gas_cost,
+        relayer_markup,
+        execution_fee,
+        user_total_debit,
+    })
+}
+
+/// Quotes cross-chain private spend where CCIP network fee is a pass-through fee.
+/// Relayer markup is applied ONLY to `relayer_gas_cost`, NOT to `ccip_network_fee`.
+pub fn quote_cross_chain_private_spend_with_fee(
+    merchant_amount: u64,
+    relayer_gas_cost: u64,
+    ccip_network_fee: u64,
+    relayer_markup_bps: u64,
+    fee_bps: u64,
+) -> Option<SpendQuote> {
+    let contract_amount = merchant_amount;
+    let protocol_fee = fee_round_up(merchant_amount, fee_bps)?;
+    let (relayer_markup, execution_fee) = quote_execution_fee_with_pass_through(
+        relayer_gas_cost,
+        ccip_network_fee,
+        relayer_markup_bps,
+    )?;
+    let gas_cost = relayer_gas_cost.checked_add(ccip_network_fee)?;
     let user_total_debit = contract_amount
         .checked_add(protocol_fee)?
         .checked_add(execution_fee)?;
@@ -188,5 +234,30 @@ mod tests {
 
         let q40 = quote_private_spend_with_fee(100_000_000, 0, 0, 40).unwrap();
         assert_eq!(q40.protocol_fee, 400_000);
+    }
+
+    #[test]
+    fn cross_chain_quote_applies_markup_only_to_relayer_gas() {
+        let relayer_gas = 20_000;
+        let ccip_fee = 800_000;
+        let markup_bps = 1_500; // 15%
+        let fee_bps = 45; // 0.45%
+        let quote = quote_cross_chain_private_spend_with_fee(
+            100_000_000,
+            relayer_gas,
+            ccip_fee,
+            markup_bps,
+            fee_bps,
+        )
+        .unwrap();
+
+        // 15% of 20_000 = 3_000. CCIP fee is NOT marked up!
+        assert_eq!(quote.relayer_markup, 3_000);
+        assert_eq!(quote.gas_cost, 820_000);
+        assert_eq!(quote.execution_fee, 20_000 + 3_000 + 800_000);
+        assert_eq!(
+            quote.user_total_debit,
+            100_000_000 + 450_000 + 20_000 + 3_000 + 800_000
+        );
     }
 }
