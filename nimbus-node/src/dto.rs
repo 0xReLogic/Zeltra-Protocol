@@ -135,6 +135,9 @@ pub struct PrivateSpendQuoteRequest {
     pub relayer_markup_bps: Option<u64>,
     #[serde(default)]
     pub association_root: Option<String>,
+    /// Optional CCIP destination chain selector for cross-chain fee quote transparency
+    #[serde(default)]
+    pub destination_chain_selector: Option<u64>,
 }
 
 #[derive(Serialize)]
@@ -149,6 +152,15 @@ pub struct PrivateSpendQuoteResponse {
     pub user_total_debit: u64,
     pub fee_bps: u64,
     pub relayer_markup_bps: u64,
+    /// Transparent fee breakdown: pure local Arbitrum relayer execution gas cost (USDC base units)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub relayer_gas_cost: Option<u64>,
+    /// Transparent fee breakdown: Chainlink CCIP cross-chain network fee (USDC base units)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ccip_network_fee: Option<u64>,
+    /// Destination chain selector if quoting a cross-chain spend
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub destination_chain_selector: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub fee_tier: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]

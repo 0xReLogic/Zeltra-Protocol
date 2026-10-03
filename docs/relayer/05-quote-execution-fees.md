@@ -27,9 +27,19 @@ Total Yang Didebit Dari Saldo Pengguna =
 ```
 
 ### Rincian Komponen Kuotasi:
-1. **Gas Reimbursement:** Estimasi biaya gas on-chain aktual dari RPC node Arbitrum yang dikonversi ke unit stablecoin USDC.
-2. **Markup Relayer:** Tambahan komisi operasional flat **15%** (`DEFAULT_RELAYER_MARKUP_BPS = 1500`) di atas biaya gas.
-3. **Diskon Waktu Simpan (*Holding Time*):** Node memeriksa timestamp `association_root` di cache memori. Jika dana sudah di-hold $\ge 7$ hari $\to$ fee turun ke 0.20%; jika $\ge 30$ hari $\to$ fee turun ke 0.10%.
+1. **Relayer Execution Gas (`relayer_gas_cost`):** Estimasi biaya gas eksekusi relayer on-chain aktual dari RPC node Arbitrum yang dikonversi ke unit stablecoin USDC (misal ~0.02 USDC).
+2. **CCIP Network Fee (`ccip_network_fee`):** Biaya lintas rantai Chainlink CCIP (hanya jika parameter `destination_chain_selector` disertakan, default ~0.80 USDC / 800.000 base units). Nilai ini transparan dipisahkan dari relayer execution gas di response JSON.
+3. **Markup Relayer (`relayer_markup`):** Tambahan komisi operasional flat **15%** (`DEFAULT_RELAYER_MARKUP_BPS = 1500`) di atas total gas reimbursement (`relayer_gas_cost + ccip_network_fee`).
+4. **Diskon Waktu Simpan (*Holding Time*):** Node memeriksa timestamp `association_root` di cache memori. Jika dana sudah di-hold $\ge 7$ hari $\to$ fee turun ke 0.20%; jika $\ge 30$ hari $\to$ fee turun ke 0.10%.
+
+### Transparansi UX (Same-Chain vs Cross-Chain):
+- **Same-Chain Spend:** `ccip_network_fee = null`, `destination_chain_selector = null`. Pengguna hanya membayar gas eksekusi lokal + markup.
+- **Cross-Chain CCIP Spend:** `ccip_network_fee = 800000`, `relayer_gas_cost = 20000`, `destination_chain_selector = <selector>`. UI client dapat menampilkan rincian terpisah:
+  * Biaya Jaringan CCIP: `$0.80` (langsung dibayarkan ke CCIP Router Chainlink)
+  * Biaya Gas Relayer: `$0.02`
+  * Markup Layanan Relayer (15%): `$0.123`
+  * Total Biaya Eksekusi: `$0.943`
+  * Nilai invariant matematika dan EIP-712 hashing tetap terjaga 100% konsisten.
 
 ---
 
