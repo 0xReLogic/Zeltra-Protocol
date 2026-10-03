@@ -13,6 +13,15 @@ use crate::interfaces::IErc20;
 use crate::storage::Nimbus;
 
 impl Nimbus {
+    /// Returns the current deposit fee in basis points (defaults to 20 bps = 0.20% if uninitialized)
+    pub fn get_deposit_fee_bps(&self) -> U256 {
+        if self.deposit_fee_initialized.get() {
+            self.deposit_fee_bps.get()
+        } else {
+            U256::from(20)
+        }
+    }
+
     /// Claim refund for a deposit if the timelock (24 hours) has expired.
     pub fn _claim_refund(&mut self, sid: FixedBytes<32>) -> Result<(), Vec<u8>> {
         self.check_not_paused()?;
@@ -60,6 +69,13 @@ impl Nimbus {
                 }
             }
         }
+
+        // Emit refund event (principal is refunded without protocol fee deduction)
+        crate::events::emit_event(crate::events::DepositRefunded {
+            session_id: sid,
+            client,
+            amount,
+        });
 
         // Enforce invariant: contract_assets >= outstanding_liabilities
         self.check_liability_invariant()?;
@@ -110,12 +126,17 @@ impl Nimbus {
             return Err(b"AMOUNT_TOO_SMALL".to_vec());
         }
 
-        // Calculate deposit/minting fee of 0.20% (round up)
-        let fee = (amount
-            .checked_mul(U256::from(20))
-            .ok_or_else(|| b"FEE_MULTIPLY_OVERFLOW".to_vec())?
-            + U256::from(9999))
-            / U256::from(10000);
+        // Calculate deposit/minting fee dynamically (round up, bypass if fee_bps == 0)
+        let fee_bps = self.get_deposit_fee_bps();
+        let fee = if fee_bps == U256::ZERO {
+            U256::ZERO
+        } else {
+            (amount
+                .checked_mul(fee_bps)
+                .ok_or_else(|| b"FEE_MULTIPLY_OVERFLOW".to_vec())?
+                + U256::from(9999))
+                / U256::from(10000)
+        };
         let net_amount = amount
             .checked_sub(fee)
             .ok_or_else(|| b"NET_AMOUNT_UNDERFLOW".to_vec())?;
@@ -163,7 +184,7 @@ impl Nimbus {
                 return Err(b"TRANSFER_FROM_FAILED".to_vec());
             }
 
-            // Send 0.1% fee to fee_recipient
+            // Send fee to fee_recipient (if fee > 0)
             if fee > U256::ZERO {
                 let recipient = self.fee_recipient.get();
                 let fee_success =
@@ -173,6 +194,15 @@ impl Nimbus {
                 }
             }
         }
+
+        // Emit DepositFee event
+        crate::events::emit_event(crate::events::DepositFee {
+            session_id: sid,
+            client,
+            gross_amount: amount,
+            fee,
+            net_amount,
+        });
 
         // Enforce invariant: contract_assets >= outstanding_liabilities
         self.check_liability_invariant()?;

@@ -19,6 +19,7 @@ getrandom::register_custom_getrandom!(reject_runtime_randomness);
 
 mod constants;
 mod deposit;
+mod events;
 mod helpers;
 mod interfaces;
 mod merkle;
@@ -122,6 +123,68 @@ impl Nimbus {
         Ok(())
     }
 
+    // --- Dynamic Deposit Fee Configuration (docs/todos/fee-policy-zero-deposit.md) ---
+
+    /// Returns the current deposit fee in basis points (view)
+    pub fn deposit_fee_bps(&self) -> Result<U256, Vec<u8>> {
+        Ok(self.get_deposit_fee_bps())
+    }
+
+    /// Propose a new deposit fee in basis points (max 50 bps = 0.50%) with 24h timelock
+    pub fn propose_deposit_fee_bps(&mut self, new_fee_bps: U256) -> Result<(), Vec<u8>> {
+        self.check_owner()?;
+        if new_fee_bps > U256::from(50) {
+            return Err(b"DEPOSIT_FEE_EXCEEDS_MAX".to_vec());
+        }
+        self.proposed_deposit_fee_bps.set(new_fee_bps);
+        self.deposit_fee_eta
+            .set(U256::from(self.block_timestamp() + 86400));
+        Ok(())
+    }
+
+    /// Execute the proposed deposit fee change after 24h timelock
+    pub fn execute_deposit_fee_bps(&mut self) -> Result<(), Vec<u8>> {
+        self.check_owner()?;
+        let eta = self.deposit_fee_eta.get();
+        if eta == U256::ZERO {
+            return Err(b"NO_PROPOSAL_ACTIVE".to_vec());
+        }
+        let current_time = U256::from(self.block_timestamp());
+        if current_time < eta {
+            return Err(b"TIMELOCK_NOT_EXPIRED".to_vec());
+        }
+        let old_fee_bps = self.get_deposit_fee_bps();
+        let new_fee_bps = self.proposed_deposit_fee_bps.get();
+        self.deposit_fee_bps.set(new_fee_bps);
+        self.deposit_fee_initialized.set(true);
+        self.deposit_fee_eta.set(U256::ZERO);
+
+        crate::events::emit_event(crate::events::DepositFeeConfigUpdated {
+            old_fee_bps,
+            new_fee_bps,
+        });
+
+        Ok(())
+    }
+
+    /// Direct setter for deposit fee in basis points (max 50 bps = 0.50%, admin only)
+    pub fn set_deposit_fee_bps(&mut self, new_fee_bps: U256) -> Result<(), Vec<u8>> {
+        self.check_owner()?;
+        if new_fee_bps > U256::from(50) {
+            return Err(b"DEPOSIT_FEE_EXCEEDS_MAX".to_vec());
+        }
+        let old_fee_bps = self.get_deposit_fee_bps();
+        self.deposit_fee_bps.set(new_fee_bps);
+        self.deposit_fee_initialized.set(true);
+
+        crate::events::emit_event(crate::events::DepositFeeConfigUpdated {
+            old_fee_bps,
+            new_fee_bps,
+        });
+
+        Ok(())
+    }
+
     /// Set execution fee recipient address (admin only)
     pub fn set_execution_fee_recipient(&mut self, recipient: Address) -> Result<(), Vec<u8>> {
         self.check_owner()?;
@@ -175,6 +238,13 @@ impl Nimbus {
         if accrued >= amount {
             self.accrued_execution_fee_liability.set(accrued - amount);
         }
+
+        // Emit FeeClaim event
+        crate::events::emit_event(crate::events::FeeClaim {
+            recipient,
+            amount,
+            fee_type: keccak256(b"EXECUTION_FEE"),
+        });
 
         // Enforce invariant: contract_assets >= outstanding_liabilities
         // Tolak claim on-chain yang menyentuh backing deposit user/refund (DEC-016 & Gate B)
@@ -2940,5 +3010,114 @@ mod tests {
 
         assert_eq!(err, b"INVALID_NOTE_COMMITMENT_SCALAR".to_vec());
         assert_eq!(contract.note_tree_next_index().unwrap(), U256::ZERO);
+    }
+
+    #[test]
+    fn test_dynamic_deposit_fee_zero_bps_and_fair_refund() {
+        reset_test_state();
+        let mut contract = Nimbus::default();
+        let owner = Address::repeat_byte(0x01);
+        let client = Address::repeat_byte(0x05);
+
+        contract
+            .init(
+                owner,
+                Address::repeat_byte(0x02),
+                Address::repeat_byte(0x03),
+            )
+            .unwrap();
+
+        // 1. Owner sets deposit fee to 0 bps (Zero-Fee Inflow Policy)
+        set_msg_sender(owner);
+        contract.set_deposit_fee_bps(U256::ZERO).unwrap();
+        assert_eq!(contract.deposit_fee_bps().unwrap(), U256::ZERO);
+
+        // 2. User deposits 20 USDC
+        let sid = FixedBytes::repeat_byte(0x10);
+        let deposit_amount = U256::from(20_000_000); // 20 USDC
+        let dummy_com_k = Bytes::from(alloc::vec![0u8; 256]);
+
+        set_msg_sender(client);
+        set_block_timestamp(1000);
+        contract.deposit(sid, dummy_com_k, deposit_amount).unwrap();
+
+        // Gross == Net when fee is 0 bps
+        assert_eq!(
+            contract.total_deposited_principal().unwrap(),
+            deposit_amount
+        );
+        assert_eq!(
+            contract.refundable_deposit_liability().unwrap(),
+            deposit_amount
+        );
+
+        // 3. User claims refund after 24 hours: must receive 100% of principal with 0 fee deducted
+        set_block_timestamp(1000 + 86401);
+        contract.claim_refund(sid).unwrap();
+
+        assert_eq!(contract.total_deposited_principal().unwrap(), U256::ZERO);
+        assert_eq!(contract.refundable_deposit_liability().unwrap(), U256::ZERO);
+    }
+
+    #[test]
+    fn test_deposit_fee_governance_timelock_and_max_cap() {
+        reset_test_state();
+        let mut contract = Nimbus::default();
+        let owner = Address::repeat_byte(0x01);
+        let non_owner = Address::repeat_byte(0x99);
+
+        contract
+            .init(
+                owner,
+                Address::repeat_byte(0x02),
+                Address::repeat_byte(0x03),
+            )
+            .unwrap();
+
+        // 1. Non-owner cannot change fee
+        set_msg_sender(non_owner);
+        assert_eq!(
+            contract.set_deposit_fee_bps(U256::from(10)),
+            Err(b"NOT_OWNER".to_vec())
+        );
+        assert_eq!(
+            contract.propose_deposit_fee_bps(U256::from(10)),
+            Err(b"NOT_OWNER".to_vec())
+        );
+
+        // 2. Fee > 50 bps hard-cap is strictly rejected
+        set_msg_sender(owner);
+        assert_eq!(
+            contract.set_deposit_fee_bps(U256::from(51)),
+            Err(b"DEPOSIT_FEE_EXCEEDS_MAX".to_vec())
+        );
+        assert_eq!(
+            contract.propose_deposit_fee_bps(U256::from(51)),
+            Err(b"DEPOSIT_FEE_EXCEEDS_MAX".to_vec())
+        );
+
+        // 3. Two-step governance with 24h timelock
+        set_block_timestamp(1000);
+        contract.propose_deposit_fee_bps(U256::from(15)).unwrap();
+
+        // Calling before timelock expires must fail
+        set_block_timestamp(1000 + 3600);
+        assert_eq!(
+            contract.execute_deposit_fee_bps(),
+            Err(b"TIMELOCK_NOT_EXPIRED".to_vec())
+        );
+
+        // Calling after 24h timelock succeeds
+        set_block_timestamp(1000 + 86401);
+        contract.execute_deposit_fee_bps().unwrap();
+        assert_eq!(contract.deposit_fee_bps().unwrap(), U256::from(15));
+    }
+
+    #[test]
+    fn test_default_uninitialized_deposit_fee() {
+        reset_test_state();
+        let contract = Nimbus::default();
+        // Defaults to 20 bps (0.20%) when uninitialized
+        assert_eq!(contract.deposit_fee_bps().unwrap(), U256::from(20));
     }
 }

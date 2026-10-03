@@ -92,6 +92,14 @@ sol_storage! {
         mapping(bytes32 => bytes32) session_note_commitment;
         // Namespaced private-note nullifier set (distinct from legacy BLS nullifiers)
         mapping(bytes32 => bool) note_nullifiers;
+
+        // --- Dynamic Deposit Fee Configuration (docs/todos/fee-policy-zero-deposit.md) ---
+        // Configurable deposit fee in basis points (e.g. 0 for 0%, 20 for 0.20%)
+        uint256 deposit_fee_bps;
+        bool deposit_fee_initialized;
+        // Two-step governance for deposit fee change
+        uint256 proposed_deposit_fee_bps;
+        uint256 deposit_fee_eta;
     }
 }
 

@@ -187,6 +187,13 @@ impl Nimbus {
         self.root_history.insert(slot, new_root_bytes);
         self.root_history_index.set(hist_idx + U256::from(1));
 
+        // Emit ChangeCommitment event
+        crate::events::emit_event(crate::events::ChangeCommitment {
+            leaf_index: next_idx,
+            commitment: leaf,
+            new_root: new_root_bytes,
+        });
+
         Ok((next_idx, new_root_bytes))
     }
 

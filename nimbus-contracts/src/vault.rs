@@ -74,6 +74,13 @@ impl Nimbus {
             }
         }
 
+        // Emit FeeClaim event
+        crate::events::emit_event(crate::events::FeeClaim {
+            recipient: self.fee_recipient.get(),
+            amount: yield_amount,
+            fee_type: alloy_primitives::keccak256(b"YIELD"),
+        });
+
         Ok(yield_amount)
     }
 }

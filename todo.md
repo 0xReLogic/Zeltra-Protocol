@@ -56,7 +56,7 @@ Ref: [`docs/todos/private-note-balance.md`](file:///workspaces/Zeltra-Protocol/d
   - Wajibkan `ccip_router != Address::ZERO` sebelum menerima message.
   - Tolak semua caller jika router belum dikonfigurasi.
   - Validasi `source_chain_selector` dan bind sender contract yang sah untuk setiap chain.
-- [ ] **Fee & Events**:
+- [x] **Fee & Events**:
   - Ref: [`docs/todos/fee-policy-zero-deposit.md`](file:///workspaces/Zeltra-Protocol/docs/todos/fee-policy-zero-deposit.md)
   - Evaluasi kebijakan fee deposit vs spend (0% deposit vs dynamic configurable `deposit_fee_bps`).
   - Pastikan refund akibat gagal issuance/settlement tidak dikenai protocol fee.

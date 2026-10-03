@@ -276,6 +276,20 @@ impl Nimbus {
             self.accrued_execution_fee_liability.set(new_accrued_fees);
             self.realized_protocol_fees.set(new_realized_fees);
 
+            // Emit ProtocolFee and ExecutionFee events
+            crate::events::emit_event(crate::events::ProtocolFee {
+                nullifier,
+                recipient,
+                amount: payout,
+                fee_bps,
+                protocol_fee: protocol_share,
+            });
+            crate::events::emit_event(crate::events::ExecutionFee {
+                nullifier,
+                execution_fee,
+                max_execution_fee,
+            });
+
             // Enforce invariant: contract_assets >= outstanding_liabilities
             self.check_liability_invariant()?;
 
@@ -319,6 +333,20 @@ impl Nimbus {
                     return Err(b"SPEND_FEE_TRANSFER_FAILED".to_vec());
                 }
             }
+
+            // Emit ProtocolFee and ExecutionFee events
+            crate::events::emit_event(crate::events::ProtocolFee {
+                nullifier,
+                recipient,
+                amount: payout,
+                fee_bps,
+                protocol_fee: protocol_share,
+            });
+            crate::events::emit_event(crate::events::ExecutionFee {
+                nullifier,
+                execution_fee,
+                max_execution_fee,
+            });
 
             // Enforce invariant: contract_assets >= outstanding_liabilities
             self.check_liability_invariant()?;
