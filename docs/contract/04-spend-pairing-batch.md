@@ -55,14 +55,14 @@ Jika nullifier tidak cocok dengan parameter transaksi, kontrak seketika revert d
 
 Besaran biaya protokol (*protocol fee*) dihitung secara transparan di atas nominal invoice:
 
-* **Tarif Default:** `25 bps` (0.25%).
-* **Holding Time ≥ 7 Hari:** Diskon ke `20 bps` (0.20%).
-* **Whale Holding Time ≥ 30 Hari:** Diskon ke `10 bps` (0.10%).
+* **Tarif Default (< 30 Hari):** `45 bps` (0.45%).
+* **Holding Time ≥ 30 Hari:** Diskon ke `40 bps` (0.40%).
+* **Tier 7 Hari Dieliminasi:** Mencegah kompleksitas percabangan kode dan menutup celah manipulasi batas waktu.
 
 ### Pembuktian Waktu Tanpa Membocorkan Privasi:
 Waktu kepemilikan dibuktikan melalui pendaftaran root himpunan asosiasi bersih:
 $$\Delta t = \text{block.timestamp} - \text{clean\_association\_roots}[root]$$
-Pengguna membuktikan keanggotaan dalam himpunan root tersebut tanpa membuka identitas kapan deposit mereka dilakukan secara persis.
+Pengguna membuktikan keanggotaan dalam himpunan root tersebut tanpa membuka identitas kapan deposit mereka dilakukan secara persis. Kontrak meng-emit event `ProtocolFee` dan `ExecutionFee`.
 
 ---
 
@@ -83,6 +83,7 @@ $$\prod_{i=1}^N \left( e(-\alpha_i, G_2) \cdot e(H(m_i), pk_{iss\_i}) \right) ==
 
 ## 5. Klaim Komisi Relayer (`claim_execution_fees`)
 
-Biaya eksekusi gas yang dibayarkan pengguna (`execution_fee`) diakumulasikan ke slot `accumulated_execution_fees`. 
+Biaya eksekusi gas yang dibayarkan pengguna (`execution_fee`) diakumulasikan ke slot `accrued_execution_fee_liability` dan `accumulated_execution_fees`.
 * Alamat yang berhak (`execution_fee_recipient`) dapat mencairkan komisi tersebut secara berkala dalam satu transaksi hemat gas.
-* Penarikan komisi diverifikasi terhadap invariant solvabilitas agar tidak menyentuh saldo kolateral milik depositor.
+* Penarikan komisi diverifikasi secara ketat terhadap invariant solvabilitas (`assets >= total_liabilities`) agar tidak menyentuh saldo kolateral milik depositor atau unspent note pengguna.
+* Kontrak meng-emit event `FeeClaim(recipient, amount)`.

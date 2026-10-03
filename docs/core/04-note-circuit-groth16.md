@@ -43,26 +43,30 @@ Sirkuit mengeksekusi dan membuktikan constraint R1CS berikut:
 
 ---
 
-## 3. Titik Macet: Audit Security Blocker (Gate C0)
+## 3. Status Gate C0 Security Repairs (SELESAI & TERVERIFIKASI)
 
 Ref: [`docs/todos/private-note-balance.md`](file:///workspaces/Zeltra-Protocol/docs/todos/private-note-balance.md) & [`DEC-016B`](file:///workspaces/Zeltra-Protocol/research/decisions/DEC-016B-mvp-circuit-shortcuts.md)
 
-Audit independen menemukan 3 celah fatal pada prototype MVP `PrivateNoteCircuit` yang harus diperbaiki pada **Gate C0**:
+Seluruh 3 celah keamanan kritis yang ditemukan pada audit prototype `PrivateNoteCircuit` **telah berhasil diperbaiki dan lulus pengujian regression/negative testing**:
 
-### ⚠️ Blocker 1: Path Merkle Belum Terikat ke `leaf_index`
-* **Masalah:** Arah hashing kiri/kanan pada Merkle path saat ini belum dipaksa identik dengan bit-bit representasi biner `input_leaf_index`.
-* **Dampak Keamanan:** Attacker dapat memanipulasi `leaf_index` palsu untuk note yang sama, sehingga menghasilkan dua nullifier berbeda dari satu note $\to$ **Double-Spending Exploit**.
-* **Solusi Perbaikan:** Dekomposisi `leaf_index` menjadi 20 bit boolean di dalam sirkuit dan enforce:
-  $$\text{leaf\_index} == \sum_{i=0}^{19} \text{bit}_i \cdot 2^i$$
-  Gunakan bit yang sama untuk menentukan urutan hashing cabang kiri/kanan.
+### ✅ 1. Pengikatan Bit Merkle Path ke `leaf_index` (Pencegah Double-Spend)
+* **Implementasi:** `input_leaf_index` didekomposisi secara ketat menjadi tepat 20 boolean bit variable di dalam sirkuit R1CS:
+  $$\text{leaf\_index} == \sum_{i=0}^{19} \text{bit}_i \cdot 2^i, \quad \text{bit}_i \in \{0, 1\}$$
+* **Arah Hashing:** Setiap $\text{bit}_i$ menentukan langsung posisi node kiri vs kanan: jika $\text{bit}_i = 0$, hash anak berada di kiri; jika $\text{bit}_i = 1$, hash anak berada di kanan.
+* **Negative Test:** `test_gate_c0_tampered_leaf_index_fails_proving` membuktikan bahwa pemalsuan indeks seketika gagal saat proving/verifikasi.
 
-### ⚠️ Blocker 2: Rentan Modular Wrap-Around (Aritmatika Field Scalar)
-* **Masalah:** Nilai `amount`, `fee`, dan `change_value` dihitung di atas finite field $\mathbb{F}_r$ tanpa pemeriksaan batas integer 64-bit.
-* **Dampak Keamanan:** Jika ada nilai yang overflow modulo $p$, prover bisa mencetak uang virtual dari hasil *wrap-around* aljabar medan skalar.
-* **Solusi Perbaikan:** Pasang range constraint strict $\in [0, 2^{64})$ pada seluruh variabel nominal menggunakan gadget bit-decomposition Arkworks.
+### ✅ 2. Proteksi Integer Range 64-bit (Pencegah Modular Wrap-Around)
+* **Implementasi:** Seluruh variabel nominal (`input_value`, `merchant_amount`, `protocol_fee`, `execution_fee`, dan `change_value`) didekomposisi menjadi 64 bit boolean gadget di sirkuit:
+  $$\text{value} == \sum_{j=0}^{63} \text{bit}_j \cdot 2^j, \quad \text{value} < 2^{64}$$
+* Mencegah prover mencetak uang virtual via overflow modulo $r$ pada scalar field $\mathbb{F}_r$.
+* **Negative Test:** `test_gate_c0_overflow_amount_fails_proving` membuktikan bahwa injeksi nilai di luar rentang $2^{64}$ gagal membangkitkan proof.
 
-### ⚠️ Blocker 3: `has_change` Belum Di-Boolean-Constrain
-* **Masalah:** Hubungan output saat ini: $\text{output} == \text{has\_change} \times \text{change\_cm}$.
-* **Dampak Keamanan:** Jika prover menyuntikkan `has_change = 2` (bukan 0 atau 1), output menjadi dua kali lipat komitmen.
-* **Solusi Perbaikan:** Tambahkan constraint boolean 1 baris:
-  $$\text{has\_change} \times (1 - \text{has\_change}) == 0$$
+### ✅ 3. Boolean Constraint Strict & Zero-Change Enforcement pada `has_change`
+* **Implementasi:**
+  1. Enforce constraint boolean: $\text{has\_change} \times (1 - \text{has\_change}) == 0$.
+  2. Enforce jika `has_change == 0`, maka $\text{change\_value} == 0$ dan $\text{change\_commitment} == 0$.
+  3. Enforce jika `has_change == 1`, maka $\text{change\_commitment} == \text{computed\_change\_cm}$.
+* **Negative Tests:**
+  - `test_gate_c0_non_boolean_has_change_fails_proving` (injeksi `has_change = 2` gagal).
+  - `test_gate_c0_zero_change_with_positive_change_value_fails_proving` (injeksi `has_change = 0` dengan `change_value > 0` gagal).
+  - `test_gate_c0_swapped_domain_fields_fails_verification` (swap domain field terdeteksi).

@@ -38,11 +38,11 @@ Jika kondisi ini dilanggar bahkan hanya selisih 1 unit terkecil (1 *base unit* U
 
 | Transisi | Perubahan Aset Kas | Perubahan Liabilitas | Keterangan |
 |---|---|---|---|
-| **Deposit** | `assets += gross` | `refundable_liability += net`<br>`protocol_fees += fee` | Fee 0.20% dipotong di muka; sisa net siap di-mint. |
-| **Resolve (Reveal)** | *Tidak berubah* | `refundable_liability -= net`<br>`user_note_liability += net` | Hak refund hangus; note aktif menjadi saldo privat. |
-| **Refund** | `assets -= net` | `refundable_liability -= net` | Dilakukan oleh depositor jika timeout 24 jam lewat. |
+| **Deposit** | `assets += gross` | `refundable_liability += net` | Fee deposit 0% (0 bps); 100% nominal menjadi net refundable deposit. |
+| **Resolve (Reveal)** | *Tidak berubah* | `refundable_liability -= net`<br>`user_note_liability += net` | Hak refund hangus; note aktif dimint ke Merkle tree on-chain. |
+| **Refund** | `assets -= net` | `refundable_liability -= net` | Dilakukan oleh depositor jika timeout 24 jam lewat (100% principal kembali). |
 | **Private Spend** | `assets -= payout` | `user_note_liability -= (payout + fee + exec)`<br>`protocol_fees += fee`<br>`relayer_liability += exec` | Liabilitas user berkurang sebesar total debit invoice. |
-| **Claim Relayer Fee** | `assets -= amount` | `relayer_liability -= amount` | Relayer mencairkan komisi gas yang sudah terkumpul. |
+| **Claim Relayer Fee** | `assets -= amount` | `relayer_liability -= amount` | Relayer mencairkan komisi gas yang sudah terkumpul (cek solvabilitas). |
 | **Withdraw Treasury** | `assets -= amount` | `realized_protocol_fees -= amount` | Protokol menarik profit operasional. |
 
 ---
@@ -58,11 +58,13 @@ File referensi: [`nimbus-core/src/fees.rs`](file:///workspaces/Zeltra-Protocol/n
        (a + b - 1) / b
    }
    ```
-2. **Besaran Tarif Fee:**
-   * **Deposit Fee:** `20 bps` (0.20%).
-   * **Private Spend Fee (Default):** `25 bps` (0.25%).
-   * **Holding Time Discount (≥ 7 Hari):** Diskon ke `20 bps` (0.20%).
-   * **Whale Holding Time Discount (≥ 30 Hari):** Diskon ke `10 bps` (0.10%).
+2. **Besaran Tarif Fee (Immutable Constants):**
+   * **Deposit Fee:** `0 bps` (0.00% - Zero-Friction Inflow).
+   * **Private Spend Fee (Default):** `45 bps` (0.45%).
+   * **Long-Term Holding Discount (≥ 30 Hari):** Diskon ke `40 bps` (0.40%).
+   * **Relayer Execution Fee:** Estimasi gas L2 aktual + markup `15%` (default `1.500 bps`).
 3. **Holding Time Proof:**
    Dihitung secara anonim dan gas-efisien di smart contract on-chain menggunakan timestamp registrasi root:
    `mapping(bytes32 => uint256) clean_association_roots`.
+4. **Proteksi Anti-Exploit:**
+   Menghindari kompleksitas DAO governance setter untuk fee demi menutup celah eksploitasi flashloan voting atau governance hijacking. Aturan fee bersifat deterministik dan matematis.

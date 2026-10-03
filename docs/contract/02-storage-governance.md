@@ -17,38 +17,56 @@ sol_storage! {
         mapping(bytes32 => address) session_client;
         mapping(bytes32 => uint256) session_amount;
         mapping(bytes32 => bool)    session_resolved;
-        mapping(bytes32 => uint256) session_timestamp;
-        mapping(bytes32 => bytes32) session_commitment_hash; // Binding com_k (DEC-001)
-        mapping(bytes32 => bool)    session_exists;
-
-        // --- Nullifier & Anti-Double-Spend ---
         mapping(bytes32 => bool)    nullifiers;
-
-        // --- ZK Compliance & Holding Time Discount ---
         mapping(bytes32 => uint256) clean_association_roots;
-
-        // --- Financial & Principal Tracking ---
-        uint256                     total_deposited_principal;
-        address                     stablecoin;
-        address                     fee_recipient;
-
-        // --- Relayer Execution Fees ---
-        uint256                     accumulated_execution_fees;
-        address                     execution_fee_recipient;
-
-        // --- Access Control & Timelocked Governance ---
         address                     owner;
         bool                        paused;
+        mapping(bytes32 => uint256) session_timestamp;
+        address                     stablecoin;
+        address                     fee_recipient;
+        uint256                     total_deposited_principal;
+        mapping(bytes32 => uint256) failed_intent_refunds;
+
+        // --- Two-Step Governance & Timelocked Parameter Changes ---
         address                     pending_owner;
         address                     proposed_fee_recipient;
         uint256                     fee_recipient_eta;
-
-        // --- Security Registries (DEC-002 & DEC-015) ---
-        mapping(bytes32 => bool)    trusted_issuer_keys;
         address                     ccip_router;
+
+        // --- Deposit Commitment Binding (DEC-001) & Registries ---
+        mapping(bytes32 => bytes32) session_commitment_hash;
+        mapping(bytes32 => bool)    session_exists;
+        mapping(bytes32 => bool)    trusted_issuer_keys;
         mapping(bytes32 => bool)    ccip_processed_messages;
         mapping(bytes32 => bool)    ccip_allowed_senders;
-        mapping(bytes32 => uint256) failed_intent_refunds;
+
+        // --- Execution Fee Accumulation (Signed Quote Revenue Engine) ---
+        uint256                     accumulated_execution_fees;
+        address                     execution_fee_recipient;
+
+        // --- Multi-Liability Storage Accounting (DEC-016 & Gate B) ---
+        uint256                     user_note_liability;
+        uint256                     refundable_deposit_liability;
+        uint256                     accrued_execution_fee_liability;
+        uint256                     realized_protocol_fees;
+
+        // --- Append-Only Note Commitment Tree (Gate D: LeanIMT Depth 20) ---
+        uint256                     note_tree_next_index;
+        bytes32                     note_tree_root;
+        mapping(uint256 => bytes32) note_tree_filled_subtrees;
+        mapping(bytes32 => uint256) accepted_note_roots;
+        mapping(uint256 => bytes32) root_history;
+        uint256                     root_history_index;
+
+        // --- Gated Initial Note Minting (DEC-016 Gate D) ---
+        mapping(bytes32 => bytes32) session_note_commitment;
+        mapping(bytes32 => bool)    note_nullifiers;
+
+        // --- Dynamic Deposit Fee Configuration (Zero-Deposit Default) ---
+        uint256                     deposit_fee_bps;
+        bool                        deposit_fee_initialized;
+        uint256                     proposed_deposit_fee_bps;
+        uint256                     deposit_fee_eta;
     }
 }
 ```
