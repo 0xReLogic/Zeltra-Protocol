@@ -52,6 +52,11 @@ pub fn domain_initial_note() -> Fr {
     domain_from_label("nimbus.note.initial.v1")
 }
 
+/// Domain tag for canonical quote & payment binding (Gate C0).
+pub fn domain_quote_binding() -> Fr {
+    domain_from_label("nimbus.quote.binding.v1")
+}
+
 // ═══════════════════════════════════════════════════════════════════════════
 // PrivateNoteV1
 // ═══════════════════════════════════════════════════════════════════════════

@@ -3,7 +3,7 @@
 **Priority:** Tier 0 - Mainnet Blocker
 **Status:** Gate A/B/C dibuka kembali setelah audit independen; Gate C0 security
 repair wajib selesai sebelum Gate D.
-**Decision:** `research/decisions/DEC-016-private-note-change-ledger.md`
+**Decision:** [`research/decisions/DEC-016-private-note-change-ledger.md`](file:///workspaces/Zeltra-Protocol/research/decisions/DEC-016-private-note-change-ledger.md) | **Frozen Spec:** [`research/decisions/DEC-016A-private-note-spec-freeze.md`](file:///workspaces/Zeltra-Protocol/research/decisions/DEC-016A-private-note-spec-freeze.md) | **Audit Shortcuts:** [`research/decisions/DEC-016B-mvp-circuit-shortcuts.md`](file:///workspaces/Zeltra-Protocol/research/decisions/DEC-016B-mvp-circuit-shortcuts.md)
 
 ## Stop Rule
 

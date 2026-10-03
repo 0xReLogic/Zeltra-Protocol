@@ -313,18 +313,26 @@ impl ConstraintSynthesizer<Fr> for PrivateNoteCircuit {
         //    the prover from substituting arbitrary values.
         // ═══════════════════════════════════════════════════════════════
 
-        // recipient, quote_hash, chain_id, contract_address, expiry
-        // are bound via a "binding hash" that includes all of them.
-        // We compute: binding = Poseidon_W3(recipient + quote_hash, chain_id + contract_address + expiry)
-        // This forces all these values to be constrained.
-        let bind_left = &recipient_var + &quote_hash_var;
-        let bind_right = &chain_id_var + &contract_addr_var + &expiry_var;
-        let _binding = poseidon_w3_hash(&bind_left, &bind_right, &w3_rc, &w3_mds)?;
-        // The binding hash is computed but not compared to anything public.
-        // However, since all inputs are public variables, any change to them
-        // would change the proof's public inputs, which the verifier checks.
-        // The key property is that each public input variable appears in at
-        // least one constraint (here: the addition constraints above).
+        // ═══════════════════════════════════════════════════════════════
+        // 9. Canonical Payment & Domain Binding (Gate C0)
+        // ═══════════════════════════════════════════════════════════════
+        // Bind recipient, chain_id, contract_address, expiry as independent
+        // inputs into Poseidon_W5 (no linear addition or parameter swapping possible).
+        let domain_binding = crate::note::domain_quote_binding();
+        let scope_hash = poseidon_w5_hash(
+            &[
+                recipient_var.clone(),
+                chain_id_var.clone(),
+                contract_addr_var.clone(),
+                expiry_var.clone(),
+            ],
+            domain_binding,
+            &w5_rc,
+            &w5_mds,
+        )?;
+
+        // Non-linearly combine quote_hash and scope_hash
+        let _binding = poseidon_w3_hash(&quote_hash_var, &scope_hash, &w3_rc, &w3_mds)?;
 
         // ═══════════════════════════════════════════════════════════════
         // 10. Input value > 0 (non-zero)
@@ -374,6 +382,17 @@ pub fn generate_note_circuit_keys() -> Result<NoteCircuitKeys, SynthesisError> {
     Ok(NoteCircuitKeys {
         proving_key: pk,
         verifying_key: vk,
+    })
+}
+
+#[cfg(test)]
+static CACHED_KEYS: std::sync::OnceLock<NoteCircuitKeys> = std::sync::OnceLock::new();
+
+/// Retrieve or lazily initialize cached keys for development and tests (Gate C0 P1).
+#[cfg(test)]
+pub fn get_or_init_note_circuit_keys() -> &'static NoteCircuitKeys {
+    CACHED_KEYS.get_or_init(|| {
+        generate_note_circuit_keys().expect("Failed to initialize development note circuit keys")
     })
 }
 
@@ -501,7 +520,7 @@ mod tests {
 
     #[test]
     fn test_note_circuit_valid_proof() {
-        let keys = generate_note_circuit_keys().unwrap();
+        let keys = get_or_init_note_circuit_keys();
         let circuit = setup_valid_circuit();
         let public_inputs = extract_public_inputs(&circuit);
 
@@ -513,7 +532,7 @@ mod tests {
 
     #[test]
     fn test_note_circuit_tampered_nullifier() {
-        let keys = generate_note_circuit_keys().unwrap();
+        let keys = get_or_init_note_circuit_keys();
         let circuit = setup_valid_circuit();
         let mut public_inputs = extract_public_inputs(&circuit);
 
@@ -528,7 +547,7 @@ mod tests {
 
     #[test]
     fn test_note_circuit_tampered_merchant_amount() {
-        let keys = generate_note_circuit_keys().unwrap();
+        let keys = get_or_init_note_circuit_keys();
         let circuit = setup_valid_circuit();
         let mut public_inputs = extract_public_inputs(&circuit);
 
@@ -543,7 +562,7 @@ mod tests {
 
     #[test]
     fn test_note_circuit_tampered_recipient() {
-        let keys = generate_note_circuit_keys().unwrap();
+        let keys = get_or_init_note_circuit_keys();
         let circuit = setup_valid_circuit();
         let mut public_inputs = extract_public_inputs(&circuit);
 
@@ -558,7 +577,7 @@ mod tests {
 
     #[test]
     fn test_note_circuit_tampered_root() {
-        let keys = generate_note_circuit_keys().unwrap();
+        let keys = get_or_init_note_circuit_keys();
         let circuit = setup_valid_circuit();
         let mut public_inputs = extract_public_inputs(&circuit);
 
@@ -573,7 +592,7 @@ mod tests {
 
     #[test]
     fn test_note_circuit_wrong_owner_key_fails_proving() {
-        let keys = generate_note_circuit_keys().unwrap();
+        let keys = get_or_init_note_circuit_keys();
         let mut circuit = setup_valid_circuit();
 
         // Use wrong owner key — this should fail during proof generation
@@ -591,7 +610,7 @@ mod tests {
 
     #[test]
     fn test_note_circuit_wrong_merkle_path_fails() {
-        let keys = generate_note_circuit_keys().unwrap();
+        let keys = get_or_init_note_circuit_keys();
         let mut circuit = setup_valid_circuit();
 
         // Corrupt one sibling in the Merkle path
@@ -610,7 +629,7 @@ mod tests {
 
     #[test]
     fn test_note_circuit_value_conservation_violation_fails() {
-        let keys = generate_note_circuit_keys().unwrap();
+        let keys = get_or_init_note_circuit_keys();
         let mut circuit = setup_valid_circuit();
 
         // Violate value conservation: increase change by 1
@@ -632,7 +651,7 @@ mod tests {
             note_commitment as nc,
         };
 
-        let keys = generate_note_circuit_keys().unwrap();
+        let keys = get_or_init_note_circuit_keys();
         let spending_key = Fr::from(42u64);
         let nk = dnk(spending_key);
 
@@ -688,7 +707,7 @@ mod tests {
 
     #[test]
     fn test_gate_c0_tampered_leaf_index_fails_proving() {
-        let keys = generate_note_circuit_keys().unwrap();
+        let keys = get_or_init_note_circuit_keys();
         let mut circuit = setup_valid_circuit();
 
         // Tamper leaf index from 0 to 1 while leaving Merkle path intact
@@ -705,7 +724,7 @@ mod tests {
 
     #[test]
     fn test_gate_c0_non_boolean_has_change_fails_proving() {
-        let keys = generate_note_circuit_keys().unwrap();
+        let keys = get_or_init_note_circuit_keys();
         let mut circuit = setup_valid_circuit();
 
         // Non-boolean has_change = 2 must violate has_change * (1 - has_change) == 0
@@ -722,7 +741,7 @@ mod tests {
 
     #[test]
     fn test_gate_c0_zero_change_with_positive_change_value_fails_proving() {
-        let keys = generate_note_circuit_keys().unwrap();
+        let keys = get_or_init_note_circuit_keys();
         let mut circuit = setup_valid_circuit();
 
         // has_change = 0 but change_value > 0 must violate ch_value * (1 - has_change) == 0
@@ -740,7 +759,7 @@ mod tests {
 
     #[test]
     fn test_gate_c0_overflow_amount_fails_proving() {
-        let keys = generate_note_circuit_keys().unwrap();
+        let keys = get_or_init_note_circuit_keys();
         let mut circuit = setup_valid_circuit();
 
         // Amount outside [0, 2^64) must violate 64-bit range decomposition
@@ -754,5 +773,21 @@ mod tests {
             "Field overflow amount (> 2^64 - 1) must fail 64-bit range check"
         );
     }
+
+    #[test]
+    fn test_gate_c0_swapped_domain_fields_fails_verification() {
+        let keys = get_or_init_note_circuit_keys();
+        let circuit = setup_valid_circuit();
+        let mut public_inputs = extract_public_inputs(&circuit);
+
+        let proof = generate_note_proof(circuit, &keys.proving_key).unwrap();
+
+        // Swap chain_id (index 8) and contract_address (index 9)
+        public_inputs.swap(8, 9);
+
+        let is_valid = verify_note_proof(&proof, &keys.verifying_key, &public_inputs);
+        assert!(!is_valid, "Swapped chain_id and contract_address must fail verification");
+    }
 }
+
 

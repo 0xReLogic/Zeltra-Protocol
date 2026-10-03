@@ -23,7 +23,7 @@ Pilih salah satu dari 2 arah berikut sebelum mulai ngoding:
 * **Arah B (Jalur ZK-UTXO - Gate C0):** Selesaikan circuit Groth16 untuk 1-in 1-out private note dengan change output di bawah ini.
 
 ### Gate C0 - Security Repair Private Note Circuit (Jika Memilih Arah B)
-Ref: [`docs/todos/private-note-balance.md`](file:///workspaces/Zeltra-Protocol/docs/todos/private-note-balance.md) & [`DEC-016B`](file:///workspaces/Zeltra-Protocol/research/decisions/DEC-016B-mvp-circuit-shortcuts.md)
+Ref: [`docs/todos/private-note-balance.md`](file:///workspaces/Zeltra-Protocol/docs/todos/private-note-balance.md), [`DEC-016A (Frozen Spec)`](file:///workspaces/Zeltra-Protocol/research/decisions/DEC-016A-private-note-spec-freeze.md), & [`DEC-016B (Shortcuts Fix)`](file:///workspaces/Zeltra-Protocol/research/decisions/DEC-016B-mvp-circuit-shortcuts.md)
 
 - [x] **Bind Merkle path bits ke `input_leaf_index` di circuit**:
   - Dekomposisi indeks menjadi tepat `MERKLE_TREE_DEPTH` boolean bits.
@@ -34,12 +34,12 @@ Ref: [`docs/todos/private-note-balance.md`](file:///workspaces/Zeltra-Protocol/d
   - Pastikan value conservation adalah integer USDC (cegah modular wrap modulo scalar field Fr).
   - Boolean-constrain `has_change` ke `{0, 1}` (cegah prover nge-scale output commitment).
   - Enforce jika `has_change == 0` maka `change_value == 0` dan output commitment nol.
-- [ ] **Payment and domain binding**:
+- [x] **Payment and domain binding**:
   - Definisikan canonical signed quote digest yang mengikat: recipient, merchant amount, protocol fee, execution fee, expiry, chain ID, contract address, asset ID, dan nonce.
-  - Enforce digest tersebut di circuit dan cocokkan dengan quote yang diverifikasi contract.
+  - Enforce digest tersebut di circuit via Poseidon-W5 non-linear lane hashing dan cocokkan dengan quote.
 - [ ] **Cryptographic parameters**:
   - Ganti parameter Poseidon width-5 ad-hoc (StdRng) dengan parameter standar/audited.
-  - Simpan proving/verifying key sebagai artifact versioned; cache development key pada test runner.
+  - Simpan proving/verifying key sebagai artifact versioned; [x] cache development key pada test runner.
 
 ---
 
