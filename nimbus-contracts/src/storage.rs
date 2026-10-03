@@ -62,6 +62,16 @@ sol_storage! {
         uint256 accumulated_execution_fees;
         // Address authorized to claim accumulated execution fees (relayer/operator)
         address execution_fee_recipient;
+
+        // --- Multi-Liability Storage Accounting (DEC-016 & Gate B) ---
+        // Sum of all unspent private note values held by users
+        uint256 user_note_liability;
+        // Sum of unresolved deposits that can still be refunded
+        uint256 refundable_deposit_liability;
+        // Execution fees accrued to relayer but not yet claimed
+        uint256 accrued_execution_fee_liability;
+        // Protocol fees realized and retained as protocol equity
+        uint256 realized_protocol_fees;
     }
 }
 

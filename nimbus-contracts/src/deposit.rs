@@ -41,6 +41,11 @@ impl Nimbus {
             self.total_deposited_principal.set(principal - amount);
         }
 
+        let ref_liab = self.refundable_deposit_liability.get();
+        if ref_liab >= amount {
+            self.refundable_deposit_liability.set(ref_liab - amount);
+        }
+
         if amount > U256::ZERO {
             self.ensure_liquidity(amount)?;
 
@@ -114,6 +119,12 @@ impl Nimbus {
             .checked_add(net_amount)
             .ok_or_else(|| b"PRINCIPAL_OVERFLOW".to_vec())?;
         self.total_deposited_principal.set(new_principal);
+
+        let ref_liab = self.refundable_deposit_liability.get();
+        let new_ref_liab = ref_liab
+            .checked_add(net_amount)
+            .ok_or_else(|| b"REFUNDABLE_LIABILITY_OVERFLOW".to_vec())?;
+        self.refundable_deposit_liability.set(new_ref_liab);
 
         // 3. INTERACTIONS
         #[cfg(not(test))]
@@ -208,6 +219,18 @@ impl Nimbus {
             // Reveal makes the credential spendable and permanently disables
             // refund. Collateral remains backing the credential until spend.
             self.session_resolved.insert(sid, true);
+
+            // Shift liability from refundable deposit to active user note liability (DEC-016 Gate B)
+            let amount = self.session_amount.get(sid);
+            let ref_liab = self.refundable_deposit_liability.get();
+            if ref_liab >= amount {
+                self.refundable_deposit_liability.set(ref_liab - amount);
+            }
+            let user_liab = self.user_note_liability.get();
+            if let Some(new_user_liab) = user_liab.checked_add(amount) {
+                self.user_note_liability.set(new_user_liab);
+            }
+
             Ok(true)
         } else {
             Ok(false)

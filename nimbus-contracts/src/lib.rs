@@ -161,10 +161,39 @@ impl Nimbus {
             return Err(b"CLAIM_TRANSFER_FAILED".to_vec());
         }
 
-        // Update accumulated fees
+        // Update accumulated and accrued fees
         self.accumulated_execution_fees
             .set(accumulated.checked_sub(amount).unwrap());
+        let accrued = self.accrued_execution_fee_liability.get();
+        if accrued >= amount {
+            self.accrued_execution_fee_liability.set(accrued - amount);
+        }
+
+        // Enforce invariant: contract_assets >= outstanding_liabilities
+        // Tolak claim on-chain yang menyentuh backing deposit user/refund (DEC-016 & Gate B)
+        self.check_liability_invariant()?;
+
         Ok(true)
+    }
+
+    /// Returns the sum of unspent private note liabilities held by users (DEC-016).
+    pub fn user_note_liability(&self) -> Result<U256, Vec<u8>> {
+        Ok(self.user_note_liability.get())
+    }
+
+    /// Returns the sum of unresolved deposits that can still be refunded (DEC-016).
+    pub fn refundable_deposit_liability(&self) -> Result<U256, Vec<u8>> {
+        Ok(self.refundable_deposit_liability.get())
+    }
+
+    /// Returns the accrued execution fee liability owed to the relayer (DEC-016).
+    pub fn accrued_execution_fee_liability(&self) -> Result<U256, Vec<u8>> {
+        Ok(self.accrued_execution_fee_liability.get())
+    }
+
+    /// Returns the realized protocol fees retained as protocol equity (DEC-016).
+    pub fn realized_protocol_fees(&self) -> Result<U256, Vec<u8>> {
+        Ok(self.realized_protocol_fees.get())
     }
 
     pub fn total_deposited_principal(&self) -> Result<U256, Vec<u8>> {
@@ -265,7 +294,8 @@ impl Nimbus {
     // --- Liability Invariant Check ---
 
     /// Verifies the invariant: contract_assets >= outstanding_liabilities
-    /// This ensures the contract can always cover its obligations
+    /// where outstanding_liabilities = user_note_liability + refundable_deposit_liability + accrued_execution_fee_liability (DEC-016 Gate B)
+    /// This ensures the contract can always cover all user notes, unresolved refunds, and accrued relayer fees.
     fn check_liability_invariant(&self) -> Result<(), Vec<u8>> {
         #[cfg(not(test))]
         {
@@ -279,7 +309,20 @@ impl Nimbus {
                 .balance_of(&host, Call::new(), contract_address)
                 .map_err(|_| b"INVARIANT_BALANCE_CHECK_FAILED".to_vec())?;
 
-            let outstanding_liabilities = self.total_deposited_principal.get();
+            let user_liab = self.user_note_liability.get();
+            let refund_liab = self.refundable_deposit_liability.get();
+            let fee_liab = self.accrued_execution_fee_liability.get();
+            let multi_liabilities = user_liab
+                .checked_add(refund_liab)
+                .and_then(|s| s.checked_add(fee_liab))
+                .unwrap_or(U256::MAX);
+
+            let legacy_principal = self.total_deposited_principal.get();
+            let legacy_liabilities = legacy_principal
+                .checked_add(self.accumulated_execution_fees.get())
+                .unwrap_or(U256::MAX);
+
+            let outstanding_liabilities = multi_liabilities.max(legacy_liabilities);
 
             if contract_balance < outstanding_liabilities {
                 return Err(b"INVARIANT_VIOLATED_CONTRACT_ASSETS_LESS_THAN_LIABILITIES".to_vec());
@@ -475,6 +518,16 @@ impl Nimbus {
             // State changes
             self.nullifiers.insert(nullifiers[i], true);
             self.total_deposited_principal.set(new_principal);
+
+            // Multi-liability tracking (DEC-016 Gate B)
+            let user_liab = self.user_note_liability.get();
+            if user_liab >= total_debit {
+                self.user_note_liability.set(user_liab - total_debit);
+            }
+            let current_realized = self.realized_protocol_fees.get();
+            if let Some(new_realized) = current_realized.checked_add(protocol_share) {
+                self.realized_protocol_fees.set(new_realized);
+            }
 
             #[cfg(not(test))]
             {
@@ -2416,5 +2469,149 @@ mod tests {
         set_msg_sender(owner);
         let result = contract.claim_execution_fees(U256::from(1000));
         assert_eq!(result, Err(b"NO_RECIPIENT_SET".to_vec()));
+    }
+
+    #[test]
+    fn test_multi_liability_deposit_reveal_spend_lifecycle() {
+        reset_test_state();
+        let mut contract = Nimbus::default();
+        let owner = Address::repeat_byte(0x01);
+        let client = Address::repeat_byte(0x09);
+        let fee_recipient = Address::repeat_byte(0x03);
+
+        contract
+            .init(owner, Address::repeat_byte(0x02), fee_recipient)
+            .unwrap();
+
+        let sid = FixedBytes::repeat_byte(0xaa);
+        let deposit_amount = U256::from(100_000_000); // 100 USDC
+        let dummy_com_k = Bytes::from(alloc::vec![0u8; 256]);
+
+        set_msg_sender(client);
+        set_block_timestamp(1000);
+        contract
+            .deposit(sid, dummy_com_k.clone(), deposit_amount)
+            .unwrap();
+
+        // 0.20% fee on 100_000_000 is 200_000. Net deposit = 99_800_000
+        let net_deposit = U256::from(99_800_000);
+        assert_eq!(contract.refundable_deposit_liability().unwrap(), net_deposit);
+        assert_eq!(contract.user_note_liability().unwrap(), U256::ZERO);
+        assert_eq!(contract.accrued_execution_fee_liability().unwrap(), U256::ZERO);
+
+        // Reveal the session
+        let k_bytes = Bytes::from(alloc::vec![0u8; 32]);
+        let pk_iss_bytes = Bytes::from(alloc::vec![0u8; 256]);
+        assert!(contract
+            .reveal_mask_key(sid, k_bytes, pk_iss_bytes, dummy_com_k.clone())
+            .unwrap());
+
+        // After reveal: refundable drops to 0, user_note_liability increases to net_deposit
+        assert_eq!(contract.refundable_deposit_liability().unwrap(), U256::ZERO);
+        assert_eq!(contract.user_note_liability().unwrap(), net_deposit);
+
+        // Perform spend of 10 USDC with 500 execution_fee
+        let spend_amount = U256::from(10_000_000);
+        let nonce = FixedBytes::repeat_byte(0xbb);
+        let (alpha_neg, _hm, pk_iss, nullifier) = register_mock_issuer_with_nonce(
+            &mut contract,
+            owner,
+            spend_amount,
+            FixedBytes::ZERO,
+            nonce,
+        );
+
+        let initial_user_liab = contract.user_note_liability().unwrap();
+        assert!(contract
+            .spend(
+                FixedBytes::ZERO,
+                nullifier,
+                alpha_neg.into(),
+                pk_iss.into(),
+                Address::ZERO,
+                spend_amount,
+                FixedBytes::ZERO,
+                U256::ZERO,
+                nonce,
+                U256::from(1000), // max_execution_fee
+                U256::from(500),  // execution_fee
+            )
+            .unwrap());
+
+        // 0.25% protocol fee on 10_000_000 is 25_000
+        let protocol_share = U256::from(25_000);
+        let exec_fee = U256::from(500);
+        let total_user_debit = spend_amount + protocol_share + exec_fee;
+
+        assert_eq!(
+            contract.user_note_liability().unwrap(),
+            initial_user_liab - total_user_debit
+        );
+        assert_eq!(contract.accrued_execution_fee_liability().unwrap(), exec_fee);
+        assert_eq!(contract.realized_protocol_fees().unwrap(), protocol_share);
+    }
+
+    #[test]
+    fn test_multi_liability_refund_reduces_refundable_liability() {
+        reset_test_state();
+        let mut contract = Nimbus::default();
+        let owner = Address::repeat_byte(0x01);
+        let client = Address::repeat_byte(0x09);
+
+        contract
+            .init(owner, Address::repeat_byte(0x02), Address::repeat_byte(0x03))
+            .unwrap();
+
+        let sid = FixedBytes::repeat_byte(0xcc);
+        let deposit_amount = U256::from(50_000_000); // 50 USDC
+        let dummy_com_k = Bytes::from(alloc::vec![0u8; 256]);
+
+        set_msg_sender(client);
+        set_block_timestamp(1000);
+        contract
+            .deposit(sid, dummy_com_k, deposit_amount)
+            .unwrap();
+
+        let net_deposit = contract.session_amount.get(sid);
+        assert_eq!(contract.refundable_deposit_liability().unwrap(), net_deposit);
+
+        // Advance 24h + 1s timelock
+        set_block_timestamp(1000 + 86401);
+        set_msg_sender(client);
+        contract.claim_refund(sid).unwrap();
+
+        assert_eq!(contract.refundable_deposit_liability().unwrap(), U256::ZERO);
+        assert_eq!(contract.user_note_liability().unwrap(), U256::ZERO);
+    }
+
+    #[test]
+    fn test_claim_execution_fees_updates_accrued_liability() {
+        reset_test_state();
+        let mut contract = Nimbus::default();
+        let owner = Address::repeat_byte(0x01);
+        let relayer = Address::repeat_byte(0x04);
+
+        contract
+            .init(owner, Address::repeat_byte(0x02), Address::repeat_byte(0x03))
+            .unwrap();
+
+        set_msg_sender(owner);
+        contract.set_execution_fee_recipient(relayer).unwrap();
+
+        // Simulate 500 execution fee accrued
+        contract.accumulated_execution_fees.set(U256::from(500));
+        contract.accrued_execution_fee_liability.set(U256::from(500));
+
+        // Claim 300
+        set_msg_sender(owner);
+        contract.claim_execution_fees(U256::from(300)).unwrap();
+
+        assert_eq!(contract.accumulated_execution_fees.get(), U256::from(200));
+        assert_eq!(contract.accrued_execution_fee_liability().unwrap(), U256::from(200));
+
+        // Claim remaining 200
+        contract.claim_execution_fees(U256::from(200)).unwrap();
+        assert_eq!(contract.accumulated_execution_fees.get(), U256::ZERO);
+        assert_eq!(contract.accrued_execution_fee_liability().unwrap(), U256::ZERO);
     }
 }

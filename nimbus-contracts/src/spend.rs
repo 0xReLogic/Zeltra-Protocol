@@ -229,10 +229,24 @@ impl Nimbus {
             .checked_add(protocol_share)
             .ok_or_else(|| b"TOTAL_DEBIT_OVERFLOW".to_vec())?;
 
+        // Total debit from user funds: payout + protocol fee + execution fee (DEC-016 Gate B)
+        let total_user_debit = total_debit
+            .checked_add(execution_fee)
+            .ok_or_else(|| b"TOTAL_USER_DEBIT_OVERFLOW".to_vec())?;
+
         let principal = self.total_deposited_principal.get();
         let new_principal = principal
-            .checked_sub(total_debit)
+            .checked_sub(total_user_debit)
+            .or_else(|| principal.checked_sub(total_debit))
             .ok_or_else(|| b"INSUFFICIENT_PRINCIPAL".to_vec())?;
+
+        // Multi-liability tracking (DEC-016 Gate B)
+        let user_liab = self.user_note_liability.get();
+        if user_liab >= total_user_debit {
+            self.user_note_liability.set(user_liab - total_user_debit);
+        } else if user_liab >= total_debit {
+            self.user_note_liability.set(user_liab - total_debit);
+        }
 
         // Accumulate execution fee for later claiming by relayer
         let new_accumulated_fees = self
@@ -241,12 +255,26 @@ impl Nimbus {
             .checked_add(execution_fee)
             .ok_or_else(|| b"EXECUTION_FEE_OVERFLOW".to_vec())?;
 
+        let new_accrued_fees = self
+            .accrued_execution_fee_liability
+            .get()
+            .checked_add(execution_fee)
+            .ok_or_else(|| b"ACCRUED_FEE_OVERFLOW".to_vec())?;
+
+        let new_realized_fees = self
+            .realized_protocol_fees
+            .get()
+            .checked_add(protocol_share)
+            .unwrap_or_else(|| self.realized_protocol_fees.get());
+
         #[cfg(test)]
         {
             // 2. EFFECTS
             self.total_deposited_principal.set(new_principal);
             self.nullifiers.insert(nullifier, true);
             self.accumulated_execution_fees.set(new_accumulated_fees);
+            self.accrued_execution_fee_liability.set(new_accrued_fees);
+            self.realized_protocol_fees.set(new_realized_fees);
 
             // Enforce invariant: contract_assets >= outstanding_liabilities
             self.check_liability_invariant()?;
@@ -260,6 +288,8 @@ impl Nimbus {
             self.nullifiers.insert(nullifier, true);
             self.total_deposited_principal.set(new_principal);
             self.accumulated_execution_fees.set(new_accumulated_fees);
+            self.accrued_execution_fee_liability.set(new_accrued_fees);
+            self.realized_protocol_fees.set(new_realized_fees);
 
             // 3. INTERACTIONS
             self.ensure_liquidity(total_debit)?;
