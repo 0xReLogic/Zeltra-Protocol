@@ -2,10 +2,10 @@ use alloy::{
     network::{EthereumWallet, TransactionBuilder},
     primitives::{Address, Bytes, U256},
     providers::{DynProvider, Provider, ProviderBuilder, WsConnect},
-    rpc::types::eth::TransactionRequest,
+    rpc::types::eth::{Filter, TransactionRequest},
     signers::local::PrivateKeySigner,
     sol,
-    sol_types::{SolCall, SolValue},
+    sol_types::{SolCall, SolEvent, SolValue},
 };
 use anyhow::{Context, Result};
 use std::str::FromStr;
@@ -13,6 +13,16 @@ use std::sync::Arc;
 use tokio::sync::Mutex;
 
 sol! {
+    #[derive(Debug, PartialEq)]
+    event DepositFee(
+        bytes32 indexed session_id,
+        bytes32 indexed com_k_hash,
+        address indexed client,
+        uint256 gross_amount,
+        uint256 fee,
+        uint256 net_amount
+    );
+
     function spend(
         bytes32 root,
         bytes32 nullifier,
@@ -1184,6 +1194,127 @@ impl EvmClient {
 
         self.send_tx_with_fallback(tx).await
     }
+
+    /// Query on-chain DepositFee events in a block range [from_block, to_block] (DEC-018)
+    pub async fn get_deposit_events(
+        &self,
+        from_block: u64,
+        to_block: u64,
+    ) -> Result<Vec<DepositEventInfo>> {
+        let filter = Filter::new()
+            .address(self.contract_address)
+            .event_signature(DepositFee::SIGNATURE_HASH)
+            .from_block(from_block)
+            .to_block(to_block);
+
+        let logs = self
+            .provider
+            .get_logs(&filter)
+            .await
+            .context("Failed to get deposit logs")?;
+
+        let mut events = Vec::new();
+        for log in logs {
+            if log.address() != self.contract_address {
+                continue;
+            }
+            if let Ok(decoded) = DepositFee::decode_raw_log(log.topics(), &log.data().data) {
+                let session_id_hex = format!("0x{}", hex::encode(decoded.session_id.as_slice()));
+                let com_k_hash_hex = format!("0x{}", hex::encode(decoded.com_k_hash.as_slice()));
+                let client_hex = format!("{:?}", decoded.client);
+                let tx_hash = log
+                    .transaction_hash
+                    .map(|h| format!("{:#x}", h))
+                    .unwrap_or_default();
+                let block_number = log.block_number.unwrap_or(0);
+
+                events.push(DepositEventInfo {
+                    session_id: session_id_hex,
+                    com_k_hash: com_k_hash_hex,
+                    client: client_hex,
+                    gross_amount: decoded.gross_amount.to::<u64>(),
+                    fee: decoded.fee.to::<u64>(),
+                    net_amount: decoded.net_amount.to::<u64>(),
+                    tx_hash,
+                    block_number,
+                });
+            }
+        }
+
+        Ok(events)
+    }
+
+    /// Check if a specific transaction contains a verified on-chain deposit event (DEC-018)
+    pub async fn check_deposit_tx_on_chain(
+        &self,
+        tx_hash: &str,
+        session_id: &str,
+    ) -> Result<Option<DepositEventInfo>> {
+        let hash: alloy::primitives::TxHash =
+            tx_hash.parse().context("Invalid transaction hash")?;
+        let receipt = match self.provider.get_transaction_receipt(hash).await? {
+            Some(rcpt) => rcpt,
+            None => return Ok(None),
+        };
+
+        if !receipt.status() {
+            return Ok(None);
+        }
+
+        let block_num = receipt.block_number.unwrap_or(0);
+        let current_block = self.get_block_number().await.unwrap_or(block_num);
+        let confirmations = if current_block >= block_num {
+            current_block - block_num + 1
+        } else {
+            1
+        };
+
+        if confirmations < self.finality_config.confirmation_threshold {
+            return Ok(None);
+        }
+
+        let norm_sid = session_id.trim_start_matches("0x").to_lowercase();
+
+        for log in receipt.inner.logs() {
+            if log.address() == self.contract_address {
+                if let Ok(decoded) = DepositFee::decode_raw_log(log.topics(), &log.data().data) {
+                    let ev_sid = hex::encode(decoded.session_id.as_slice()).to_lowercase();
+                    if ev_sid == norm_sid {
+                        let session_id_hex = format!("0x{}", ev_sid);
+                        let com_k_hash_hex =
+                            format!("0x{}", hex::encode(decoded.com_k_hash.as_slice()));
+                        let client_hex = format!("{:?}", decoded.client);
+
+                        return Ok(Some(DepositEventInfo {
+                            session_id: session_id_hex,
+                            com_k_hash: com_k_hash_hex,
+                            client: client_hex,
+                            gross_amount: decoded.gross_amount.to::<u64>(),
+                            fee: decoded.fee.to::<u64>(),
+                            net_amount: decoded.net_amount.to::<u64>(),
+                            tx_hash: tx_hash.to_string(),
+                            block_number: block_num,
+                        }));
+                    }
+                }
+            }
+        }
+
+        Ok(None)
+    }
+}
+
+/// Information extracted from an on-chain DepositFee event (DEC-018)
+#[derive(Clone, Debug, PartialEq)]
+pub struct DepositEventInfo {
+    pub session_id: String,
+    pub com_k_hash: String,
+    pub client: String,
+    pub gross_amount: u64,
+    pub fee: u64,
+    pub net_amount: u64,
+    pub tx_hash: String,
+    pub block_number: u64,
 }
 
 /// Detects whether an error message indicates an EVM transaction nonce conflict or mismatch.

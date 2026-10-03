@@ -490,6 +490,19 @@ impl Nimbus {
         self._claim_refund(sid)
     }
 
+    /// Returns the stored commitment hash for a deposit session (DEC-018)
+    pub fn get_session_commitment_hash(
+        &self,
+        sid: FixedBytes<32>,
+    ) -> Result<FixedBytes<32>, Vec<u8>> {
+        Ok(self.session_commitment_hash.get(sid))
+    }
+
+    /// Returns true if a deposit session exists and has not been resolved/refunded (DEC-018)
+    pub fn is_session_active(&self, sid: FixedBytes<32>) -> Result<bool, Vec<u8>> {
+        Ok(self.session_exists.get(sid) && !self.session_resolved.get(sid))
+    }
+
     pub fn spend(
         &mut self,
         root: FixedBytes<32>,

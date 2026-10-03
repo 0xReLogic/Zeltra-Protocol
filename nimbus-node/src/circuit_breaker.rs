@@ -258,7 +258,7 @@ mod tests {
     async fn test_circuit_breaker_opens_on_failures() {
         let cb = CircuitBreaker::new(CircuitBreakerConfig {
             failure_threshold: 3,
-            recovery_timeout: Duration::from_millis(100),
+            recovery_timeout: Duration::from_secs(5),
             success_threshold: 2,
             name: "test-failure".to_string(),
         });

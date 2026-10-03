@@ -61,14 +61,16 @@ Merekam seluruh nullifier yang sudah mendapatkan konfirmasi receipt sukses di on
 * `spent_at`: Timestamp transaksi confirmed.
 * `tx_hash` & `block_number`: Bukti transaksi blockchain.
 
-### C. Tabel `sessions` (Sesi Deposit & Reveal Masking Key)
+### C. Tabel `sessions` (Sesi Deposit & Reveal Masking Key - DEC-018)
 * `session_id`: ID sesi transaksi (PRIMARY KEY).
 * `client_address`: Alamat depositor USDC.
 * `amount`: Nominal bersih deposit.
-* `com_k`: Komitmen masking key yang diserahkan.
-* `k_encrypted`: Kunci masking $k$ yang disimpan aman sebelum dirilis.
-* `deposit_confirmed`: Flag apakah transaksi deposit sudah verified di on-chain.
-* `resolved`: Flag apakah masking key sudah dirilis ke client.
+* `com_k_hex`: Komitmen masking key $k \cdot \text{pk}_{\text{iss}}$ yang diserahkan.
+* `masking_key_hex`: Kunci masking $k$ yang disimpan aman sebelum dirilis.
+* `deposit_confirmed`: Flag apakah transaksi deposit sudah verified di on-chain smart contract event.
+* `deposit_tx_hash`: Hash transaksi deposit on-chain yang terverifikasi.
+* `deposit_block_number`: Tinggi blok tempat event `DepositFee` terkonfirmasi.
+* `resolved`: Flag apakah masking key sudah dirilis ke client setelah verifikasi kriptografis lolos.
 
 ### D. Tabel `spend_batches` (Pencatatan Batching & Komisi)
 * `batch_id`: UUID batch unik.
@@ -92,3 +94,10 @@ Merekam seluruh transaksi on-chain yang dibroadcast oleh relayer untuk pelacakan
 * `confirmations`: Jumlah blok konfirmasi yang telah dilewati.
 * `error_reason`: Pesan revert atau kegagalan jika transaksi gagal di on-chain.
 * `created_at` & `updated_at`: Timestamp untuk keperluan timeout watchdog & gas bump replacement.
+
+### G. Tabel `indexer_state` (Checkpoint Indexer Event On-Chain - DEC-018)
+Menyimpan posisi blok terakhir yang telah berhasil diindeks oleh background worker event listener:
+* `key`: Identifier unik indexer (e.g. `"deposit_indexer_last_block"`).
+* `last_block`: Nomor blok terakhir yang aman dari reorg dan telah diproses ke database.
+* `updated_at`: Unix timestamp saat checkpoint blok diperbarui.
+

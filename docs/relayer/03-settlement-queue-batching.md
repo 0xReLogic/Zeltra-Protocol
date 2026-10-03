@@ -126,3 +126,24 @@ GET /api/tx-status?tx_hash=0x1234...
 
 *Status yang didukung:* `pending` (termasuk broadcasting & replacement), `confirmed`, `failed`, dan `not_found`. Jika transaksi telah masuk blok, counter `confirmations` dihitung secara dinamis terhadap tinggi blok blockchain saat ini.
 
+---
+
+## 8. On-Chain Deposit Indexer & Cryptographic Reveal (DEC-018)
+
+Mengacu pada spesifikasi [`DEC-018`](file:///workspaces/Zeltra-Protocol/research/decisions/DEC-018-on-chain-deposit-indexer-and-cryptographic-reveal-verification.md), relayer menghapus ketergantungan pencatatan deposit berbasis client API murni dan menerapkan arsitektur *on-chain event listener* yang kebal terhadap reorg dan phantom deposits:
+
+1. **Smart Contract Event Binding (`DepositFee`):**
+   * Smart contract Stylus memancarkan event `DepositFee(session_id, com_k_hash, client, gross, fee, net)`.
+   * Komitmen masking key di-hash dengan `keccak256(com_k)` dan ditempatkan sebagai topic indexed ke-2 untuk memungkinkan relayer memvalidasi keaslian komitmen langsung dari log receipt EVM.
+2. **Background Indexer Worker (`deposit_indexer_worker`):**
+   * Polling berkala terhadap blok on-chain dengan batasan `safe_block = current_block.saturating_sub(confirmation_threshold - 1)`.
+   * Menolak memproses blok di ujung rantai (*tip*) untuk mencegah pemalsuan deposit akibat chain reorg.
+   * Checkpoint nomor blok terakhir yang berhasil diproses dicatat durable pada tabel `indexer_state`.
+3. **Fail-Closed Cryptographic Verification pada Reveal (`/api/reveal`):**
+   * Kunci masking $k$ hanya dirilis jika dan hanya jika:
+     1. Status sesi deposit sudah berstatus confirmed di on-chain (`deposit_confirmed == true`).
+     2. Verifikasi kriptografis kurva eliptis BLS12-381 $\mathbb{G}_2$ valid:
+        $$k \cdot \text{pk}_{\text{iss}} == \text{com}_k$$
+   * Jika $k$ atau $\text{com}_k$ rusak, dimanipulasi, atau tidak cocok, endpoint seketika mengembalikan respons `REJECTED`, sesi tetap terkunci (`resolved == false`), dan tidak ada rahasia yang bocor ke publik.
+
+

@@ -33,7 +33,8 @@ pub use evm::{get_alpha_neg_evm, get_hm_evm, get_pk_iss_evm, to_evm_g1, to_evm_g
 
 // Re-export blind signature protocol
 pub use blind_sign::{
-    client_blind, client_unmask, client_verify_masked, issuer_sign_blinded, verify_unmasked,
+    client_blind, client_unmask, client_verify_masked, issuer_sign_blinded,
+    verify_masking_key_commitment, verify_unmasked,
 };
 
 // Re-export threshold cryptography

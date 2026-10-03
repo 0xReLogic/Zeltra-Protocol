@@ -91,6 +91,9 @@ pub struct DepositRequest {
     /// Client-supplied idempotency key (UUID recommended).
     #[serde(default)]
     pub idempotency_key: Option<String>,
+    /// Optional transaction hash of the on-chain deposit for expedited verification.
+    #[serde(default)]
+    pub tx_hash: Option<String>,
 }
 
 #[derive(Clone, Serialize, Deserialize)]

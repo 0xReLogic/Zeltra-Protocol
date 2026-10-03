@@ -50,6 +50,18 @@ pub struct StalledSessionInfo {
     pub resolved: i64,
 }
 
+#[derive(Debug, Clone)]
+#[allow(dead_code)]
+pub struct SessionForReveal {
+    pub session_id: String,
+    pub com_k_hex: String,
+    pub masking_key_hex: String,
+    pub amount: u64,
+    pub client_address: String,
+    pub deposit_confirmed: bool,
+    pub resolved: bool,
+}
+
 const DEFAULT_DB_KEY: &str = "default-change-in-production";
 
 fn database_key() -> Result<String> {
@@ -140,11 +152,20 @@ impl Database {
                     deposit_confirmed BOOLEAN NOT NULL DEFAULT 0,
                     masking_key_hex TEXT,
                     client_address TEXT NOT NULL,
+                    deposit_tx_hash TEXT,
+                    deposit_block_number INTEGER,
                     created_at INTEGER NOT NULL,
                     resolved_at INTEGER
                 );
                 CREATE INDEX IF NOT EXISTS idx_sessions_resolved ON sessions(resolved);
                 CREATE INDEX IF NOT EXISTS idx_sessions_client ON sessions(client_address);
+
+                -- Indexer state tracking (DEC-018 / On-chain Event Indexer)
+                CREATE TABLE IF NOT EXISTS indexer_state (
+                    key TEXT PRIMARY KEY,
+                    last_block INTEGER NOT NULL,
+                    updated_at INTEGER NOT NULL
+                );
 
                 -- Nullifier tracking (double-spend prevention)
                 -- Inspired by ZK Rollup nullifier registries
@@ -296,6 +317,24 @@ impl Database {
                 WHERE request_json IS NULL AND status = 'queued';
             ",
             )?;
+
+            // Migrations for DEC-018 on-chain deposit indexer
+            let _ = conn.execute(
+                "ALTER TABLE sessions ADD COLUMN deposit_tx_hash TEXT",
+                params![],
+            );
+            let _ = conn.execute(
+                "ALTER TABLE sessions ADD COLUMN deposit_block_number INTEGER",
+                params![],
+            );
+            let _ = conn.execute(
+                "CREATE TABLE IF NOT EXISTS indexer_state (
+                    key TEXT PRIMARY KEY,
+                    last_block INTEGER NOT NULL,
+                    updated_at INTEGER NOT NULL
+                )",
+                params![],
+            );
 
             Ok(())
         })
@@ -1126,6 +1165,7 @@ impl Database {
 
     /// Insert session (deposit)
     /// Returns true if inserted, false if already exists
+    #[allow(dead_code)]
     pub async fn insert_session(
         &self,
         session_id: &str,
@@ -1306,6 +1346,7 @@ impl Database {
     /// Resolve session and retrieve masking key (Atomic Release flow)
     /// Sets resolved = 1 and returns the masking_key_hex ONLY IF deposit_confirmed = 1
     /// Returns Ok(Some(masking_key_hex)) if successful, Ok(None) if not found, already resolved, or not confirmed.
+    #[allow(dead_code)]
     pub async fn resolve_session_release(&self, session_id: &str) -> Result<Option<String>> {
         let path = self.path.clone();
         let session_id = session_id.to_string();
@@ -1344,6 +1385,189 @@ impl Database {
             } else {
                 Ok(None)
             }
+        })
+        .await?
+    }
+
+    /// Retrieve session details for cryptographic reveal verification (DEC-018)
+    pub async fn get_session_for_reveal(
+        &self,
+        session_id: &str,
+    ) -> Result<Option<SessionForReveal>> {
+        let path = self.path.clone();
+        let session_id = session_id.to_string();
+        let db_key = database_key()?;
+
+        task::spawn_blocking(move || -> Result<Option<SessionForReveal>> {
+            let conn = open_connection(&path, &db_key)?;
+            let info = conn
+                .query_row(
+                    "SELECT session_id, com_k_hex, masking_key_hex, amount, client_address, deposit_confirmed, resolved
+                     FROM sessions WHERE session_id = ?",
+                    params![session_id],
+                    |row| {
+                        Ok(SessionForReveal {
+                            session_id: row.get(0)?,
+                            com_k_hex: row.get(1)?,
+                            masking_key_hex: row.get::<_, Option<String>>(2)?.unwrap_or_default(),
+                            amount: row.get::<_, i64>(3)? as u64,
+                            client_address: row.get(4)?,
+                            deposit_confirmed: row.get::<_, i64>(5)? == 1,
+                            resolved: row.get::<_, i64>(6)? == 1,
+                        })
+                    },
+                )
+                .optional()?;
+
+            Ok(info)
+        })
+        .await?
+    }
+
+    /// Mark session as resolved after cryptographic verification has passed (DEC-018)
+    pub async fn mark_session_resolved(&self, session_id: &str) -> Result<bool> {
+        let path = self.path.clone();
+        let session_id = session_id.to_string();
+        let db_key = database_key()?;
+
+        task::spawn_blocking(move || -> Result<bool> {
+            let conn = open_connection(&path, &db_key)?;
+            let now = unix_timestamp()?;
+            let rows = conn.execute(
+                "UPDATE sessions
+                 SET resolved = 1, resolved_at = ?
+                 WHERE session_id = ? AND resolved = 0 AND deposit_confirmed = 1",
+                params![now, session_id],
+            )?;
+            Ok(rows > 0)
+        })
+        .await?
+    }
+
+    /// Confirm deposit for a session from on-chain event (DEC-018)
+    /// Validates session_id and net_amount match
+    pub async fn confirm_deposit_on_chain(
+        &self,
+        session_id: &str,
+        net_amount: u64,
+        client_address: &str,
+        tx_hash: &str,
+        block_number: u64,
+    ) -> Result<bool> {
+        let path = self.path.clone();
+        let session_id = session_id.to_string();
+        let client_address = client_address.to_string();
+        let tx_hash = tx_hash.to_string();
+        let db_key = database_key()?;
+
+        task::spawn_blocking(move || -> Result<bool> {
+            let conn = open_connection(&path, &db_key)?;
+
+            // Check existing session
+            let existing: Option<(i64, i64)> = conn
+                .query_row(
+                    "SELECT deposit_confirmed, amount FROM sessions WHERE session_id = ?",
+                    params![session_id],
+                    |row| Ok((row.get(0)?, row.get(1)?)),
+                )
+                .optional()?;
+
+            match existing {
+                Some((1, _)) => {
+                    // Already confirmed (idempotent), update tx_hash and block if missing
+                    let _ = conn.execute(
+                        "UPDATE sessions
+                         SET deposit_tx_hash = coalesce(deposit_tx_hash, ?),
+                             deposit_block_number = coalesce(deposit_block_number, ?)
+                         WHERE session_id = ?",
+                        params![tx_hash, block_number as i64, session_id],
+                    );
+                    Ok(true)
+                }
+                Some((0, stored_amount)) => {
+                    if stored_amount as u64 != net_amount {
+                        eprintln!(
+                            "DEPOSIT REJECTED: Amount mismatch for session {}. Expected {}, got on-chain {}",
+                            session_id, stored_amount, net_amount
+                        );
+                        return Ok(false);
+                    }
+                    let rows = conn.execute(
+                        "UPDATE sessions
+                         SET deposit_confirmed = 1,
+                             client_address = CASE WHEN client_address = '' THEN ? ELSE client_address END,
+                             deposit_tx_hash = ?,
+                             deposit_block_number = ?
+                         WHERE session_id = ? AND deposit_confirmed = 0",
+                        params![client_address, tx_hash, block_number as i64, session_id],
+                    )?;
+                    Ok(rows > 0)
+                }
+                _ => {
+                    eprintln!("DEPOSIT NOTICE: On-chain deposit detected for unindexed session {}", session_id);
+                    Ok(false)
+                }
+            }
+        })
+        .await?
+    }
+
+    /// Check if deposit is confirmed for a session (DEC-018)
+    pub async fn is_deposit_confirmed(&self, session_id: &str) -> Result<bool> {
+        let path = self.path.clone();
+        let session_id = session_id.to_string();
+        let db_key = database_key()?;
+
+        task::spawn_blocking(move || -> Result<bool> {
+            let conn = open_connection(&path, &db_key)?;
+            let confirmed: Option<i64> = conn
+                .query_row(
+                    "SELECT deposit_confirmed FROM sessions WHERE session_id = ?",
+                    params![session_id],
+                    |row| row.get(0),
+                )
+                .optional()?;
+            Ok(confirmed.unwrap_or(0) == 1)
+        })
+        .await?
+    }
+
+    /// Get last indexed block number for a given indexer key (DEC-018)
+    pub async fn get_indexer_last_block(&self, key: &str) -> Result<Option<u64>> {
+        let path = self.path.clone();
+        let key = key.to_string();
+        let db_key = database_key()?;
+
+        task::spawn_blocking(move || -> Result<Option<u64>> {
+            let conn = open_connection(&path, &db_key)?;
+            let block: Option<i64> = conn
+                .query_row(
+                    "SELECT last_block FROM indexer_state WHERE key = ?",
+                    params![key],
+                    |row| row.get(0),
+                )
+                .optional()?;
+            Ok(block.map(|b| b as u64))
+        })
+        .await?
+    }
+
+    /// Set last indexed block number for a given indexer key (DEC-018)
+    pub async fn set_indexer_last_block(&self, key: &str, last_block: u64) -> Result<()> {
+        let path = self.path.clone();
+        let key = key.to_string();
+        let db_key = database_key()?;
+
+        task::spawn_blocking(move || -> Result<()> {
+            let conn = open_connection(&path, &db_key)?;
+            let now = unix_timestamp()?;
+            conn.execute(
+                "INSERT INTO indexer_state (key, last_block, updated_at)
+                 VALUES (?, ?, ?)
+                 ON CONFLICT(key) DO UPDATE SET last_block = excluded.last_block, updated_at = excluded.updated_at",
+                params![key, last_block as i64, now],
+            )?;
+            Ok(())
         })
         .await?
     }
@@ -2175,5 +2399,97 @@ mod tests {
         let rec_failed = db.get_relayer_tx(tx2).await.unwrap().unwrap();
         assert_eq!(rec_failed.status, "failed");
         assert_eq!(rec_failed.error_reason, Some("reverted".to_string()));
+    }
+
+    #[tokio::test]
+    async fn test_on_chain_deposit_confirmation_and_reveal_lifecycle() {
+        std::env::set_var("NIMBUS_DB_KEY", "test-encryption-key");
+        let tmp = TempDir::new().unwrap();
+        let db_path = tmp.path().join("reveal_lifecycle.db");
+        let db = Database::new(&db_path).await.unwrap();
+
+        let session_id = "0xsession123";
+        let amount = 1_000_000u64;
+        let com_k_hex = "0xcomk";
+        let masking_key_hex = "0xmaskingkey";
+        let client_address = "0xclient";
+        let tx_hash = "0xtxhash123";
+        let block_number = 12345u64;
+
+        db.insert_signing_session(
+            session_id,
+            com_k_hex,
+            amount,
+            client_address,
+            masking_key_hex,
+        )
+        .await
+        .unwrap();
+
+        // 1. Initially deposit is not confirmed
+        assert!(!db.is_deposit_confirmed(session_id).await.unwrap());
+
+        // 2. Negative: Wrong amount rejected
+        let wrong_amount_res = db
+            .confirm_deposit_on_chain(
+                session_id,
+                amount + 500,
+                client_address,
+                tx_hash,
+                block_number,
+            )
+            .await
+            .unwrap();
+        assert!(!wrong_amount_res);
+        assert!(!db.is_deposit_confirmed(session_id).await.unwrap());
+
+        // 3. Positive: Correct confirmation
+        let ok_res = db
+            .confirm_deposit_on_chain(session_id, amount, client_address, tx_hash, block_number)
+            .await
+            .unwrap();
+        assert!(ok_res);
+        assert!(db.is_deposit_confirmed(session_id).await.unwrap());
+
+        // 4. Idempotent call returns true
+        let idem_res = db
+            .confirm_deposit_on_chain(session_id, amount, client_address, tx_hash, block_number)
+            .await
+            .unwrap();
+        assert!(idem_res);
+
+        // 5. Query for reveal
+        let session_info = db
+            .get_session_for_reveal(session_id)
+            .await
+            .unwrap()
+            .expect("session found");
+        assert_eq!(session_info.session_id, session_id);
+        assert_eq!(session_info.com_k_hex, com_k_hex);
+        assert_eq!(session_info.masking_key_hex, masking_key_hex);
+        assert!(session_info.deposit_confirmed);
+        assert!(!session_info.resolved);
+
+        // 6. Mark resolved
+        assert!(db.mark_session_resolved(session_id).await.unwrap());
+        // Duplicate mark resolved fails (already resolved)
+        assert!(!db.mark_session_resolved(session_id).await.unwrap());
+
+        // 7. Check indexer state persistence
+        assert_eq!(
+            db.get_indexer_last_block("deposit_indexer_last_block")
+                .await
+                .unwrap(),
+            None
+        );
+        db.set_indexer_last_block("deposit_indexer_last_block", 99999)
+            .await
+            .unwrap();
+        assert_eq!(
+            db.get_indexer_last_block("deposit_indexer_last_block")
+                .await
+                .unwrap(),
+            Some(99999)
+        );
     }
 }

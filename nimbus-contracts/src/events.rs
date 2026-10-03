@@ -8,6 +8,7 @@ sol! {
     /// Emitted when a deposit is processed with its fee breakdown (DEC-016 & Gate D).
     event DepositFee(
         bytes32 indexed session_id,
+        bytes32 indexed com_k_hash,
         address indexed client,
         uint256 gross_amount,
         uint256 fee,

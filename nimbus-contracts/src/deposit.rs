@@ -196,8 +196,10 @@ impl Nimbus {
         }
 
         // Emit DepositFee event
+        let com_k_hash = self.session_commitment_hash.get(sid);
         crate::events::emit_event(crate::events::DepositFee {
             session_id: sid,
+            com_k_hash,
             client,
             gross_amount: amount,
             fee,

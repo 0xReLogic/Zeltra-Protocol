@@ -72,7 +72,8 @@ Ref: [`docs/todos/private-note-balance.md`](file:///workspaces/Zeltra-Protocol/d
   - Tangani replacement transaction otomatis jika transaksi stuck di mempool.
   - Deteksi dan tangani nonce collision antar worker.
   - Ekspos API status transaksi: `GET /api/tx-status?tx_hash=...` (pending/confirmed/failed).
-- [ ] **Deposit Event Indexer On-Chain**:
+- [x] **Deposit Event Indexer On-Chain**:
+  - Ref: [`research/decisions/DEC-018-on-chain-deposit-indexer-and-cryptographic-reveal-verification.md`](file:///workspaces/Zeltra-Protocol/research/decisions/DEC-018-on-chain-deposit-indexer-and-cryptographic-reveal-verification.md)
   - Gantikan pencatatan deposit berbasis API murni dengan event listener on-chain dari smart contract.
   - Verifikasi `k * pk_iss == stored com_k` sebelum resolve session.
 - [ ] **Input & Safety Validation**:

@@ -76,6 +76,10 @@ impl RuntimeMode {
         matches!(self, Self::HardTest | Self::Production | Self::Mainnet)
     }
 
+    pub fn is_dev(self) -> bool {
+        matches!(self, Self::Development | Self::Test)
+    }
+
     pub fn label(self) -> &'static str {
         match self {
             Self::Development => "development",

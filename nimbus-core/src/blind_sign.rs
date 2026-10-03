@@ -51,6 +51,16 @@ pub fn client_verify_masked(
     lhs == rhs
 }
 
+/// Verifies that a revealed masking key k matches its commitment: com_k == k * pk_iss on G2.
+pub fn verify_masking_key_commitment(
+    pk_iss: &IssuerPublicKey,
+    k: &MaskingKey,
+    com_k: &MaskingKeyCommitment,
+) -> bool {
+    let expected_com_k = pk_iss.0 * k.0;
+    expected_com_k == com_k.0
+}
+
 /// Client: unmasks the signature once the masking key k is revealed on-chain.
 /// alpha = (r * k)^-1 * masked_sig
 pub fn client_unmask(
@@ -77,4 +87,65 @@ pub fn verify_unmasked(
     let hm = hash_to_g1(message);
     let rhs = Bls12_381::pairing(hm, pk_iss.0);
     lhs == rhs
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ark_ff::UniformRand;
+
+    #[test]
+    fn test_verify_masking_key_commitment_positive() {
+        let mut rng = rand::thread_rng();
+        let sk = Fr::rand(&mut rng);
+        let pk_iss = IssuerPublicKey(G2Projective::generator() * sk);
+
+        let k_scalar = Fr::rand(&mut rng);
+        let k = MaskingKey(k_scalar);
+        let com_k = MaskingKeyCommitment(pk_iss.0 * k_scalar);
+
+        assert!(verify_masking_key_commitment(&pk_iss, &k, &com_k));
+    }
+
+    #[test]
+    fn test_verify_masking_key_commitment_negative_tampered_k() {
+        let mut rng = rand::thread_rng();
+        let sk = Fr::rand(&mut rng);
+        let pk_iss = IssuerPublicKey(G2Projective::generator() * sk);
+
+        let k_scalar = Fr::rand(&mut rng);
+        let com_k = MaskingKeyCommitment(pk_iss.0 * k_scalar);
+
+        let tampered_k = MaskingKey(k_scalar + Fr::from(1u64));
+        assert!(!verify_masking_key_commitment(&pk_iss, &tampered_k, &com_k));
+    }
+
+    #[test]
+    fn test_verify_masking_key_commitment_negative_tampered_com_k() {
+        let mut rng = rand::thread_rng();
+        let sk = Fr::rand(&mut rng);
+        let pk_iss = IssuerPublicKey(G2Projective::generator() * sk);
+
+        let k_scalar = Fr::rand(&mut rng);
+        let k = MaskingKey(k_scalar);
+        let com_k = MaskingKeyCommitment(pk_iss.0 * k_scalar);
+
+        let tampered_com_k = MaskingKeyCommitment(com_k.0 + G2Projective::generator());
+        assert!(!verify_masking_key_commitment(&pk_iss, &k, &tampered_com_k));
+    }
+
+    #[test]
+    fn test_verify_masking_key_commitment_negative_wrong_issuer() {
+        let mut rng = rand::thread_rng();
+        let sk1 = Fr::rand(&mut rng);
+        let pk_iss1 = IssuerPublicKey(G2Projective::generator() * sk1);
+        let sk2 = Fr::rand(&mut rng);
+        let pk_iss2 = IssuerPublicKey(G2Projective::generator() * sk2);
+
+        let k_scalar = Fr::rand(&mut rng);
+        let k = MaskingKey(k_scalar);
+        let com_k = MaskingKeyCommitment(pk_iss1.0 * k_scalar);
+
+        assert!(!verify_masking_key_commitment(&pk_iss2, &k, &com_k));
+    }
 }

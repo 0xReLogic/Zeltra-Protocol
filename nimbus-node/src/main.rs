@@ -2,6 +2,7 @@ mod ccip_monitor;
 mod circuit_breaker;
 mod config;
 mod database;
+mod deposit_indexer;
 mod dto;
 mod evm_client;
 mod execution_fee_claimer;
@@ -225,6 +226,12 @@ async fn main() {
     let fee_claimer_state = state.clone();
     tokio::spawn(async move {
         execution_fee_claimer::execution_fee_claimer_worker(fee_claimer_state).await;
+    });
+
+    // Spawn on-chain deposit indexer background worker (DEC-018)
+    let deposit_indexer_state = state.clone();
+    tokio::spawn(async move {
+        deposit_indexer::deposit_indexer_worker(deposit_indexer_state).await;
     });
 
     let app = Router::new()
