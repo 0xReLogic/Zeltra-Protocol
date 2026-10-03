@@ -57,6 +57,8 @@ Ref: [`docs/todos/private-note-balance.md`](file:///workspaces/Zeltra-Protocol/d
   - Tolak semua caller jika router belum dikonfigurasi.
   - Validasi `source_chain_selector` dan bind sender contract yang sah untuk setiap chain.
 - [ ] **Fee & Events**:
+  - Ref: [`docs/todos/fee-policy-zero-deposit.md`](file:///workspaces/Zeltra-Protocol/docs/todos/fee-policy-zero-deposit.md)
+  - Evaluasi kebijakan fee deposit vs spend (0% deposit vs dynamic configurable `deposit_fee_bps`).
   - Pastikan refund akibat gagal issuance/settlement tidak dikenai protocol fee.
   - Tambahkan event terpisah untuk deposit fee, protocol fee, execution fee, change commitment, dan fee claim.
 
