@@ -20,31 +20,36 @@ Dokumen ini adalah memori konteks persisten untuk agen AI saat bekerja di reposi
 3. **Settlement & Batching:** Persistent queue SQLite dengan leasing worker, retry exponential backoff, dan entrypoint `batch_spend()` (2-8 item) terdeploy on-chain.
 4. **CCIP & Finality:** Tracking pesan CCIP dan refund timelock 24 jam.
 
-### B. Keputusan Desain: Jalur B (ZK-UTXO Private Note Balance)
-* Masalah sistem voucher lama (1 deposit = 1 spend, uang kembalian hangus di kontrak) diselesaikan melalui **Jalur B (ZK-UTXO Model)** mengacu pada `DEC-016` & `DEC-016A`.
-* Setiap transaksi *partial spend* mengkonsumsi input note dan otomatis men-generate **Change Note baru** ke Merkle tree atas spending key privat user via ZK-SNARK Groth16.
-* **Hukum Kekekalan Nilai (Value Conservation):**
-  $$\text{Input Note} = \text{Payout} + \text{Protocol Fee} + \text{Execution Fee} + \text{Change Note}$$
+### B. Arsitektur ZK-UTXO & Gate D (Private Note Balance)
+* **Jalur B (ZK-UTXO Model):** Sesuai `DEC-016`, `DEC-016A`, dan `DEC-016B`.
+* **Gate C0 Security Repair Selesai:**
+  - Bit Merkle path terikat ke `input_leaf_index` (20 bits decomposition gadget).
+  - Boolean constraint pada `has_change` dan zero-change integrity.
+  - 64-bit integer range constraints mencegah overflow / modular wrap-around di $\mathbb{F}_r$.
+* **Gate D Merkle Tree Terintegrasi:** State LeanIMT Merkle tree tingkat 20 terdeploy on-chain di smart contract Stylus, dengan history bounded accepted-root.
+
+### C. Relayer Hardening (DEC-017 & DEC-018)
+* **DEC-017 Receipt Finality & Nonce Lock:** Thread-safe atomic nonce manager, mempool watchdog, dan automatic +15% gas-bump transaction replacement.
+* **DEC-018 On-Chain Deposit Indexer & Cryptographic Reveal:**
+  - Event listener on-chain `DepositFee` dengan `com_k_hash` terindeks.
+  - Reorg-safe indexing window dengan ambang batas konfirmasi finalitas dan checkpoint persistent di tabel `indexer_state`.
+  - Verifikasi kriptografis kurva eliptis $k \cdot \text{pk}_{\text{iss}} == \text{com}_k$ enforced *fail-closed* sebelum rilis kunci $k$.
 
 ---
 
-## 3. Prioritas Aktif Sekarang: Gate C0 Security Repair
+## 3. Prioritas Aktif Selanjutnya
 
-Lokasi target: [`nimbus-core/src/note_circuit.rs`](file:///workspaces/Zeltra-Protocol/nimbus-core/src/note_circuit.rs)  
-Referensi audit: [`docs/todos/private-note-balance.md`](file:///workspaces/Zeltra-Protocol/docs/todos/private-note-balance.md) & [`DEC-016B`](file:///workspaces/Zeltra-Protocol/research/decisions/DEC-016B-mvp-circuit-shortcuts.md)
+Mengacu pada master checklist [`todo.md`](file:///workspaces/Zeltra-Protocol/todo.md):
 
-Audit menemukan 3 blocker kritis pada sirkuit Groth16 prototype yang **wajib diperbaiki sebelum Gate D (integrasi contract)**:
+1. **Input & Safety Validation (`nimbus-node`):**
+   * Validasi recipient address EVM valid, batas min/max amount, dan chain selector allowlist.
+   * Rekonsiliasi status database dengan nullifier contract setelah node restart.
+2. **Batch & Fee Metrics (`nimbus-node`):**
+   * Tambahkan batch profitability metrics ke health endpoint & DB (`batch_count`, `total_batch_margin_usdc`, `avg_batch_size`).
+3. **Cross-Chain CCIP Testing & Verification (Phase 4):**
+   * Testnet E2E Hard-Test di Arbitrum Sepolia (source broadcast $\rightarrow$ router $\rightarrow$ destination execution $\rightarrow$ destination confirmation).
+   * Uji jalur kegagalan destination failure (refund 24h & double payout rejection).
 
-1. **[P0] Ikat Bit Merkle Path ke `input_leaf_index` di Circuit:**
-   * Dekomposisi `leaf_index` menjadi tepat 20 boolean bits di circuit.
-   * Enforce $\text{leaf\_index} == \sum_{i=0}^{19} \text{bit}_i \cdot 2^i$ dan $< 2^{20}$.
-   * Gunakan bit-bit tersebut untuk menentukan arah hashing kiri/kanan pada Merkle path (mencegah double-spending via pergantian leaf index).
-2. **[P0] Boolean Constraint pada `has_change`:**
-   * Enforce constraint boolean: $\text{has\_change} \times (1 - \text{has\_change}) == 0$.
-   * Enforce jika `has_change == 0` maka $\text{change\_value} == 0$ dan output commitment nol.
-3. **[P0] Integer Range Safety (64-bit Constraints):**
-   * Range constrain input value, payout, protocol fee, execution fee, dan change value ke $[0, 2^{64})$ menggunakan bit-decomposition gadget.
-   * Mencegah eksploitasi pencetakan uang melalui *modular wrap-around* pada scalar field $\mathbb{F}_r$.
 
 ---
 
@@ -74,10 +79,11 @@ Audit menemukan 3 blocker kritis pada sirkuit Groth16 prototype yang **wajib dip
 
 ## 5. Aturan Kerja Agen (Operating Principles)
 
-1. **Cek Source Code Riil Terlebih Dahulu:** Jangan berasumsi atau hanya membaca ringkasan. Buka dan baca kode Rust aslinya sebelum mengubah atau mendokumentasikan.
-2. **Hindari Birokrasi Berlebihan:** Jangan membuat puluhan file markdown baru atau checklist ribet yang mendistraksi developer. Jaga dokumentasi tetap terpusat pada bab modular yang sudah ada.
-3. **Zero Breaking Change untuk Public API:** Semua fungsi yang diexport di `lib.rs` harus tetap kompatibel dengan crate lain di workspace.
-4. **Keamanan Kriptografi & Finansial:**
+1. **Gunakan CodeGraph MCP Terlebih Dahulu (Mandatory):** Repository ini diindeks dengan CodeGraph (`.codegraph/`). Panggil MCP `codegraph_explore` (atau shell `codegraph explore "<query>"`) **SEBELUM** grep, find, atau manual read file. CodeGraph mengembalikan verbatim source ber-line number, call paths, dan blast radius lengkap dalam 1 kali round-trip hemat token.
+2. **Cek Source Code Riil Terlebih Dahulu:** Jangan berasumsi atau hanya membaca ringkasan. Buka dan baca kode Rust aslinya sebelum mengubah atau mendokumentasikan.
+3. **Hindari Birokrasi Berlebihan:** Jangan membuat puluhan file markdown baru atau checklist ribet yang mendistraksi developer. Jaga dokumentasi tetap terpusat pada bab modular yang sudah ada.
+4. **Zero Breaking Change untuk Public API:** Semua fungsi yang diexport di `lib.rs` harus tetap kompatibel dengan crate lain di workspace.
+5. **Keamanan Kriptografi & Finansial:**
    * Jangan pernah membypass verifikasi kriptografi di production path.
    * `fail-closed` jika rahasia/kunci tidak tersedia (dilarang fallback ke mock key di mode non-test).
    * Uji selalu kondisi negatif (tes gagal harus membuktikan state on-chain/DB tidak berubah).
@@ -86,6 +92,7 @@ Audit menemukan 3 blocker kritis pada sirkuit Groth16 prototype yang **wajib dip
 
 ## 6. Tooling & MCP Capabilities
 
+* **CodeGraph MCP (`codegraph_explore`) [MANDATORY FIRST STEP]:** Tool utama pencarian dan pemetaan kode. Panggil untuk memahami flow antar fungsi, caller hierarchy, dan blast radius sebelum melakukan edit.
 * **Web Search & Fetching:** Tersedia MCP `parallel-search` (`web_search`, `web_fetch`) dan native `search_web`/`read_url_content` untuk mencari paper ZK, auditing report, atau referensi kriptografi terkini.
 * **Browser Agent:** Tersedia `browser_subagent` jika butuh navigasi interaktif atau visual inspection.
 * **Environment:** Codespace Linux dengan Git, Curl, dan tool eksekusi shell. Selalu verifikasi sintaks dan tipe secara ketat pada crate `nimbus-core` dan `nimbus-contracts`.

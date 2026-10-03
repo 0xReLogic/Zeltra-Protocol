@@ -53,6 +53,10 @@ Client                                  Issuer / Leader
      $$e(\tilde{\sigma}, G_2) == e(X, com_k)$$
    * *Pembuktian:*
      $$e(\tilde{\sigma}, G_2) = e((k \cdot sk_{iss}) \cdot (r \cdot H(m)), G_2) = e(r \cdot H(m), k \cdot sk_{iss} \cdot G_2) = e(X, com_k)$$
+3b. **Masking Key Verification (Relayer Node - DEC-018):**
+   * Sebelum kunci masking $k$ dirilis ke client pada endpoint `/api/reveal`, relayer membuktikan keaslian $k$ terhadap komitmen $com_k$ yang tersimpan menggunakan [`verify_masking_key_commitment`](file:///workspaces/Zeltra-Protocol/nimbus-core/src/blind_sign.rs):
+     $$k \cdot pk_{iss} == com_k \in G_2$$
+   * Menjamin *fail-closed*: jika nilai $k$ rusak di basis data atau dimanipulasi, rilis kunci ditolak (`REJECTED`) sehingga client terlindungi dari unmasking dengan kunci korup.
 4. **Unmasking (Client):**
    * Setelah deposit confirmed dan $k$ dirilis oleh leader:
      $$\alpha = (r \cdot k)^{-1} \cdot \tilde{\sigma} \in G_1$$

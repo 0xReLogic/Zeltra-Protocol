@@ -26,9 +26,14 @@ Client memanggil deposit_with_commitment(sid, com_k_bytes, amount, note_commitme
   │      • session_note_commitment = note_commitment (Binding Gate D)
   │      • total_deposited_principal += net_amount
   │      • refundable_deposit_liability += net_amount
-  ├── 9. Emit event DepositFee(sid, client, 0)
+  ├── 9. Emit event DepositFee(sid, com_k_hash, client, gross_amount, fee, net_amount) (DEC-018)
   └── 10. Verifikasi invariant solvabilitas (Assets >= Liabilities)
 ```
+
+### Getter View Publik Sesi (DEC-018):
+Smart contract menyediakan fungsi view publik untuk memvalidasi status sesi tanpa biaya gas:
+* `get_session_commitment_hash(bytes32 session_id) -> bytes32`: Mengembalikan hash komitmen `keccak256(com_k)` yang tersimpan di contract storage.
+* `is_session_active(bytes32 session_id) -> bool`: Mengembalikan `true` jika sesi aktif (terdaftar, belum di-reveal, dan belum di-refund).
 
 ---
 
