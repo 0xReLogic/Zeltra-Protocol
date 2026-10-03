@@ -66,3 +66,14 @@ pub fn to_evm_scalar(scalar: &Fr) -> [u8; 32] {
     }
     evm_buf
 }
+
+/// Helper to deserialize a scalar Fr from EVM Big-Endian format (32 bytes).
+/// Validates that the scalar element is strictly within the field modulus.
+pub fn from_evm_scalar(bytes: &[u8; 32]) -> Option<Fr> {
+    use ark_serialize::CanonicalDeserialize;
+    let mut le_buf = [0u8; 32];
+    for j in 0..32 {
+        le_buf[j] = bytes[31 - j];
+    }
+    Fr::deserialize_uncompressed(&le_buf[..]).ok()
+}

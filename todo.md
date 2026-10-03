@@ -49,7 +49,7 @@ Ref: [`docs/todos/private-note-balance.md`](file:///workspaces/Zeltra-Protocol/d
   - Integrasikan storage terpisah: `user_note_liability`, `refundable_deposit_liability`, `accrued_execution_fee_liability`.
   - Saat spend, kurangi user liability sebesar payout + protocol fee + execution fee.
   - Tolak fee claim yang menyentuh backing deposit user/refund.
-- [ ] **Append-only Note Commitment Tree (Gate D)**:
+- [x] **Append-only Note Commitment Tree (Gate D)**:
   - Tambahkan state Merkle tree on-chain dan bounded accepted-root history di Stylus.
   - Initial commitment hanya bisa di-mint dari deposit confirmed sebesar net deposit.
 - [ ] **CCIP Contract Hardening**:

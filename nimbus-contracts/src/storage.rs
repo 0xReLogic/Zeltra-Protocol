@@ -72,6 +72,26 @@ sol_storage! {
         uint256 accrued_execution_fee_liability;
         // Protocol fees realized and retained as protocol equity
         uint256 realized_protocol_fees;
+
+        // --- Append-Only Note Commitment Tree (Gate D: LeanIMT Depth 20) ---
+        // Next leaf index to be inserted into the Merkle tree (0 .. 2^20)
+        uint256 note_tree_next_index;
+        // Current Merkle tree root hash
+        bytes32 note_tree_root;
+        // Frontier: right-most filled subtrees at each level 0..19 for O(depth) appends
+        mapping(uint256 => bytes32) note_tree_filled_subtrees;
+        // Bounded accepted roots: mapping root hash to registration block timestamp
+        mapping(bytes32 => uint256) accepted_note_roots;
+        // Ring buffer history of recent roots (size 100)
+        mapping(uint256 => bytes32) root_history;
+        // Pointer index in the root history ring buffer (0 .. 99)
+        uint256 root_history_index;
+
+        // --- Gated Initial Note Minting (DEC-016 Gate D) ---
+        // Commitment bound to the deposit session at deposit time
+        mapping(bytes32 => bytes32) session_note_commitment;
+        // Namespaced private-note nullifier set (distinct from legacy BLS nullifiers)
+        mapping(bytes32 => bool) note_nullifiers;
     }
 }
 

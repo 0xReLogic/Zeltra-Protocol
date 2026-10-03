@@ -250,13 +250,13 @@ dapat direkonstruksi dari seed publik.
 
 ## Gate D - Contract Private Note Ledger
 
-- [ ] Fresh deployment design; jangan ubah semantic storage deployment lama.
-- [ ] Tambahkan append-only note commitment tree.
-- [ ] Tambahkan bounded accepted-root history.
-- [ ] Tambahkan namespaced private-note nullifier set.
-- [ ] Deposit confirmed hanya dapat mint initial commitment sebesar net deposit.
-- [ ] Bind initial note commitment ke deposit session sebelum reveal.
-- [ ] Pastikan guardian/BLS quorum tidak dapat mint note tanpa collateral.
+- [x] Fresh deployment design; jangan ubah semantic storage deployment lama.
+- [x] Tambahkan append-only note commitment tree.
+- [x] Tambahkan bounded accepted-root history.
+- [x] Tambahkan namespaced private-note nullifier set.
+- [x] Deposit confirmed hanya dapat mint initial commitment sebesar net deposit.
+- [x] Bind initial note commitment ke deposit session sebelum reveal.
+- [x] Pastikan guardian/BLS quorum tidak dapat mint note tanpa collateral.
 - [ ] Tambahkan private-note spend entrypoint dengan:
   - accepted root;
   - input nullifiers;

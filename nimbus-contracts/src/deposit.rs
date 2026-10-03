@@ -54,9 +54,7 @@ impl Nimbus {
                 let stablecoin_address = self.stablecoin.get();
                 let erc20 = IErc20::new(stablecoin_address);
                 let host = Self::runtime_host();
-                let success = erc20
-                    .transfer(&host, Call::new_mutating(self), client, amount)
-                    .map_err(|e| e)?;
+                let success = erc20.transfer(&host, Call::new_mutating(self), client, amount)?;
                 if !success {
                     return Err(b"REFUND_TRANSFER_FAILED".to_vec());
                 }
@@ -76,6 +74,24 @@ impl Nimbus {
         com_k_bytes: Bytes,
         amount: U256,
     ) -> Result<(), Vec<u8>> {
+        self._deposit_with_commitment(sid, com_k_bytes, amount, FixedBytes::ZERO)
+    }
+
+    /// Deposit funds for atomic token issuance with bound initial note commitment (DEC-016 Gate D).
+    pub fn _deposit_with_commitment(
+        &mut self,
+        sid: FixedBytes<32>,
+        com_k_bytes: Bytes,
+        amount: U256,
+        note_commitment: FixedBytes<32>,
+    ) -> Result<(), Vec<u8>> {
+        if note_commitment != FixedBytes::ZERO {
+            // Validate commitment is a canonical scalar field element
+            if crate::types::from_evm_scalar(&note_commitment.0).is_none() {
+                return Err(b"INVALID_NOTE_COMMITMENT_SCALAR".to_vec());
+            }
+            self.session_note_commitment.insert(sid, note_commitment);
+        }
         // 1. CHECKS
         self.check_not_paused()?;
 
@@ -136,15 +152,13 @@ impl Nimbus {
             let host = Self::runtime_host();
 
             // Call transferFrom to transfer the collateral from user to this contract
-            let success = erc20
-                .transfer_from(
-                    &host,
-                    Call::new_mutating(self),
-                    client,
-                    this_address,
-                    amount,
-                )
-                .map_err(|e| e)?;
+            let success = erc20.transfer_from(
+                &host,
+                Call::new_mutating(self),
+                client,
+                this_address,
+                amount,
+            )?;
             if !success {
                 return Err(b"TRANSFER_FROM_FAILED".to_vec());
             }
@@ -152,9 +166,8 @@ impl Nimbus {
             // Send 0.1% fee to fee_recipient
             if fee > U256::ZERO {
                 let recipient = self.fee_recipient.get();
-                let fee_success = erc20
-                    .transfer(&host, Call::new_mutating(self), recipient, fee)
-                    .map_err(|e| e)?;
+                let fee_success =
+                    erc20.transfer(&host, Call::new_mutating(self), recipient, fee)?;
                 if !fee_success {
                     return Err(b"FEE_TRANSFER_FAILED".to_vec());
                 }
@@ -229,6 +242,13 @@ impl Nimbus {
             let user_liab = self.user_note_liability.get();
             if let Some(new_user_liab) = user_liab.checked_add(amount) {
                 self.user_note_liability.set(new_user_liab);
+            }
+
+            // Gate D: If an initial note commitment was bound to this deposit session,
+            // atomically mint it into the on-chain Merkle tree
+            let bound_commitment = self.session_note_commitment.get(sid);
+            if bound_commitment != FixedBytes::ZERO {
+                self._merkle_insert(bound_commitment)?;
             }
 
             Ok(true)

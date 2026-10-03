@@ -300,9 +300,7 @@ impl Nimbus {
 
             // Transfer payout to recipient (if not zero address)
             if recipient != Address::ZERO && payout > U256::ZERO {
-                let success = erc20
-                    .transfer(&host, Call::new_mutating(self), recipient, payout)
-                    .map_err(|e| e)?;
+                let success = erc20.transfer(&host, Call::new_mutating(self), recipient, payout)?;
                 if !success {
                     return Err(b"SPEND_TRANSFER_FAILED".to_vec());
                 }
@@ -311,14 +309,12 @@ impl Nimbus {
             // Transfer fee to fee_recipient
             if protocol_share > U256::ZERO {
                 let recipient_fee = self.fee_recipient.get();
-                let fee_success = erc20
-                    .transfer(
-                        &host,
-                        Call::new_mutating(self),
-                        recipient_fee,
-                        protocol_share,
-                    )
-                    .map_err(|e| e)?;
+                let fee_success = erc20.transfer(
+                    &host,
+                    Call::new_mutating(self),
+                    recipient_fee,
+                    protocol_share,
+                )?;
                 if !fee_success {
                     return Err(b"SPEND_FEE_TRANSFER_FAILED".to_vec());
                 }
@@ -410,9 +406,8 @@ impl Nimbus {
             }
 
             // Approve Polymarket CTF to spend payout amount of collateral token
-            let approve_success = erc20
-                .approve(&host, Call::new_mutating(self), polymarket_ctf, payout)
-                .map_err(|e| e)?;
+            let approve_success =
+                erc20.approve(&host, Call::new_mutating(self), polymarket_ctf, payout)?;
             if !approve_success {
                 return Err(b"POLYMARKET_APPROVE_FAILED".to_vec());
             }
@@ -472,9 +467,7 @@ impl Nimbus {
             let stablecoin_address = self.stablecoin.get();
             let erc20 = IErc20::new(stablecoin_address);
             let host = Self::runtime_host();
-            let success = erc20
-                .transfer(&host, Call::new_mutating(self), recipient, amount)
-                .map_err(|e| e)?;
+            let success = erc20.transfer(&host, Call::new_mutating(self), recipient, amount)?;
             if !success {
                 return Err(b"REFUND_TRANSFER_FAILED".to_vec());
             }

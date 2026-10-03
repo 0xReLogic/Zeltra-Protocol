@@ -1,5 +1,10 @@
 #![cfg_attr(all(not(feature = "export-abi"), not(test)), no_main)]
-#![allow(unused_variables, dead_code, unused_imports)]
+#![allow(
+    unused_variables,
+    dead_code,
+    unused_imports,
+    clippy::too_many_arguments
+)]
 extern crate alloc;
 
 #[cfg(target_arch = "wasm32")]
@@ -16,6 +21,8 @@ mod constants;
 mod deposit;
 mod helpers;
 mod interfaces;
+mod merkle;
+mod poseidon_w5_constants;
 mod spend;
 mod storage;
 mod types;
@@ -200,6 +207,39 @@ impl Nimbus {
         Ok(self.total_deposited_principal.get())
     }
 
+    /// Returns the current Merkle tree root hash. If next_index == 0, returns the canonical empty root (DEC-016 Gate D).
+    pub fn note_tree_root(&self) -> Result<FixedBytes<32>, Vec<u8>> {
+        let next_idx = self.note_tree_next_index.get();
+        if next_idx == U256::ZERO && self.note_tree_root.get() == FixedBytes::ZERO {
+            Ok(FixedBytes::from(
+                poseidon_w5_constants::EMPTY_TREE_ROOT_BYTES,
+            ))
+        } else {
+            Ok(self.note_tree_root.get())
+        }
+    }
+
+    /// Returns the next leaf index in the incremental Merkle tree (0 .. 2^20).
+    pub fn note_tree_next_index(&self) -> Result<U256, Vec<u8>> {
+        Ok(self.note_tree_next_index.get())
+    }
+
+    /// Checks if a root hash is currently accepted: either in accepted_note_roots, current root, or canonical empty root.
+    pub fn is_accepted_note_root(&self, root: FixedBytes<32>) -> Result<bool, Vec<u8>> {
+        Ok(self._is_accepted_note_root(root))
+    }
+
+    /// Returns root from the bounded ring buffer history (size 100).
+    pub fn get_root_history(&self, slot: U256) -> Result<FixedBytes<32>, Vec<u8>> {
+        let size = U256::from(poseidon_w5_constants::ROOT_HISTORY_SIZE);
+        Ok(self.root_history.get(slot % size))
+    }
+
+    /// Returns the note commitment bound to a deposit session.
+    pub fn session_note_commitment(&self, sid: FixedBytes<32>) -> Result<FixedBytes<32>, Vec<u8>> {
+        Ok(self.session_note_commitment.get(sid))
+    }
+
     /// Returns the CCIP Router address configured for the contract.
     pub fn ccip_router(&self) -> Result<Address, Vec<u8>> {
         Ok(self.ccip_router.get())
@@ -341,6 +381,17 @@ impl Nimbus {
         amount: U256,
     ) -> Result<(), Vec<u8>> {
         self._deposit(sid, com_k_bytes, amount)
+    }
+
+    /// Deposit funds with an initial private note commitment bound to the session (DEC-016 Gate D).
+    pub fn deposit_with_commitment(
+        &mut self,
+        sid: FixedBytes<32>,
+        com_k_bytes: Bytes,
+        amount: U256,
+        note_commitment: FixedBytes<32>,
+    ) -> Result<(), Vec<u8>> {
+        self._deposit_with_commitment(sid, com_k_bytes, amount, note_commitment)
     }
 
     pub fn reveal_mask_key(
@@ -539,9 +590,8 @@ impl Nimbus {
 
                 // Transfer payout to recipient (if not zero address)
                 if recipients[i] != Address::ZERO && payout > U256::ZERO {
-                    let success = erc20
-                        .transfer(&host, Call::new_mutating(self), recipients[i], payout)
-                        .map_err(|e| e)?;
+                    let success =
+                        erc20.transfer(&host, Call::new_mutating(self), recipients[i], payout)?;
                     if !success {
                         return Err(b"SPEND_TRANSFER_FAILED".to_vec());
                     }
@@ -550,14 +600,12 @@ impl Nimbus {
                 // Transfer fee to fee_recipient
                 if protocol_share > U256::ZERO {
                     let recipient_fee = self.fee_recipient.get();
-                    let fee_success = erc20
-                        .transfer(
-                            &host,
-                            Call::new_mutating(self),
-                            recipient_fee,
-                            protocol_share,
-                        )
-                        .map_err(|e| e)?;
+                    let fee_success = erc20.transfer(
+                        &host,
+                        Call::new_mutating(self),
+                        recipient_fee,
+                        protocol_share,
+                    )?;
                     if !fee_success {
                         return Err(b"SPEND_FEE_TRANSFER_FAILED".to_vec());
                     }
@@ -2495,9 +2543,15 @@ mod tests {
 
         // 0.20% fee on 100_000_000 is 200_000. Net deposit = 99_800_000
         let net_deposit = U256::from(99_800_000);
-        assert_eq!(contract.refundable_deposit_liability().unwrap(), net_deposit);
+        assert_eq!(
+            contract.refundable_deposit_liability().unwrap(),
+            net_deposit
+        );
         assert_eq!(contract.user_note_liability().unwrap(), U256::ZERO);
-        assert_eq!(contract.accrued_execution_fee_liability().unwrap(), U256::ZERO);
+        assert_eq!(
+            contract.accrued_execution_fee_liability().unwrap(),
+            U256::ZERO
+        );
 
         // Reveal the session
         let k_bytes = Bytes::from(alloc::vec![0u8; 32]);
@@ -2547,7 +2601,10 @@ mod tests {
             contract.user_note_liability().unwrap(),
             initial_user_liab - total_user_debit
         );
-        assert_eq!(contract.accrued_execution_fee_liability().unwrap(), exec_fee);
+        assert_eq!(
+            contract.accrued_execution_fee_liability().unwrap(),
+            exec_fee
+        );
         assert_eq!(contract.realized_protocol_fees().unwrap(), protocol_share);
     }
 
@@ -2559,7 +2616,11 @@ mod tests {
         let client = Address::repeat_byte(0x09);
 
         contract
-            .init(owner, Address::repeat_byte(0x02), Address::repeat_byte(0x03))
+            .init(
+                owner,
+                Address::repeat_byte(0x02),
+                Address::repeat_byte(0x03),
+            )
             .unwrap();
 
         let sid = FixedBytes::repeat_byte(0xcc);
@@ -2568,12 +2629,13 @@ mod tests {
 
         set_msg_sender(client);
         set_block_timestamp(1000);
-        contract
-            .deposit(sid, dummy_com_k, deposit_amount)
-            .unwrap();
+        contract.deposit(sid, dummy_com_k, deposit_amount).unwrap();
 
         let net_deposit = contract.session_amount.get(sid);
-        assert_eq!(contract.refundable_deposit_liability().unwrap(), net_deposit);
+        assert_eq!(
+            contract.refundable_deposit_liability().unwrap(),
+            net_deposit
+        );
 
         // Advance 24h + 1s timelock
         set_block_timestamp(1000 + 86401);
@@ -2592,7 +2654,11 @@ mod tests {
         let relayer = Address::repeat_byte(0x04);
 
         contract
-            .init(owner, Address::repeat_byte(0x02), Address::repeat_byte(0x03))
+            .init(
+                owner,
+                Address::repeat_byte(0x02),
+                Address::repeat_byte(0x03),
+            )
             .unwrap();
 
         set_msg_sender(owner);
@@ -2600,18 +2666,226 @@ mod tests {
 
         // Simulate 500 execution fee accrued
         contract.accumulated_execution_fees.set(U256::from(500));
-        contract.accrued_execution_fee_liability.set(U256::from(500));
+        contract
+            .accrued_execution_fee_liability
+            .set(U256::from(500));
 
         // Claim 300
         set_msg_sender(owner);
         contract.claim_execution_fees(U256::from(300)).unwrap();
 
         assert_eq!(contract.accumulated_execution_fees.get(), U256::from(200));
-        assert_eq!(contract.accrued_execution_fee_liability().unwrap(), U256::from(200));
+        assert_eq!(
+            contract.accrued_execution_fee_liability().unwrap(),
+            U256::from(200)
+        );
 
         // Claim remaining 200
         contract.claim_execution_fees(U256::from(200)).unwrap();
         assert_eq!(contract.accumulated_execution_fees.get(), U256::ZERO);
-        assert_eq!(contract.accrued_execution_fee_liability().unwrap(), U256::ZERO);
+        assert_eq!(
+            contract.accrued_execution_fee_liability().unwrap(),
+            U256::ZERO
+        );
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // Gate D: Append-Only Note Commitment Tree & Gated Minting Tests
+    // ═══════════════════════════════════════════════════════════════════════
+
+    #[test]
+    fn test_merkle_tree_empty_root_matches_kav() {
+        reset_test_state();
+        let contract = Nimbus::default();
+
+        let expected_empty_root =
+            FixedBytes::from(crate::poseidon_w5_constants::EMPTY_TREE_ROOT_BYTES);
+        assert_eq!(
+            contract.note_tree_root().unwrap(),
+            expected_empty_root,
+            "Initial root must match canonical empty tree root (depth 20)"
+        );
+        assert_eq!(contract.note_tree_next_index().unwrap(), U256::ZERO);
+        assert!(
+            contract.is_accepted_note_root(expected_empty_root).unwrap(),
+            "Canonical empty root must be accepted"
+        );
+    }
+
+    #[test]
+    fn test_merkle_tree_single_insert_matches_kav() {
+        reset_test_state();
+        let mut contract = Nimbus::default();
+
+        // KAV note commitment from DEC-016A
+        let leaf = FixedBytes::from(alloy_primitives::hex!(
+            "46d1b90c8a28c364fefdbb95bd709956e2f39a411750e6797fe1112b27635c59"
+        ));
+        let expected_root_after_1 = FixedBytes::from(alloy_primitives::hex!(
+            "3ed6d45ee8da74b055fa37a13ec3459e9fa97db5f89d014fdb0e41013fb56bfd"
+        ));
+
+        set_block_timestamp(500);
+        let (leaf_idx, new_root) = contract._merkle_insert(leaf).unwrap();
+
+        assert_eq!(leaf_idx, U256::ZERO);
+        assert_eq!(
+            new_root, expected_root_after_1,
+            "Root after 1 insert must exactly match DEC-016A KAV"
+        );
+        assert_eq!(contract.note_tree_root().unwrap(), expected_root_after_1);
+        assert_eq!(contract.note_tree_next_index().unwrap(), U256::from(1));
+
+        // Must be in accepted roots and in ring buffer history
+        assert!(contract.is_accepted_note_root(new_root).unwrap());
+        assert_eq!(
+            contract.get_root_history(U256::ZERO).unwrap(),
+            expected_root_after_1
+        );
+    }
+
+    #[test]
+    fn test_merkle_tree_gated_deposit_and_reveal_minting() {
+        reset_test_state();
+        let mut contract = Nimbus::default();
+        let owner = Address::repeat_byte(0x01);
+        let client = Address::repeat_byte(0x05);
+        let fee_recipient = Address::repeat_byte(0x03);
+
+        contract
+            .init(owner, Address::repeat_byte(0x02), fee_recipient)
+            .unwrap();
+
+        let sid = FixedBytes::repeat_byte(0xdd);
+        let deposit_amount = U256::from(100_000_000); // 100 USDC
+        let dummy_com_k = Bytes::from(alloc::vec![0u8; 256]);
+        let note_commitment = FixedBytes::from(alloy_primitives::hex!(
+            "46d1b90c8a28c364fefdbb95bd709956e2f39a411750e6797fe1112b27635c59"
+        ));
+        let expected_root_after_1 = FixedBytes::from(alloy_primitives::hex!(
+            "3ed6d45ee8da74b055fa37a13ec3459e9fa97db5f89d014fdb0e41013fb56bfd"
+        ));
+
+        // 1. User deposits with bound note commitment
+        set_msg_sender(client);
+        set_block_timestamp(1000);
+        contract
+            .deposit_with_commitment(sid, dummy_com_k.clone(), deposit_amount, note_commitment)
+            .unwrap();
+
+        // Before reveal: commitment is recorded, but Merkle tree is still empty (gated!)
+        assert_eq!(
+            contract.session_note_commitment(sid).unwrap(),
+            note_commitment
+        );
+        assert_eq!(contract.note_tree_next_index().unwrap(), U256::ZERO);
+        assert_eq!(
+            contract.note_tree_root().unwrap(),
+            FixedBytes::from(crate::poseidon_w5_constants::EMPTY_TREE_ROOT_BYTES)
+        );
+
+        // 2. Leader & guardians reveal masking key k
+        let k_bytes = Bytes::from(alloc::vec![0u8; 32]);
+        let pk_iss_bytes = Bytes::from(alloc::vec![0u8; 256]);
+        set_block_timestamp(1050);
+        let revealed = contract
+            .reveal_mask_key(sid, k_bytes, pk_iss_bytes, dummy_com_k.clone())
+            .unwrap();
+        assert!(revealed);
+
+        // After reveal: commitment is automatically and atomically minted into tree
+        assert_eq!(contract.note_tree_next_index().unwrap(), U256::from(1));
+        assert_eq!(contract.note_tree_root().unwrap(), expected_root_after_1);
+        assert!(contract
+            .is_accepted_note_root(expected_root_after_1)
+            .unwrap());
+
+        // Liabilities shifted properly
+        assert_eq!(contract.refundable_deposit_liability().unwrap(), U256::ZERO);
+        assert_eq!(
+            contract.user_note_liability().unwrap(),
+            U256::from(99_800_000)
+        );
+    }
+
+    #[test]
+    fn test_merkle_tree_refunded_deposit_cannot_mint_leaf() {
+        reset_test_state();
+        let mut contract = Nimbus::default();
+        let owner = Address::repeat_byte(0x01);
+        let client = Address::repeat_byte(0x05);
+
+        contract
+            .init(
+                owner,
+                Address::repeat_byte(0x02),
+                Address::repeat_byte(0x03),
+            )
+            .unwrap();
+
+        let sid = FixedBytes::repeat_byte(0xee);
+        let deposit_amount = U256::from(50_000_000); // 50 USDC
+        let dummy_com_k = Bytes::from(alloc::vec![0u8; 256]);
+        let note_commitment = FixedBytes::from(alloy_primitives::hex!(
+            "46d1b90c8a28c364fefdbb95bd709956e2f39a411750e6797fe1112b27635c59"
+        ));
+
+        // 1. User deposits
+        set_msg_sender(client);
+        set_block_timestamp(1000);
+        contract
+            .deposit_with_commitment(sid, dummy_com_k.clone(), deposit_amount, note_commitment)
+            .unwrap();
+
+        // 2. Issuance fails / leader unresponsive. 24h timelock expires
+        set_block_timestamp(1000 + 86400 + 1);
+        contract.claim_refund(sid).unwrap();
+
+        // 3. Leader attempts late reveal: must return Ok(false) and NEVER mint leaf
+        let k_bytes = Bytes::from(alloc::vec![0u8; 32]);
+        let pk_iss_bytes = Bytes::from(alloc::vec![0u8; 256]);
+        let revealed = contract
+            .reveal_mask_key(sid, k_bytes, pk_iss_bytes, dummy_com_k)
+            .unwrap();
+        assert!(!revealed, "Late reveal after refund must return false");
+
+        // Merkle tree remains completely unmolested
+        assert_eq!(contract.note_tree_next_index().unwrap(), U256::ZERO);
+        assert_eq!(
+            contract.note_tree_root().unwrap(),
+            FixedBytes::from(crate::poseidon_w5_constants::EMPTY_TREE_ROOT_BYTES)
+        );
+        assert_eq!(contract.user_note_liability().unwrap(), U256::ZERO);
+    }
+
+    #[test]
+    fn test_merkle_tree_invalid_commitment_scalar_rejected() {
+        reset_test_state();
+        let mut contract = Nimbus::default();
+        let owner = Address::repeat_byte(0x01);
+        let client = Address::repeat_byte(0x05);
+
+        contract
+            .init(
+                owner,
+                Address::repeat_byte(0x02),
+                Address::repeat_byte(0x03),
+            )
+            .unwrap();
+
+        let sid = FixedBytes::repeat_byte(0xff);
+        let deposit_amount = U256::from(50_000_000);
+        let dummy_com_k = Bytes::from(alloc::vec![0u8; 256]);
+
+        // Scalar >= modulus p for BLS12-381 Fr: 0xffffff...
+        let invalid_commitment = FixedBytes::repeat_byte(0xff);
+
+        set_msg_sender(client);
+        let err = contract
+            .deposit_with_commitment(sid, dummy_com_k, deposit_amount, invalid_commitment)
+            .unwrap_err();
+
+        assert_eq!(err, b"INVALID_NOTE_COMMITMENT_SCALAR".to_vec());
+        assert_eq!(contract.note_tree_next_index().unwrap(), U256::ZERO);
     }
 }

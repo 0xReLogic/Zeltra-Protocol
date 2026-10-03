@@ -20,9 +20,7 @@ impl Nimbus {
             let host = Self::runtime_host();
             let this_address = self.env_contract_address();
 
-            let cash_balance = erc20
-                .balance_of(&host, Call::new(), this_address)
-                .map_err(|e| e)?;
+            let cash_balance = erc20.balance_of(&host, Call::new(), this_address)?;
 
             if cash_balance < required_amount {
                 return Err(b"INSUFFICIENT_LIQUIDITY".to_vec());
@@ -69,9 +67,8 @@ impl Nimbus {
             let erc20 = IErc20::new(stablecoin_address);
             let recipient = self.fee_recipient.get();
             let host = Self::runtime_host();
-            let success = erc20
-                .transfer(&host, Call::new_mutating(self), recipient, yield_amount)
-                .map_err(|e| e)?;
+            let success =
+                erc20.transfer(&host, Call::new_mutating(self), recipient, yield_amount)?;
             if !success {
                 return Err(b"YIELD_TRANSFER_FAILED".to_vec());
             }

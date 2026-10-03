@@ -786,8 +786,9 @@ mod tests {
         public_inputs.swap(8, 9);
 
         let is_valid = verify_note_proof(&proof, &keys.verifying_key, &public_inputs);
-        assert!(!is_valid, "Swapped chain_id and contract_address must fail verification");
+        assert!(
+            !is_valid,
+            "Swapped chain_id and contract_address must fail verification"
+        );
     }
 }
-
-
