@@ -153,11 +153,11 @@ selesai. Vector yang hanya dihasilkan oleh `nimbus-core` belum memenuhi syarat i
 - [x] Bind merchant payout.
 - [x] Bind protocol fee.
 - [x] Bind execution fee dan signed quote hash.
-- [ ] Bind recipient, expiry, chain ID, contract address, asset ID, dan version (MVP: weak binding via Poseidon_W3, lihat DEC-016B).
-- [ ] Range constrain seluruh amount sebelum arithmetic field.
-- [ ] Tolak duplicate input note dalam transaksi yang sama (MVP: 1 input only).
-- [ ] Tolak zero-value output (MVP: has_change not boolean-constrained, lihat DEC-016B).
-- [ ] Tambahkan maximum input/output bounds (MVP: 1-in 1-out).
+- [x] Bind recipient, expiry, chain ID, contract address, asset ID, dan version (Gate C0: canonical Poseidon_W5 domain separation binding).
+- [x] Range constrain seluruh amount sebelum arithmetic field (Gate C0: 64-bit integer range gadget).
+- [x] Tolak duplicate input note dalam transaksi yang sama (MVP: 1 input only).
+- [x] Tolak zero-value output (Gate C0: boolean-constrained has_change, zero-change enforcement).
+- [x] Tambahkan maximum input/output bounds (MVP: 1-in 1-out).
 - [x] Audit semua public input benar-benar dipakai dalam constraint.
 
 ### Keys and artifacts
@@ -290,11 +290,11 @@ SDK integration.
 - [ ] Signed quote wajib; field parsial atau quote kosong harus fail closed.
 - [ ] Quote bind exact merchant amount, max execution fee, expiry, quote ID,
   relayer, chain, contract, dan circuit version.
-- [ ] Tentukan apakah quote signature diverifikasi on-chain atau diikat ke ZK proof.
+- [x] Tentukan apakah quote signature diverifikasi on-chain atau diikat ke ZK proof (Diikat ke ZK proof via public input quote_hash - DEC-016A).
 - [ ] Contract tidak boleh percaya `execution_fee <= max` tanpa bukti user consent.
 - [ ] Batch ABI membawa exact execution fee dan quote binding per item.
 - [ ] Batch tidak boleh menghilangkan output commitment/change.
-- [ ] Satu item invalid membuat seluruh on-chain batch revert tanpa partial state.
+- [x] Satu item invalid membuat seluruh on-chain batch revert tanpa partial state (Terverifikasi di batch_spend contract & tests).
 - [ ] DB menyimpan input nullifiers dan output commitments secara atomic.
 - [ ] Receipt confirmation mengubah input `reserved -> spent` dan output
   `unconfirmed -> unspent`.
