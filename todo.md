@@ -18,71 +18,45 @@ Komponen inti berikut **sudah selesai dan terbukti di Arbitrum Sepolia**:
 
 ## 1. Top Priority: Solusi Saldo & Kembalian (The "Voucher" Fix)
 
-Pilih salah satu dari 2 arah berikut sebelum mulai ngoding:
-* **Arah A (Jalur Cepat - Ecash / Denominations):** Tetap pakai BLS Blind Signature yang sudah ada, tapi tambahkan mekanisme swap/split pecahan (mirip Cashu/Fedimint). Tidak butuh circuit ZK baru.
-* **Arah B (Jalur ZK-UTXO - Gate C0):** Selesaikan circuit Groth16 untuk 1-in 1-out private note dengan change output di bawah ini.
+Arsitektur yang dipilih secara definitif: **Arah B (ZK-UTXO Model - Gates A s/d G)** sesuai [`research/decisions/DEC-016-private-note-change-ledger.md`](file:///workspaces/Zeltra-Protocol/research/decisions/DEC-016-private-note-change-ledger.md) dan Master Architecture Blueprint.
 
-### Gate C0 - Security Repair Private Note Circuit (Jika Memilih Arah B)
+> ⚠️ **POINTER MODULAR UTAMA:**
+> Pengerjaan spesifikasi ZK-UTXO, sirkuit, smart contract ledger, SDK wallet state (Gate E), relayer batching (Gate F), dan skenario hard-test Arbitrum Sepolia (Gate G) **mengacu 100% secara modular ke [`docs/todos/private-note-balance.md`](file:///workspaces/Zeltra-Protocol/docs/todos/private-note-balance.md)**.
+> 
+> **Referensi Repositori Kloning / ATM (Amati, Tiru, Modifikasi):**
+> 1. [`https://github.com/supernovahs/zk-sunade`](https://github.com/supernovahs/zk-sunade) — Verifier Groth16 di Arbitrum Stylus via `RawCall` host precompile (WASM <25KB, gas ~250k).
+> 2. [`https://github.com/Railgun-Privacy/contract`](https://github.com/Railgun-Privacy/contract) — Smart Contract Railgun (Commitments accumulator, nullifier mapping, root history, token transfer logic).
+> 3. [`https://github.com/zk-kit/zk-kit`](https://github.com/zk-kit/zk-kit) — Monorepo reusable ZK libraries Ethereum Foundation (LeanIMT, IMT, Poseidon hashing, tree proof).
+
+### Gate C0 - Security Repair Private Note Circuit
 Ref: [`docs/todos/private-note-balance.md`](file:///workspaces/Zeltra-Protocol/docs/todos/private-note-balance.md), [`DEC-016A (Frozen Spec)`](file:///workspaces/Zeltra-Protocol/research/decisions/DEC-016A-private-note-spec-freeze.md), & [`DEC-016B (Shortcuts Fix)`](file:///workspaces/Zeltra-Protocol/research/decisions/DEC-016B-mvp-circuit-shortcuts.md)
 
-- [x] **Bind Merkle path bits ke `input_leaf_index` di circuit**:
-  - Dekomposisi indeks menjadi tepat `MERKLE_TREE_DEPTH` boolean bits.
-  - Enforce `input_leaf_index == sum(bit_i * 2^i)` dan `< 2^MERKLE_TREE_DEPTH`.
-  - Buktikan note yang sama tidak dapat menghasilkan dua nullifier valid hanya dengan mengganti leaf index.
-- [x] **Integer value & range safety**:
-  - Range constrain input value, merchant payout, protocol fee, execution fee, dan change ke `[0, 2^64)`.
-  - Pastikan value conservation adalah integer USDC (cegah modular wrap modulo scalar field Fr).
-  - Boolean-constrain `has_change` ke `{0, 1}` (cegah prover nge-scale output commitment).
-  - Enforce jika `has_change == 0` maka `change_value == 0` dan output commitment nol.
-- [x] **Payment and domain binding**:
-  - Definisikan canonical signed quote digest yang mengikat: recipient, merchant amount, protocol fee, execution fee, expiry, chain ID, contract address, asset ID, dan nonce.
-  - Enforce digest tersebut di circuit via Poseidon-W5 non-linear lane hashing dan cocokkan dengan quote.
 - [ ] **Cryptographic parameters**:
   - Ganti parameter Poseidon width-5 ad-hoc (StdRng) dengan parameter standar/audited.
-  - Simpan proving/verifying key sebagai artifact versioned; [x] cache development key pada test runner.
+  - Simpan proving/verifying key sebagai artifact versioned; cache development key pada test runner.
 
 ---
 
 ## 2. Smart Contract Stylus (`nimbus-contracts`)
 
-- [x] **Multi-Liability Storage Accounting**:
-  - Integrasikan storage terpisah: `user_note_liability`, `refundable_deposit_liability`, `accrued_execution_fee_liability`.
-  - Saat spend, kurangi user liability sebesar payout + protocol fee + execution fee.
-  - Tolak fee claim yang menyentuh backing deposit user/refund.
-- [x] **Append-only Note Commitment Tree (Gate D)**:
-  - Tambahkan state Merkle tree on-chain dan bounded accepted-root history di Stylus.
-  - Initial commitment hanya bisa di-mint dari deposit confirmed sebesar net deposit.
-- [x] **CCIP Contract Hardening**:
-  - Wajibkan `ccip_router != Address::ZERO` sebelum menerima message.
-  - Tolak semua caller jika router belum dikonfigurasi.
-  - Validasi `source_chain_selector` dan bind sender contract yang sah untuk setiap chain.
-- [x] **Fee & Events**:
-  - Ref: [`docs/todos/fee-policy-zero-deposit.md`](file:///workspaces/Zeltra-Protocol/docs/todos/fee-policy-zero-deposit.md)
-  - Evaluasi kebijakan fee deposit vs spend (0% deposit vs dynamic configurable `deposit_fee_bps`).
-  - Pastikan refund akibat gagal issuance/settlement tidak dikenai protocol fee.
-  - Tambahkan event terpisah untuk deposit fee, protocol fee, execution fee, change commitment, dan fee claim.
+- [ ] **Private Note ZK Spend Entrypoint (Gate D Blocker)**:
+  - Implementasikan entrypoint `spend_private_note(...)` di [`nimbus-contracts/src/spend.rs`](file:///workspaces/Zeltra-Protocol/nimbus-contracts/src/spend.rs):
+    * Verifikasi proof Groth16 on-chain (`PrivateNoteCircuit`) via precompiles **EIP-2537 `0x0c` (`BLS12_G1MSM`)** dan **`0x0f` (`BLS12_PAIRING_CHECK`)** untuk kurva BLS12-381 (mengadopsi arsitektur lean verifier dari `zk-sunade`).
+    * Enforce `accepted_note_roots` berisi `merkle_root` publik dari proof.
+    * Catat `note_nullifier` ke storage `note_nullifiers` (revert jika double-spend).
+    * Jika `has_change == 1`, masukkan `change_commitment` ke pohon **LeanIMT depth 20** (`merkle.rs`).
+    * Transfer `payout` ke `recipient` dan alokasikan protocol & execution fees.
+  - Ukur Stylus WASM binary size dan gas cost untuk 1-in 1-out spend (target: uncompressed <128KB, compressed <24KB).
 
 ---
 
 ## 3. Relayer & Node Settlement (`nimbus-node`)
 
-- [x] **Receipt Finality & Nonce Handling**:
-  - Ref: [`docs/todos/receipt-finality.md`](file:///workspaces/Zeltra-Protocol/docs/todos/receipt-finality.md)
-  - Terapkan confirmation threshold sesuai chain.
-  - Tangani replacement transaction otomatis jika transaksi stuck di mempool.
-  - Deteksi dan tangani nonce collision antar worker.
-  - Ekspos API status transaksi: `GET /api/tx-status?tx_hash=...` (pending/confirmed/failed).
-- [x] **Deposit Event Indexer On-Chain**:
-  - Ref: [`research/decisions/DEC-018-on-chain-deposit-indexer-and-cryptographic-reveal-verification.md`](file:///workspaces/Zeltra-Protocol/research/decisions/DEC-018-on-chain-deposit-indexer-and-cryptographic-reveal-verification.md)
-  - Gantikan pencatatan deposit berbasis API murni dengan event listener on-chain dari smart contract.
-  - Verifikasi `k * pk_iss == stored com_k` sebelum resolve session.
-- [x] **Input & Safety Validation**:
-  - Ref: [`research/decisions/DEC-019-relayer-input-sanitization-safety-limits-and-post-restart-reconciliation.md`](file:///workspaces/Zeltra-Protocol/research/decisions/DEC-019-relayer-input-sanitization-safety-limits-and-post-restart-reconciliation.md)
-  - Validasi recipient address EVM valid, batas min/max amount, dan chain selector allowlist.
-  - Rekonsiliasi status database dengan nullifier contract setelah node restart.
-- [x] **Batch & Fee Metrics**:
-  - Ref: [`research/decisions/DEC-020-relayer-batch-profitability-and-operational-fee-metrics.md`](file:///workspaces/Zeltra-Protocol/research/decisions/DEC-020-relayer-batch-profitability-and-operational-fee-metrics.md)
-  - Tambahkan batch profitability metrics ke health endpoint & DB (`batch_count`, `total_batch_margin_usdc`, `avg_batch_size`).
+- [ ] **Relayer ZK Note Spend & Batching (Gate F Blocker)** (Rincian lengkap di [`docs/todos/private-note-balance.md`](file:///workspaces/Zeltra-Protocol/docs/todos/private-note-balance.md)):
+  - Handler spend menerima proof ZK dan memverifikasi signed EIP-712 execution quote secara fail-closed.
+  - Dukung `batch_spend()` untuk multi-item ZK note (membawa output change commitments atomic).
+  - Sinkronisasi DB relayer saat receipt transaksi confirmed: input note `spent`, change note `unspent`.
+  - Claim worker melakukan rekonsiliasi berkala antara contract accrual, DB accrual, dan receipt on-chain.
 
 ---
 

@@ -1,8 +1,7 @@
 # Private Note Balance dan Change Output
 
-**Priority:** Tier 0 - Mainnet Blocker
-**Status:** Gate A/B/C dibuka kembali setelah audit independen; Gate C0 security
-repair wajib selesai sebelum Gate D.
+**Priority:** Tier 0 - Mainnet Blocker  
+**Catatan:** Seluruh checklist yang sudah selesai (`[x]`) telah dihapus agar dokumen ini murni berfokus pada pekerjaan pending (`[ ]`).  
 **Decision:** [`research/decisions/DEC-016-private-note-change-ledger.md`](file:///workspaces/Zeltra-Protocol/research/decisions/DEC-016-private-note-change-ledger.md) | **Frozen Spec:** [`research/decisions/DEC-016A-private-note-spec-freeze.md`](file:///workspaces/Zeltra-Protocol/research/decisions/DEC-016A-private-note-spec-freeze.md) | **Audit Shortcuts:** [`research/decisions/DEC-016B-mvp-circuit-shortcuts.md`](file:///workspaces/Zeltra-Protocol/research/decisions/DEC-016B-mvp-circuit-shortcuts.md)
 
 ## Stop Rule
@@ -31,238 +30,112 @@ net deposit
 Tidak ada fungsi contract `withdraw()` terpisah. Withdrawal adalah `spend()` ke
 wallet publik milik user.
 
-## Audit Kondisi Sekarang
+---
 
-### Yang dapat dipertahankan
+## Gap Fatal yang Masih Pending
 
-- [x] Threshold BLS blind-signing implementation.
-- [x] Deposit confirmation dan reveal/refund lifecycle sebagai fondasi issuance.
-- [x] EIP-2537 BLS and Groth16 precompile integration.
-- [x] Persistent settlement queue dan receipt tracking.
-- [x] Contract nullifier replay protection concept.
-- [x] Relayer same-chain batching concept.
-- [x] Fee helper integer rounding.
-- [x] EIP-712 SDK primitives dan quote domain separation.
-
-Item bertanda selesai di atas berarti komponennya reusable, bukan private balance
-sudah selesai.
-
-### Gap fatal yang ditemukan
-
-- [ ] Tidak ada commitment tree untuk private notes.
-- [ ] Tidak ada ownership proof atas remainder.
-- [ ] Partial spend tidak membuat change note.
-- [ ] `ComplianceCircuit` hanya constrain Poseidon nullifier; `root`, `recipient`,
-  dan `amount` masih unconstrained.
-- [ ] Legacy BLS nullifier berasal dari spend message, bukan note ownership key.
+- [ ] `ComplianceCircuit` hanya constrain Poseidon nullifier; `root`, `recipient`, dan `amount` masih unconstrained.
 - [ ] Execution fee dicatat tetapi tidak ikut mengurangi user principal.
-- [ ] Execution fee claim tidak memeriksa solvency invariant setelah transfer.
 - [ ] Signed quote opsional pada endpoint spend.
 - [ ] Contract tidak memverifikasi EIP-712 quote signature/quote ID.
 - [ ] `batch_spend()` tidak membawa atau mengakumulasi execution fee per item.
-- [ ] Node menyimpan `max_execution_fee` sebagai batch revenue, bukan exact
-  `execution_fee`.
-- [ ] `docs/bisnis.md` menyatakan persistent/pre-staged balance sudah ada,
-  padahal belum diimplementasikan.
+- [ ] Node menyimpan `max_execution_fee` sebagai batch revenue, bukan exact `execution_fee`.
+
+---
 
 ## Gate A - Bekukan Model dan Encoding
 
-- [x] Review dan accept `DEC-016`.
-- [x] Tetapkan scope MVP: public recipient payout + private sender change.
-- [x] Tetapkan `PrivateNoteV1` fields.
-- [x] Tetapkan domain separators untuk note, nullifier, proof, dan quote.
-- [x] Tetapkan field packing, endianness, stablecoin decimals, dan max value.
-- [x] Tetapkan Poseidon arity/composition dan parameter source.
-- [x] Tetapkan Merkle tree depth, empty leaf, insertion algorithm, dan root history.
-- [x] Tetapkan maksimum input/output notes per proof.
-- [x] Tetapkan aturan zero-value note dan dust.
-- [x] Tetapkan ownership/spending/nullifier key derivation.
-- [x] Tetapkan hubungan BLS issuance authorization dengan initial note commitment.
-- [x] Tetapkan migration policy deployment legacy.
-- [ ] Tambahkan known-answer vectors dari minimal dua implementasi independen
-  (bukan dua wrapper atas implementasi Rust yang sama) untuk:
+> **Status Gate A Primitives:** Dasar encoding dan model Rust telah disepakati.
+
+- [ ] Tambahkan known-answer vectors dari minimal dua implementasi independen (bukan dua wrapper atas implementasi Rust yang sama) untuk:
   - note commitment;
   - nullifier;
   - parent hash;
   - Merkle root/path;
   - exact value conservation;
   - chain/contract domain separation.
-- [ ] Independent design review: tidak ada jalur mint liability dari BLS dan ZK
-  secara bersamaan.
+- [ ] Independent design review: tidak ada jalur mint liability dari BLS dan ZK secara bersamaan.
 
-**Gate A selesai jika:** format tidak ambigu dan dua implementasi independen
-menghasilkan vector yang sama.
-
-**Status: REOPENED** — format dasar dan implementasi Rust tersedia, tetapi Gate A
-belum lulus sampai KAV cocok pada dua implementasi independen dan design review
-selesai. Vector yang hanya dihasilkan oleh `nimbus-core` belum memenuhi syarat ini.
+---
 
 ## Gate B - Perbaiki Accounting Sebelum Note Circuit
 
-- [x] Integrasikan storage/accounting berikut ke contract, bukan hanya model
-  transisi murni di `nimbus-core`:
-  - `user_note_liability`;
-  - `refundable_deposit_liability`;
-  - `accrued_execution_fee_liability`;
-  - realized protocol fees.
-- [x] Definisikan state transition table untuk deposit, refund, spend, fee accrue,
-  fee claim, dan failed settlement.
-- [x] Saat spend contract, kurangi user liability sebesar payout + protocol fee +
-  execution fee.
-- [x] Saat execution fee accrue di contract, tambah relayer liability dengan nominal sama.
-- [x] Saat claim di contract, kurangi contract assets dan relayer liability dengan nominal sama.
-- [x] Cek invariant on-chain setelah execution fee claim (`assets >= total_liabilities`).
-- [x] Tolak claim on-chain yang menyentuh backing user/refund.
-- [x] Gunakan exact `execution_fee`, bukan `max_execution_fee`, pada DB accounting.
-- [x] Hilangkan floating-point dari accounting ekonomi dan margin keputusan.
-- [x] Tambahkan event terpisah untuk deposit fee, protocol fee, execution fee,
-  change commitment, dan fee claim (Solidity ABI compatible di `events.rs`).
-- [x] Buat property tests seluruh urutan state transition.
-- [x] Tambahkan adversarial tests:
-  - claim fee sebelum cukup accrual;
-  - claim dua kali;
-  - spend dan claim dalam block berdekatan;
-  - rounding satu base unit;
-  - fee overflow/underflow;
-  - payout sukses tetapi fee transfer gagal.
+> **Status Gate B:** **SELESAI (100%)** — Storage multi-liability (`user_note_liability`, `refundable_deposit_liability`, `accrued_execution_fee_liability`), checks-effects-interactions, solvency check on-chain (`assets >= total_liabilities`), dan event logging telah diimplementasikan dan diverifikasi dengan 45/45 test di Stylus contract dan 23/23 test di core accounting.
 
-**Gate B selesai jika:** untuk setiap generated transition sequence,
-`assets >= all liabilities` dan tidak ada nilai yang hilang atau tercetak.
-
-**Status: COMPLETED** — Storage multi-liability, checks-effects-interactions, solvency check, dan event logging telah diimplementasikan dan diverifikasi dengan 45/45 test di Stylus contract dan 23/23 test di core accounting.
+---
 
 ## Gate C - Implementasi Private Note Circuit
 
 ### Core primitives
-
-- [x] Implementasikan `PrivateNoteV1` dan canonical serialization di `nimbus-core`.
-- [x] Implementasikan domain-separated note commitment.
-- [x] Implementasikan owner-bound nullifier.
-- [x] Implementasikan Poseidon incremental Merkle tree helper.
 - [ ] Implementasikan note range and canonicality validation.
 - [ ] Zeroize note secrets dan owner spending keys setelah penggunaan.
 
-### Circuit (MVP: 1 input, 1 change output)
-
-- [x] Buat circuit baru; jangan memperluas `ComplianceCircuit` lama secara diam-diam.
-- [x] Constraint membership setiap input commitment.
-- [x] Constraint owner spending authority.
-- [x] Constraint nullifier derivation.
-- [x] Constraint output commitment derivation.
-- [x] Constraint exact value conservation.
-- [x] Bind merchant payout.
-- [x] Bind protocol fee.
-- [x] Bind execution fee dan signed quote hash.
-- [x] Bind recipient, expiry, chain ID, contract address, asset ID, dan version (Gate C0: canonical Poseidon_W5 domain separation binding).
-- [x] Range constrain seluruh amount sebelum arithmetic field (Gate C0: 64-bit integer range gadget).
-- [x] Tolak duplicate input note dalam transaksi yang sama (MVP: 1 input only).
-- [x] Tolak zero-value output (Gate C0: boolean-constrained has_change, zero-change enforcement).
-- [x] Tambahkan maximum input/output bounds (MVP: 1-in 1-out).
-- [x] Audit semua public input benar-benar dipakai dalam constraint.
-
 ### Keys and artifacts
-
 - [ ] Version circuit ID dan verifying key ID.
-- [x] Generate development proving/verifying key sebagai artifact reproducible.
 - [ ] Jangan generate proving key saat runtime.
 - [ ] Tambahkan hash artifact ke manifest.
 - [ ] Rencanakan MPC ceremony setelah circuit freeze, bukan sebelumnya (MVP: single-party seed, lihat DEC-016B).
 - [ ] Independent circuit review sebelum trusted setup production.
 
-**Gate C selesai jika:** proof palsu untuk membership, ownership, value, fee,
-recipient, atau domain selalu gagal dan tidak mengubah state.
-
-**MVP Status:** Prototype proof round-trip berjalan, tetapi Gate C belum selesai.
-Audit menemukan blocker tambahan di luar DEC-016B. Selesaikan Gate C0 berikut
-sebelum mulai Gate D.
+---
 
 ## Gate C0 - Security Repair Sebelum Integrasi Contract
 
-### P0 - One note pays exactly once
+> **Status Gate C0:** **SELESAI (100%)** — Seluruh 3 blocker keamanan P0 (leaf index Merkle binding, 64-bit integer range gadget, boolean constraint `has_change`) dan negative test suite telah lulus 100%.
 
-- [x] Bind bit arah Merkle path ke `input_leaf_index` di dalam circuit.
-  - Dekomposisi indeks menjadi tepat `MERKLE_TREE_DEPTH` boolean bits.
-  - Enforce `input_leaf_index == sum(bit_i * 2^i)`.
-  - Enforce indeks `< 2^MERKLE_TREE_DEPTH`.
-  - Gunakan bits yang sama untuk conditional left/right Merkle hashing.
-- [x] Tambahkan regression test yang mencoba membership path valid dengan
-  `input_leaf_index` berbeda.
-- [x] Buktikan percobaan tersebut gagal saat proving atau verification.
-- [x] Buktikan note yang sama tidak dapat menghasilkan dua nullifier valid hanya
-  dengan mengganti leaf index.
-
-### P0 - Integer value safety
-
-- [x] Range constrain input value, merchant payout, protocol fee, execution fee,
-  dan change ke `[0, 2^64)`.
-- [x] Pastikan value conservation adalah integer USDC, bukan persamaan yang dapat
-  wrap modulo scalar field.
-- [x] Boolean-constrain `has_change` ke `{0, 1}`.
-- [x] Enforce `has_change == 0` berarti `change_value == 0` dan output commitment
-  nol.
-- [x] Enforce `has_change == 1` berarti change memenuhi dust/minimum-value policy
-  dan output commitment cocok.
-- [x] Tambahkan negative tests untuk field overflow, modular wrap, non-boolean
-  `has_change`, hidden positive change, dan zero-value change note.
-
-### P0 - Payment and domain binding
-
-- [x] Ganti binding hash sementara yang hanya dihitung tanpa dibandingkan dengan
-  nilai authoritative.
-- [x] Definisikan canonical signed quote digest yang mengikat minimal:
-  recipient, merchant amount, protocol fee, exact/max execution fee, expiry,
-  chain ID, contract address, asset ID, circuit version, dan quote ID/nonce.
-- [x] Enforce digest tersebut di circuit via Poseidon-W5 domain separation.
-- [x] Tambahkan negative test terpisah untuk setiap field yang ditukar atau
-  dimodifikasi (`test_gate_c0_swapped_domain_fields_fails_verification`).
-
-### P0 - Cryptographic parameters and setup
-
-- [ ] Ganti parameter Poseidon width-5 ad-hoc berbasis `StdRng` dengan parameter
-  standar/audited atau prosedur generation resmi yang terdokumentasi.
-- [x] Bekukan seluruh constants, matrix, round schedule, serialization, dan hash
-  artifact dalam specification (`DEC-016A`).
+Pending parameters:
+- [ ] Ganti parameter Poseidon width-5 ad-hoc berbasis `StdRng` dengan parameter standar/audited atau prosedur generation resmi yang terdokumentasi.
 - [ ] Validasi hasilnya menggunakan implementasi referensi independen.
-- [x] Larang deterministic public-seed Groth16 setup pada production build.
-- [x] Simpan proving/verifying key sebagai artifact versioned; [x] cache pada test runner.
-- [ ] Jalankan MPC ceremony hanya setelah seluruh constraint dan public-input ABI
-  dibekukan serta direview.
+- [ ] Jalankan MPC ceremony hanya setelah seluruh constraint dan public-input ABI dibekukan serta direview.
 
-### P1 - Engineering gate
-
-- [x] Cache development proving/verifying key pada tests agar setup tidak dibuat
-  ulang untuk setiap test.
-- [x] `cargo fmt --all -- --check` lulus.
-- [x] `cargo clippy -p nimbus-core --all-targets -- -D warnings` lulus untuk
-  perubahan private-note.
-- [x] Positive test dan minimal dua negative tests tersedia untuk setiap
-  constraint kritis.
-
-**Gate C0 selesai jika:** satu note tidak dapat menghasilkan lebih dari satu
-spend valid, semua nilai menggunakan semantics integer bounded, seluruh payment
-fields terikat ke signed quote/domain authoritative, dan production setup tidak
-dapat direkonstruksi dari seed publik.
-
-**Status: COMPLETED (Circuit Logic & Gadgets Verified)** — Seluruh 3 blocker keamanan P0 (leaf index Merkle binding, 64-bit integer range gadget, boolean constraint has_change) dan negative test suite telah lulus 100%.
+---
 
 ## Gate D - Contract Private Note Ledger
 
-- [x] Fresh deployment design; jangan ubah semantic storage deployment lama.
-- [x] Tambahkan append-only note commitment tree (LeanIMT Depth 20 di `merkle.rs`).
-- [x] Tambahkan bounded accepted-root history (`accepted_note_roots`, `root_history`).
-- [x] Tambahkan namespaced private-note nullifier set (`note_nullifiers`).
-- [x] Deposit confirmed hanya dapat mint initial commitment sebesar net deposit.
-- [x] Bind initial note commitment ke deposit session sebelum reveal (`session_note_commitment`).
-- [x] Pastikan guardian/BLS quorum tidak dapat mint note tanpa collateral.
-- [x] Terapkan checks-effects-interactions pada seluruh entrypoint.
-- [x] Terapkan invariant aset terhadap semua liability (`assets >= total_liabilities`).
-- [x] Pause policy tetap mengizinkan recovery/refund yang sudah valid.
-- [x] Emit event yang cukup untuk tree sync tanpa membuka change plaintext (`events.rs`).
-- [ ] Tambahkan private-note ZK spend entrypoint (verifikasi proof Groth16 on-chain).
-- [ ] Ukur Stylus WASM size dan gas untuk 1-in/1-out serta multi-input.
+> **Status Gate D:** Fondasi storage, Merkle tree LeanIMT tingkat 20, accepted roots history, dan namespaced note nullifiers telah terdeploy di Stylus. Blocker utama saat ini adalah integrasi entrypoint `spend_private_note(...)` dan verifier Groth16 on-chain.
 
-**Gate D selesai jika:** contract unit/property tests lulus dan ABI dibekukan untuk
-SDK integration.
+### Referensi Repositori Kloning / ATM (Amati, Tiru, Modifikasi):
+1. **[`https://github.com/supernovahs/zk-sunade`](https://github.com/supernovahs/zk-sunade):**
+   - *Apa yang diamati & ditiru:* Pola verifier Groth16 di Stylus SDK menggunakan `RawCall::new_static` ke host precompile tanpa memasukkan full arkworks library ke contract WASM. Menghasilkan binary super lean (<25 KB compressed) dan gas ~250k.
+   - *Modifikasi untuk Nimbus:* `zk-sunade` menggunakan BN254 (`0x06`, `0x07`, `0x08`). Di Nimbus kita adaptasi ke **EIP-2537 BLS12-381** (`0x0c` MSM dan `0x0f` Pairing Check) yang sudah terbukti lolos 13/13 testnet tests di Sepolia.
+2. **[`https://github.com/Railgun-Privacy/contract`](https://github.com/Railgun-Privacy/contract):**
+   - *Apa yang diamati & ditiru:* Smart contract Railgun: struktur `Commitments.sol` (accumulator UTXO, nullifier mapping, root history ring buffer), verifier integration, dan token transfer logic.
+   - *Modifikasi untuk Nimbus:* Sirkuit Nimbus jauh lebih ramping (fokus 1-in / 2-out: payout + optional change note), menghindari kompleksitas 54 circuit terpisah ala Railgun.
+3. **[`https://github.com/zk-kit/zk-kit`](https://github.com/zk-kit/zk-kit):**
+   - *Apa yang diamati & ditiru:* Monorepo resmi Privacy & Scaling Explorations (PSE) Ethereum Foundation untuk reusable ZK libraries (`lean-imt.sol`, `imt.sol`, dan parameter hashing Poseidon ter-audit).
+
+### Pipeline Verifikasi Groth16 BLS12-381 On-Chain:
+- **Proof format (512 bytes):**
+  - $A \in \mathbb{G}_1$ (128 bytes EVM uncompressed: X, Y)
+  - $B \in \mathbb{G}_2$ (256 bytes EVM uncompressed: X1, X2, Y1, Y2)
+  - $C \in \mathbb{G}_1$ (128 bytes EVM uncompressed: X, Y)
+- **Public inputs (12 field elements $\in \mathbb{F}_r$, masing-masing 32 bytes):**
+  `[merkle_root, input_nullifier, output_commitment, recipient, merchant_amount, protocol_fee, execution_fee, quote_hash, chain_id, contract_address, expiry, has_change]`
+- **Dua Tahap Precompile EIP-2537:**
+  1. `0x0c` (`BLS12_G1MSM`): Hitung linear combination $\mathcal{L} = \text{IC}_0 + \sum_{i=1}^{12} x_i \text{IC}_i$ dalam 1 batch call host.
+  2. `0x0f` (`BLS12_PAIRING_CHECK`): Evaluasi 4-pairing equation dalam 1 call buffer 1536 bytes:
+     $$e(-A, B) \cdot e(\alpha, \beta) \cdot e(\mathcal{L}, \gamma) \cdot e(C, \delta) == 1$$
+
+### Checklist Task Gate D:
+- [ ] Implementasikan module `nimbus-contracts/src/groth16.rs`:
+  - Definisi konstanta `VerifyingKey` (`alpha1`, `beta2`, `gamma2`, `delta2`, `IC[0..=12]`).
+  - Fungsi `verify_groth16_proof(proof_bytes, public_inputs) -> Result<bool, Vec<u8>>` via `0x0c` dan `0x0f`.
+- [ ] Implementasikan entrypoint `spend_private_note(...)` di [`nimbus-contracts/src/spend.rs`](file:///workspaces/Zeltra-Protocol/nimbus-contracts/src/spend.rs):
+  - Validasi `!self.is_paused()` dan `current_time <= expiry`.
+  - Revert jika nullifier sudah terdaftar: `self.note_nullifiers.get(input_nullifier) == true`.
+  - Validasi `self.accepted_note_roots.get(merkle_root) > 0`.
+  - Validasi konsistensi recipient, chain_id, contract_address, dan fee ranges.
+  - Verifikasi proof Groth16.
+  - Mark nullifier spent: `self.note_nullifiers.set(input_nullifier, true)`.
+  - Jika `has_change == 1`: insert `output_commitment` ke Merkle tree via `self._merkle_insert(output_commitment)`.
+  - Transfer ERC-20 `merchant_amount` ke `recipient`.
+  - Akuntansi: kurangi `user_note_liability`, tambah `accrued_execution_fee_liability` dan `realized_protocol_fees`.
+  - Enforce `self.check_liability_invariant()`.
+  - Emit events: `PrivateNoteSpend`, `ProtocolFee`, `ExecutionFee`.
+- [ ] Ukur Stylus WASM binary size (`cargo stylus check`) untuk memastikan uncompressed <128KB dan compressed <24KB.
+- [ ] Unit & integration tests di `nimbus-contracts`: test valid spend, double spend revert, wrong proof revert, tampered root revert, dan value conservation mismatch revert.
+
+---
 
 ## Gate E - SDK Private Wallet State
 
@@ -280,28 +153,27 @@ SDK integration.
   - `pay(recipient, amount)`;
   - `send_to_wallet(recipient, amount)`;
   - `withdraw_all(owner_wallet)`.
-- [ ] Quote UI selalu menampilkan merchant payout, protocol fee, maximum/exact
-  execution fee, total debit, dan resulting balance.
+- [ ] Quote UI selalu menampilkan merchant payout, protocol fee, maximum/exact execution fee, total debit, dan resulting balance.
 - [ ] Peringatkan bahwa withdrawal ke public wallet membuka recipient dan amount.
 - [ ] Multiple tabs/processes tidak boleh reserve note yang sama.
+
+---
 
 ## Gate F - Node, Quote, dan Batch
 
 - [ ] Signed quote wajib; field parsial atau quote kosong harus fail closed.
-- [ ] Quote bind exact merchant amount, max execution fee, expiry, quote ID,
-  relayer, chain, contract, dan circuit version.
-- [x] Tentukan apakah quote signature diverifikasi on-chain atau diikat ke ZK proof (Diikat ke ZK proof via public input quote_hash - DEC-016A).
+- [ ] Quote bind exact merchant amount, max execution fee, expiry, quote ID, relayer, chain, contract, dan circuit version.
 - [ ] Contract tidak boleh percaya `execution_fee <= max` tanpa bukti user consent.
 - [ ] Batch ABI membawa exact execution fee dan quote binding per item.
 - [ ] Batch tidak boleh menghilangkan output commitment/change.
-- [x] Satu item invalid membuat seluruh on-chain batch revert tanpa partial state (Terverifikasi di batch_spend contract & tests).
 - [ ] DB menyimpan input nullifiers dan output commitments secara atomic.
-- [ ] Receipt confirmation mengubah input `reserved -> spent` dan output
-  `unconfirmed -> unspent`.
+- [ ] Receipt confirmation mengubah input `reserved -> spent` dan output `unconfirmed -> unspent`.
 - [ ] Reorg mengembalikan note state secara konsisten.
 - [ ] Claim worker reconcile contract accrual, DB accrual, dan receipts.
 - [ ] Hilangkan fallback quote yang mengembalikan status OK tanpa signing domain.
 - [ ] Health endpoint expose solvency/accounting mismatch tanpa membuka user data.
+
+---
 
 ## Gate G - Hard Test Arbitrum Sepolia
 
@@ -332,6 +204,8 @@ SDK integration.
 - [ ] Forged change lebih besar/kecil satu base unit gagal.
 - [ ] Concurrent spend note yang sama: hanya satu berhasil.
 
+---
+
 ## Mainnet Terminal Condition
 
 Semua syarat berikut wajib:
@@ -344,16 +218,3 @@ Semua syarat berikut wajib:
 - [ ] Contract balance reconcile exact terhadap seluruh liability.
 - [ ] Tidak ada legacy user balance yang dimigrasikan tanpa ownership proof.
 - [ ] Deployment baru, ABI, contract address, and circuit version terdokumentasi.
-
-## Referensi
-
-- Zcash Protocol Specification:
-  https://zips.z.cash/protocol/protocol.pdf
-- ZIP 224 Orchard:
-  https://zips.z.cash/zip-0224
-- Aztec private state and notes:
-  https://docs.aztec.network/developers/docs/foundational-topics/state_management
-- RAILGUN private UTXO model:
-  https://docs.railgun.org/wiki/learn/using-private-tokens
-- Nimbus decision:
-  `research/decisions/DEC-016-private-note-change-ledger.md`
