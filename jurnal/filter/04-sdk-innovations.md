@@ -47,3 +47,18 @@ Dokumen ini memetakan paper terpilih untuk arsitektur client SDK dan manajemen w
   Protokol gossip terenkripsi dengan *Private Information Retrieval (PIR)* ringan, memungkinkan SDK memilih relayer optimal secara anonim.
 * **Implementasi di Nimbus SDK:**
   * Modul relayer selection di SDK: Klien dapat membandingkan quote fee relayer secara private tanpa metadata profiling.
+
+---
+
+## 5. MinMandate: Private Task-Scoped Payment Authorization for Adaptive Agent Workflows (2026)
+* **File Jurnal:** [`jurnal/MinMandate-Private-Task-Scoped-Payment.md`](file:///workspaces/Zeltra-Protocol/jurnal/MinMandate-Private-Task-Scoped-Payment.md)
+* **Penulis:** Ge Gao, Haining Yu, Zhichao Liu, Dongyang Zhan, Yuanxiao Zhu, Zhongyun Hua
+* **Problem di Sistem Klasik:**
+  Framework agentic payment yang ada (ERC-4337 paymaster, EIP-7702 delegation) mengizinkan AI agent untuk spend atas nama user, tetapi otorisasi bersifat open-ended: agent diberi budget maksimum dan bebas menggunakannya untuk merchant atau layanan apapun. User tidak bisa membatasi "hanya boleh bayar untuk X, bukan Y" tanpa menulis smart contract custom.
+* **Inovasi Paper:**
+  *Scoped Credential* berbasis constraint: User menerbitkan credential yang hanya valid untuk kategori pengeluaran spesifik (misal: "hanya untuk compute API calls", "hanya untuk domain tertentu", "maksimum 3 kali per hari"). Merchant yang menerima pembayaran harus membuktikan dirinya masuk kategori yang diizinkan via ZK proof of category membership — tanpa mengungkap kategori lain yang diizinkan.
+* **Implementasi di Nimbus SDK:**
+  * Method baru di SDK: `authorize_agent(scope: SpendScope, max_amount: u64, expiry: u64) -> ScopedCredential`.
+  * `SpendScope` adalah enum yang di-encode ke dalam BLS credential saat issuance, diverifikasi di contract via tambahan gadget circuit pada `PrivateNoteCircuit`.
+  * Use case langsung: AI agent yang mengelola micro-payment untuk API calls (GPT, compute, storage) tidak bisa di-exploit untuk drain wallet ke merchant arbitrary — scope constraint di-enforce secara kriptografis on-chain, bukan hanya di level aplikasi.
+  * Komponen: [`nimbus-sdk/src/wallet/agent_wallet.rs`](file:///workspaces/Zeltra-Protocol/nimbus-sdk/src/wallet/agent_wallet.rs) (baru), integrate dengan `DelegProof-EIP-7702` untuk gasless execution.

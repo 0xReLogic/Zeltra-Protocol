@@ -49,3 +49,18 @@ Dokumen ini memetakan paper terpilih untuk arsitektur smart contract Nimbus ([`n
   Formulasi representasi koordinat terkompresi dan batching pre-evaluasi pairing multi-skalar untuk memangkas konsumsi gas on-chain hingga 35%.
 * **Implementasi di Nimbus Stylus:**
   * Optimasi langsung fungsi `batch_spend()` di [`nimbus-contracts/src/spend.rs`](file:///workspaces/Zeltra-Protocol/nimbus-contracts/src/spend.rs), mengagregasi 2–8 verifikasi BLS EIP-2537 dalam satu panggilan precompile terpadu.
+
+---
+
+## 5. Blind Spots in Blind Signatures: Chaumian Ecash System-Level Security (IACR ePrint 2026/2174)
+* **File Jurnal:** [`jurnal/Blind-Spots-Chaumian-Ecash.md`](file:///workspaces/Zeltra-Protocol/jurnal/Blind-Spots-Chaumian-Ecash.md)
+* **Penulis:** Huaifeng Chen, Yuchang Zhang, Yu Cheng
+* **Problem di Sistem Klasik:**
+  Sistem Chaumian ecash seperti Cashu tumbuh dari satu blind signature sederhana menjadi 31 dokumen spesifikasi, 58 mint, dan 7 wallet yang saling interoperabel — namun analisis keamanan selalu terbatas pada core blind signature saja. Insiden cross-mint theft 2026 terbukti bukan dari kelemahan kriptografi primitif, melainkan dari komposisi: keyset rotation bersamaan wallet recovery dan multi-mint identity.
+* **Inovasi Paper:**
+  Analisis keamanan level sistem pertama untuk Chaumian ecash. Mengidentifikasi tiga kelas serangan komposisional: (1) *keyset rotation race* — window di mana token lama masih valid tapi key baru sudah aktif, memungkinkan double-issuance; (2) *wallet recovery oracle* — endpoint backup memungkinkan enumerasi denominasi token yang dimiliki korban; (3) *cross-mint identity linkage* — pola deposit/withdraw lintas mint dapat dikaitkan via timing correlation.
+* **Implementasi di Nimbus Stylus:**
+  * Nimbus adalah Chaumian ecash di atas Arbitrum — semua attack surface yang ditemukan paper ini identik dengan Nimbus. Tiga mitigasi langsung:
+  * **Keyset rotation:** Kontrak `nimbus-contracts/src/storage.rs` harus enforce atomic key transition — `trusted_issuer_keys` lama di-disable dalam satu transaksi yang sama dengan aktivasi key baru, tanpa window overlap.
+  * **Denomination fingerprinting:** Fungsi `deposit()` dan `spend()` harus enforce denomination bucketing (misal: hanya 10, 100, 1000 USDC) agar amount tidak bisa digunakan sebagai identifier.
+  * **Cross-session timing:** Settlement batcher di `batcher.rs` harus menambahkan random delay (1–5 blok) sebelum on-chain submission untuk memutus timing correlation antara deposit event dan spend event.

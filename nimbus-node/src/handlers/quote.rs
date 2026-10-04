@@ -193,7 +193,7 @@ pub async fn handle_private_spend_quote(
 }
 
 /// Resolves the applicable fee tier. Returns (fee_bps, tier_label, discount_bps).
-/// If no root provided or root not found, falls back to default 25 bps.
+/// If no root provided or root not found, falls back to default 45 bps (PRIVATE_SPEND_FEE_BPS).
 async fn resolve_fee_tier(
     state: &AppState,
     association_root: Option<&str>,

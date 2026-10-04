@@ -47,3 +47,17 @@ Dokumen ini memetakan paper terpilih untuk lapisan kriptografi fundamental Nimbu
   Merumuskan standar *Strong Blindness under Abort Attacks* dan teknik zero-knowledge blinding blindsizing untuk mencegah metadata leakage.
 * **Implementasi di Nimbus Core:**
   * Memperkuat modul masking key release $k \cdot \text{pk}_{\text{iss}} == \text{com}_k$ (DEC-018) agar kegagalan validasi tidak pernah membocorkan bit rahasia dari unmasking request klien.
+
+---
+
+## 5. CUBE: Partially Blind BBS Signatures for Unlinkable Decentralized Identity (IACR ePrint 2026/920)
+* **File Jurnal:** [`jurnal/CUBE-Partially-Blind-BBS-Signatures-Unlinkable-Decentralized-Identity.md`](file:///workspaces/Zeltra-Protocol/jurnal/CUBE-Partially-Blind-BBS-Signatures-Unlinkable-Decentralized-Identity.md)
+* **Penulis:** Guohao Lai
+* **Problem Kritis:**
+  Blueprint Nimbus Fase 3 merencanakan BBS+ selective disclosure untuk CEX compliance. Namun implementasi naif BBS+ memiliki celah tersembunyi: guardian cluster yang menerbitkan kredensial dapat menyimpan log internal issuance request dan mengkorelasikan sesi deposit dengan sesi spend — bahkan tanpa membaca konten kredensial. Ini adalah *issuance linkability*, serangan yang tidak ditangani oleh paper Threshold BBS+ standar.
+* **Inovasi Paper:**
+  CUBE (Credential Unlinkability using Blinded Elements) memperkenalkan *partially blind issuance*: sebagian atribut diblind oleh user sebelum dikirim ke issuer (guardian cluster), sehingga issuer tidak pernah melihat atribut sensitif saat issuance. Hasilnya: issuer tidak bisa membuat link antara sesi issuance dengan sesi verifikasi di CEX, bahkan dengan kolusi seluruh guardian.
+* **Implementasi di Nimbus Core:**
+  * Komponen utama: [`nimbus-core/src/bbs_credential.rs`](file:///workspaces/Zeltra-Protocol/nimbus-core/src/bbs_credential.rs) (baru) dan [`nimbus-node/src/guardian/credential_issuer.rs`](file:///workspaces/Zeltra-Protocol/nimbus-node/src/guardian/credential_issuer.rs) (baru).
+  * Alur baru: User memblind atribut `session_id` dan `deposit_address` sebelum mengirim issuance request ke guardian cluster. Guardian hanya menandatangani blinded commitment — tidak pernah melihat nilai asli. User unmask setelah threshold signature terkumpul.
+  * Dampak keamanan: Menghapus asumsi "guardian tidak kolusi" dari threat model Nimbus. Bahkan jika semua 5 guardian berkolusi, mereka tidak dapat menghubungkan credential yang diterbitkan ke transaksi deposit spesifik.
