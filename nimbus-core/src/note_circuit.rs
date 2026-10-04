@@ -424,11 +424,9 @@ pub fn generate_note_circuit_evm_vk(
     (alpha_g1, beta_g2, gamma_g2, delta_g2, ic)
 }
 
-#[cfg(test)]
 static CACHED_KEYS: std::sync::OnceLock<NoteCircuitKeys> = std::sync::OnceLock::new();
 
-/// Retrieve or lazily initialize cached keys for development and tests (Gate C0 P1).
-#[cfg(test)]
+/// Retrieve or lazily initialize cached keys for development, testing, and relayer verification.
 pub fn get_or_init_note_circuit_keys() -> &'static NoteCircuitKeys {
     CACHED_KEYS.get_or_init(|| {
         generate_note_circuit_keys().expect("Failed to initialize development note circuit keys")
@@ -436,7 +434,7 @@ pub fn get_or_init_note_circuit_keys() -> &'static NoteCircuitKeys {
 }
 
 /// Create a dummy circuit with valid values for setup and testing.
-fn create_dummy_circuit() -> PrivateNoteCircuit {
+pub fn create_dummy_circuit() -> PrivateNoteCircuit {
     use crate::note::{
         compute_empty_hashes, derive_nullifier as dn, derive_nullifier_key as dnk,
         note_commitment as nc,
@@ -524,6 +522,33 @@ pub fn verify_note_proof(
 
     let pvk = prepare_verifying_key(vk);
     Groth16::<Bls12_381>::verify_with_processed_vk(&pvk, public_inputs, proof).unwrap_or(false)
+}
+
+static PREPARED_NOTE_VK: std::sync::OnceLock<ark_groth16::PreparedVerifyingKey<Bls12_381>> =
+    std::sync::OnceLock::new();
+
+/// Returns the prepared verifying key for PrivateNoteCircuit, cached across invocations.
+pub fn get_prepared_note_vk() -> &'static ark_groth16::PreparedVerifyingKey<Bls12_381> {
+    PREPARED_NOTE_VK.get_or_init(|| {
+        let keys = get_or_init_note_circuit_keys();
+        ark_groth16::prepare_verifying_key(&keys.verifying_key)
+    })
+}
+
+/// Verify an EVM-encoded Groth16 proof for PrivateNoteCircuit.
+/// Preflight check for relayer nodes to defend against gas-griefing attacks (DEC-026 C-01).
+pub fn verify_evm_note_proof(
+    proof_a_neg: &[u8; 128],
+    proof_b: &[u8; 256],
+    proof_c: &[u8; 128],
+    public_inputs: &[Fr; 12],
+) -> bool {
+    let Some(proof) = crate::evm::from_evm_proof(proof_a_neg, proof_b, proof_c) else {
+        return false;
+    };
+    let pvk = get_prepared_note_vk();
+    ark_groth16::Groth16::<Bls12_381>::verify_with_processed_vk(pvk, public_inputs, &proof)
+        .unwrap_or(false)
 }
 
 /// Extract public inputs from a dummy circuit (for testing).
@@ -873,5 +898,40 @@ mod tests {
             eprintln!("    alloy_primitives::hex!(\"{}\"),", to_hex(ic_point));
         }
         eprintln!("];");
+    }
+
+    #[test]
+    fn test_verify_evm_note_proof_preflight() {
+        use crate::evm::{to_evm_g1, to_evm_g2};
+
+        let keys = get_or_init_note_circuit_keys();
+        let circuit = setup_valid_circuit();
+        let pis = extract_public_inputs(&circuit);
+        let mut public_inputs = [Fr::default(); 12];
+        public_inputs.copy_from_slice(&pis[..12]);
+
+        let proof = generate_note_proof(circuit, &keys.proving_key).unwrap();
+
+        // Convert proof to EVM format
+        let mut a_neg = [0u8; 128];
+        a_neg.copy_from_slice(&to_evm_g1(&-proof.a));
+
+        let mut b = [0u8; 256];
+        b.copy_from_slice(&to_evm_g2(&proof.b));
+
+        let mut c = [0u8; 128];
+        c.copy_from_slice(&to_evm_g1(&proof.c));
+
+        // 1. Valid EVM proof verifies
+        assert!(verify_evm_note_proof(&a_neg, &b, &c, &public_inputs));
+
+        // 2. Tampered public input rejected
+        let mut tampered_pis = public_inputs;
+        tampered_pis[4] += Fr::from(100u64);
+        assert!(!verify_evm_note_proof(&a_neg, &b, &c, &tampered_pis));
+
+        // 3. Fake proof points rejected
+        let fake_a = [0x11u8; 128];
+        assert!(!verify_evm_note_proof(&fake_a, &b, &c, &public_inputs));
     }
 }

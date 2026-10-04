@@ -21,12 +21,31 @@ pub const CCIP_ETHEREUM_SEPOLIA: u64 = 16015286601757825753;
 pub const CCIP_BASE_SEPOLIA: u64 = 10344971235874465080;
 pub const CCIP_OPTIMISM_SEPOLIA: u64 = 5224473277236331295;
 
+/// Canonical list of known sanctioned digital currency addresses (OFAC SDN List).
+/// Implements DEC-026 Layer 3: Relayer Operational Policy (Low-Cost Sanctions Screening via Public Data).
+pub static KNOWN_SANCTIONED_ADDRESSES: &[&str] = &[
+    "0x8576acc5c05d6ce88f4e49bf65bdf0c62f91353c", // Tornado Cash: Router
+    "0xd90e2f925da726b50c4ed8d0fb90ad053324f31b", // Tornado Cash: Core Contract
+    "0xd7aa9749da3e9ae6008b8b0e8cecd25a666986cf", // OFAC SDN - Lazarus Group
+    "0x098b716b8aaf21512996dc57eb0615e2383e2f96", // Tornado Cash 0.1 ETH
+    "0xa160cdab225685da1d56aa342ad8841c3b53f291", // Tornado Cash 1 ETH
+    "0x12d66f87a04a9e220743712ce6d9bb1b5616b8fc", // Tornado Cash 10 ETH
+    "0x47ce0c6ed5b0ce3d3a51fdb1c52dc66a7c3c2936", // Tornado Cash 100 ETH
+];
+
 /// Configurable safety limits for spend operations
 #[derive(Clone, Debug)]
 pub struct SafetyLimits {
     pub min_spend_usdc: u64,
     pub max_spend_usdc: u64,
     pub allowed_chain_selectors: HashSet<u64>,
+    pub sanctioned_addresses: HashSet<Address>,
+}
+
+impl SafetyLimits {
+    pub fn is_sanctioned(&self, address: &Address) -> bool {
+        self.sanctioned_addresses.contains(address)
+    }
 }
 
 impl Default for SafetyLimits {
@@ -58,10 +77,28 @@ impl Default for SafetyLimits {
             allowed_chain_selectors.insert(CCIP_OPTIMISM_SEPOLIA);
         }
 
+        let mut sanctioned_addresses = HashSet::new();
+        for addr_str in KNOWN_SANCTIONED_ADDRESSES {
+            if let Ok(addr) = Address::from_str(addr_str) {
+                sanctioned_addresses.insert(addr);
+            }
+        }
+        if let Ok(custom_sanctioned) = std::env::var("NIMBUS_SANCTIONED_ADDRESSES") {
+            for part in custom_sanctioned.split(',') {
+                let trimmed = part.trim();
+                if !trimmed.is_empty() {
+                    if let Ok(addr) = Address::from_str(trimmed) {
+                        sanctioned_addresses.insert(addr);
+                    }
+                }
+            }
+        }
+
         Self {
             min_spend_usdc,
             max_spend_usdc,
             allowed_chain_selectors,
+            sanctioned_addresses,
         }
     }
 }
@@ -71,6 +108,7 @@ impl Default for SafetyLimits {
 pub enum ValidationError {
     InvalidRecipientAddress(String),
     ZeroRecipientAddress,
+    RecipientSanctioned(String),
     AmountTooSmall { amount: u64, min_required: u64 },
     AmountTooLarge { amount: u64, max_allowed: u64 },
     InvalidDestinationContract(String),
@@ -83,6 +121,11 @@ impl std::fmt::Display for ValidationError {
         match self {
             Self::InvalidRecipientAddress(err) => write!(f, "Invalid recipient address: {}", err),
             Self::ZeroRecipientAddress => write!(f, "Recipient address cannot be zero address"),
+            Self::RecipientSanctioned(addr) => write!(
+                f,
+                "Recipient address {} is restricted under public sanctions policy (DEC-026)",
+                addr
+            ),
             Self::AmountTooSmall {
                 amount,
                 min_required,
@@ -127,6 +170,12 @@ pub fn validate_spend_request(
 
     if parsed_recipient == Address::ZERO {
         return Err(ValidationError::ZeroRecipientAddress);
+    }
+
+    if limits.is_sanctioned(&parsed_recipient) {
+        return Err(ValidationError::RecipientSanctioned(
+            parsed_recipient.to_string(),
+        ));
     }
 
     // 2. Amount safety bounds (Min & Max)
@@ -302,5 +351,25 @@ mod tests {
             validate_spend_request(recipient, amount, Some(&malformed_dest_cc), &limits),
             Err(ValidationError::InvalidDestinationContract(_))
         ));
+    }
+
+    #[test]
+    fn test_reject_sanctioned_recipient_address() {
+        let limits = SafetyLimits::default();
+        // Tornado Cash router address
+        let sanctioned_recipient = "0x8576acc5c05d6ce88f4e49bf65bdf0c62f91353c";
+        let amount = 10_000_000;
+
+        let res = validate_spend_request(sanctioned_recipient, amount, None, &limits);
+        assert!(matches!(res, Err(ValidationError::RecipientSanctioned(_))));
+
+        // Lazarus Group OFAC address
+        let lazarus_recipient = "0xd7aa9749da3e9ae6008b8b0e8cecd25a666986cf";
+        let res2 = validate_spend_request(lazarus_recipient, amount, None, &limits);
+        assert!(matches!(res2, Err(ValidationError::RecipientSanctioned(_))));
+
+        // Clean recipient passes
+        let clean_recipient = "0x1111111111111111111111111111111111111111";
+        assert!(validate_spend_request(clean_recipient, amount, None, &limits).is_ok());
     }
 }

@@ -30,7 +30,8 @@ pub use crypto::hash_to_g1;
 
 // Re-export EVM helpers
 pub use evm::{
-    from_evm_scalar, get_alpha_neg_evm, get_hm_evm, get_pk_iss_evm, to_evm_g1, to_evm_g2,
+    from_evm_g1, from_evm_g2, from_evm_proof, from_evm_scalar, get_alpha_neg_evm, get_hm_evm,
+    get_pk_iss_evm, to_evm_g1, to_evm_g2,
 };
 
 // Re-export blind signature protocol
@@ -76,11 +77,12 @@ pub use note::{
 // Re-export accounting state machine (DEC-016A Gate B)
 pub use accounting::{ContractAccounting, TransitionResult};
 
-// Re-export Private Note Circuit (DEC-016A Gate C)
+// Re-export Private Note Circuit (DEC-016A Gate C & DEC-026 C-01)
 pub use note_circuit::{
-    extract_public_inputs, generate_note_circuit_evm_vk, generate_note_circuit_keys,
-    generate_note_proof, verify_note_proof, NoteCircuitKeys, PrivateNoteCircuit,
-    NOTE_CIRCUIT_SETUP_SEED, NUM_PUBLIC_INPUTS,
+    create_dummy_circuit, extract_public_inputs, generate_note_circuit_evm_vk,
+    generate_note_circuit_keys, generate_note_proof, get_or_init_note_circuit_keys,
+    get_prepared_note_vk, verify_evm_note_proof, verify_note_proof, NoteCircuitKeys,
+    PrivateNoteCircuit, NOTE_CIRCUIT_SETUP_SEED, NUM_PUBLIC_INPUTS,
 };
 
 #[cfg(test)]

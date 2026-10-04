@@ -429,6 +429,20 @@ pub async fn handle_private_note_spend(
         }
     };
 
+    // Sanctions screening (DEC-026 Layer 3: Relayer Operational Policy)
+    let limits = crate::validation::SafetyLimits::default();
+    if limits.is_sanctioned(&recipient_addr) {
+        return Json(PrivateNoteSpendResponse {
+            status: "REJECTED".to_string(),
+            message: format!(
+                "Recipient address {} is restricted under public sanctions policy (DEC-026)",
+                payload.recipient
+            ),
+            queue_position: 0,
+            estimated_gas_usdc: None,
+        });
+    }
+
     // 6. Note root and nullifier format check
     let note_root_bytes = match hex::decode(payload.note_root.trim_start_matches("0x")) {
         Ok(b) if b.len() == 32 => b,
@@ -638,6 +652,50 @@ pub async fn handle_private_note_spend(
             return Json(PrivateNoteSpendResponse {
                 status: "REJECTED".to_string(),
                 message: "public_inputs[11] does not match has_change flag".to_string(),
+                queue_position: 0,
+                estimated_gas_usdc: None,
+            });
+        }
+
+        // 8.5. Local Groth16 Proof Preflight Verification (DEC-026 Mitigasi C-01)
+        // Defends the relayer against gas-griefing attacks by verifying the Groth16 proof
+        // on node CPU before enqueuing or spending gas for on-chain broadcast.
+        let mut proof_a_bytes = [0u8; 128];
+        if let Ok(b) = hex::decode(payload.proof_a_neg.trim_start_matches("0x")) {
+            if b.len() == 128 {
+                proof_a_bytes.copy_from_slice(&b);
+            }
+        }
+        let mut proof_b_bytes = [0u8; 256];
+        if let Ok(b) = hex::decode(payload.proof_b.trim_start_matches("0x")) {
+            if b.len() == 256 {
+                proof_b_bytes.copy_from_slice(&b);
+            }
+        }
+        let mut proof_c_bytes = [0u8; 128];
+        if let Ok(b) = hex::decode(payload.proof_c.trim_start_matches("0x")) {
+            if b.len() == 128 {
+                proof_c_bytes.copy_from_slice(&b);
+            }
+        }
+
+        let mut fr_public_inputs = [nimbus_core::Fr::default(); 12];
+        for (idx, pi) in parsed_inputs.iter().enumerate().take(12) {
+            if let Some(fr) = nimbus_core::from_evm_scalar(pi) {
+                fr_public_inputs[idx] = fr;
+            }
+        }
+
+        if !nimbus_core::verify_evm_note_proof(
+            &proof_a_bytes,
+            &proof_b_bytes,
+            &proof_c_bytes,
+            &fr_public_inputs,
+        ) {
+            return Json(PrivateNoteSpendResponse {
+                status: "REJECTED".to_string(),
+                message: "Invalid Groth16 proof: preflight verification failed (C-01 defense)"
+                    .to_string(),
                 queue_position: 0,
                 estimated_gas_usdc: None,
             });
@@ -1352,52 +1410,61 @@ mod tests {
     }
 
     fn sample_valid_private_note_request() -> PrivateNoteSpendRequest {
-        let note_root = "0x0000000000000000000000000000000000000000000000000000000000000001";
-        let input_nullifier = "0x0000000000000000000000000000000000000000000000000000000000000002";
-        let output_commitment =
-            "0x0000000000000000000000000000000000000000000000000000000000000003";
-        let recipient = "0x1111111111111111111111111111111111111111";
+        use nimbus_core::{
+            create_dummy_circuit, extract_public_inputs, fr_to_be_bytes, generate_note_proof,
+            get_or_init_note_circuit_keys, to_evm_g1, to_evm_g2,
+        };
 
-        PrivateNoteSpendRequest {
-            session_id: Some("session_1".to_string()),
-            note_root: note_root.to_string(),
-            input_nullifier: input_nullifier.to_string(),
-            output_commitment: Some(output_commitment.to_string()),
-            recipient: recipient.to_string(),
-            merchant_amount: 5_000_000,
-            protocol_fee: 22_500,
-            execution_fee: 20_000,
-            max_execution_fee: 25_000,
-            quote_hash: Some(
-                "0x0000000000000000000000000000000000000000000000000000000000000004".to_string(),
-            ),
-            quote_signature: None,
-            quote_id: None,
-            user_address: None,
-            expiry: Some(9999999999),
-            has_change: Some(serde_json::Value::Number(1.into())),
-            proof_a_neg: format!("0x{}", "11".repeat(128)),
-            proof_b: format!("0x{}", "22".repeat(256)),
-            proof_c: format!("0x{}", "33".repeat(128)),
-            public_inputs: vec![
-                note_root.to_string(),
-                input_nullifier.to_string(),
-                output_commitment.to_string(),
-                format!("0x000000000000000000000000{}", &recipient[2..]),
-                format!("0x{:064x}", 5_000_000u64),
-                format!("0x{:064x}", 22_500u64),
-                format!("0x{:064x}", 20_000u64),
-                "0x0000000000000000000000000000000000000000000000000000000000000004".to_string(),
-                format!("0x{:064x}", 421614u64),
-                format!(
-                    "0x000000000000000000000000{}",
-                    "3333333333333333333333333333333333333333"
-                ),
-                format!("0x{:064x}", 9999999999u64),
-                format!("0x{:064x}", 1u64),
-            ],
-            idempotency_key: Some("idem_valid_1".to_string()),
-        }
+        static CACHED_REQ: std::sync::OnceLock<PrivateNoteSpendRequest> =
+            std::sync::OnceLock::new();
+        CACHED_REQ
+            .get_or_init(|| {
+                let keys = get_or_init_note_circuit_keys();
+                let circuit = create_dummy_circuit();
+                let pis = extract_public_inputs(&circuit);
+                let proof = generate_note_proof(circuit, &keys.proving_key).expect("prove");
+
+                let mut a_neg = [0u8; 128];
+                a_neg.copy_from_slice(&to_evm_g1(&-proof.a));
+                let mut b = [0u8; 256];
+                b.copy_from_slice(&to_evm_g2(&proof.b));
+                let mut c = [0u8; 128];
+                c.copy_from_slice(&to_evm_g1(&proof.c));
+
+                let note_root = format!("0x{}", hex::encode(fr_to_be_bytes(&pis[0])));
+                let input_nullifier = format!("0x{}", hex::encode(fr_to_be_bytes(&pis[1])));
+                let output_commitment = format!("0x{}", hex::encode(fr_to_be_bytes(&pis[2])));
+                let recipient = "0x0000000000000000000000000000000000000064".to_string();
+
+                let public_inputs: Vec<String> = pis
+                    .iter()
+                    .map(|fr| format!("0x{}", hex::encode(fr_to_be_bytes(fr))))
+                    .collect();
+
+                PrivateNoteSpendRequest {
+                    session_id: Some("session_1".to_string()),
+                    note_root,
+                    input_nullifier,
+                    output_commitment: Some(output_commitment),
+                    recipient,
+                    merchant_amount: 5_000_000,
+                    protocol_fee: 12_500,
+                    execution_fee: 23_000,
+                    max_execution_fee: 25_000,
+                    quote_hash: Some(format!("0x{}", hex::encode(fr_to_be_bytes(&pis[7])))),
+                    quote_signature: None,
+                    quote_id: None,
+                    user_address: None,
+                    expiry: Some(0),
+                    has_change: Some(serde_json::Value::Number(1.into())),
+                    proof_a_neg: format!("0x{}", hex::encode(a_neg)),
+                    proof_b: format!("0x{}", hex::encode(b)),
+                    proof_c: format!("0x{}", hex::encode(c)),
+                    public_inputs,
+                    idempotency_key: Some("idem_valid_1".to_string()),
+                }
+            })
+            .clone()
     }
 
     #[tokio::test]
@@ -1479,5 +1546,32 @@ mod tests {
         let resp = handle_private_note_spend(State(state), Json(req)).await;
         assert_eq!(resp.0.status, "REJECTED");
         assert!(resp.0.message.contains("Double-spending detected"));
+    }
+
+    #[tokio::test]
+    async fn test_handle_private_note_spend_reject_invalid_proof() {
+        let (state, _tmp) = setup_test_state().await;
+        let mut req = sample_valid_private_note_request();
+        // Replace with fake proof (DEC-026 C-01 griefing attempt)
+        req.proof_a_neg = format!("0x{}", "11".repeat(128));
+
+        let resp = handle_private_note_spend(State(state), Json(req)).await;
+        assert_eq!(resp.0.status, "REJECTED");
+        assert!(resp.0.message.contains("Invalid Groth16 proof"));
+    }
+
+    #[tokio::test]
+    async fn test_handle_private_note_spend_reject_sanctioned_recipient() {
+        let (state, _tmp) = setup_test_state().await;
+        let mut req = sample_valid_private_note_request();
+        // Tornado Cash router address
+        req.recipient = "0x8576acc5c05d6ce88f4e49bf65bdf0c62f91353c".to_string();
+
+        let resp = handle_private_note_spend(State(state), Json(req)).await;
+        assert_eq!(resp.0.status, "REJECTED");
+        assert!(resp
+            .0
+            .message
+            .contains("restricted under public sanctions policy"));
     }
 }

@@ -17,6 +17,7 @@ Komponen inti berikut **sudah selesai dan diverifikasi**:
 * **ZK-UTXO Gate D (Contract Note Ledger):** Verifier Groth16 BLS12-381 via EIP-2537 (`0x0c` MSM + `0x0f` Pairing Check), LeanIMT depth 20 Merkle tree, dan entrypoint `spend_private_note(...)` di Stylus (53/53 tests pass).
 * **ZK-UTXO Gate E (Client Note Wallet):** `PrivateNoteWallet` di SDK dengan local Groth16 proof generation, note lifecycle state machine, encrypted storage, dan privacy-aware coin selection (20/20 tests pass).
 * **ZK-UTXO Gate F (Relayer Note Settlement):** Endpoint `/api/v1/spend-private-note`, fail-closed pre-flight checks, dual-layer nullifier double-spend prevention (SQLite & on-chain), dan single-item settlement dispatcher `broadcast_spend_private_note_transaction` ([`DEC-025`](file:///workspaces/Zeltra-Protocol/research/decisions/DEC-025-relayer-zk-note-spend-settlement-atomic-batching-and-reconciliation.md)).
+* **Relayer Hardening & Compliance (DEC-026):** Local Groth16 preflight verification di CPU relayer (`verify_evm_note_proof`) sebagai mitigasi C-01 anti gas-griefing, serta screening sanksi publik aktif (OFAC SDN List di layer HTTP) dengan penolakan langsung (`403 / REJECTED`) pada spend handler dan validation.
 
 ---
 
