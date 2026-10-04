@@ -63,6 +63,131 @@ pub fn generate_mds_matrix(seed: u64) -> Vec<Vec<Fr>> {
         .collect()
 }
 
+// ─── Grain-128 LFSR Parameter Generator (DEC-021) ─────────────────────────
+
+/// Canonical Grain-128 LFSR in self-shrinking mode for audited Poseidon parameter generation.
+///
+/// Implements the standardized parameter generation algorithm specified in
+/// Grassi et al. (Poseidon Paper, Section 2.3) and Aztec Barretenberg (`poseidon2_cpp_params.sage`),
+/// mitigating invariant subspace trails and Gröbner basis algebraic attacks (DEC-021).
+#[derive(Clone, Debug)]
+pub struct GrainLfsr {
+    state: [bool; 80],
+}
+
+impl GrainLfsr {
+    /// Initialize Grain LFSR for a specific Poseidon instance over BLS12-381 Fr:
+    /// - `width`: state width t (e.g., 3 or 5)
+    /// - `full_rounds`: R_F
+    /// - `partial_rounds`: R_P
+    pub fn new(width: usize, full_rounds: usize, partial_rounds: usize) -> Self {
+        let mut state = [false; 80];
+
+        // b0, b1: 1, 0 for prime field Fp
+        state[0] = true;
+        state[1] = false;
+
+        // b2..b5: S-box exponent alpha = 5 (binary 0101)
+        state[2] = true;
+        state[3] = false;
+        state[4] = true;
+        state[5] = false;
+
+        // b6..b17: field size n = 255 bits (12 bits)
+        let n = 255u16;
+        for i in 0..12 {
+            state[6 + i] = ((n >> i) & 1) == 1;
+        }
+
+        // b18..b29: state size t (12 bits)
+        let t = width as u16;
+        for i in 0..12 {
+            state[18 + i] = ((t >> i) & 1) == 1;
+        }
+
+        // b30..b39: full rounds R_F (10 bits)
+        let rf = full_rounds as u16;
+        for i in 0..10 {
+            state[30 + i] = ((rf >> i) & 1) == 1;
+        }
+
+        // b40..b49: partial rounds R_P (10 bits)
+        let rp = partial_rounds as u16;
+        for i in 0..10 {
+            state[40 + i] = ((rp >> i) & 1) == 1;
+        }
+
+        // b50..b79: 1's (30 bits)
+        for i in 50..80 {
+            state[i] = true;
+        }
+
+        let mut lfsr = Self { state };
+
+        // Warmup: discard first 160 bits
+        for _ in 0..160 {
+            lfsr.clock_raw();
+        }
+
+        lfsr
+    }
+
+    /// Single clock cycle of the 80-bit LFSR.
+    /// Polynomial: x^80 + x^62 + x^51 + x^38 + x^23 + x^13 + 1
+    fn clock_raw(&mut self) -> bool {
+        let feedback = self.state[62]
+            ^ self.state[51]
+            ^ self.state[38]
+            ^ self.state[23]
+            ^ self.state[13]
+            ^ self.state[0];
+        let out = self.state[0];
+        self.state.copy_within(1..80, 0);
+        self.state[79] = feedback;
+        out
+    }
+
+    /// Self-shrinking mode: sample 2 bits b0, b1.
+    /// If b0 == 1, output b1; if b0 == 0, discard b1 and retry.
+    pub fn get_bit(&mut self) -> bool {
+        loop {
+            let b0 = self.clock_raw();
+            let b1 = self.clock_raw();
+            if b0 {
+                return b1;
+            }
+        }
+    }
+
+    /// Generate next field element in Fr using rejection sampling.
+    pub fn get_field_element(&mut self) -> Fr {
+        loop {
+            let mut bytes = [0u8; 32];
+            for bit_idx in 0..255 {
+                if self.get_bit() {
+                    let byte_pos = bit_idx / 8;
+                    let bit_pos = bit_idx % 8;
+                    bytes[byte_pos] |= 1 << bit_pos;
+                }
+            }
+            if let Some(elem) = Fr::from_random_bytes(&bytes) {
+                return elem;
+            }
+        }
+    }
+}
+
+/// Generate Poseidon round constants deterministically using the canonical Grain LFSR (DEC-021).
+pub fn generate_grain_round_constants(
+    width: usize,
+    full_rounds: usize,
+    partial_rounds: usize,
+) -> Vec<Fr> {
+    let mut lfsr = GrainLfsr::new(width, full_rounds, partial_rounds);
+    let total = width * (1 + full_rounds + partial_rounds);
+    (0..total).map(|_| lfsr.get_field_element()).collect()
+}
+
 // ─── R1CS Gadget ────────────────────────────────────────────────────────
 
 /// Poseidon x^5 S-box gadget.
@@ -614,4 +739,36 @@ mod tests {
             "Width-3 and width-5 must produce different outputs"
         );
     }
+
+    #[test]
+    fn test_grain_lfsr_deterministic_and_nonzero() {
+        let rc1 = generate_grain_round_constants(3, 8, 57);
+        let rc2 = generate_grain_round_constants(3, 8, 57);
+        assert_eq!(rc1.len(), 3 * (1 + 8 + 57));
+        assert_eq!(rc1, rc2, "Grain LFSR must be strictly deterministic");
+        for c in &rc1 {
+            assert_ne!(*c, Fr::from(0u64), "Round constants must be non-zero");
+        }
+    }
+
+    #[test]
+    fn test_grain_lfsr_round_constants_unique() {
+        let rc = generate_grain_round_constants(5, 8, 60);
+        assert_eq!(rc.len(), 5 * (1 + 8 + 60));
+        let mut set = std::collections::HashSet::new();
+        for c in &rc {
+            assert!(set.insert(*c), "All round constants must be distinct");
+        }
+    }
+
+    #[test]
+    fn test_grain_lfsr_distinct_widths() {
+        let rc_w3 = generate_grain_round_constants(3, 8, 57);
+        let rc_w5 = generate_grain_round_constants(5, 8, 60);
+        assert_ne!(
+            rc_w3[0], rc_w5[0],
+            "Different state widths must yield independent constants"
+        );
+    }
 }
+

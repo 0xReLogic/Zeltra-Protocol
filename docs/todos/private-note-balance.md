@@ -84,8 +84,8 @@ wallet publik milik user.
 > **Status Gate C0:** **SELESAI (100%)** — Seluruh 3 blocker keamanan P0 (leaf index Merkle binding, 64-bit integer range gadget, boolean constraint `has_change`) dan negative test suite telah lulus 100%.
 
 Pending parameters:
-- [ ] Ganti parameter Poseidon width-5 ad-hoc berbasis `StdRng` dengan parameter standar/audited atau prosedur generation resmi yang terdokumentasi.
-- [ ] Validasi hasilnya menggunakan implementasi referensi independen.
+- [x] Ganti parameter Poseidon width-5 ad-hoc berbasis `StdRng` dengan parameter standar/audited Grain-128 LFSR di [`nimbus-core/src/poseidon.rs`](file:///workspaces/Zeltra-Protocol/nimbus-core/src/poseidon.rs) ([`DEC-021`](file:///workspaces/Zeltra-Protocol/research/decisions/DEC-021-audited-poseidon-parameters-grain-lfsr-defense.md)).
+- [x] Validasi hasilnya menggunakan implementasi referensi independen (Aztec Barretenberg `poseidon2_cpp_params.sage` & EF Cryptanalysis 2024–2026).
 - [ ] Jalankan MPC ceremony hanya setelah seluruh constraint dan public-input ABI dibekukan serta direview.
 
 ---

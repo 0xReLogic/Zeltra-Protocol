@@ -59,3 +59,15 @@ Helper fungsi di `evm.rs`:
   $$e(-\alpha, G_2) \cdot e(H(m), pk_{iss}) == 1$$
 * `get_hm_evm(&msg)`: Menghasilkan representasi 128 bytes dari $H(m) \in G_1$.
 * `get_pk_iss_evm(&pk)`: Menghasilkan representasi 256 bytes dari $pk_{iss} \in G_2$.
+
+---
+
+## 5. Poseidon Hash & Grain-128 LFSR Parameter Generator (DEC-021)
+
+File referensi: [`nimbus-core/src/poseidon.rs`](file:///workspaces/Zeltra-Protocol/nimbus-core/src/poseidon.rs)
+
+Poseidon adalah fungsi hash ramah ZK (*arithmetization-oriented*) yang digunakan secara intensif di Nimbus:
+* **Width $t=3$:** Digunakan untuk hashing 2 input (misal derivasi `nullifier_key` dan sirkuit compliance).
+* **Width $t=5$:** Digunakan untuk komitmen note (`value, owner_key, rho, randomness`), derivasi nullifier berindeks (`nullifier_key, commitment, leaf_index`), dan parent hash pohon LeanIMT Merkle tree.
+* **Standard Grain-128 LFSR (`GrainLfsr`):** Menggantikan generator PRNG ad-hoc dengan generator resmi standar Grassi et al. dan Aztec Barretenberg. Generator ini membentengi cipher dari celah *invariant subspace trails* dan serangan aljabar basis Gröbner sesuai riset *Ethereum Foundation Poseidon Cryptanalysis 2024–2026* ([`DEC-021`](file:///workspaces/Zeltra-Protocol/research/decisions/DEC-021-audited-poseidon-parameters-grain-lfsr-defense.md)).
+

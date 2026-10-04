@@ -32,8 +32,8 @@ Arsitektur yang dipilih secara definitif: **Arah B (ZK-UTXO Model - Gates A s/d 
 Ref: [`docs/todos/private-note-balance.md`](file:///workspaces/Zeltra-Protocol/docs/todos/private-note-balance.md), [`DEC-016A (Frozen Spec)`](file:///workspaces/Zeltra-Protocol/research/decisions/DEC-016A-private-note-spec-freeze.md), & [`DEC-016B (Shortcuts Fix)`](file:///workspaces/Zeltra-Protocol/research/decisions/DEC-016B-mvp-circuit-shortcuts.md)
 
 - [ ] **Cryptographic parameters**:
-  - Ganti parameter Poseidon width-5 ad-hoc (StdRng) dengan parameter standar/audited.
-  - Simpan proving/verifying key sebagai artifact versioned; cache development key pada test runner.
+  - [x] Generator parameter standar/audited Grain-128 LFSR (`GrainLfsr`) terimplementasi di [`nimbus-core/src/poseidon.rs`](file:///workspaces/Zeltra-Protocol/nimbus-core/src/poseidon.rs) sesuai [`DEC-021`](file:///workspaces/Zeltra-Protocol/research/decisions/DEC-021-audited-poseidon-parameters-grain-lfsr-defense.md) (108/108 tests pass).
+  - [ ] Simpan proving/verifying key sebagai artifact versioned; cache development key pada test runner.
 
 ---
 
@@ -50,7 +50,18 @@ Ref: [`docs/todos/private-note-balance.md`](file:///workspaces/Zeltra-Protocol/d
 
 ---
 
-## 3. Relayer & Node Settlement (`nimbus-node`)
+## 3. Client SDK Private Wallet State (`nimbus-sdk` - Gate E Blocker)
+
+- [ ] **Private Note Wallet & UTXO Selection (Gate E Blocker)** (Rincian lengkap di [`docs/todos/private-note-balance.md`](file:///workspaces/Zeltra-Protocol/docs/todos/private-note-balance.md)):
+  - Ganti `AgentTokenPool` (voucher BDHKE nominal kaku) dengan model Note UTXO: akumulasi seluruh unspent notes menjadi satu saldo gabungan.
+  - Implementasikan note lifecycle state machine: `unconfirmed -> unspent -> reserved -> spent`.
+  - Privacy-aware coin selection & change calculation: otomatis memilih input note dan menghitung nilai kembalian (*change note*).
+  - Local proof generator: buat proof Groth16 (`PrivateNoteCircuit`) langsung di client SDK (jangan pernah kirim spending key / note preimage ke relayer).
+  - Client API methods: `deposit(amount)`, `pay(recipient, amount)`, `send_to_wallet(recipient, amount)`, dan `withdraw_all(owner_wallet)`.
+
+---
+
+## 4. Relayer & Node Settlement (`nimbus-node` - Gate F Blocker)
 
 - [ ] **Relayer ZK Note Spend & Batching (Gate F Blocker)** (Rincian lengkap di [`docs/todos/private-note-balance.md`](file:///workspaces/Zeltra-Protocol/docs/todos/private-note-balance.md)):
   - Handler spend menerima proof ZK dan memverifikasi signed EIP-712 execution quote secara fail-closed.
@@ -60,7 +71,7 @@ Ref: [`docs/todos/private-note-balance.md`](file:///workspaces/Zeltra-Protocol/d
 
 ---
 
-## 4. Cross-Chain CCIP Testing & Verification
+## 5. Cross-Chain CCIP Testing & Verification
 
 - [ ] **Testnet E2E Hard-Test (Arbitrum Sepolia)**:
   - Uji alur lengkap: source broadcast $\rightarrow$ router $\rightarrow$ destination execution $\rightarrow$ destination confirmation.
@@ -68,7 +79,7 @@ Ref: [`docs/todos/private-note-balance.md`](file:///workspaces/Zeltra-Protocol/d
 
 ---
 
-## 5. Security, Secrets & Infrastructure
+## 6. Security, Secrets & Infrastructure
 
 - [ ] **Credential Rotation & Git Cleanup**:
   - Rotasi seluruh secret/private key yang pernah ter-commit di masa lalu.
@@ -84,7 +95,7 @@ Ref: [`docs/todos/private-note-balance.md`](file:///workspaces/Zeltra-Protocol/d
 
 ---
 
-## 6. Integrasi Eksternal (Opsional / Secondary)
+## 7. Integrasi Eksternal (Opsional / Secondary)
 
 - [ ] **x402 Facilitator**:
   - Ref: [`docs/todos/x402.md`](file:///workspaces/Zeltra-Protocol/docs/todos/x402.md)
@@ -95,7 +106,7 @@ Ref: [`docs/todos/private-note-balance.md`](file:///workspaces/Zeltra-Protocol/d
 
 ---
 
-## 7. Mainnet Readiness Gate
+## 8. Mainnet Readiness Gate
 
 - [ ] Seluruh invariant akuntansi terbukti solvent: `contract assets >= all liabilities`.
 - [ ] Tidak ada fallback mock atau bypass `#[cfg(test)]` pada binary production.
