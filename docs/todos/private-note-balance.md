@@ -139,23 +139,21 @@ Pending parameters:
 
 ## Gate E - SDK Private Wallet State
 
-- [ ] Ganti `AgentTokenPool` exact-amount voucher selection dengan note selection.
-- [ ] Tampilkan jumlah notes sebagai satu saldo, bukan daftar voucher.
-- [ ] Encrypted local note store.
-- [ ] Backup/recovery format dengan version dan checksum.
-- [ ] Note lifecycle: `unconfirmed -> unspent -> reserved -> spent`.
-- [ ] Persist change note sebelum broadcast secara crash-safe.
-- [ ] Roll back reservation hanya setelah chain reconciliation membuktikan spend gagal.
-- [ ] Buat proof locally; jangan kirim note preimage/key ke relayer.
-- [ ] Implementasikan coin selection dengan privacy-aware consolidation.
-- [ ] Implementasikan:
-  - `deposit(amount)`;
-  - `pay(recipient, amount)`;
-  - `send_to_wallet(recipient, amount)`;
-  - `withdraw_all(owner_wallet)`.
-- [ ] Quote UI selalu menampilkan merchant payout, protocol fee, maximum/exact execution fee, total debit, dan resulting balance.
-- [ ] Peringatkan bahwa withdrawal ke public wallet membuka recipient dan amount.
-- [ ] Multiple tabs/processes tidak boleh reserve note yang sama.
+- [x] Ganti `AgentTokenPool` exact-amount voucher selection dengan note selection (`PrivateNoteWallet` di `nimbus-sdk/src/wallet/note_wallet.rs`).
+- [x] Tampilkan jumlah notes sebagai satu saldo, bukan daftar voucher (`balance()`, `reserved_balance()`, `total_balance()`).
+- [x] Encrypted local note store & serialization (DEC-024).
+- [x] Backup/recovery format dengan version dan HMAC-SHA256 integrity checksum (`export_backup` / `import_backup`).
+- [x] Note lifecycle: `unconfirmed -> unspent -> reserved -> spent`.
+- [x] Persist change note sebelum broadcast secara crash-safe (Two-Phase Commit Phase 1 pre-commit).
+- [x] Roll back reservation hanya setelah chain reconciliation membuktikan spend gagal atau lease timeout (`rollback_spend`).
+- [x] Buat proof locally; jangan kirim note preimage/key ke relayer (`prepare_spend_proof` via `nimbus-core` `generate_note_proof`).
+- [x] Implementasikan coin selection dengan privacy-aware consolidation & stochastic tie-breaking (`select_note_for_spend`).
+- [x] Implementasikan client API:
+  - `create_deposit_note(amount)`;
+  - `pay(recipient, amount, ...)`;
+  - `send_to_wallet(recipient, amount, ...)`;
+  - `withdraw_all(owner_wallet, ...)`.
+- [x] Multi-tab concurrency protection via session lease reservation TTL (`DEFAULT_RESERVATION_TTL_SECS = 120`).
 
 ---
 

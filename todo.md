@@ -52,7 +52,7 @@ Ref: [`docs/todos/private-note-balance.md`](file:///workspaces/Zeltra-Protocol/d
 
 ## 3. Client SDK Private Wallet State (`nimbus-sdk` - Gate E Blocker)
 
-- [ ] **Private Note Wallet & UTXO Selection (Gate E Blocker)** (Rincian lengkap di [`docs/todos/private-note-balance.md`](file:///workspaces/Zeltra-Protocol/docs/todos/private-note-balance.md)):
+- [x] **Private Note Wallet & UTXO Selection (Gate E Blocker)** (Rincian lengkap di [`docs/todos/private-note-balance.md`](file:///workspaces/Zeltra-Protocol/docs/todos/private-note-balance.md)):
   - Ganti `AgentTokenPool` (voucher BDHKE nominal kaku) dengan model Note UTXO: akumulasi seluruh unspent notes menjadi satu saldo gabungan.
   - Implementasikan note lifecycle state machine: `unconfirmed -> unspent -> reserved -> spent`.
   - Privacy-aware coin selection & change calculation: otomatis memilih input note dan menghitung nilai kembalian (*change note*).

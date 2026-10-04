@@ -28,17 +28,14 @@ pub fn init_compliance_keys() -> Result<(), JsValue> {
     log("ZK Prover: Initializing compliance circuit keys...");
 
     // Generate keys (in production, these would be loaded from a trusted setup)
-    match generate_compliance_keys() {
-        Ok(keys) => {
-            let _ = PROVING_KEY.set(keys.proving_key);
-            let _ = VERIFYING_KEY.set(keys.verifying_key);
-            #[cfg(target_arch = "wasm32")]
-            log("ZK Prover: Compliance circuit keys initialized successfully");
-        }
-        Err(_) => {
-            #[cfg(target_arch = "wasm32")]
-            log("ZK Prover: Failed to initialize keys");
-        }
+    if let Ok(keys) = generate_compliance_keys() {
+        let _ = PROVING_KEY.set(keys.proving_key);
+        let _ = VERIFYING_KEY.set(keys.verifying_key);
+        #[cfg(target_arch = "wasm32")]
+        log("ZK Prover: Compliance circuit keys initialized successfully");
+    } else {
+        #[cfg(target_arch = "wasm32")]
+        log("ZK Prover: Failed to initialize keys");
     }
 
     Ok(())

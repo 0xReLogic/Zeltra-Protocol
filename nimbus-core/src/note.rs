@@ -497,9 +497,7 @@ mod tests {
         // Proof for leaf[1]: sibling at level 0 is leaf[0], rest are empty
         let mut siblings = [Fr::from(0u64); MERKLE_TREE_DEPTH];
         siblings[0] = leaves[0]; // level 0 sibling
-        for i in 1..MERKLE_TREE_DEPTH {
-            siblings[i] = empty[i];
-        }
+        siblings[1..MERKLE_TREE_DEPTH].copy_from_slice(&empty[1..MERKLE_TREE_DEPTH]);
 
         assert!(
             verify_merkle_proof(r1, leaves[1], 1, &siblings),

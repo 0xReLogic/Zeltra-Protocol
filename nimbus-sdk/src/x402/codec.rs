@@ -72,6 +72,7 @@ pub fn encode_payment_required(req: &X402PaymentRequired) -> Result<String, Stri
 /// This is the primary entry point for AI Agents: given the anonymous token
 /// spend proof (nullifier, alpha_neg, hm, pk_iss), it builds a valid x402
 /// PAYMENT-SIGNATURE payload that can be attached to an HTTP request header.
+#[allow(clippy::too_many_arguments)]
 pub fn build_nimbus_payment_signature(
     nullifier_hex: &str,
     alpha_neg_hex: &str,
@@ -104,6 +105,7 @@ pub fn build_nimbus_payment_signature(
 /// Builds a payment signature where the caller starts from the merchant's exact
 /// requested amount. The embedded contract amount is grossed up so the on-chain
 /// 0.15% spend fee does not reduce the merchant payout.
+#[allow(clippy::too_many_arguments)]
 pub fn build_nimbus_payment_signature_for_merchant_amount(
     nullifier_hex: &str,
     alpha_neg_hex: &str,

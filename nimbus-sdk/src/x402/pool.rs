@@ -253,6 +253,7 @@ impl AgentTokenPool {
     }
 
     #[wasm_bindgen]
+    #[allow(clippy::too_many_arguments)]
     pub fn spend_any_token(
         &mut self,
         amount: u64,

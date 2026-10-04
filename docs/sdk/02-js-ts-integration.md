@@ -90,3 +90,77 @@ const signatures = `${sig1Hex},${sig2Hex},${sig4Hex}`;
 const aggregatedMaskedSig = wasm_aggregate_shares(indices, signatures);
 ```
 Fungsi ini menghitung interpolasi Lagrange secara instan di dalam WASM tanpa membocorkan secret share antar guardian.
+
+---
+
+## 4. Private Note Wallet & UTXO State (Gate E — DEC-024)
+
+Untuk mendukung saldo fleksibel pecahan sembarang (*variable-amount ZK-UTXO*), SDK menyediakan `PrivateNoteWallet` yang mengelola siklus hidup note secara crash-safe dan melindungi privasi pengguna dari serangan *subset-sum / wallet fingerprinting*:
+
+### A. Siklus Hidup Note 4 Tahap
+$$\text{Unconfirmed} \longrightarrow \text{Unspent} \overset{\text{Reserve}}{\underset{\text{Rollback}}{\rightleftharpoons}} \text{Reserved} \longrightarrow \text{Spent}$$
+
+* **`Unconfirmed`:** Note deposit baru atau kembalian (*change note*) yang belum terbit/terkonfirmasi on-chain.
+* **`Unspent`:** Note confirmed on-chain dengan Merkle witness lengkap (siap dibelanjakan).
+* **`Reserved`:** Note yang dikunci sementara untuk sesi belanja aktif dengan batas waktu sewa (`lease_expiry_secs = 120s`). Mencegah double-reservation antar tab browser.
+* **`Spent`:** Note yang telah dikonsumsi di smart contract dengan nullifier terdaftar.
+
+### B. Contoh Penggunaan Wallet Lengkap (TypeScript / Rust SDK):
+
+```typescript
+import { PrivateNoteWallet, NoteStatus } from 'nimbus-sdk';
+
+// 1. Inisialisasi Wallet dari 32-Byte Master Seed (BIP-32 / DEC-024)
+const seed = new Uint8Array(32); // Entropy aman (CSPRNG)
+crypto.getRandomValues(seed);
+const wallet = PrivateNoteWallet.new(seed);
+
+// 2. Cek Saldo Gabungan (Aggregate Balance)
+console.log("Saldo Tersedia:", wallet.balance());           // Hanya Unspent notes
+console.log("Saldo Terkunci:", wallet.reserved_balance(now)); // Sesi aktif
+console.log("Total Saldo:", wallet.total_balance(now));
+
+// 3. Deposit Baru
+const [depositNote, commitmentHex] = wallet.create_deposit_note(100_000_000, now);
+// Kirim commitmentHex ke contract.deposit(100_000_000, commitmentHex)
+// Setelah confirmed on-chain, update leaf_index dan Merkle path:
+wallet.confirm_deposit(commitmentHex, leafIndex, merklePathArray, currentTreeRoot);
+
+// 4. Seleksi Koin & Pembayaran (Coin Selection & Zero-Change Mode)
+// Otomatis memilih note terbaik (Exact Match > Best Fit) untuk meminimalkan pecahan kembalian:
+const selected = wallet.select_note_for_spend(
+    25_000_000, // merchant payout
+    112_500,    // protocol fee (45 bps)
+    50_000,     // execution fee
+    now
+);
+
+// 5. Pembuatan Proof ZK Lokal (Client-Side Groth16)
+// Spending key & preimage tidak pernah dikirim ke relayer
+const spendPayload = wallet.prepare_spend_proof(
+    selected,
+    sessionId,
+    recipientAddress,
+    maxExecutionFee,
+    quoteHashHex,
+    chainId,
+    contractAddressHex,
+    expiryTimestamp,
+    now,
+    provingKey
+);
+
+// 6. Two-Phase Commit (2PC) Crash Safety:
+try {
+    const txReceipt = await submitToRelayer(spendPayload);
+    // Sukses: Promosikan change note menjadi Unspent, tandai input note Spent
+    wallet.commit_spend(sessionId, txReceipt.nullifier, now, txReceipt.changeLeafIndex, txReceipt.changePath, txReceipt.newRoot);
+} catch (err) {
+    // Gagal / Timeout: Kembalikan input note ke status Unspent, batalkan change note
+    wallet.rollback_spend(sessionId);
+}
+
+// 7. Backup & Recovery Terenkripsi (Password-Protected AES/HMAC)
+const backupJson = wallet.export_backup("PasswordRahasia123!");
+const restoredWallet = PrivateNoteWallet.import_backup(backupJson, "PasswordRahasia123!");
+```

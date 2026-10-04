@@ -118,9 +118,7 @@ impl GrainLfsr {
         }
 
         // b50..b79: 1's (30 bits)
-        for i in 50..80 {
-            state[i] = true;
-        }
+        state[50..80].fill(true);
 
         let mut lfsr = Self { state };
 

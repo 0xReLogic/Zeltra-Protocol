@@ -30,6 +30,9 @@ nimbus-sdk/src/
 ├── fee_wasm.rs         # Kalkulasi quote fee & gross-up di client
 ├── zk_wasm.rs          # Prover & verifier ZK Groth16 client-side
 ├── eip712.rs           # Penandatanganan typed data EIP-712 quote execution fee
+├── wallet/             # Modul Private Note Wallet State (Gate E - DEC-024)
+│   ├── mod.rs          # Re-export tipe & fungsi wallet
+│   └── note_wallet.rs  # UTXO lifecycle, coin selection, 2PC crash safety, backup
 └── x402/               # Modul protokol micropayment agen AI (HTTP 402)
     ├── mod.rs          # Integrasi modul
     ├── types.rs        # Struktur data pembayaran x402

@@ -67,3 +67,15 @@ Nimbus SDK menyediakan pustaka self-custodial bagi autonomous agent AI untuk mel
 1. **Self-Custodial:** Kunci rahasia note disimpan lokal di memori agent, bukan di server terpusat.
 2. **Tanpa Interupsi Manusia:** Agent dapat membelanjakan saldo secara otomatis sesuai batasan limit kebijakan (*spending policy guard*) yang ditetapkan pemilik.
 3. **Privasi Penuh:** API provider tidak dapat menghubungkan dompet utama penyandang dana (*funder*) dengan bot AI yang memanggil layanan.
+
+---
+
+## 3. Evolusi: Dari Fixed Voucher ke Note UTXO Pool (DEC-024)
+
+Pada versi awal (Phase 1), agen AI mengelola token kaku berdenominasi tetap (`AgentTokenPool`). Hal ini membatasi fleksibilitas pembayaran jika invoice API bernilai pecahan desimal yang dinamis (misal $0.0034 per prompt).
+
+Dengan implementasi **Gate E (`PrivateNoteWallet`)**:
+1. **Saldo Gabungan Tunggal:** Seluruh deposit dan change notes terakumulasi menjadi satu saldo global (`wallet.balance()`).
+2. **Otomatisasi Pecahan & Kembalian (*Change Notes*):** Agen cukup memanggil `wallet.select_note_for_spend(amount, protocol_fee, exec_fee, now)`. Jika nominal note lebih besar dari invoice, SDK secara otomatis membuat komitmen *change note* baru ke Merkle tree tanpa membocorkan nilai ke relayer.
+3. **Ketahanan Crash (*Crash Resilience*):** Jika server LLM atau jaringan terputus di tengah-tengah negosiasi x402, mekanisme *Two-Phase Commit* (2PC) mengembalikan status note ke `Unspent` setelah masa sewa (`lease_expiry_secs`) berakhir, mencegah dana agen hilang permanen (*ghost note*).
+

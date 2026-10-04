@@ -6,7 +6,8 @@ mod tests {
     use ark_std::Zero;
     use rand::{thread_rng, Rng, RngCore};
 
-    /// 1. FORMAL VERIFICATION: Shamir Secret Sharing & Lagrange Reconstruction Correctness
+    /// FORMAL VERIFICATION: Shamir Secret Sharing & Lagrange Reconstruction Correctness
+    ///
     /// Verifies the algebraic correctness of Shamir Secret Sharing across multiple random scenarios
     /// and checks completeness (threshold >= t) and soundness (threshold < t).
     #[test]
@@ -79,7 +80,8 @@ mod tests {
         }
     }
 
-    /// 2. FORMAL VERIFICATION: Blind Signature Protocol Soundness
+    /// FORMAL VERIFICATION: Blind Signature Protocol Soundness
+    ///
     /// Verifies that any perturbation in the signature, blinding factor, or message leads to verification failure.
     #[test]
     fn verify_blind_signature_soundness() {
@@ -106,7 +108,7 @@ mod tests {
 
         // B. Adversary alters the unmasked signature point
         let mut corrupted_alpha = alpha.clone();
-        corrupted_alpha.0 = corrupted_alpha.0 + G1Projective::generator();
+        corrupted_alpha.0 += G1Projective::generator();
         assert!(
             !verify_unmasked(message, &corrupted_alpha, &pk_iss),
             "Adversary successfully verified a corrupted unmasked signature!"
@@ -121,7 +123,8 @@ mod tests {
         );
     }
 
-    /// 3. DETERMINISTIC FUZZING: Deserialization and Parser Robustness
+    /// DETERMINISTIC FUZZING: Deserialization and Parser Robustness
+    ///
     /// Fuzzes the deserialize function with corrupted, truncated, and random byte strings
     /// to ensure absolutely no panics occur.
     #[test]
@@ -141,7 +144,8 @@ mod tests {
         }
     }
 
-    /// 4. DETERMINISTIC FUZZING: EVM Coordinate Serialization Safety
+    /// DETERMINISTIC FUZZING: EVM Coordinate Serialization Safety
+    ///
     /// Fuzzes `to_evm_g1` and `to_evm_g2` coordinate converters to ensure bounds safety.
     #[test]
     fn fuzz_evm_serialization_safety() {
@@ -164,7 +168,8 @@ mod tests {
         }
     }
 
-    /// 5. DETERMINISTIC FUZZING: Parameter Bounds Safety
+    /// DETERMINISTIC FUZZING: Parameter Bounds Safety
+    ///
     /// Fuzzes threshold parameter functions with invalid inputs to ensure assertions are safe.
     #[test]
     fn fuzz_threshold_parameter_assertions() {

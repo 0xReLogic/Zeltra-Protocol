@@ -205,7 +205,7 @@ mod tests {
         // Derive the public key and address
         let signing_key = SigningKey::from_bytes((&private_key).into()).unwrap();
         let verifying_key = signing_key.verifying_key();
-        let signer_address = public_key_to_address(&verifying_key);
+        let signer_address = public_key_to_address(verifying_key);
 
         let quote = ExecutionQuote {
             quoteId: U256::from(456u64),

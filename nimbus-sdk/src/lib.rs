@@ -4,6 +4,7 @@ mod evm_wasm;
 mod fee_wasm;
 mod threshold_wasm;
 mod wasm_types;
+pub mod wallet;
 pub mod x402;
 mod zk_wasm;
 
@@ -12,6 +13,7 @@ pub use eip712::*;
 pub use evm_wasm::*;
 pub use fee_wasm::*;
 pub use threshold_wasm::*;
+pub use wallet::*;
 pub use wasm_types::*;
 pub use zk_wasm::*;
 
@@ -71,13 +73,13 @@ pub fn hmac_sha256(key: &[u8], message: &[u8]) -> [u8; 32] {
     }
 
     let mut inner_hasher = Sha256::new();
-    inner_hasher.update(&ipad);
+    inner_hasher.update(ipad);
     inner_hasher.update(message);
     let inner_hash = inner_hasher.finalize();
 
     let mut outer_hasher = Sha256::new();
-    outer_hasher.update(&opad);
-    outer_hasher.update(&inner_hash);
+    outer_hasher.update(opad);
+    outer_hasher.update(inner_hash);
     let outer_hash = outer_hasher.finalize();
 
     let mut result = [0u8; 32];
