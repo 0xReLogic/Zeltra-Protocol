@@ -280,10 +280,7 @@ fn default_relayer_markup_bps() -> u64 {
 
 /// Generate a random 32-byte quote ID as hex string
 fn generate_quote_id() -> String {
-    use rand::Rng;
-    let mut rng = rand::thread_rng();
-    let mut bytes = [0u8; 32];
-    rng.fill(&mut bytes);
+    let bytes: [u8; 32] = rand::random();
     format!("0x{}", hex::encode(bytes))
 }
 

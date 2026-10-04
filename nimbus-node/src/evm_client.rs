@@ -70,6 +70,7 @@ sol! {
 
     function getCleanRootTimestamp(bytes32 root) external view returns (uint256);
     function isNullifierSpent(bytes32 nullifier) external view returns (bool);
+    function isSanctioned(address addr) external view returns (bool);
 
     struct EVMTokenAmount {
         address token;
@@ -1334,6 +1335,36 @@ impl EvmClient {
         }
     }
 
+    /// Official Chainalysis Sanctions Oracle address on Arbitrum and Ethereum
+    pub const CHAINALYSIS_SANCTIONS_ORACLE_ADDRESS: &'static str =
+        "0x40C57923924B5c5c5455c48D93317139ADDaC8fb";
+
+    /// Check if an address is sanctioned on-chain via the official Chainalysis Sanctions Oracle.
+    /// Performs a free view call via eth_call (0 gas cost).
+    pub async fn is_sanctioned_on_chain(&self, address: &Address) -> Result<bool> {
+        let oracle_addr =
+            Address::from_str(Self::CHAINALYSIS_SANCTIONS_ORACLE_ADDRESS).unwrap_or(Address::ZERO);
+
+        let call_data = isSanctionedCall { addr: *address }.abi_encode();
+
+        let tx = TransactionRequest::default()
+            .with_to(oracle_addr)
+            .with_input(Bytes::from(call_data));
+
+        let result = self
+            .provider
+            .call(tx)
+            .await
+            .context("Failed to query Chainalysis Sanctions Oracle on-chain")?;
+
+        if !result.is_empty() {
+            // ABI bool return is decoded from the last byte of the 32-byte word
+            Ok(result.last().copied().unwrap_or(0) != 0)
+        } else {
+            Ok(false)
+        }
+    }
+
     /// Get the contract address as a hex string
     pub fn contract_address(&self) -> String {
         format!("{:?}", self.contract_address)
@@ -1561,5 +1592,18 @@ mod tests {
         assert_eq!(cfg.tx_timeout_secs, 30);
         assert_eq!(cfg.gas_bump_percent, 15);
         assert_eq!(cfg.max_gas_bumps, 3);
+    }
+
+    #[test]
+    fn test_chainalysis_oracle_call_encoding() {
+        let addr = Address::from_str("0x8576acc5c05d6ce88f4e49bf65bdf0c62f91353c").unwrap();
+        let call = isSanctionedCall { addr };
+        let encoded = call.abi_encode();
+        // Selector for isSanctioned(address) should be 4 bytes followed by 32 bytes address word
+        assert_eq!(encoded.len(), 36);
+
+        let oracle_addr =
+            Address::from_str(EvmClient::CHAINALYSIS_SANCTIONS_ORACLE_ADDRESS).unwrap();
+        assert_ne!(oracle_addr, Address::ZERO);
     }
 }

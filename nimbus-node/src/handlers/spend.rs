@@ -8,7 +8,9 @@
 use crate::database::QueuedSpend;
 use crate::evm_client::BatchSpendItem;
 use crate::{dto::*, state::AppState};
+use alloy::primitives::Address;
 use axum::Json;
+use std::str::FromStr;
 
 pub async fn handle_spend(
     axum::extract::State(state): axum::extract::State<AppState>,
@@ -62,24 +64,79 @@ pub async fn handle_spend(
 
     // --- Input Validation & Safety Bounds (DEC-019) ---
     let safety_limits = crate::validation::SafetyLimits::default();
-    if let Err(val_err) = crate::validation::validate_spend_request(
+    let recipient_addr = match crate::validation::validate_spend_request(
         &payload.recipient,
         payload.amount,
         payload.cross_chain.as_ref(),
         &safety_limits,
     ) {
-        let response = SpendResponse {
-            status: "REJECTED".to_string(),
-            message: format!("Input validation failed: {}", val_err),
-            queue_position: 0,
-            estimated_gas_usdc: None,
-        };
-        if let Some(ref idem_key) = payload.idempotency_key {
-            if let Ok(json) = serde_json::to_string(&response) {
-                let _ = state.db.store_idempotency(idem_key, "spend", &json).await;
+        Ok(addr) => addr,
+        Err(val_err) => {
+            let response = SpendResponse {
+                status: "REJECTED".to_string(),
+                message: format!("Input validation failed: {}", val_err),
+                queue_position: 0,
+                estimated_gas_usdc: None,
+            };
+            if let Some(ref idem_key) = payload.idempotency_key {
+                if let Ok(json) = serde_json::to_string(&response) {
+                    let _ = state.db.store_idempotency(idem_key, "spend", &json).await;
+                }
+            }
+            return Json(response);
+        }
+    };
+
+    // --- Layer 2 Sanctions Screening: On-Chain Oracle (DEC-026) ---
+    if let Some(ref client) = state.evm_client {
+        match client.is_sanctioned_on_chain(&recipient_addr).await {
+            Ok(true) => {
+                let response = SpendResponse {
+                    status: "REJECTED".to_string(),
+                    message: format!(
+                        "Recipient address {} is sanctioned per on-chain Oracle (DEC-026)",
+                        payload.recipient
+                    ),
+                    queue_position: 0,
+                    estimated_gas_usdc: None,
+                };
+                if let Some(ref idem_key) = payload.idempotency_key {
+                    if let Ok(json) = serde_json::to_string(&response) {
+                        let _ = state.db.store_idempotency(idem_key, "spend", &json).await;
+                    }
+                }
+                return Json(response);
+            }
+            Ok(false) => {}
+            Err(e) => {
+                eprintln!(
+                    "RELAYER WARNING: On-chain sanctions oracle check failed: {}",
+                    e
+                );
             }
         }
-        return Json(response);
+
+        if let Some(ref cc) = payload.cross_chain {
+            if let Ok(dest_addr) = Address::from_str(&cc.destination_contract) {
+                if let Ok(true) = client.is_sanctioned_on_chain(&dest_addr).await {
+                    let response = SpendResponse {
+                        status: "REJECTED".to_string(),
+                        message: format!(
+                            "Cross-chain destination contract {} is sanctioned per on-chain Oracle (DEC-026)",
+                            cc.destination_contract
+                        ),
+                        queue_position: 0,
+                        estimated_gas_usdc: None,
+                    };
+                    if let Some(ref idem_key) = payload.idempotency_key {
+                        if let Ok(json) = serde_json::to_string(&response) {
+                            let _ = state.db.store_idempotency(idem_key, "spend", &json).await;
+                        }
+                    }
+                    return Json(response);
+                }
+            }
+        }
     }
 
     // --- Double-spend check ---
@@ -430,6 +487,7 @@ pub async fn handle_private_note_spend(
     };
 
     // Sanctions screening (DEC-026 Layer 3: Relayer Operational Policy)
+    // 1. Fast-path: Offline in-memory dataset
     let limits = crate::validation::SafetyLimits::default();
     if limits.is_sanctioned(&recipient_addr) {
         return Json(PrivateNoteSpendResponse {
@@ -441,6 +499,30 @@ pub async fn handle_private_note_spend(
             queue_position: 0,
             estimated_gas_usdc: None,
         });
+    }
+
+    // 2. Dynamic-path: Live Chainalysis Sanctions Oracle query (Arbitrum on-chain)
+    if let Some(ref client) = state.evm_client {
+        match client.is_sanctioned_on_chain(&recipient_addr).await {
+            Ok(true) => {
+                return Json(PrivateNoteSpendResponse {
+                    status: "REJECTED".to_string(),
+                    message: format!(
+                        "Recipient address {} is sanctioned per on-chain Chainalysis Oracle (DEC-026)",
+                        payload.recipient
+                    ),
+                    queue_position: 0,
+                    estimated_gas_usdc: None,
+                });
+            }
+            Ok(false) => {}
+            Err(e) => {
+                eprintln!(
+                    "RELAYER WARNING: On-chain sanctions oracle check failed: {}",
+                    e
+                );
+            }
+        }
     }
 
     // 6. Note root and nullifier format check
@@ -1565,7 +1647,11 @@ mod tests {
         let (state, _tmp) = setup_test_state().await;
         let mut req = sample_valid_private_note_request();
         // Tornado Cash router address
-        req.recipient = "0x8576acc5c05d6ce88f4e49bf65bdf0c62f91353c".to_string();
+        req.recipient = crate::validation::sanctioned_evm_addresses()
+            .iter()
+            .next()
+            .unwrap()
+            .to_string();
 
         let resp = handle_private_note_spend(State(state), Json(req)).await;
         assert_eq!(resp.0.status, "REJECTED");

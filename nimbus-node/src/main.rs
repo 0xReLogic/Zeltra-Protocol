@@ -10,6 +10,7 @@ mod handlers;
 mod http;
 mod key_rotation;
 mod kms;
+mod sanctions_sync;
 mod state;
 mod validation;
 
@@ -189,6 +190,9 @@ async fn main() {
 
     // Spawn key rotation background task (Finding #12)
     let _rotation_handle = state.key_manager.clone().spawn_rotation_task();
+
+    // Spawn background sanctions list sync worker (07:00 UTC daily refresh from GitHub)
+    let _sanctions_handle = sanctions_sync::spawn_sanctions_sync_task();
 
     // Spawn background worker with adaptive same-chain batching window (Finding #10)
     let worker_state = state.clone();
