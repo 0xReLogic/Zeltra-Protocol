@@ -2228,6 +2228,7 @@ mod tests {
             quote_id: None,
             quote_signature: None,
             user_address: None,
+            ..Default::default()
         }
     }
 

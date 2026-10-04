@@ -3,8 +3,8 @@ pub mod eip712;
 mod evm_wasm;
 mod fee_wasm;
 mod threshold_wasm;
-mod wasm_types;
 pub mod wallet;
+mod wasm_types;
 pub mod x402;
 mod zk_wasm;
 

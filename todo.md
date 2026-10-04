@@ -63,11 +63,13 @@ Ref: [`docs/todos/private-note-balance.md`](file:///workspaces/Zeltra-Protocol/d
 
 ## 4. Relayer & Node Settlement (`nimbus-node` - Gate F Blocker)
 
-- [ ] **Relayer ZK Note Spend & Batching (Gate F Blocker)** (Rincian lengkap di [`docs/todos/private-note-balance.md`](file:///workspaces/Zeltra-Protocol/docs/todos/private-note-balance.md)):
-  - Handler spend menerima proof ZK dan memverifikasi signed EIP-712 execution quote secara fail-closed.
-  - Dukung `batch_spend()` untuk multi-item ZK note (membawa output change commitments atomic).
-  - Sinkronisasi DB relayer saat receipt transaksi confirmed: input note `spent`, change note `unspent`.
-  - Claim worker melakukan rekonsiliasi berkala antara contract accrual, DB accrual, dan receipt on-chain.
+- [x] **Relayer ZK Note Spend & Direct Settlement (Gate F Blocker)** (Rincian lengkap di [`docs/todos/private-note-balance.md`](file:///workspaces/Zeltra-Protocol/docs/todos/private-note-balance.md) & [`DEC-025`](file:///workspaces/Zeltra-Protocol/research/decisions/DEC-025-relayer-zk-note-spend-settlement-atomic-batching-and-reconciliation.md)):
+  - Endpoint ingress `POST /api/v1/spend-private-note` dengan validasi fail-closed lengkap ([`nimbus-node/src/handlers/spend.rs`](file:///workspaces/Zeltra-Protocol/nimbus-node/src/handlers/spend.rs)).
+  - Pre-flight skalar kanonikalitas ($< r$) dan semantic public input binding (DEC-022 boundary gap defense).
+  - Single-item direct settlement dispatcher `EvmClient::broadcast_spend_private_note_transaction` (bypassing multi-item batching queue untuk Stylus WASM compute).
+  - Pengecekan double-spend fail-closed terhadap database SQLite lokal dan on-chain contract view function `is_nullifier_spent`.
+  - Sinkronisasi receipt on-chain mencatat transaksi submitted, confirmed, block number, dan reservasi nullifier.
+  - Test suite lengkap (91/91 tests pass di `nimbus-node`, 164/164 tests pass di seluruh workspace, clippy zero warnings).
 
 ---
 

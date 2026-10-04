@@ -100,9 +100,9 @@ pub struct SpendProofPayload {
     pub contract_address_hex: String,
     pub expiry: u64,
     pub has_change: bool,
-    pub proof_a_neg_hex: String, // 128 bytes EVM format
-    pub proof_b_hex: String,     // 256 bytes EVM format
-    pub proof_c_hex: String,     // 128 bytes EVM format
+    pub proof_a_neg_hex: String,        // 128 bytes EVM format
+    pub proof_b_hex: String,            // 256 bytes EVM format
+    pub proof_c_hex: String,            // 128 bytes EVM format
     pub public_inputs_hex: Vec<String>, // 12 x 32 bytes EVM scalars
 }
 
@@ -123,8 +123,14 @@ pub enum WalletError {
 impl std::fmt::Display for WalletError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::InsufficientBalance { requested, available } => {
-                write!(f, "Insufficient balance: requested {requested}, available {available}")
+            Self::InsufficientBalance {
+                requested,
+                available,
+            } => {
+                write!(
+                    f,
+                    "Insufficient balance: requested {requested}, available {available}"
+                )
             }
             Self::NoteNotFound(id) => write!(f, "Note not found: {id}"),
             Self::NoteNotSpendable(id) => write!(f, "Note not spendable: {id}"),
@@ -185,7 +191,9 @@ impl PrivateNoteWallet {
         let bytes = hex::decode(&self.spending_key_hex)
             .map_err(|e| WalletError::InvalidHex(e.to_string()))?;
         if bytes.len() != 32 {
-            return Err(WalletError::CryptoError("Invalid spending key length".into()));
+            return Err(WalletError::CryptoError(
+                "Invalid spending key length".into(),
+            ));
         }
         let mut arr = [0u8; 32];
         arr.copy_from_slice(&bytes);
@@ -197,7 +205,9 @@ impl PrivateNoteWallet {
         let bytes = hex::decode(&self.nullifier_key_hex)
             .map_err(|e| WalletError::InvalidHex(e.to_string()))?;
         if bytes.len() != 32 {
-            return Err(WalletError::CryptoError("Invalid nullifier key length".into()));
+            return Err(WalletError::CryptoError(
+                "Invalid nullifier key length".into(),
+            ));
         }
         let mut arr = [0u8; 32];
         arr.copy_from_slice(&bytes);
@@ -218,7 +228,9 @@ impl PrivateNoteWallet {
         self.notes
             .values()
             .filter(|n| match &n.status {
-                NoteStatus::Reserved { lease_expiry_secs, .. } => *lease_expiry_secs > current_time_secs,
+                NoteStatus::Reserved {
+                    lease_expiry_secs, ..
+                } => *lease_expiry_secs > current_time_secs,
                 _ => false,
             })
             .map(|n| n.value)
@@ -311,7 +323,9 @@ impl PrivateNoteWallet {
         let total_required = merchant_amount
             .checked_add(protocol_fee)
             .and_then(|v| v.checked_add(execution_fee))
-            .ok_or_else(|| WalletError::CryptoError("Total required spend amount overflow".into()))?;
+            .ok_or_else(|| {
+                WalletError::CryptoError("Total required spend amount overflow".into())
+            })?;
 
         // Gather spendable notes
         let spendable_candidates: Vec<&WalletNote> = self
@@ -323,7 +337,9 @@ impl PrivateNoteWallet {
                 }
                 match &n.status {
                     NoteStatus::Unspent => true,
-                    NoteStatus::Reserved { lease_expiry_secs, .. } => *lease_expiry_secs <= current_time_secs,
+                    NoteStatus::Reserved {
+                        lease_expiry_secs, ..
+                    } => *lease_expiry_secs <= current_time_secs,
                     _ => false,
                 }
             })
@@ -337,7 +353,10 @@ impl PrivateNoteWallet {
         }
 
         // Branch 1: Exact Match Search (Zero-Change Priority)
-        if let Some(exact_note) = spendable_candidates.iter().find(|n| n.value == total_required) {
+        if let Some(exact_note) = spendable_candidates
+            .iter()
+            .find(|n| n.value == total_required)
+        {
             return Ok(SelectedSpend {
                 input_commitment_hex: exact_note.commitment_hex.clone(),
                 input_value: exact_note.value,
@@ -395,7 +414,9 @@ impl PrivateNoteWallet {
 
         match &note.status {
             NoteStatus::Unspent => {}
-            NoteStatus::Reserved { lease_expiry_secs, .. } => {
+            NoteStatus::Reserved {
+                lease_expiry_secs, ..
+            } => {
                 if *lease_expiry_secs > current_time_secs {
                     return Err(WalletError::NoteAlreadyReserved(commitment_hex.to_string()));
                 }
@@ -514,14 +535,10 @@ impl PrivateNoteWallet {
                 created_at_secs: current_time_secs,
                 session_id: Some(session_id.to_string()),
             };
-            self.notes.insert(change_note.commitment_hex.clone(), change_note);
+            self.notes
+                .insert(change_note.commitment_hex.clone(), change_note);
 
-            (
-                Fr::from(selected.change_amount),
-                c_cm,
-                c_rho,
-                c_rand,
-            )
+            (Fr::from(selected.change_amount), c_cm, c_rho, c_rand)
         } else {
             (
                 Fr::from(0u64),
@@ -533,7 +550,9 @@ impl PrivateNoteWallet {
 
         // Parse EVM public input scalars
         let recipient_bytes = {
-            let clean = recipient_evm_address.strip_prefix("0x").unwrap_or(recipient_evm_address);
+            let clean = recipient_evm_address
+                .strip_prefix("0x")
+                .unwrap_or(recipient_evm_address);
             let dec = hex::decode(clean).map_err(|e| WalletError::InvalidHex(e.to_string()))?;
             let mut buf = [0u8; 32];
             if dec.len() == 20 {
@@ -541,7 +560,9 @@ impl PrivateNoteWallet {
             } else if dec.len() == 32 {
                 buf.copy_from_slice(&dec);
             } else {
-                return Err(WalletError::InvalidHex("Invalid recipient address length".into()));
+                return Err(WalletError::InvalidHex(
+                    "Invalid recipient address length".into(),
+                ));
             }
             buf
         };
@@ -561,7 +582,9 @@ impl PrivateNoteWallet {
         let quote_fr = Fr::from_be_bytes_mod_order(&quote_bytes);
 
         let contract_bytes = {
-            let clean = contract_address_hex.strip_prefix("0x").unwrap_or(contract_address_hex);
+            let clean = contract_address_hex
+                .strip_prefix("0x")
+                .unwrap_or(contract_address_hex);
             let dec = hex::decode(clean).map_err(|e| WalletError::InvalidHex(e.to_string()))?;
             let mut buf = [0u8; 32];
             if dec.len() == 20 {
@@ -569,13 +592,19 @@ impl PrivateNoteWallet {
             } else if dec.len() == 32 {
                 buf.copy_from_slice(&dec);
             } else {
-                return Err(WalletError::InvalidHex("Invalid contract address length".into()));
+                return Err(WalletError::InvalidHex(
+                    "Invalid contract address length".into(),
+                ));
             }
             buf
         };
         let contract_fr = Fr::from_be_bytes_mod_order(&contract_bytes);
 
-        let has_change_fr = if selected.has_change { Fr::from(1u64) } else { Fr::from(0u64) };
+        let has_change_fr = if selected.has_change {
+            Fr::from(1u64)
+        } else {
+            Fr::from(0u64)
+        };
 
         // Construct PrivateNoteCircuit
         let circuit = nimbus_core::PrivateNoteCircuit {
@@ -676,7 +705,11 @@ impl PrivateNoteWallet {
             current_time_secs,
         )?;
 
-        let session_id = format!("spend_{}_{}", current_time_secs, hex::encode(rand::random::<[u8; 8]>()));
+        let session_id = format!(
+            "spend_{}_{}",
+            current_time_secs,
+            hex::encode(rand::random::<[u8; 8]>())
+        );
 
         self.prepare_spend_proof(
             &selected,
@@ -747,7 +780,9 @@ impl PrivateNoteWallet {
                 }
                 match &n.status {
                     NoteStatus::Unspent => true,
-                    NoteStatus::Reserved { lease_expiry_secs, .. } => *lease_expiry_secs <= current_time_secs,
+                    NoteStatus::Reserved {
+                        lease_expiry_secs, ..
+                    } => *lease_expiry_secs <= current_time_secs,
                     _ => false,
                 }
             })
@@ -755,7 +790,10 @@ impl PrivateNoteWallet {
             .collect();
 
         if spendable_cms.is_empty() {
-            return Err(WalletError::InsufficientBalance { requested: 1, available: 0 });
+            return Err(WalletError::InsufficientBalance {
+                requested: 1,
+                available: 0,
+            });
         }
 
         let mut payloads = Vec::with_capacity(spendable_cms.len());
@@ -776,7 +814,11 @@ impl PrivateNoteWallet {
                 has_change: false,
             };
 
-            let session_id = format!("withdraw_{}_{}", current_time_secs, hex::encode(rand::random::<[u8; 8]>()));
+            let session_id = format!(
+                "withdraw_{}_{}",
+                current_time_secs,
+                hex::encode(rand::random::<[u8; 8]>())
+            );
             let payload = self.prepare_spend_proof(
                 &selected,
                 &session_id,
@@ -824,13 +866,17 @@ impl PrivateNoteWallet {
         }
 
         if !found_input {
-            return Err(WalletError::NoteNotFound(format!("Session {session_id} input note")));
+            return Err(WalletError::NoteNotFound(format!(
+                "Session {session_id} input note"
+            )));
         }
 
         // 2. Promote Change Note to Unspent (if present and witness provided)
         if let (Some(idx), Some(path)) = (change_leaf_index, change_merkle_path) {
             for note in self.notes.values_mut() {
-                if note.session_id.as_deref() == Some(session_id) && note.status == NoteStatus::Unconfirmed {
+                if note.session_id.as_deref() == Some(session_id)
+                    && note.status == NoteStatus::Unconfirmed
+                {
                     note.leaf_index = Some(idx);
                     note.merkle_path_hex = Some(path);
                     note.status = NoteStatus::Unspent;
@@ -919,14 +965,19 @@ impl PrivateNoteWallet {
 
     /// Imports and decrypts a wallet backup.
     pub fn import_backup(backup_json: &str, password: &str) -> Result<Self, WalletError> {
-        let val: serde_json::Value = serde_json::from_str(backup_json)
-            .map_err(|_| WalletError::BackupDecryptionFailed)?;
+        let val: serde_json::Value =
+            serde_json::from_str(backup_json).map_err(|_| WalletError::BackupDecryptionFailed)?;
 
-        let mac_hex = val["mac_hex"].as_str().ok_or(WalletError::BackupDecryptionFailed)?;
-        let ciphertext_hex = val["ciphertext_hex"].as_str().ok_or(WalletError::BackupDecryptionFailed)?;
+        let mac_hex = val["mac_hex"]
+            .as_str()
+            .ok_or(WalletError::BackupDecryptionFailed)?;
+        let ciphertext_hex = val["ciphertext_hex"]
+            .as_str()
+            .ok_or(WalletError::BackupDecryptionFailed)?;
 
         let expected_mac = hex::decode(mac_hex).map_err(|_| WalletError::BackupDecryptionFailed)?;
-        let mut ciphertext = hex::decode(ciphertext_hex).map_err(|_| WalletError::BackupDecryptionFailed)?;
+        let mut ciphertext =
+            hex::decode(ciphertext_hex).map_err(|_| WalletError::BackupDecryptionFailed)?;
 
         let key = crate::hmac_sha256(password.as_bytes(), b"nimbus.wallet.backup.v1");
 
@@ -949,7 +1000,8 @@ impl PrivateNoteWallet {
             return Err(WalletError::BackupDecryptionFailed);
         }
 
-        let plaintext = String::from_utf8(ciphertext).map_err(|_| WalletError::BackupDecryptionFailed)?;
+        let plaintext =
+            String::from_utf8(ciphertext).map_err(|_| WalletError::BackupDecryptionFailed)?;
         serde_json::from_str(&plaintext).map_err(|_| WalletError::BackupDecryptionFailed)
     }
 }
@@ -988,7 +1040,9 @@ mod tests {
 
         // 2. Confirm deposit
         let path = dummy_merkle_path();
-        wallet.confirm_deposit(&cm1, 0, path.clone(), "0xroot").unwrap();
+        wallet
+            .confirm_deposit(&cm1, 0, path.clone(), "0xroot")
+            .unwrap();
         assert_eq!(wallet.balance(), 50_000_000);
 
         // 3. Add second note
@@ -1005,11 +1059,15 @@ mod tests {
 
         let (_, cm1) = wallet.create_deposit_note(10_000_000, 1000).unwrap();
         let (_, cm2) = wallet.create_deposit_note(25_000_000, 1000).unwrap();
-        wallet.confirm_deposit(&cm1, 0, path.clone(), "0xroot").unwrap();
+        wallet
+            .confirm_deposit(&cm1, 0, path.clone(), "0xroot")
+            .unwrap();
         wallet.confirm_deposit(&cm2, 1, path, "0xroot").unwrap();
 
         // Exact match for 10_000_000 total (9_800_000 + 150_000 + 50_000)
-        let selected = wallet.select_note_for_spend(9_800_000, 150_000, 50_000, 1010).unwrap();
+        let selected = wallet
+            .select_note_for_spend(9_800_000, 150_000, 50_000, 1010)
+            .unwrap();
         assert_eq!(selected.input_commitment_hex, cm1);
         assert_eq!(selected.total_required, 10_000_000);
         assert_eq!(selected.change_amount, 0);
@@ -1024,11 +1082,15 @@ mod tests {
 
         let (_, cm1) = wallet.create_deposit_note(10_000_000, 1000).unwrap();
         let (_, cm2) = wallet.create_deposit_note(50_000_000, 1000).unwrap();
-        wallet.confirm_deposit(&cm1, 0, path.clone(), "0xroot").unwrap();
+        wallet
+            .confirm_deposit(&cm1, 0, path.clone(), "0xroot")
+            .unwrap();
         wallet.confirm_deposit(&cm2, 1, path, "0xroot").unwrap();
 
         // Need 15_000_000: cm1 is too small, cm2 is selected
-        let selected = wallet.select_note_for_spend(14_000_000, 700_000, 300_000, 1010).unwrap();
+        let selected = wallet
+            .select_note_for_spend(14_000_000, 700_000, 300_000, 1010)
+            .unwrap();
         assert_eq!(selected.input_commitment_hex, cm2);
         assert_eq!(selected.total_required, 15_000_000);
         assert_eq!(selected.change_amount, 35_000_000);
@@ -1068,16 +1130,24 @@ mod tests {
         let (_, cm1) = wallet.create_deposit_note(100_000_000, 1000).unwrap();
         wallet.confirm_deposit(&cm1, 0, path, "0xroot").unwrap();
 
-        let selected = wallet.select_note_for_spend(40_000_000, 2_000_000, 1_000_000, 1000).unwrap();
-        wallet.reserve_note(&selected.input_commitment_hex, "session_tx_1", 1000, 120).unwrap();
+        let selected = wallet
+            .select_note_for_spend(40_000_000, 2_000_000, 1_000_000, 1000)
+            .unwrap();
+        wallet
+            .reserve_note(&selected.input_commitment_hex, "session_tx_1", 1000, 120)
+            .unwrap();
 
         // Simulate rollback on failure
         wallet.rollback_spend("session_tx_1").unwrap();
         assert_eq!(wallet.balance(), 100_000_000);
 
         // Re-reserve and simulate successful commit
-        wallet.reserve_note(&selected.input_commitment_hex, "session_tx_2", 1050, 120).unwrap();
-        wallet.commit_spend("session_tx_2", "0xnullifier123", 1055, None, None, None).unwrap();
+        wallet
+            .reserve_note(&selected.input_commitment_hex, "session_tx_2", 1050, 120)
+            .unwrap();
+        wallet
+            .commit_spend("session_tx_2", "0xnullifier123", 1055, None, None, None)
+            .unwrap();
 
         assert_eq!(wallet.balance(), 0);
         let note = wallet.notes.get(&cm1).unwrap();
@@ -1101,13 +1171,23 @@ mod tests {
 
         // Restore with wrong password fails
         let wrong_restore = PrivateNoteWallet::import_backup(&backup, "WrongPassword");
-        assert_eq!(wrong_restore.err(), Some(WalletError::BackupDecryptionFailed));
+        assert_eq!(
+            wrong_restore.err(),
+            Some(WalletError::BackupDecryptionFailed)
+        );
 
         // Restore with correct password succeeds
-        let restored = PrivateNoteWallet::import_backup(&backup, "SuperSecretPassword123!").unwrap();
+        let restored =
+            PrivateNoteWallet::import_backup(&backup, "SuperSecretPassword123!").unwrap();
         assert_eq!(restored.balance(), 55_000_000);
-        assert_eq!(restored.spending_key().unwrap(), wallet.spending_key().unwrap());
-        assert_eq!(restored.current_merkle_root_hex.as_deref(), Some("0xroot_abc"));
+        assert_eq!(
+            restored.spending_key().unwrap(),
+            wallet.spending_key().unwrap()
+        );
+        assert_eq!(
+            restored.current_merkle_root_hex.as_deref(),
+            Some("0xroot_abc")
+        );
     }
 
     #[test]
@@ -1119,7 +1199,9 @@ mod tests {
         let (_, cm1) = wallet.create_deposit_note(50_000_000, 1000).unwrap();
         wallet.confirm_deposit(&cm1, 0, path, "0xroot").unwrap();
 
-        let selected = wallet.select_note_for_spend(20_000_000, 100_000, 50_000, 1000).unwrap();
+        let selected = wallet
+            .select_note_for_spend(20_000_000, 100_000, 50_000, 1000)
+            .unwrap();
         assert!(selected.has_change);
         assert_eq!(selected.change_amount, 29_850_000);
 
@@ -1141,8 +1223,8 @@ mod tests {
             .unwrap();
 
         assert_eq!(payload.proof_a_neg_hex.len(), 256); // 128 bytes
-        assert_eq!(payload.proof_b_hex.len(), 512);     // 256 bytes
-        assert_eq!(payload.proof_c_hex.len(), 256);     // 128 bytes
+        assert_eq!(payload.proof_b_hex.len(), 512); // 256 bytes
+        assert_eq!(payload.proof_c_hex.len(), 256); // 128 bytes
         assert_eq!(payload.public_inputs_hex.len(), 12);
         assert_eq!(payload.merchant_amount, 20_000_000);
         assert!(payload.has_change);

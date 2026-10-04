@@ -354,9 +354,14 @@ impl Nimbus {
         Ok(self.clean_association_roots.get(root))
     }
 
-    /// Returns whether a nullifier has already been spent on-chain (DEC-019).
+    /// Returns whether a nullifier has already been spent on-chain (DEC-019 & DEC-025).
     pub fn is_nullifier_spent(&self, nullifier: FixedBytes<32>) -> Result<bool, Vec<u8>> {
-        Ok(self.nullifiers.get(nullifier))
+        Ok(self.nullifiers.get(nullifier) || self.note_nullifiers.get(nullifier))
+    }
+
+    /// Returns whether a private note nullifier has already been spent on-chain (DEC-025).
+    pub fn is_note_nullifier_spent(&self, nullifier: FixedBytes<32>) -> Result<bool, Vec<u8>> {
+        Ok(self.note_nullifiers.get(nullifier))
     }
 
     pub fn register_issuer_key(&mut self, pk_iss_bytes: Bytes) -> Result<(), Vec<u8>> {
@@ -874,10 +879,10 @@ mod tests {
 
     thread_local! {
         pub(crate) static STORAGE: RefCell<HashMap<[u8; 32], [u8; 32]>> = RefCell::new(HashMap::new());
-        pub(crate) static MSG_SENDER: RefCell<Address> = RefCell::new(Address::ZERO);
-        pub(crate) static BLOCK_TIMESTAMP: RefCell<u64> = RefCell::new(0);
-        static PAIRING_RESULT: RefCell<u8> = RefCell::new(1);
-        static LAST_RETURN_DATA_SIZE: RefCell<usize> = RefCell::new(32);
+        pub(crate) static MSG_SENDER: RefCell<Address> = const { RefCell::new(Address::ZERO) };
+        pub(crate) static BLOCK_TIMESTAMP: RefCell<u64> = const { RefCell::new(0) };
+        static PAIRING_RESULT: RefCell<u8> = const { RefCell::new(1) };
+        static LAST_RETURN_DATA_SIZE: RefCell<usize> = const { RefCell::new(32) };
     }
 
     fn reset_test_state() {
@@ -926,7 +931,7 @@ mod tests {
         );
         let hm_affine = helpers::hash_to_g1(&m_hash);
         let hm_evm_bytes = types::to_evm_g1(&hm_affine);
-        let nullifier = keccak256(&hm_evm_bytes);
+        let nullifier = keccak256(hm_evm_bytes);
 
         (alpha_neg, hm_evm_bytes.to_vec(), pk_iss, nullifier)
     }
@@ -1330,7 +1335,7 @@ mod tests {
         // Owner pausing should succeed
         set_msg_sender(owner);
         assert!(contract.pause().is_ok());
-        assert_eq!(contract.paused.get(), true);
+        assert!(contract.paused.get());
 
         // Non-owner unpausing should fail
         set_msg_sender(non_owner);
@@ -1339,7 +1344,7 @@ mod tests {
         // Owner unpausing should succeed
         set_msg_sender(owner);
         assert!(contract.unpause().is_ok());
-        assert_eq!(contract.paused.get(), false);
+        assert!(!contract.paused.get());
     }
 
     #[test]
@@ -1611,7 +1616,7 @@ mod tests {
         );
         let hm_affine = helpers::hash_to_g1(&m_hash);
         let hm_evm_bytes = types::to_evm_g1(&hm_affine);
-        let nullifier = keccak256(&hm_evm_bytes);
+        let nullifier = keccak256(hm_evm_bytes);
 
         assert_eq!(
             contract.spend(
@@ -3198,8 +3203,11 @@ mod tests {
         let mut contract = Nimbus::default();
         contract.init(owner, stablecoin, Address::ZERO).unwrap();
 
-        let initial_root = FixedBytes::<32>::from_slice(&crate::poseidon_w5_constants::EMPTY_TREE_ROOT_BYTES);
-        contract.accepted_note_roots.insert(initial_root, U256::from(1000));
+        let initial_root =
+            FixedBytes::<32>::from_slice(&crate::poseidon_w5_constants::EMPTY_TREE_ROOT_BYTES);
+        contract
+            .accepted_note_roots
+            .insert(initial_root, U256::from(1000));
         contract.user_note_liability.set(U256::from(100_000_000)); // 100 USDC liability
 
         let nullifier = FixedBytes::<32>::from_slice(&[0x0a; 32]);
@@ -3220,8 +3228,8 @@ mod tests {
             U256::from(23_000),    // execution fee
             U256::from(25_000),    // max execution fee
             quote_hash,
-            U256::from(2000),      // expiry
-            U256::from(1),         // has_change = 1
+            U256::from(2000), // expiry
+            U256::from(1),    // has_change = 1
             proof_a,
             proof_b,
             proof_c,
@@ -3231,8 +3239,14 @@ mod tests {
         assert!(contract.note_nullifiers.get(nullifier));
         // Remaining liability = 100M - 5M - 22.5k - 23k = 94_954_500
         assert_eq!(contract.user_note_liability.get(), U256::from(94_954_500));
-        assert_eq!(contract.accumulated_execution_fees.get(), U256::from(23_000));
-        assert_eq!(contract.accrued_execution_fee_liability.get(), U256::from(23_000));
+        assert_eq!(
+            contract.accumulated_execution_fees.get(),
+            U256::from(23_000)
+        );
+        assert_eq!(
+            contract.accrued_execution_fee_liability.get(),
+            U256::from(23_000)
+        );
         assert_eq!(contract.realized_protocol_fees.get(), U256::from(22_500));
         assert_eq!(contract.note_tree_next_index.get(), U256::from(1));
     }
@@ -3248,30 +3262,35 @@ mod tests {
         let mut contract = Nimbus::default();
         contract.init(owner, Address::ZERO, Address::ZERO).unwrap();
 
-        let initial_root = FixedBytes::<32>::from_slice(&crate::poseidon_w5_constants::EMPTY_TREE_ROOT_BYTES);
-        contract.accepted_note_roots.insert(initial_root, U256::from(1000));
+        let initial_root =
+            FixedBytes::<32>::from_slice(&crate::poseidon_w5_constants::EMPTY_TREE_ROOT_BYTES);
+        contract
+            .accepted_note_roots
+            .insert(initial_root, U256::from(1000));
         contract.user_note_liability.set(U256::from(100_000_000));
 
         let nullifier = FixedBytes::<32>::from_slice(&[0x0b; 32]);
         let change_cm = FixedBytes::<32>::from_slice(&[0x02; 32]);
 
         // First spend succeeds
-        contract.spend_private_note(
-            initial_root,
-            nullifier,
-            change_cm,
-            merchant,
-            U256::from(5_000_000),
-            U256::from(22_500),
-            U256::from(23_000),
-            U256::from(25_000),
-            FixedBytes::ZERO,
-            U256::from(2000),
-            U256::from(1),
-            vec![0x11; 128].into(),
-            vec![0x22; 256].into(),
-            vec![0x33; 128].into(),
-        ).unwrap();
+        contract
+            .spend_private_note(
+                initial_root,
+                nullifier,
+                change_cm,
+                merchant,
+                U256::from(5_000_000),
+                U256::from(22_500),
+                U256::from(23_000),
+                U256::from(25_000),
+                FixedBytes::ZERO,
+                U256::from(2000),
+                U256::from(1),
+                vec![0x11; 128].into(),
+                vec![0x22; 256].into(),
+                vec![0x33; 128].into(),
+            )
+            .unwrap();
 
         // Second spend with identical nullifier MUST revert
         let result = contract.spend_private_note(
@@ -3331,7 +3350,8 @@ mod tests {
         let mut contract = Nimbus::default();
         contract.init(owner, Address::ZERO, Address::ZERO).unwrap();
 
-        let root = FixedBytes::<32>::from_slice(&crate::poseidon_w5_constants::EMPTY_TREE_ROOT_BYTES);
+        let root =
+            FixedBytes::<32>::from_slice(&crate::poseidon_w5_constants::EMPTY_TREE_ROOT_BYTES);
         contract.accepted_note_roots.insert(root, U256::from(1000));
         set_block_timestamp(5000);
 
@@ -3362,7 +3382,8 @@ mod tests {
         let mut contract = Nimbus::default();
         contract.init(owner, Address::ZERO, Address::ZERO).unwrap();
 
-        let root = FixedBytes::<32>::from_slice(&crate::poseidon_w5_constants::EMPTY_TREE_ROOT_BYTES);
+        let root =
+            FixedBytes::<32>::from_slice(&crate::poseidon_w5_constants::EMPTY_TREE_ROOT_BYTES);
         contract.accepted_note_roots.insert(root, U256::from(1000));
 
         let result = contract.spend_private_note(
@@ -3392,7 +3413,8 @@ mod tests {
         let mut contract = Nimbus::default();
         contract.init(owner, Address::ZERO, Address::ZERO).unwrap();
 
-        let root = FixedBytes::<32>::from_slice(&crate::poseidon_w5_constants::EMPTY_TREE_ROOT_BYTES);
+        let root =
+            FixedBytes::<32>::from_slice(&crate::poseidon_w5_constants::EMPTY_TREE_ROOT_BYTES);
         contract.accepted_note_roots.insert(root, U256::from(1000));
 
         let non_zero_commitment = FixedBytes::<32>::from_slice(&[0x77; 32]);
@@ -3424,7 +3446,8 @@ mod tests {
         let mut contract = Nimbus::default();
         contract.init(owner, Address::ZERO, Address::ZERO).unwrap();
 
-        let root = FixedBytes::<32>::from_slice(&crate::poseidon_w5_constants::EMPTY_TREE_ROOT_BYTES);
+        let root =
+            FixedBytes::<32>::from_slice(&crate::poseidon_w5_constants::EMPTY_TREE_ROOT_BYTES);
         contract.accepted_note_roots.insert(root, U256::from(1000));
         contract.user_note_liability.set(U256::from(1_000_000)); // only 1 USDC liability
 
@@ -3455,7 +3478,8 @@ mod tests {
         let mut contract = Nimbus::default();
         contract.init(owner, Address::ZERO, Address::ZERO).unwrap();
 
-        let root = FixedBytes::<32>::from_slice(&crate::poseidon_w5_constants::EMPTY_TREE_ROOT_BYTES);
+        let root =
+            FixedBytes::<32>::from_slice(&crate::poseidon_w5_constants::EMPTY_TREE_ROOT_BYTES);
         contract.accepted_note_roots.insert(root, U256::from(1000));
         contract.user_note_liability.set(U256::from(100_000_000));
 

@@ -779,7 +779,8 @@ impl Nimbus {
                 let stablecoin_address = self.stablecoin.get();
                 let erc20 = IErc20::new(stablecoin_address);
                 let host = Self::runtime_host();
-                let call_res = erc20.transfer(&host, Call::new_mutating(self), recipient, merchant_amount);
+                let call_res =
+                    erc20.transfer(&host, Call::new_mutating(self), recipient, merchant_amount);
                 match call_res {
                     Ok(true) => {}
                     _ => return Err(b"ERC20_TRANSFER_FAILED".to_vec()),

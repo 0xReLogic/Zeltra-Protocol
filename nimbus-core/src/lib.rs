@@ -29,7 +29,9 @@ pub use serialization::{deserialize_from_bytes, serialize_to_bytes};
 pub use crypto::hash_to_g1;
 
 // Re-export EVM helpers
-pub use evm::{get_alpha_neg_evm, get_hm_evm, get_pk_iss_evm, to_evm_g1, to_evm_g2};
+pub use evm::{
+    from_evm_scalar, get_alpha_neg_evm, get_hm_evm, get_pk_iss_evm, to_evm_g1, to_evm_g2,
+};
 
 // Re-export blind signature protocol
 pub use blind_sign::{

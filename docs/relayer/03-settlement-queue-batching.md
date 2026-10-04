@@ -175,6 +175,43 @@ Mengacu pada spesifikasi [`DEC-020`](file:///workspaces/Zeltra-Protocol/research
 2. **Eksposur Telemetri & Monitoring (`GET /api/health`):**
    * Objek `batch_metrics` disertakan pada respons endpoint kesehatan untuk monitoring otomatis (Prometheus / Grafana scraper) guna mendeteksi anomali gas margin dan efisiensi throughput batching secara real-time.
 
+---
+
+## 11. ZK-UTXO Private Note Spend Ingress & Direct Settlement (DEC-025 Gate F)
+
+Mengacu pada spesifikasi [`DEC-025`](file:///workspaces/Zeltra-Protocol/research/decisions/DEC-025-relayer-zk-note-spend-settlement-atomic-batching-and-reconciliation.md):
+
+### A. Endpoint Ingress (`POST /api/v1/spend-private-note`)
+Node mengekspos endpoint khusus untuk menerima pembelanjaan saldo privat ZK-UTXO ([`nimbus-node/src/handlers/spend.rs`](file:///workspaces/Zeltra-Protocol/nimbus-node/src/handlers/spend.rs)). Format request payload berupa [`PrivateNoteSpendRequest`](file:///workspaces/Zeltra-Protocol/nimbus-node/src/dto.rs#L162).
+
+### B. Pipeline Validasi Pre-Flight (Fail-Closed)
+Sebelum transaksi di-enqueue ke database, node menjalankan serangkaian verifikasi invariant:
+1. **Idempotency Caching (24h TTL):** Memeriksa tabel `idempotency_cache` dengan namespace `"private_note_spend"`. Request duplikat langsung mengembalikan respons yang sama persis tanpa broadcast ulang.
+2. **Transaction Expiry:** Memvalidasi `now <= expiry`. Transaksi kedaluwarsa otomatis ditolak (`TRANSACTION_EXPIRED`).
+3. **Pemeriksaan Skalar Kanonikalitas ($< r$):**
+   * *Mitigasi Post-Mortem:* Mengadopsi prinsip dari [*Z-SCAPE* (2026/1621)](file:///workspaces/Zeltra-Protocol/jurnal/honorable/Z-SCAPE-Asset-Protection-Entropy-Failure.md) dan [*zkBSA* (2026/513)](file:///workspaces/Zeltra-Protocol/jurnal/honorable/zkBSA-Auditable-Compliant-Stealth-Addresses-Blockchains.md).
+   * Seluruh 12 skalar publik (`public_inputs`) wajib berada di bawah modulus medan skalar BLS12-381 $r$ (`from_evm_scalar`). Input dengan representasi overflow $\ge r$ seketika ditolak (*fail-closed*).
+4. **Semantic Public Input Binding (DEC-022):**
+   * *Mitigasi Post-Mortem:* Mencegah *boundary gap attack* seperti pada insiden Aztec Connect ($2.28M).
+   * Node memverifikasi kesesuaian nilai byte-for-byte antara parameter request eksplisit dengan 12 skalar public inputs Groth16 (`note_root`, `input_nullifier`, `output_commitment`, `recipient`, `merchant_amount`, `protocol_fee`, `execution_fee`, `quote_hash`, `chain_id`, `contract_address`, `expiry`, `has_change`).
+5. **Execution Fee Enforcement:** Memastikan `execution_fee <= max_execution_fee`.
+6. **Konsistensi Change Note:** Jika `has_change == 0`, maka `output_commitment` wajib bernilai zero (`0x00...00`).
+7. **Pencegahan Double-Spend Dual-Layer:**
+   * Cek tabel lokal SQLite `is_nullifier_spent(nullifier)` $\to$ tolak jika nullifier sudah ada.
+   * Cek view function kontrak Stylus on-chain `is_nullifier_spent(nullifier)` $\to$ tolak jika nullifier sudah berstatus spent di blockchain.
+
+### C. Antrean Durable SQLite & Alokasi Leasing
+Jika seluruh validasi lolos:
+* Transaksi di-insert ke tabel `spend_queue` dengan `spend_type = 'private_note'` dan `status = 'queued'`.
+* Transaksi database menggunakan mode `Immediate` agar pencegahan race-condition nullifier bersifat atomik di tingkat engine database.
+
+### D. Direct Settlement Dispatcher via `EvmClient`
+Pada proses batching background (`process_spend_batch`):
+* Transaksi `is_private_note() == true` **tidak digabungkan ke antrean batch BLS**, melainkan langsung dialirkan ke antrean `direct`.
+* Hal ini karena transaksi ZK-UTXO memanggil fungsi Stylus khusus `spend_private_note(...)` yang memverifikasi Groth16 via precompile EIP-2537 (`0x0c` MSM dan `0x0f` 4-pairing check) dengan alokasi gas limit **2.500.000 gas**.
+* [`EvmClient::broadcast_spend_private_note_transaction`](file:///workspaces/Zeltra-Protocol/nimbus-node/src/evm_client.rs#L810) meng-ABI encode calldata Sol! secara tipe-aman dan menyiarkannya dengan watchdog penggantian gas otomatis (+15% bump) jika tersangkut di mempool.
+* Saat receipt on-chain terkonfirmasi sukses, database secara atomik menandai spend sebagai `confirmed`, merekam `tx_hash` dan `block_number`, serta mencatat nullifier ke tabel `nullifiers`.
+
 
 
 

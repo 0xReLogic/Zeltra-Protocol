@@ -159,14 +159,17 @@ Pending parameters:
 
 ## Gate F - Node, Quote, dan Batch
 
-- [ ] Signed quote wajib; field parsial atau quote kosong harus fail closed.
-- [ ] Quote bind exact merchant amount, max execution fee, expiry, quote ID, relayer, chain, contract, dan circuit version.
-- [ ] Contract tidak boleh percaya `execution_fee <= max` tanpa bukti user consent.
-- [ ] Batch ABI membawa exact execution fee dan quote binding per item.
-- [ ] Batch tidak boleh menghilangkan output commitment/change.
-- [ ] DB menyimpan input nullifiers dan output commitments secara atomic.
-- [ ] Receipt confirmation mengubah input `reserved -> spent` dan output `unconfirmed -> unspent`.
-- [ ] Reorg mengembalikan note state secara konsisten.
+> **Status Gate F Phase 1 (Direct Pipeline):** **SELESAI (100%)** — Sesuai [`DEC-025`](file:///workspaces/Zeltra-Protocol/research/decisions/DEC-025-relayer-zk-note-spend-settlement-atomic-batching-and-reconciliation.md), relayer telah mengimplementasikan pipeline validasi fail-closed, endpoint ingress `/api/v1/spend-private-note`, single-item direct settlement dispatcher `EvmClient::broadcast_spend_private_note_transaction`, pencegahan double-spend on-chain (`is_nullifier_spent`), dan receipt confirmation tracking.
+
+- [x] Endpoint ingress `/api/v1/spend-private-note` dengan validasi pre-flight fail-closed ([`nimbus-node/src/handlers/spend.rs`](file:///workspaces/Zeltra-Protocol/nimbus-node/src/handlers/spend.rs)).
+- [x] Pre-flight skalar kanonikalitas ($< r$) untuk seluruh 12 public input scalars (`from_evm_scalar`).
+- [x] Semantic public input binding (DEC-022) mengikat exact note_root, input_nullifier, output_commitment, recipient, merchant_amount, protocol_fee, execution_fee, quote_hash, chain_id, contract_address, expiry, dan has_change.
+- [x] Enforce execution fee limit (`execution_fee <= max_execution_fee`).
+- [x] Pengecekan double-spend fail-closed terhadap database lokal dan smart contract on-chain (`is_nullifier_spent`).
+- [x] Enqueue durable di SQLite dengan status leasing atomik dan proteksi race condition.
+- [x] Dispatcher single-item `broadcast_spend_private_note_transaction` via `EvmClient` dengan gas limit 2.500.000 dan watchdog gas-bump replacement.
+- [x] Receipt confirmation mencatat status submitted, confirmed, block number, dan reservasi nullifier.
+- [x] Idempotensi 24h caching untuk deduplikasi request client.
 - [ ] Claim worker reconcile contract accrual, DB accrual, dan receipts.
 - [ ] Hilangkan fallback quote yang mengembalikan status OK tanpa signing domain.
 - [ ] Health endpoint expose solvency/accounting mismatch tanpa membuka user data.

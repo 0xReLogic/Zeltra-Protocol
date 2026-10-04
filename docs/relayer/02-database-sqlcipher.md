@@ -45,18 +45,19 @@ PRAGMA busy_timeout = 5000;
 ## 3. Skema Tabel Utama
 
 ### A. Tabel `spend_queue` (Antrian Penyelesaian Transaksi)
-Menyimpan antrian permintaan spend sebelum dan saat dibroadcast ke blockchain:
+Menyimpan antrian permintaan spend sebelum dan saat dibroadcast ke blockchain (mendukung transaksi BLS standar maupun ZK-UTXO Private Note DEC-025):
 * `id`: Primary key urutan antrian.
-* `request_json`: Serialisasi payload transaksi lengkap.
+* `nullifier`: Hash nullifier unik pembelanjaan (BLS atau private note nullifier).
+* `request_json`: Serialisasi payload transaksi lengkap (`SpendRequest` atau `PrivateNoteSpendRequest`).
 * `status`: Status transisi (`queued`, `broadcasting`, `submitted`, `confirmed`, `failed`, `retryable`).
 * `retry_count`: Jumlah percobaan broadcast ulang.
 * `last_error`: Pesan kesalahan terakhir jika terjadi kegagalan RPC/revert.
 * `lease_expires_at`: Timestamp kedaluwarsa hak klaim worker (mencegah double-broadcast).
-* `batch_id`: ID kelompok batch jika digabungkan bersama transaksi lain.
+* `batch_id`: ID kelompok batch jika digabungkan bersama transaksi lain (transaksi private note dialirkan ke direct dispatch single-item).
 * `tx_hash`: Hash transaksi on-chain setelah berhasil dibroadcast.
 
 ### B. Tabel `nullifiers` (Pencegah Double-Spend Lokal)
-Merekam seluruh nullifier yang sudah mendapatkan konfirmasi receipt sukses di on-chain:
+Merekam seluruh nullifier yang sudah mendapatkan konfirmasi receipt sukses di on-chain (baik nullifier deposit voucher BLS maupun nullifier private note ZK-UTXO):
 * `nullifier`: Hash 32-byte unik (PRIMARY KEY).
 * `spent_at`: Timestamp transaksi confirmed.
 * `tx_hash` & `block_number`: Bukti transaksi blockchain.

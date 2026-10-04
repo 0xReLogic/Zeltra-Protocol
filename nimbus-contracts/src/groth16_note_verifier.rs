@@ -65,9 +65,7 @@ pub const NOTE_VK_IC: [[u8; 128]; 13] = [
 
 /// Computes the public inputs linear combination point L = IC_0 + sum_{i=1..12} x_i * IC_i in G1.
 /// Uses EIP-2537 precompiles 0x0c (BLS12_G1_MSM) and 0x0b (BLS12_G1_ADD).
-pub fn compute_note_public_inputs_g1(
-    public_inputs: &[[u8; 32]; 12],
-) -> Result<[u8; 128], Vec<u8>> {
+pub fn compute_note_public_inputs_g1(public_inputs: &[[u8; 32]; 12]) -> Result<[u8; 128], Vec<u8>> {
     let mut msm_input = Vec::with_capacity(12 * 160);
     for i in 0..12 {
         msm_input.extend_from_slice(&NOTE_VK_IC[i + 1]);

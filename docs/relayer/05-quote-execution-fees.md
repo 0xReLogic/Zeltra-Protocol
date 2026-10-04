@@ -61,3 +61,20 @@ Komisi relayer tidak ditarik satu per satu di setiap transaksi spend karena akan
    ```
 4. **Update Status Atomic:** 
    Setelah tx receipt berhasil dikonfirmasi di blockchain, seluruh baris batch terkait diperbarui menjadi `claimed = true`.
+
+---
+
+## 4. Integrasi Quote pada ZK Private Note Spend (DEC-022 & DEC-025)
+
+Pada model ZK-UTXO ([`DEC-016`](file:///workspaces/Zeltra-Protocol/research/decisions/DEC-016-private-note-change-ledger.md) & [`DEC-025`](file:///workspaces/Zeltra-Protocol/research/decisions/DEC-025-relayer-zk-note-spend-settlement-atomic-batching-and-reconciliation.md)), penentuan fee eksekusi relayer terikat secara kriptografis ke dalam sirkuit zero-knowledge `PrivateNoteCircuit`:
+
+1. **Semantic Quote Hash Binding:**
+   * Kuotasi biaya eksekusi relayer menghasilkan `quote_hash` (digest EIP-712).
+   * Nilai `quote_hash` dipasok sebagai public input ke-7 (`public_inputs[7]`) pada sirkuit Groth16.
+   * Node relayer ([`nimbus-node/src/handlers/spend.rs`](file:///workspaces/Zeltra-Protocol/nimbus-node/src/handlers/spend.rs)) memverifikasi bahwa `quote_hash` di request cocok byte-for-byte dengan nilai yang dibuktikan di dalam proof ZK (mitigasi DEC-022).
+2. **Replay Protection Quote ID:**
+   * Jika signed quote disertakan pada request ZK spend (`quote_id`, `quote_signature`, `user_address`), relayer memverifikasi tanda tangan EIP-712 pengguna dan memastikan `quote_id` belum pernah dipakai sebelumnya via `check_and_insert_quote_id()`.
+3. **Penegakan Batas Maksimal Fee (`max_execution_fee`):**
+   * Di smart contract Stylus ([`nimbus-contracts/src/spend.rs`](file:///workspaces/Zeltra-Protocol/nimbus-contracts/src/spend.rs)) dan di ingress relayer, berlaku invariant ketat:
+     $$\text{execution\_fee} \le \text{max\_execution\_fee}$$
+   * Jika relayer mencoba memotong fee di atas kesepakatan kuotasi pengguna, transaksi otomatis revert dengan kode `EXECUTION_FEE_EXCEEDS_MAX`.

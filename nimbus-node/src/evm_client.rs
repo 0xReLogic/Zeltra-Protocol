@@ -49,6 +49,23 @@ sol! {
         bytes32[] calldata nonces
     ) external returns (bool);
 
+    function spendPrivateNote(
+        bytes32 note_root,
+        bytes32 input_nullifier,
+        bytes32 output_commitment,
+        address recipient,
+        uint256 merchant_amount,
+        uint256 protocol_fee,
+        uint256 execution_fee,
+        uint256 max_execution_fee,
+        bytes32 quote_hash,
+        uint256 expiry,
+        uint256 has_change,
+        bytes calldata proof_a_neg,
+        bytes calldata proof_b,
+        bytes calldata proof_c
+    ) external returns (bool);
+
     function claimExecutionFees(uint256 amount) external;
 
     function getCleanRootTimestamp(bytes32 root) external view returns (uint256);
@@ -784,6 +801,127 @@ impl EvmClient {
         let outcome = self.send_tx_with_fallback(tx).await?;
 
         println!("RELAYER: Transaction broadcasted");
+        println!("  Tx Hash     : {}", outcome.tx_hash);
+
+        Ok(outcome)
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub async fn broadcast_spend_private_note_transaction(
+        &self,
+        note_root_hex: &str,
+        input_nullifier_hex: &str,
+        output_commitment_hex: &str,
+        recipient: &str,
+        merchant_amount: u64,
+        protocol_fee: u64,
+        execution_fee: u64,
+        max_execution_fee: u64,
+        quote_hash_hex: &str,
+        expiry: u64,
+        has_change: u64,
+        proof_a_neg_hex: &str,
+        proof_b_hex: &str,
+        proof_c_hex: &str,
+    ) -> Result<TransactionOutcome> {
+        println!("RELAYER: Broadcasting private note spend transaction (DEC-025)");
+        println!(
+            "  Nullifier       : {}...",
+            &input_nullifier_hex[..core::cmp::min(10, input_nullifier_hex.len())]
+        );
+        println!("  Recipient       : {}", recipient);
+        println!(
+            "  Merchant Amount : {} USDC",
+            merchant_amount as f64 / 1_000_000.0
+        );
+        println!(
+            "  Protocol Fee    : {} USDC",
+            protocol_fee as f64 / 1_000_000.0
+        );
+        println!(
+            "  Execution Fee   : {} USDC",
+            execution_fee as f64 / 1_000_000.0
+        );
+        println!("  Has Change      : {}", has_change == 1);
+
+        let note_root_bytes =
+            hex::decode(note_root_hex.trim_start_matches("0x")).context("Invalid note_root hex")?;
+        if note_root_bytes.len() != 32 {
+            anyhow::bail!(
+                "Invalid note_root length: expected 32, got {}",
+                note_root_bytes.len()
+            );
+        }
+        let mut note_root_fixed = [0u8; 32];
+        note_root_fixed.copy_from_slice(&note_root_bytes);
+
+        let nullifier_bytes = hex::decode(input_nullifier_hex.trim_start_matches("0x"))
+            .context("Invalid input_nullifier hex")?;
+        if nullifier_bytes.len() != 32 {
+            anyhow::bail!(
+                "Invalid input_nullifier length: expected 32, got {}",
+                nullifier_bytes.len()
+            );
+        }
+        let mut nullifier_fixed = [0u8; 32];
+        nullifier_fixed.copy_from_slice(&nullifier_bytes);
+
+        let output_cm_bytes = hex::decode(output_commitment_hex.trim_start_matches("0x"))
+            .unwrap_or_else(|_| vec![0u8; 32]);
+        let mut output_cm_fixed = [0u8; 32];
+        if output_cm_bytes.len() == 32 {
+            output_cm_fixed.copy_from_slice(&output_cm_bytes);
+        }
+
+        let recipient_addr = Address::from_str(recipient)
+            .map_err(|e| anyhow::anyhow!("Invalid recipient address '{}': {}", recipient, e))?;
+
+        let quote_hash_bytes =
+            hex::decode(quote_hash_hex.trim_start_matches("0x")).unwrap_or_else(|_| vec![0u8; 32]);
+        let mut quote_hash_fixed = [0u8; 32];
+        if quote_hash_bytes.len() == 32 {
+            quote_hash_fixed.copy_from_slice(&quote_hash_bytes);
+        }
+
+        let proof_a_neg = hex::decode(proof_a_neg_hex.trim_start_matches("0x"))
+            .context("Invalid proof_a_neg hex")?;
+        let proof_b =
+            hex::decode(proof_b_hex.trim_start_matches("0x")).context("Invalid proof_b hex")?;
+        let proof_c =
+            hex::decode(proof_c_hex.trim_start_matches("0x")).context("Invalid proof_c hex")?;
+
+        let call_data = spendPrivateNoteCall {
+            note_root: note_root_fixed.into(),
+            input_nullifier: nullifier_fixed.into(),
+            output_commitment: output_cm_fixed.into(),
+            recipient: recipient_addr,
+            merchant_amount: U256::from(merchant_amount),
+            protocol_fee: U256::from(protocol_fee),
+            execution_fee: U256::from(execution_fee),
+            max_execution_fee: U256::from(max_execution_fee),
+            quote_hash: quote_hash_fixed.into(),
+            expiry: U256::from(expiry),
+            has_change: U256::from(has_change),
+            proof_a_neg: proof_a_neg.into(),
+            proof_b: proof_b.into(),
+            proof_c: proof_c.into(),
+        }
+        .abi_encode();
+
+        let gas_price = self.get_gas_price().await.unwrap_or(20_000_000);
+        let max_fee = gas_price * 125 / 100;
+
+        let tx = TransactionRequest::default()
+            .with_to(self.contract_address)
+            .with_value(U256::ZERO)
+            .with_gas_limit(2_500_000)
+            .with_max_fee_per_gas(max_fee)
+            .with_max_priority_fee_per_gas(1_000_000)
+            .with_input(Bytes::from(call_data));
+
+        let outcome = self.send_tx_with_fallback(tx).await?;
+
+        println!("RELAYER: Private note spend transaction broadcasted");
         println!("  Tx Hash     : {}", outcome.tx_hash);
 
         Ok(outcome)

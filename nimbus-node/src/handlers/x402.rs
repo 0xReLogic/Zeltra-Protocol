@@ -98,6 +98,7 @@ pub async fn handle_x402_verify(
         quote_expiry: None,
         quote_signature: None,
         user_address: None,
+        ..Default::default()
     };
 
     let queue_id = match state.db.enqueue_spend(&spend_req).await {

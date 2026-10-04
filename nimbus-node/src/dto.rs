@@ -18,7 +18,7 @@ pub struct CrossChainParams {
     pub destination_contract: String,
 }
 
-#[derive(Clone, Serialize, Deserialize, Debug)]
+#[derive(Clone, Serialize, Deserialize, Debug, Default)]
 pub struct SpendRequest {
     pub nullifier: String,
     pub sig_hex: String,
@@ -73,6 +73,37 @@ pub struct SpendRequest {
     /// User's Ethereum address (signer of the quote)
     #[serde(default)]
     pub user_address: Option<String>,
+    // --- Private Note ZK UTXO Fields (DEC-016 & DEC-025) ---
+    #[serde(default)]
+    pub spend_type: Option<String>,
+    #[serde(default)]
+    pub note_root_hex: Option<String>,
+    #[serde(default)]
+    pub output_commitment_hex: Option<String>,
+    #[serde(default)]
+    pub merchant_amount: Option<u64>,
+    #[serde(default)]
+    pub protocol_fee: Option<u64>,
+    #[serde(default)]
+    pub quote_hash_hex: Option<String>,
+    #[serde(default)]
+    pub has_change: Option<u64>,
+    #[serde(default)]
+    pub proof_a_neg_hex: Option<String>,
+    #[serde(default)]
+    pub proof_b_hex: Option<String>,
+    #[serde(default)]
+    pub proof_c_hex: Option<String>,
+    #[serde(default)]
+    pub public_inputs_hex: Option<Vec<String>>,
+}
+
+impl SpendRequest {
+    pub fn is_private_note(&self) -> bool {
+        self.spend_type.as_deref() == Some("private_note")
+            || self.proof_a_neg_hex.is_some()
+            || self.public_inputs_hex.is_some()
+    }
 }
 
 #[derive(Clone, Serialize, Deserialize, Debug)]
@@ -124,6 +155,113 @@ pub struct SpendResponse {
     /// Estimated gas charge in USDC (informational, for client-side slippage check)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub estimated_gas_usdc: Option<f64>,
+}
+
+/// Request DTO for ZK Private Note Spend (DEC-025 Gate F)
+#[derive(Clone, Serialize, Deserialize, Debug)]
+pub struct PrivateNoteSpendRequest {
+    #[serde(alias = "session_id", default)]
+    pub session_id: Option<String>,
+    #[serde(alias = "note_root_hex")]
+    pub note_root: String,
+    #[serde(alias = "input_nullifier_hex", alias = "nullifier")]
+    pub input_nullifier: String,
+    #[serde(alias = "output_commitment_hex", default)]
+    pub output_commitment: Option<String>,
+    #[serde(alias = "recipient_hex")]
+    pub recipient: String,
+    #[serde(default)]
+    pub merchant_amount: u64,
+    #[serde(default)]
+    pub protocol_fee: u64,
+    #[serde(default)]
+    pub execution_fee: u64,
+    #[serde(default)]
+    pub max_execution_fee: u64,
+    #[serde(alias = "quote_hash_hex", default)]
+    pub quote_hash: Option<String>,
+    #[serde(default)]
+    pub quote_signature: Option<String>,
+    #[serde(default)]
+    pub quote_id: Option<String>,
+    #[serde(default)]
+    pub user_address: Option<String>,
+    #[serde(default)]
+    pub expiry: Option<u64>,
+    #[serde(default)]
+    pub has_change: Option<serde_json::Value>,
+    #[serde(alias = "proof_a_neg_hex")]
+    pub proof_a_neg: String,
+    #[serde(alias = "proof_b_hex")]
+    pub proof_b: String,
+    #[serde(alias = "proof_c_hex")]
+    pub proof_c: String,
+    #[serde(alias = "public_inputs_hex", default)]
+    pub public_inputs: Vec<String>,
+    #[serde(default)]
+    pub idempotency_key: Option<String>,
+}
+
+/// Response DTO for ZK Private Note Spend (DEC-025 Gate F)
+#[derive(Clone, Serialize, Deserialize, Debug)]
+pub struct PrivateNoteSpendResponse {
+    pub status: String,
+    pub message: String,
+    pub queue_position: usize,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub estimated_gas_usdc: Option<f64>,
+}
+
+impl From<PrivateNoteSpendRequest> for SpendRequest {
+    fn from(req: PrivateNoteSpendRequest) -> Self {
+        let has_change_u64 = match req.has_change {
+            Some(serde_json::Value::Bool(b)) => {
+                if b {
+                    1
+                } else {
+                    0
+                }
+            }
+            Some(serde_json::Value::Number(n)) => n.as_u64().unwrap_or(0),
+            _ => 0,
+        };
+        SpendRequest {
+            nullifier: req.input_nullifier,
+            sig_hex: String::new(),
+            recipient: req.recipient,
+            amount: req.merchant_amount,
+            eip7702_auth: None,
+            cross_chain: None,
+            association_root_hex: None,
+            alpha_neg_hex: String::new(),
+            hm_hex: String::new(),
+            pk_iss_hex: String::new(),
+            recipient_or_intent_hash_hex: None,
+            expiry: req.expiry,
+            nonce_hex: None,
+            min_payout: None,
+            deadline: None,
+            idempotency_key: req.idempotency_key,
+            max_execution_fee: Some(req.max_execution_fee),
+            execution_fee: Some(req.execution_fee),
+            quote_id: req.quote_id,
+            quote_expiry: req.expiry,
+            quote_signature: req.quote_signature,
+            user_address: req.user_address,
+            // Private Note ZK fields
+            spend_type: Some("private_note".to_string()),
+            note_root_hex: Some(req.note_root),
+            output_commitment_hex: req.output_commitment,
+            merchant_amount: Some(req.merchant_amount),
+            protocol_fee: Some(req.protocol_fee),
+            quote_hash_hex: req.quote_hash,
+            has_change: Some(has_change_u64),
+            proof_a_neg_hex: Some(req.proof_a_neg),
+            proof_b_hex: Some(req.proof_b),
+            proof_c_hex: Some(req.proof_c),
+            public_inputs_hex: Some(req.public_inputs),
+        }
+    }
 }
 
 #[derive(Deserialize)]

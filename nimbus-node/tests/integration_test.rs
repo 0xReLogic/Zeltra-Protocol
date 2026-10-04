@@ -112,7 +112,7 @@ async fn test_concurrent_double_spend_attempts() {
     assert_eq!(successes, 1, "Exactly one concurrent spend should succeed");
     assert_eq!(failures, 9, "Nine attempts should be rejected");
 
-    println!("✅ Concurrent double-spend prevention test passed!");
+    println!(" Concurrent double-spend prevention test passed!");
     println!("   - Successes: {} (expected 1)", successes);
     println!("   - Rejected: {} (expected 9)", failures);
 }
@@ -148,6 +148,7 @@ async fn test_startup_nullifier_reconciliation() {
         quote_expiry: None,
         quote_signature: None,
         user_address: None,
+        ..Default::default()
     };
 
     let req2 = nimbus_node::dto::SpendRequest {
@@ -173,6 +174,7 @@ async fn test_startup_nullifier_reconciliation() {
         quote_expiry: None,
         quote_signature: None,
         user_address: None,
+        ..Default::default()
     };
 
     // Enqueue both spends
@@ -211,5 +213,97 @@ async fn test_startup_nullifier_reconciliation() {
     assert_eq!(remaining[0].nullifier, req2.nullifier);
     assert_eq!(remaining[0].status, "queued");
 
-    println!("✅ Post-restart reconciliation test passed!");
+    println!(" Post-restart reconciliation test passed!");
+}
+
+#[tokio::test]
+async fn test_private_note_spend_enqueue_and_queue_lifecycle() {
+    let tmp = TempDir::new().unwrap();
+    let db_path = tmp.path().join("private_note_test.db");
+    let db = nimbus_node::database::Database::new(&db_path)
+        .await
+        .unwrap();
+
+    let note_root = "0x0000000000000000000000000000000000000000000000000000000000000001";
+    let input_nullifier = "0x0000000000000000000000000000000000000000000000000000000000000002";
+    let output_commitment = "0x0000000000000000000000000000000000000000000000000000000000000003";
+    let recipient = "0x1111111111111111111111111111111111111111";
+
+    let priv_req = nimbus_node::dto::PrivateNoteSpendRequest {
+        session_id: Some("session_private_1".to_string()),
+        note_root: note_root.to_string(),
+        input_nullifier: input_nullifier.to_string(),
+        output_commitment: Some(output_commitment.to_string()),
+        recipient: recipient.to_string(),
+        merchant_amount: 5_000_000,
+        protocol_fee: 22_500,
+        execution_fee: 20_000,
+        max_execution_fee: 25_000,
+        quote_hash: Some(
+            "0x0000000000000000000000000000000000000000000000000000000000000004".to_string(),
+        ),
+        quote_signature: None,
+        quote_id: None,
+        user_address: None,
+        expiry: Some(9999999999),
+        has_change: Some(serde_json::Value::Number(1.into())),
+        proof_a_neg: format!("0x{}", "11".repeat(128)),
+        proof_b: format!("0x{}", "22".repeat(256)),
+        proof_c: format!("0x{}", "33".repeat(128)),
+        public_inputs: vec![
+            note_root.to_string(),
+            input_nullifier.to_string(),
+            output_commitment.to_string(),
+            format!("0x000000000000000000000000{}", &recipient[2..]),
+            format!("0x{:064x}", 5_000_000u64),
+            format!("0x{:064x}", 22_500u64),
+            format!("0x{:064x}", 20_000u64),
+            "0x0000000000000000000000000000000000000000000000000000000000000004".to_string(),
+            format!("0x{:064x}", 421614u64),
+            format!(
+                "0x000000000000000000000000{}",
+                "3333333333333333333333333333333333333333"
+            ),
+            format!("0x{:064x}", 9999999999u64),
+            format!("0x{:064x}", 1u64),
+        ],
+        idempotency_key: Some("idem_private_1".to_string()),
+    };
+
+    let spend_req = nimbus_node::dto::SpendRequest::from(priv_req.clone());
+    assert!(spend_req.is_private_note());
+    assert_eq!(spend_req.nullifier, input_nullifier);
+    assert_eq!(spend_req.amount, 5_000_000);
+    assert_eq!(spend_req.note_root_hex.as_deref(), Some(note_root));
+
+    // Enqueue into SQLite
+    let id = db
+        .enqueue_spend(&spend_req)
+        .await
+        .unwrap()
+        .expect("Should be enqueued successfully");
+
+    // Duplicate enqueue with same nullifier should be rejected
+    let dup = db.enqueue_spend(&spend_req).await.unwrap();
+    assert!(dup.is_none(), "Duplicate nullifier should be rejected");
+
+    // Claim spend from queue
+    let claimed = db.claim_spends(10, 60).await.unwrap();
+    assert_eq!(claimed.len(), 1);
+    assert_eq!(claimed[0].id, id);
+    assert!(claimed[0].request.is_private_note());
+    assert_eq!(claimed[0].request.note_root_hex.as_deref(), Some(note_root));
+
+    // Mark submitted and confirmed
+    db.mark_spend_submitted(id, "0xtx_private_spend")
+        .await
+        .unwrap();
+    db.mark_spend_confirmed(id, input_nullifier, "0xtx_private_spend", 12345)
+        .await
+        .unwrap();
+
+    // Check nullifier is marked as spent in local database
+    assert!(db.is_nullifier_spent(input_nullifier).await.unwrap());
+
+    println!(" Gate F Private Note Spend lifecycle test passed!");
 }

@@ -844,16 +844,28 @@ mod tests {
         eprintln!("// Circuit: PrivateNoteCircuit (12 public inputs) over BLS12-381");
         eprintln!();
         eprintln!("// NOTE_VK_ALPHA_G1 (128 bytes)");
-        eprintln!("pub const NOTE_VK_ALPHA_G1: [u8; 128] = alloy_primitives::hex!(\"{}\");", to_hex(&alpha));
+        eprintln!(
+            "pub const NOTE_VK_ALPHA_G1: [u8; 128] = alloy_primitives::hex!(\"{}\");",
+            to_hex(&alpha)
+        );
         eprintln!();
         eprintln!("// NOTE_VK_BETA_G2 (256 bytes)");
-        eprintln!("pub const NOTE_VK_BETA_G2: [u8; 256] = alloy_primitives::hex!(\"{}\");", to_hex(&beta));
+        eprintln!(
+            "pub const NOTE_VK_BETA_G2: [u8; 256] = alloy_primitives::hex!(\"{}\");",
+            to_hex(&beta)
+        );
         eprintln!();
         eprintln!("// NOTE_VK_GAMMA_G2 (256 bytes)");
-        eprintln!("pub const NOTE_VK_GAMMA_G2: [u8; 256] = alloy_primitives::hex!(\"{}\");", to_hex(&gamma));
+        eprintln!(
+            "pub const NOTE_VK_GAMMA_G2: [u8; 256] = alloy_primitives::hex!(\"{}\");",
+            to_hex(&gamma)
+        );
         eprintln!();
         eprintln!("// NOTE_VK_DELTA_G2 (256 bytes)");
-        eprintln!("pub const NOTE_VK_DELTA_G2: [u8; 256] = alloy_primitives::hex!(\"{}\");", to_hex(&delta));
+        eprintln!(
+            "pub const NOTE_VK_DELTA_G2: [u8; 256] = alloy_primitives::hex!(\"{}\");",
+            to_hex(&delta)
+        );
         eprintln!();
         eprintln!("pub const NOTE_VK_IC: [[u8; 128]; 13] = [");
         for (i, ic_point) in ic.iter().enumerate() {

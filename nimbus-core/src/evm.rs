@@ -62,3 +62,14 @@ pub fn get_pk_iss_evm(pk_iss: &IssuerPublicKey) -> Vec<u8> {
     let pk_affine = pk_iss.0.into_affine();
     to_evm_g2(&pk_affine)
 }
+
+/// Helper to deserialize a scalar Fr from EVM Big-Endian format (32 bytes).
+/// Validates that the scalar element is strictly within the field modulus (< r).
+pub fn from_evm_scalar(bytes: &[u8; 32]) -> Option<ark_bls12_381::Fr> {
+    use ark_serialize::CanonicalDeserialize;
+    let mut le_buf = [0u8; 32];
+    for j in 0..32 {
+        le_buf[j] = bytes[31 - j];
+    }
+    ark_bls12_381::Fr::deserialize_uncompressed(&le_buf[..]).ok()
+}
