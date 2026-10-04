@@ -2,42 +2,62 @@
 
 ## What This Is
 
-Nimbus = private payment system on Arbitrum Stylus. User deposits USDC → gets a private credential via BLS threshold signing → spends it once (BLS verification on-chain) → refund if issuance fails.
+**Zeltra Protocol** (codebase transition name: Nimbus) = **"The Stripe of Web3 with Absolute Privacy."** A high-throughput, shielded payment and settlement rail on Arbitrum Stylus for AI Agents, retail, whales, B2B corporates, and global merchants.
 
-Everything here protects one thing: **one deposit pays out exactly once, no more, no less.**
+Full vision manifesto: [`VISION.md`](file:///workspaces/Zeltra-Protocol/VISION.md).
+
+Product Mantra: **Privacy 9.5/10, Product 10/10.** Apple Pay / QRIS speed with real-cash mental accounting ($10 - $3 = $7 change via ZK-UTXO Private Notes). Engineering hell stays in the background; user experience stays effortless.
+
+Zero-friction inflow (0% deposit fee), volume-over-TVL economic velocity, and absolute mathematical solvency: **one deposit pays out exactly once, no more, no less.**
 
 ## Repo Layout
 
 ```
-nimbus-contracts/  — Stylus WASM smart contract (deposit, spend, CCIP, ZK verification)
-nimbus-core/       — Crypto primitives (BLS, threshold signing, hash-to-curve, ZK circuit, fees)
-nimbus-node/       — Relayer node (leader, guardian, spend queue, settlement, API)
-nimbus-sdk/        — Client SDK
+nimbus-contracts/  — Stylus WASM smart contract (deposit, spend, batch, ZK private note Groth16, LeanIMT tree)
+nimbus-core/       — Crypto primitives (BLS12-381, Groth16 PrivateNoteCircuit, Poseidon Grain-128, fees, accounting)
+nimbus-node/       — Relayer node (leader, guardian, spend queue, ZK note ingress & direct settlement, API)
+nimbus-sdk/        — Client SDK (PrivateNoteWallet, coin selection, local Groth16 prover, encrypted store)
 nimbus-cli/        — CLI tool
-scripts/           — Test scripts
-research/decisions/ — Design decisions (DEC-001 s/d DEC-018)
-docs/              — Technical docs
-todo.md            — Master checklist (READ THIS FIRST)
+scripts/           — Test scripts & cluster automation
+research/decisions/ — Design decisions (DEC-001 s/d DEC-026)
+docs/              — Modular chapter-based docs
+todo.md            — Master active checklist (pending tasks only)
 ```
 
-Stack: Rust, Stylus SDK 0.10.7, Alloy, Arkworks 0.6.0 (BLS12-381 & Groth16), Axum, SQLCipher AES-256.
+Stack: Rust (Stylus SDK 0.10.7, Alloy 2.0, Arkworks 0.6.0 `ark-bls12-381` & `ark-groth16`), Axum 0.8, SQLite with SQLCipher AES-256 (`bundled-sqlcipher`), OpenBao/Vault KMS.
 
 ## Core Business Flow
 
+### 1. Inflow (Deposit USDC → Private Credential / Note)
 ```
 User deposits USDC → contract records liability & emits DepositFee event (session_id, com_k_hash, client)
   ↓
-Relayer deposit indexer verifies on-chain event with safe-block reorg protection
+Relayer deposit indexer verifies on-chain event with safe-block reorg protection (DEC-018)
   ↓
 Leader + guardians do threshold BLS blind signing → masked signature + commitment
   ↓
 Deposit confirmed on-chain → leader verifies k * pk_iss == com_k → releases masking key k
   ↓
-User unmasks → gets final credential (BLS signature)
+User unmasks → gets final credential / initial Private Note
+```
+
+### 2. Outflow (ZK-UTXO Spend & Change Note)
+```
+User selects Note UTXO via PrivateNoteWallet (SDK, DEC-024)
   ↓
-User spends → contract verifies BLS pairing + nullifier + Groth16 change note proof
+User generates local Groth16 proof (PrivateNoteCircuit: value conservation, Poseidon nullifier, Merkle path)
   ↓
-Contract pays recipient + mints Change Note to LeanIMT Merkle tree → reduces net liability
+User submits proof & 12 public inputs to Relayer (/api/v1/spend-private-note, DEC-025)
+  ↓
+Relayer validates scalars (< r), binds semantics (DEC-022), checks nullifiers locally & on-chain
+  ↓
+Relayer broadcasts spend_private_note(...) to Stylus contract
+  ↓
+Contract verifies Groth16 via EIP-2537 precompiles (0x0c MSM + 0x0f Pairing)
+  ↓
+Contract marks note_nullifier spent, inserts change note to LeanIMT tree (depth 20), pays recipient USDC
+  ↓
+Multi-liability reduced, exact value conservation maintained
 ```
 
 Refund path: if quorum fails or k never released → 24h timelock → user claims refund → liability reduced.
@@ -47,11 +67,11 @@ Refund path: if quorum fails or k never released → 24h timelock → user claim
 ## Invariants — Break These and It's a Critical Bug
 
 **Accounting & Value Conservation:**
-- `contract USDC balance >= total_deposited_principal` — checked after every state change, reverts on insolvency
-- `gross_deposit = deposit_fee + net_liability`
+- `contract USDC balance >= total_liabilities (user_note_liability + refundable_deposit_liability + accrued_execution_fee_liability)` — checked after every state change, reverts on insolvency
+- `gross_deposit = deposit_fee + net_liability` (deposit fee = 0 bps immutable)
 - `Input Note = Payout + Protocol Fee + Execution Fee + Change Note` (ZK-UTXO value conservation)
 - One session adds liability exactly once (duplicate session_id rejected)
-- One credential reduces liability exactly once (nullifier prevents double spend)
+- One credential/note reduces liability exactly once (nullifier prevents double spend)
 
 **Deposit/Reveal/Refund:**
 - `reveal()` does NOT transfer collateral — it only marks session resolved after verifying `k * pk_iss == com_k`
@@ -60,10 +80,12 @@ Refund path: if quorum fails or k never released → 24h timelock → user claim
 - Refund only after 24h timelock, only by depositor, only if session not resolved
 - `SPENT XOR REFUNDED` — a session cannot be both
 
-**Spend:**
-- BLS pairing check must pass: `e(-alpha, G2) * e(H(m), pk_iss) == 1`
-- Spend message is bound: `keccak256("SPEND" || chain_id || contract || amount || recipient || expiry || nonce)`
-- Issuer key must be registered by admin (trusted_issuer_keys mapping)
+**Spend (Legacy BLS & ZK-UTXO Private Note):**
+- Legacy BLS pairing check: `e(-alpha, G2) * e(H(m), pk_iss) == 1`
+- ZK-UTXO Private Note Groth16 check via EIP-2537 (`0x0c` MSM + `0x0f` 4-pairing):
+  `e(-A, B) * e(alpha, beta) * e(L, gamma) * e(C, delta) == 1`
+- Semantic public input binding (DEC-022): exact match of recipient, amount, fees, quote hash, chain_id, contract_address, expiry, has_change
+- Double-spend protection: siloed nullifier (`note_nullifiers[input_nullifier] == true`)
 - Fee rounding: ceiling division, always favors solvency
 
 **CCIP:**
@@ -77,7 +99,8 @@ Refund path: if quorum fails or k never released → 24h timelock → user claim
 1. **Read `todo.md`** — check item status before touching it
 2. **Check `research/decisions/`** — there might be a relevant decision
 3. **Reach for CodeGraph FIRST (Mandatory)** — Repository ini diindeks dengan CodeGraph (`.codegraph/`). SELALU gunakan MCP tool `codegraph_explore` (atau shell `codegraph explore "<query>"`) SEBELUM menggunakan grep, find, atau membaca file saat menelusuri simbol, call path, blast radius, atau arsitektur kode.
-4. **Research gate for critical changes** (financial logic, crypto, CCIP, custody, storage layout):
+4. **Prinsip ATMI (Amati, Tiru, Modifikasi, Inovasi)** — Belajar dan serap pola unggul dari paper kriptografi teruji dan repo battle-tested (seperti Zcash, Aztec Barretenberg, Railgun, zk-kit, zk-sunade, Wasabi). Amati polanya, tiru fondasinya, modifikasi agar cocok dengan Stylus/BLS12-381/ZK-UTXO Zeltra, dan inovasikan keunggulan baru (privacy 9.5/10, produk 10/10).
+5. **Research gate for critical changes** (financial logic, crypto, CCIP, custody, storage layout):
    - Search Exa MCP for recent papers, audit reports, exploit post-mortems (2024-2026)
    - Minimum 2 independent sources, 1 must be primary
    - Write decision note in `research/decisions/`
@@ -119,7 +142,7 @@ Holding time is calculated from `clean_association_roots` root registration time
 - `todo.md` — master checklist, hard-test matrix, campaign status
 - `docs/bisnis.md` — business blueprint and fee policy
 - `docs/mainnet_readiness_todo.md` — mainnet readiness roadmap
-- `research/decisions/` — 15 design decisions with rationale
+- `research/decisions/` — 26 design decisions with rationale (DEC-001 s/d DEC-026)
 - `SESSION_SUMMARY.md` — what was done in previous sessions (read this when starting fresh)
 
 ## Environment & Deployment

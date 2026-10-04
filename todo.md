@@ -7,12 +7,16 @@
 
 ## Ringkasan Status Saat Ini (Yang Sudah Berhasil)
 
-Komponen inti berikut **sudah selesai dan terbukti di Arbitrum Sepolia**:
+Komponen inti berikut **sudah selesai dan diverifikasi**:
 * **Smart Contract Stylus:** EIP-2537 BLS pairing check (`e(-alpha, G2) * e(H(m), pk_iss) == 1`), 13/13 testnet negative tests lolos.
 * **BLS Threshold Cluster:** 1 Leader + 4 Guardians (3-of-5 threshold) dengan Tailscale binding dan atomic masking key release.
 * **Persistent Queue:** SQLite/SQLCipher persistent spend queue dengan leasing dan exponential backoff.
 * **Adaptive Batch Spend:** Entrypoint `batch_spend()` (2-8 item) terdeploy di Stylus dengan EIP-712 quote validation.
 * **CCIP Tracking:** Event parsing untuk message ID dan background monitor destination.
+* **ZK-UTXO Gate C0 (Security Repair):** Poseidon Grain-128 LFSR ([`DEC-021`](file:///workspaces/Zeltra-Protocol/research/decisions/DEC-021-audited-poseidon-parameters-grain-lfsr-defense.md)), leaf index Merkle binding, dan 64-bit integer range constraints.
+* **ZK-UTXO Gate D (Contract Note Ledger):** Verifier Groth16 BLS12-381 via EIP-2537 (`0x0c` MSM + `0x0f` Pairing Check), LeanIMT depth 20 Merkle tree, dan entrypoint `spend_private_note(...)` di Stylus (53/53 tests pass).
+* **ZK-UTXO Gate E (Client Note Wallet):** `PrivateNoteWallet` di SDK dengan local Groth16 proof generation, note lifecycle state machine, encrypted storage, dan privacy-aware coin selection (20/20 tests pass).
+* **ZK-UTXO Gate F (Relayer Note Settlement):** Endpoint `/api/v1/spend-private-note`, fail-closed pre-flight checks, dual-layer nullifier double-spend prevention (SQLite & on-chain), dan single-item settlement dispatcher `broadcast_spend_private_note_transaction` ([`DEC-025`](file:///workspaces/Zeltra-Protocol/research/decisions/DEC-025-relayer-zk-note-spend-settlement-atomic-batching-and-reconciliation.md)).
 
 ---
 
@@ -31,45 +35,34 @@ Arsitektur yang dipilih secara definitif: **Arah B (ZK-UTXO Model - Gates A s/d 
 ### Gate C0 - Security Repair Private Note Circuit
 Ref: [`docs/todos/private-note-balance.md`](file:///workspaces/Zeltra-Protocol/docs/todos/private-note-balance.md), [`DEC-016A (Frozen Spec)`](file:///workspaces/Zeltra-Protocol/research/decisions/DEC-016A-private-note-spec-freeze.md), & [`DEC-016B (Shortcuts Fix)`](file:///workspaces/Zeltra-Protocol/research/decisions/DEC-016B-mvp-circuit-shortcuts.md)
 
-- [ ] **Cryptographic parameters**:
-  - [x] Generator parameter standar/audited Grain-128 LFSR (`GrainLfsr`) terimplementasi di [`nimbus-core/src/poseidon.rs`](file:///workspaces/Zeltra-Protocol/nimbus-core/src/poseidon.rs) sesuai [`DEC-021`](file:///workspaces/Zeltra-Protocol/research/decisions/DEC-021-audited-poseidon-parameters-grain-lfsr-defense.md) (108/108 tests pass).
-  - [ ] Simpan proving/verifying key sebagai artifact versioned; cache development key pada test runner.
+- [ ] Simpan proving/verifying key sebagai artifact versioned; cache development key pada test runner.
+- [ ] Jalankan MPC ceremony hanya setelah seluruh constraint dan public-input ABI dibekukan serta direview.
 
 ---
 
 ## 2. Smart Contract Stylus (`nimbus-contracts`)
 
-- [x] **Private Note ZK Spend Entrypoint (Gate D Blocker)**:
-  - Implementasikan entrypoint `spend_private_note(...)` di [`nimbus-contracts/src/spend.rs`](file:///workspaces/Zeltra-Protocol/nimbus-contracts/src/spend.rs):
-    * Verifikasi proof Groth16 on-chain (`PrivateNoteCircuit`) via precompiles **EIP-2537 `0x0c` (`BLS12_G1MSM`)** dan **`0x0f` (`BLS12_PAIRING_CHECK`)** untuk kurva BLS12-381 (mengadopsi arsitektur lean verifier dari `zk-sunade`).
-    * Enforce `accepted_note_roots` berisi `merkle_root` publik dari proof.
-    * Catat `note_nullifier` ke storage `note_nullifiers` (revert jika double-spend).
-    * Jika `has_change == 1`, masukkan `change_commitment` ke pohon **LeanIMT depth 20** (`merkle.rs`).
-    * Transfer `payout` ke `recipient` dan alokasikan protocol & execution fees.
-  - Verifikasi Stylus WASM target (`wasm32-unknown-unknown` pass) dan test suite (53/53 tests pass termasuk 8 test positif & negatif `spend_private_note`).
+> **Status Gate D:** SELESAI (100%) — Entrypoint `spend_private_note(...)` terintegrasi dengan verifier Groth16 EIP-2537 (`0x0c` + `0x0f`), pohon LeanIMT depth 20, dan multi-liability solvency invariant.
+
+- [ ] Sinkronisasi audit report & formal verification untuk parameter curve BLS12-381 precompile compatibility di Stylus.
 
 ---
 
-## 3. Client SDK Private Wallet State (`nimbus-sdk` - Gate E Blocker)
+## 3. Client SDK Private Wallet State (`nimbus-sdk`)
 
-- [x] **Private Note Wallet & UTXO Selection (Gate E Blocker)** (Rincian lengkap di [`docs/todos/private-note-balance.md`](file:///workspaces/Zeltra-Protocol/docs/todos/private-note-balance.md)):
-  - Ganti `AgentTokenPool` (voucher BDHKE nominal kaku) dengan model Note UTXO: akumulasi seluruh unspent notes menjadi satu saldo gabungan.
-  - Implementasikan note lifecycle state machine: `unconfirmed -> unspent -> reserved -> spent`.
-  - Privacy-aware coin selection & change calculation: otomatis memilih input note dan menghitung nilai kembalian (*change note*).
-  - Local proof generator: buat proof Groth16 (`PrivateNoteCircuit`) langsung di client SDK (jangan pernah kirim spending key / note preimage ke relayer).
-  - Client API methods: `deposit(amount)`, `pay(recipient, amount)`, `send_to_wallet(recipient, amount)`, dan `withdraw_all(owner_wallet)`.
+> **Status Gate E:** SELESAI (100%) — `PrivateNoteWallet` mengelola saldo UTXO, coin selection, local proof generation, dan persistensi terenkripsi (DEC-024).
+
+- [ ] WebAssembly / Browser packaging test runner untuk eksekusi sirkuit client-side secara non-blocking via Web Worker.
 
 ---
 
-## 4. Relayer & Node Settlement (`nimbus-node` - Gate F Blocker)
+## 4. Relayer & Node Settlement (`nimbus-node`)
 
-- [x] **Relayer ZK Note Spend & Direct Settlement (Gate F Blocker)** (Rincian lengkap di [`docs/todos/private-note-balance.md`](file:///workspaces/Zeltra-Protocol/docs/todos/private-note-balance.md) & [`DEC-025`](file:///workspaces/Zeltra-Protocol/research/decisions/DEC-025-relayer-zk-note-spend-settlement-atomic-batching-and-reconciliation.md)):
-  - Endpoint ingress `POST /api/v1/spend-private-note` dengan validasi fail-closed lengkap ([`nimbus-node/src/handlers/spend.rs`](file:///workspaces/Zeltra-Protocol/nimbus-node/src/handlers/spend.rs)).
-  - Pre-flight skalar kanonikalitas ($< r$) dan semantic public input binding (DEC-022 boundary gap defense).
-  - Single-item direct settlement dispatcher `EvmClient::broadcast_spend_private_note_transaction` (bypassing multi-item batching queue untuk Stylus WASM compute).
-  - Pengecekan double-spend fail-closed terhadap database SQLite lokal dan on-chain contract view function `is_nullifier_spent`.
-  - Sinkronisasi receipt on-chain mencatat transaksi submitted, confirmed, block number, dan reservasi nullifier.
-  - Test suite lengkap (91/91 tests pass di `nimbus-node`, 164/164 tests pass di seluruh workspace, clippy zero warnings).
+> **Status Gate F:** SELESAI (Phase 1 Direct Pipeline) — Ingress endpoint `/api/v1/spend-private-note`, verifikasi skalar kanonikal, binding semantik DEC-022, dual-layer double-spend guard, dan direct EVM broadcast ([`DEC-025`](file:///workspaces/Zeltra-Protocol/research/decisions/DEC-025-relayer-zk-note-spend-settlement-atomic-batching-and-reconciliation.md)).
+
+- [ ] Claim worker reconcile contract accrual, DB accrual, dan receipts.
+- [ ] Hilangkan fallback quote yang mengembalikan status OK tanpa signing domain.
+- [ ] Health endpoint expose solvency/accounting mismatch tanpa membuka user data.
 
 ---
 

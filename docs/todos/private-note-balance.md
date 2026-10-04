@@ -81,18 +81,15 @@ wallet publik milik user.
 
 ## Gate C0 - Security Repair Sebelum Integrasi Contract
 
-> **Status Gate C0:** **SELESAI (100%)** — Seluruh 3 blocker keamanan P0 (leaf index Merkle binding, 64-bit integer range gadget, boolean constraint `has_change`) dan negative test suite telah lulus 100%.
+> **Status Gate C0:** **SELESAI (100%)** — Seluruh 3 blocker keamanan P0 (leaf index Merkle binding, 64-bit integer range gadget, boolean constraint `has_change`) dan negative test suite telah lulus 100%. Parameter Poseidon Grain-128 LFSR terimplementasi di [`nimbus-core/src/poseidon.rs`](file:///workspaces/Zeltra-Protocol/nimbus-core/src/poseidon.rs) ([`DEC-021`](file:///workspaces/Zeltra-Protocol/research/decisions/DEC-021-audited-poseidon-parameters-grain-lfsr-defense.md)) dan divalidasi dengan implementasi referensi independen.
 
-Pending parameters:
-- [x] Ganti parameter Poseidon width-5 ad-hoc berbasis `StdRng` dengan parameter standar/audited Grain-128 LFSR di [`nimbus-core/src/poseidon.rs`](file:///workspaces/Zeltra-Protocol/nimbus-core/src/poseidon.rs) ([`DEC-021`](file:///workspaces/Zeltra-Protocol/research/decisions/DEC-021-audited-poseidon-parameters-grain-lfsr-defense.md)).
-- [x] Validasi hasilnya menggunakan implementasi referensi independen (Aztec Barretenberg `poseidon2_cpp_params.sage` & EF Cryptanalysis 2024–2026).
 - [ ] Jalankan MPC ceremony hanya setelah seluruh constraint dan public-input ABI dibekukan serta direview.
 
 ---
 
 ## Gate D - Contract Private Note Ledger
 
-> **Status Gate D:** **SELESAI (100%)** — Module verifier Groth16 BLS12-381 via EIP-2537 (`0x0c` MSM + `0x0f` Pairing Check) dan entrypoint `spend_private_note(...)` telah diimplementasikan di Stylus (`nimbus-contracts`). Didukung dengan pohon LeanIMT depth 20 (`_merkle_insert`), namespaced note nullifiers, multi-liability invariant, serta 53/53 tests passing (termasuk 8 positive & negative tests untuk ZK private note spend).
+> **Status Gate D:** **SELESAI (100%)** — Module verifier Groth16 BLS12-381 via EIP-2537 (`0x0c` MSM + `0x0f` Pairing Check) dan entrypoint `spend_private_note(...)` telah diimplementasikan di Stylus (`nimbus-contracts`). Didukung dengan pohon LeanIMT depth 20 (`_merkle_insert`), namespaced note nullifiers, multi-liability invariant, Stylus WASM target check lulus, serta 53/53 tests passing (termasuk 8 positive & negative tests untuk ZK private note spend).
 
 ### Referensi Repositori Kloning / ATM (Amati, Tiru, Modifikasi):
 1. **[`https://github.com/supernovahs/zk-sunade`](https://github.com/supernovahs/zk-sunade):**
@@ -116,60 +113,19 @@ Pending parameters:
   2. `0x0f` (`BLS12_PAIRING_CHECK`): Evaluasi 4-pairing equation dalam 1 call buffer 1536 bytes:
      $$e(-A, B) \cdot e(\alpha, \beta) \cdot e(\mathcal{L}, \gamma) \cdot e(C, \delta) == 1$$
 
-### Checklist Task Gate D:
-- [x] Implementasikan module `nimbus-contracts/src/groth16_note_verifier.rs`:
-  - Definisi konstanta `VerifyingKey` (`NOTE_VK_ALPHA_G1`, `NOTE_VK_BETA_G2`, `NOTE_VK_GAMMA_G2`, `NOTE_VK_DELTA_G2`, `NOTE_VK_IC[0..=12]`).
-  - Fungsi `verify_private_note_groth16(proof_a_neg, proof_b, proof_c, public_inputs_g1)` via `0x0c` dan `0x0f`.
-- [x] Implementasikan entrypoint `spend_private_note(...)` di [`nimbus-contracts/src/spend.rs`](file:///workspaces/Zeltra-Protocol/nimbus-contracts/src/spend.rs):
-  - Validasi `!self.is_paused()` dan `current_time <= expiry`.
-  - Revert jika nullifier sudah terdaftar: `self.note_nullifiers.get(input_nullifier) == true`.
-  - Validasi `self.accepted_note_roots.get(merkle_root) > 0`.
-  - Validasi konsistensi recipient, chain_id, contract_address, dan fee ranges.
-  - Verifikasi proof Groth16.
-  - Mark nullifier spent: `self.note_nullifiers.insert(input_nullifier, true)`.
-  - Jika `has_change == 1`: insert `output_commitment` ke Merkle tree via `self._merkle_insert(output_commitment)`.
-  - Transfer ERC-20 `merchant_amount` ke `recipient`.
-  - Akuntansi: kurangi `user_note_liability`, tambah `accrued_execution_fee_liability` dan `realized_protocol_fees`.
-  - Enforce `self.check_solvency()`.
-  - Emit events: `PrivateNoteSpend`, `ProtocolFee`, `ExecutionFee`.
-- [x] Ukur Stylus WASM binary size & compilation compatibility (`wasm32-unknown-unknown` check passed).
-- [x] Unit & integration tests di `nimbus-contracts`: test valid spend, double spend revert, wrong proof revert, tampered root revert, non-canonical scalar revert, zero-change inconsistent commitment revert, dan value conservation mismatch revert (53/53 tests pass).
-
 ---
 
 ## Gate E - SDK Private Wallet State
 
-- [x] Ganti `AgentTokenPool` exact-amount voucher selection dengan note selection (`PrivateNoteWallet` di `nimbus-sdk/src/wallet/note_wallet.rs`).
-- [x] Tampilkan jumlah notes sebagai satu saldo, bukan daftar voucher (`balance()`, `reserved_balance()`, `total_balance()`).
-- [x] Encrypted local note store & serialization (DEC-024).
-- [x] Backup/recovery format dengan version dan HMAC-SHA256 integrity checksum (`export_backup` / `import_backup`).
-- [x] Note lifecycle: `unconfirmed -> unspent -> reserved -> spent`.
-- [x] Persist change note sebelum broadcast secara crash-safe (Two-Phase Commit Phase 1 pre-commit).
-- [x] Roll back reservation hanya setelah chain reconciliation membuktikan spend gagal atau lease timeout (`rollback_spend`).
-- [x] Buat proof locally; jangan kirim note preimage/key ke relayer (`prepare_spend_proof` via `nimbus-core` `generate_note_proof`).
-- [x] Implementasikan coin selection dengan privacy-aware consolidation & stochastic tie-breaking (`select_note_for_spend`).
-- [x] Implementasikan client API:
-  - `create_deposit_note(amount)`;
-  - `pay(recipient, amount, ...)`;
-  - `send_to_wallet(recipient, amount, ...)`;
-  - `withdraw_all(owner_wallet, ...)`.
-- [x] Multi-tab concurrency protection via session lease reservation TTL (`DEFAULT_RESERVATION_TTL_SECS = 120`).
+> **Status Gate E:** **SELESAI (100%)** — `PrivateNoteWallet` (`nimbus-sdk/src/wallet/note_wallet.rs`) menggantikan voucher exact-amount dengan model saldo terpadu note UTXO. Mendukung encrypted note store (DEC-024), versioned backup dengan HMAC-SHA256, siklus hidup note 4-tahap (`unconfirmed -> unspent -> reserved -> spent`), crash-safe two-phase commit, local Groth16 proof generation (`prepare_spend_proof`), privacy-aware coin selection, multi-tab lease reservation (120s), dan 20/20 test suite pass.
 
 ---
 
 ## Gate F - Node, Quote, dan Batch
 
-> **Status Gate F Phase 1 (Direct Pipeline):** **SELESAI (100%)** — Sesuai [`DEC-025`](file:///workspaces/Zeltra-Protocol/research/decisions/DEC-025-relayer-zk-note-spend-settlement-atomic-batching-and-reconciliation.md), relayer telah mengimplementasikan pipeline validasi fail-closed, endpoint ingress `/api/v1/spend-private-note`, single-item direct settlement dispatcher `EvmClient::broadcast_spend_private_note_transaction`, pencegahan double-spend on-chain (`is_nullifier_spent`), dan receipt confirmation tracking.
+> **Status Gate F Phase 1 (Direct Settlement Pipeline):** **SELESAI (100%)** — Sesuai [`DEC-025`](file:///workspaces/Zeltra-Protocol/research/decisions/DEC-025-relayer-zk-note-spend-settlement-atomic-batching-and-reconciliation.md), relayer telah mengimplementasikan pipeline validasi fail-closed, endpoint ingress `/api/v1/spend-private-note`, pre-flight kanonikalitas 12 skalar (`from_evm_scalar`), semantic public input binding (DEC-022), single-item direct settlement dispatcher `EvmClient::broadcast_spend_private_note_transaction`, pencegahan double-spend on-chain (`is_nullifier_spent`) & SQLite, durable enqueue, idempotensi 24h, dan receipt confirmation tracking (91/91 node tests pass).
 
-- [x] Endpoint ingress `/api/v1/spend-private-note` dengan validasi pre-flight fail-closed ([`nimbus-node/src/handlers/spend.rs`](file:///workspaces/Zeltra-Protocol/nimbus-node/src/handlers/spend.rs)).
-- [x] Pre-flight skalar kanonikalitas ($< r$) untuk seluruh 12 public input scalars (`from_evm_scalar`).
-- [x] Semantic public input binding (DEC-022) mengikat exact note_root, input_nullifier, output_commitment, recipient, merchant_amount, protocol_fee, execution_fee, quote_hash, chain_id, contract_address, expiry, dan has_change.
-- [x] Enforce execution fee limit (`execution_fee <= max_execution_fee`).
-- [x] Pengecekan double-spend fail-closed terhadap database lokal dan smart contract on-chain (`is_nullifier_spent`).
-- [x] Enqueue durable di SQLite dengan status leasing atomik dan proteksi race condition.
-- [x] Dispatcher single-item `broadcast_spend_private_note_transaction` via `EvmClient` dengan gas limit 2.500.000 dan watchdog gas-bump replacement.
-- [x] Receipt confirmation mencatat status submitted, confirmed, block number, dan reservasi nullifier.
-- [x] Idempotensi 24h caching untuk deduplikasi request client.
+### Pending Tasks Gate F:
 - [ ] Claim worker reconcile contract accrual, DB accrual, dan receipts.
 - [ ] Hilangkan fallback quote yang mengembalikan status OK tanpa signing domain.
 - [ ] Health endpoint expose solvency/accounting mismatch tanpa membuka user data.
