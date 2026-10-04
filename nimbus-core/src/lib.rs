@@ -76,8 +76,9 @@ pub use accounting::{ContractAccounting, TransitionResult};
 
 // Re-export Private Note Circuit (DEC-016A Gate C)
 pub use note_circuit::{
-    extract_public_inputs, generate_note_circuit_keys, generate_note_proof, verify_note_proof,
-    NoteCircuitKeys, PrivateNoteCircuit, NUM_PUBLIC_INPUTS,
+    extract_public_inputs, generate_note_circuit_evm_vk, generate_note_circuit_keys,
+    generate_note_proof, verify_note_proof, NoteCircuitKeys, PrivateNoteCircuit,
+    NOTE_CIRCUIT_SETUP_SEED, NUM_PUBLIC_INPUTS,
 };
 
 #[cfg(test)]

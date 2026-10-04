@@ -63,6 +63,8 @@ interface INimbus {
 
     function spend(bytes32 root, bytes32 nullifier, bytes calldata alpha_neg_bytes, bytes calldata pk_iss_bytes, address recipient, uint256 amount, bytes32 recipient_or_intent_hash, uint256 expiry, bytes32 nonce, uint256 max_execution_fee, uint256 execution_fee) external returns (bool);
 
+    function spendPrivateNote(bytes32 note_root, bytes32 input_nullifier, bytes32 output_commitment, address recipient, uint256 merchant_amount, uint256 protocol_fee, uint256 execution_fee, uint256 max_execution_fee, bytes32 quote_hash, uint256 expiry, uint256 has_change, bytes calldata proof_a_neg, bytes calldata proof_b, bytes calldata proof_c) external returns (bool);
+
     function batchSpend(bytes32[] memory roots, bytes32[] memory nullifiers, bytes[] memory alpha_neg_items, bytes[] memory pk_iss_items, address[] memory recipients, uint256[] memory amounts, bytes32[] memory recipient_or_intent_hashes, uint256[] memory expiries, bytes32[] memory nonces) external returns (bool);
 
     function spendAndBuyShares(bytes32 root, bytes32 nullifier, bytes calldata alpha_neg_bytes, bytes calldata pk_iss_bytes, address polymarket_ctf, address collateral_token, bytes32 condition_id, uint256 amount, uint256 expiry, bytes32 nonce, uint256 max_execution_fee, uint256 execution_fee) external returns (bool);

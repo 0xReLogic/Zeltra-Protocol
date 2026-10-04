@@ -25,6 +25,7 @@ Thumbs.db
 
 # Local research reference checkouts
 research/reference-repos/
+research/reporefer/
 
 # Local sensitive configuration files
 nimbus-node/.env.test

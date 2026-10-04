@@ -385,6 +385,45 @@ pub fn generate_note_circuit_keys() -> Result<NoteCircuitKeys, SynthesisError> {
     })
 }
 
+/// Serialize the PrivateNoteCircuit VerifyingKey into EVM precompile format:
+/// - alpha_g1: [u8; 128]
+/// - beta_g2:  [u8; 256]
+/// - gamma_g2: [u8; 256]
+/// - delta_g2: [u8; 256]
+/// - ic[13]:   [[u8; 128]; 13]
+#[allow(clippy::type_complexity)]
+pub fn generate_note_circuit_evm_vk(
+    vk: &ark_groth16::VerifyingKey<Bls12_381>,
+) -> ([u8; 128], [u8; 256], [u8; 256], [u8; 256], [[u8; 128]; 13]) {
+    use crate::evm::{to_evm_g1, to_evm_g2};
+
+    fn to_g1_array(v: &[u8]) -> [u8; 128] {
+        let mut a = [0u8; 128];
+        let len = v.len().min(128);
+        a[..len].copy_from_slice(&v[..len]);
+        a
+    }
+
+    fn to_g2_array(v: &[u8]) -> [u8; 256] {
+        let mut a = [0u8; 256];
+        let len = v.len().min(256);
+        a[..len].copy_from_slice(&v[..len]);
+        a
+    }
+
+    let alpha_g1 = to_g1_array(&to_evm_g1(&vk.alpha_g1));
+    let beta_g2 = to_g2_array(&to_evm_g2(&vk.beta_g2));
+    let gamma_g2 = to_g2_array(&to_evm_g2(&vk.gamma_g2));
+    let delta_g2 = to_g2_array(&to_evm_g2(&vk.delta_g2));
+
+    let mut ic = [[0u8; 128]; 13];
+    for (i, ic_point) in vk.gamma_abc_g1.iter().take(13).enumerate() {
+        ic[i] = to_g1_array(&to_evm_g1(ic_point));
+    }
+
+    (alpha_g1, beta_g2, gamma_g2, delta_g2, ic)
+}
+
 #[cfg(test)]
 static CACHED_KEYS: std::sync::OnceLock<NoteCircuitKeys> = std::sync::OnceLock::new();
 
@@ -790,5 +829,37 @@ mod tests {
             !is_valid,
             "Swapped chain_id and contract_address must fail verification"
         );
+    }
+
+    #[test]
+    fn print_note_circuit_evm_vk_hex() {
+        let keys = get_or_init_note_circuit_keys();
+        let (alpha, beta, gamma, delta, ic) = generate_note_circuit_evm_vk(&keys.verifying_key);
+
+        let to_hex =
+            |b: &[u8]| -> String { b.iter().map(|x| format!("{x:02x}")).collect::<String>() };
+
+        eprintln!("// --- PrivateNoteCircuit Phase A Trusted Setup VK Constants ---");
+        eprintln!("// Seed: 0x{:016X} (NimbusNC)", NOTE_CIRCUIT_SETUP_SEED);
+        eprintln!("// Circuit: PrivateNoteCircuit (12 public inputs) over BLS12-381");
+        eprintln!();
+        eprintln!("// NOTE_VK_ALPHA_G1 (128 bytes)");
+        eprintln!("pub const NOTE_VK_ALPHA_G1: [u8; 128] = alloy_primitives::hex!(\"{}\");", to_hex(&alpha));
+        eprintln!();
+        eprintln!("// NOTE_VK_BETA_G2 (256 bytes)");
+        eprintln!("pub const NOTE_VK_BETA_G2: [u8; 256] = alloy_primitives::hex!(\"{}\");", to_hex(&beta));
+        eprintln!();
+        eprintln!("// NOTE_VK_GAMMA_G2 (256 bytes)");
+        eprintln!("pub const NOTE_VK_GAMMA_G2: [u8; 256] = alloy_primitives::hex!(\"{}\");", to_hex(&gamma));
+        eprintln!();
+        eprintln!("// NOTE_VK_DELTA_G2 (256 bytes)");
+        eprintln!("pub const NOTE_VK_DELTA_G2: [u8; 256] = alloy_primitives::hex!(\"{}\");", to_hex(&delta));
+        eprintln!();
+        eprintln!("pub const NOTE_VK_IC: [[u8; 128]; 13] = [");
+        for (i, ic_point) in ic.iter().enumerate() {
+            eprintln!("    // IC[{}]", i);
+            eprintln!("    alloy_primitives::hex!(\"{}\"),", to_hex(ic_point));
+        }
+        eprintln!("];");
     }
 }

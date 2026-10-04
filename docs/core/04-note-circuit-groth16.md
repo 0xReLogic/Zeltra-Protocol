@@ -1,6 +1,6 @@
 # Nimbus Core — 04: Private Note Circuit (Groth16 ZK-SNARK)
 
-Dokumen ini menjelaskan desain sirkuit ZK-SNARK **Groth16** pada [`nimbus-core/src/note_circuit.rs`](file:///workspaces/Zeltra-Protocol/nimbus-core/src/note_circuit.rs) dan daftar perbaikan keamanan kritis **Gate C0** yang wajib diselesaikan sebelum integrasi ke smart contract Stylus.
+Dokumen ini menjelaskan desain sirkuit ZK-SNARK **Groth16** pada [`nimbus-core/src/note_circuit.rs`](file:///workspaces/Zeltra-Protocol/nimbus-core/src/note_circuit.rs), format 12 public inputs yang dibinding ke smart contract Stylus, serta ekstraksi Verifying Key EVM.
 
 ---
 
@@ -8,13 +8,19 @@ Dokumen ini menjelaskan desain sirkuit ZK-SNARK **Groth16** pada [`nimbus-core/s
 
 `PrivateNoteCircuit` membuktikan validitas pembelanjaan private note (1 input note $\to$ 1 merchant payout + 1 change output) tanpa membocorkan identitas pengirim, nilai saldo awal, maupun nilai kembaliannya.
 
-### A. Public Inputs (6 Elemen Skalar $\mathbb{F}_r$ yang Diketahui Smart Contract):
-1. `merkle_root`: Root Merkle tree yang diakui oleh smart contract on-chain.
-2. `nullifier`: Penanda unik note yang di-spend untuk mencegah pembelanjaan ganda.
-3. `recipient`: Alamat penerima pembayaran (merchant atau dompet publik).
-4. `amount`: Nominal USDC yang dibayarkan ke merchant.
-5. `fee`: Total biaya transaksi (protocol fee + execution fee).
-6. `change_commitment`: Komitmen note kembalian yang akan ditambahkan ke Merkle tree on-chain.
+### A. Public Inputs (12 Elemen Skalar $\mathbb{F}_r$ yang Dibinding ke Smart Contract):
+1. `merkle_root`: Root pohon LeanIMT depth 20 yang sah di contract.
+2. `input_nullifier`: Penanda unik note input pencegah double spend.
+3. `output_commitment`: Komitmen note kembalian (wajib $0$ jika `has_change == 0`).
+4. `recipient`: Alamat EVM penerima merchant payout.
+5. `merchant_amount`: Nominal USDC yang dibayarkan ke merchant.
+6. `protocol_fee`: Biaya protokol yang direalisasikan.
+7. `execution_fee`: Biaya gas relayer yang diakumulasikan.
+8. `quote_hash`: Hash penawaran eksekusi EIP-712 yang disetujui pengguna.
+9. `chain_id`: Domain chain EVM anti-cross-chain replay.
+10. `contract_address`: Alamat smart contract anti-cross-contract replay.
+11. `expiry`: Batas waktu transaksi block timestamp.
+12. `has_change`: Flag boolean ($0$ atau $1$) keberadaan kembalian.
 
 ### B. Private Witnesses (Rahasia yang Hanya Diketahui Prover/Client):
 * `input_note`: Data note yang sedang dibelanjakan (`owner_pk`, `value`, `blinding`, `asset_id`).
@@ -43,30 +49,14 @@ Sirkuit mengeksekusi dan membuktikan constraint R1CS berikut:
 
 ---
 
-## 3. Status Gate C0 Security Repairs (SELESAI & TERVERIFIKASI)
+## 3. Ekstraksi Verifying Key untuk Precompile EIP-2537
 
-Ref: [`docs/todos/private-note-balance.md`](file:///workspaces/Zeltra-Protocol/docs/todos/private-note-balance.md) & [`DEC-016B`](file:///workspaces/Zeltra-Protocol/research/decisions/DEC-016B-mvp-circuit-shortcuts.md)
+Untuk memverifikasi proof on-chain tanpa overhead memori arkworks, verifier on-chain mengekspor verifying key dalam format big-endian EVM uncompressed:
+* Generator fungsi: `generate_note_circuit_evm_vk` pada [`nimbus-core/src/note_circuit.rs`](file:///workspaces/Zeltra-Protocol/nimbus-core/src/note_circuit.rs).
+* **Komponen Konstanta Kunci:**
+  - $\alpha \in \mathbb{G}_1$ (128 bytes)
+  - $\beta, \gamma, \delta \in \mathbb{G}_2$ (masing-masing 256 bytes)
+  - $\text{IC}_0 \dots \text{IC}_{12} \in \mathbb{G}_1$ (13 titik, masing-masing 128 bytes)
+* Di-embed langsung sebagai byte arrays di [`nimbus-contracts/src/groth16_note_verifier.rs`](file:///workspaces/Zeltra-Protocol/nimbus-contracts/src/groth16_note_verifier.rs), siap diproses oleh precompile host Stylus `0x0c` (MSM) dan `0x0f` (Pairing Check).
 
-Seluruh 3 celah keamanan kritis yang ditemukan pada audit prototype `PrivateNoteCircuit` **telah berhasil diperbaiki dan lulus pengujian regression/negative testing**:
 
-### ✅ 1. Pengikatan Bit Merkle Path ke `leaf_index` (Pencegah Double-Spend)
-* **Implementasi:** `input_leaf_index` didekomposisi secara ketat menjadi tepat 20 boolean bit variable di dalam sirkuit R1CS:
-  $$\text{leaf\_index} == \sum_{i=0}^{19} \text{bit}_i \cdot 2^i, \quad \text{bit}_i \in \{0, 1\}$$
-* **Arah Hashing:** Setiap $\text{bit}_i$ menentukan langsung posisi node kiri vs kanan: jika $\text{bit}_i = 0$, hash anak berada di kiri; jika $\text{bit}_i = 1$, hash anak berada di kanan.
-* **Negative Test:** `test_gate_c0_tampered_leaf_index_fails_proving` membuktikan bahwa pemalsuan indeks seketika gagal saat proving/verifikasi.
-
-### ✅ 2. Proteksi Integer Range 64-bit (Pencegah Modular Wrap-Around)
-* **Implementasi:** Seluruh variabel nominal (`input_value`, `merchant_amount`, `protocol_fee`, `execution_fee`, dan `change_value`) didekomposisi menjadi 64 bit boolean gadget di sirkuit:
-  $$\text{value} == \sum_{j=0}^{63} \text{bit}_j \cdot 2^j, \quad \text{value} < 2^{64}$$
-* Mencegah prover mencetak uang virtual via overflow modulo $r$ pada scalar field $\mathbb{F}_r$.
-* **Negative Test:** `test_gate_c0_overflow_amount_fails_proving` membuktikan bahwa injeksi nilai di luar rentang $2^{64}$ gagal membangkitkan proof.
-
-### ✅ 3. Boolean Constraint Strict & Zero-Change Enforcement pada `has_change`
-* **Implementasi:**
-  1. Enforce constraint boolean: $\text{has\_change} \times (1 - \text{has\_change}) == 0$.
-  2. Enforce jika `has_change == 0`, maka $\text{change\_value} == 0$ dan $\text{change\_commitment} == 0$.
-  3. Enforce jika `has_change == 1`, maka $\text{change\_commitment} == \text{computed\_change\_cm}$.
-* **Negative Tests:**
-  - `test_gate_c0_non_boolean_has_change_fails_proving` (injeksi `has_change = 2` gagal).
-  - `test_gate_c0_zero_change_with_positive_change_value_fails_proving` (injeksi `has_change = 0` dengan `change_value > 0` gagal).
-  - `test_gate_c0_swapped_domain_fields_fails_verification` (swap domain field terdeteksi).

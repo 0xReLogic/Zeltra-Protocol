@@ -87,3 +87,37 @@ Biaya eksekusi gas yang dibayarkan pengguna (`execution_fee`) diakumulasikan ke 
 * Alamat yang berhak (`execution_fee_recipient`) dapat mencairkan komisi tersebut secara berkala dalam satu transaksi hemat gas.
 * Penarikan komisi diverifikasi secara ketat terhadap invariant solvabilitas (`assets >= total_liabilities`) agar tidak menyentuh saldo kolateral milik depositor atau unspent note pengguna.
 * Kontrak meng-emit event `FeeClaim(recipient, amount)`.
+
+---
+
+## 6. Private Note Spend & Groth16 Verifier (`spend_private_note` — Gate D)
+
+Untuk pembelanjaan saldo privat ZK-UTXO dengan kembalian otomatis (*change note*), kontrak mengekspos entrypoint `spend_private_note(...)` yang memverifikasi proof Groth16 kurva BLS12-381 secara langsung on-chain via module [`groth16_note_verifier.rs`](file:///workspaces/Zeltra-Protocol/nimbus-contracts/src/groth16_note_verifier.rs).
+
+### A. Format Proof & 12 Public Inputs
+- **Proof:** $A \in \mathbb{G}_1$ (128B), $B \in \mathbb{G}_2$ (256B), $C \in \mathbb{G}_1$ (128B) — total 512 bytes uncompressed EVM.
+- **12 Public Input Scalars (32B masing-masing, wajib kanonikal $< r$):**
+  1. `merkle_root`: Root pohon LeanIMT depth 20 yang tercatat di `accepted_note_roots`.
+  2. `input_nullifier`: Nullifier unik pencegah double spend di `note_nullifiers`.
+  3. `output_commitment`: Komitmen kembalian (wajib 0 jika `has_change == 0`).
+  4. `recipient`: Alamat EVM penerima merchant payout.
+  5. `merchant_amount`: Nominal USDC yang diterima merchant.
+  6. `protocol_fee`: Biaya protokol yang direalisasikan ke kas.
+  7. `execution_fee`: Biaya gas relayer yang diakumulasikan.
+  8. `quote_hash`: Hash penawaran eksekusi EIP-712 yang disetujui pengguna.
+  9. `chain_id`: Domain chain EVM anti-cross-chain replay.
+  10. `contract_address`: Alamat smart contract anti-cross-contract replay.
+  11. `expiry`: Batas waktu transaksi block timestamp.
+  12. `has_change`: Flag boolean ($0$ atau $1$) keberadaan kembalian.
+
+### B. Pipeline Eksekusi EIP-2537:
+1. **MSM `0x0c` (`BLS12_G1MSM`):** Menghitung kombinasi linear $\mathcal{L} = \text{IC}_0 + \sum_{i=1}^{12} x_i \text{IC}_i$ dalam 1 panggilan host batch.
+2. **Pairing Check `0x0f` (`BLS12_PAIRING_CHECK`):** Mengevaluasi persamaan 4-pairing dalam buffer 1536 bytes:
+   $$e(-A, B) \cdot e(\alpha, \beta) \cdot e(\mathcal{L}, \gamma) \cdot e(C, \delta) == 1$$
+
+### C. Checks-Effects-Interactions:
+- **Checks:** Validasi non-paused, non-expired, `execution_fee <= max_execution_fee`, `merchant_amount > 0`, input skalar kanonikal, root sah, dan nullifier belum pernah terpakai.
+- **Effects:** Tandai `note_nullifiers.insert(input_nullifier, true)`, sisipkan `output_commitment` ke LeanIMT via `_merkle_insert` jika `has_change == 1`, kurangi `user_note_liability`, tambah liabilities komisi relayer dan protokol, serta verifikasi invariansi solvabilitas on-chain `check_solvency()`.
+- **Interactions:** Transfer ERC-20 `merchant_amount` ke alamat `recipient`.
+- **Events:** Emit event terindeks `PrivateNoteSpend`, `ProtocolFee`, dan `ExecutionFee`.
+

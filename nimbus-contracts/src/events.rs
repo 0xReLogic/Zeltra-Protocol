@@ -57,6 +57,16 @@ sol! {
         address indexed client,
         uint256 amount
     );
+
+    /// Emitted when a private note is spent on-chain (Gate D).
+    event PrivateNoteSpend(
+        bytes32 indexed nullifier,
+        bytes32 indexed note_root,
+        address indexed recipient,
+        uint256 merchant_amount,
+        bytes32 output_commitment,
+        bool has_change
+    );
 }
 
 /// Safe event emission helper that logs to EVM in production and operates safely in unit tests.

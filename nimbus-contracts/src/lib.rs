@@ -20,6 +20,7 @@ getrandom::register_custom_getrandom!(reject_runtime_randomness);
 mod constants;
 mod deposit;
 mod events;
+pub mod groth16_note_verifier;
 mod helpers;
 mod interfaces;
 mod merkle;
@@ -537,6 +538,42 @@ impl Nimbus {
         )
     }
 
+    /// Executes a private spend using a Groth16 zero-knowledge proof for PrivateNoteCircuit (Gate D).
+    pub fn spend_private_note(
+        &mut self,
+        note_root: FixedBytes<32>,
+        input_nullifier: FixedBytes<32>,
+        output_commitment: FixedBytes<32>,
+        recipient: Address,
+        merchant_amount: U256,
+        protocol_fee: U256,
+        execution_fee: U256,
+        max_execution_fee: U256,
+        quote_hash: FixedBytes<32>,
+        expiry: U256,
+        has_change: U256,
+        proof_a_neg: Bytes,
+        proof_b: Bytes,
+        proof_c: Bytes,
+    ) -> Result<bool, Vec<u8>> {
+        self._spend_private_note(
+            note_root,
+            input_nullifier,
+            output_commitment,
+            recipient,
+            merchant_amount,
+            protocol_fee,
+            execution_fee,
+            max_execution_fee,
+            quote_hash,
+            expiry,
+            has_change,
+            proof_a_neg,
+            proof_b,
+            proof_c,
+        )
+    }
+
     pub fn batch_spend(
         &mut self,
         roots: Vec<FixedBytes<32>>,
@@ -840,6 +877,7 @@ mod tests {
         pub(crate) static MSG_SENDER: RefCell<Address> = RefCell::new(Address::ZERO);
         pub(crate) static BLOCK_TIMESTAMP: RefCell<u64> = RefCell::new(0);
         static PAIRING_RESULT: RefCell<u8> = RefCell::new(1);
+        static LAST_RETURN_DATA_SIZE: RefCell<usize> = RefCell::new(32);
     }
 
     fn reset_test_state() {
@@ -847,6 +885,7 @@ mod tests {
         MSG_SENDER.with(|s| *s.borrow_mut() = Address::ZERO);
         BLOCK_TIMESTAMP.with(|t| *t.borrow_mut() = 0);
         PAIRING_RESULT.with(|result| *result.borrow_mut() = 1);
+        LAST_RETURN_DATA_SIZE.with(|s| *s.borrow_mut() = 32);
     }
 
     fn set_msg_sender(sender: Address) {
@@ -999,8 +1038,15 @@ mod tests {
         _gas: u64,
         return_data_len: *mut usize,
     ) -> u8 {
+        let addr_slice = std::slice::from_raw_parts(_contract, 20);
+        let len = if addr_slice[19] == 0x0c || addr_slice[19] == 0x0b {
+            128
+        } else {
+            32
+        };
+        LAST_RETURN_DATA_SIZE.with(|s| *s.borrow_mut() = len);
         if !return_data_len.is_null() {
-            *return_data_len = 32;
+            *return_data_len = len;
         }
         0 // Status code 0 is Success
     }
@@ -1010,7 +1056,7 @@ mod tests {
 
     #[no_mangle]
     pub unsafe extern "C" fn return_data_size() -> usize {
-        32
+        LAST_RETURN_DATA_SIZE.with(|s| *s.borrow())
     }
 
     #[no_mangle]
@@ -3138,5 +3184,301 @@ mod tests {
         let contract = Nimbus::default();
         // Defaults to 0 bps (0.00%) when uninitialized (zero deposit fee policy)
         assert_eq!(contract.deposit_fee_bps().unwrap(), U256::ZERO);
+    }
+
+    #[test]
+    fn test_spend_private_note_success_with_change() {
+        reset_test_state();
+        let owner = address!("1111111111111111111111111111111111111111");
+        let merchant = address!("2222222222222222222222222222222222222222");
+        let stablecoin = address!("3333333333333333333333333333333333333333");
+        set_msg_sender(owner);
+        set_block_timestamp(1000);
+
+        let mut contract = Nimbus::default();
+        contract.init(owner, stablecoin, Address::ZERO).unwrap();
+
+        let initial_root = FixedBytes::<32>::from_slice(&crate::poseidon_w5_constants::EMPTY_TREE_ROOT_BYTES);
+        contract.accepted_note_roots.insert(initial_root, U256::from(1000));
+        contract.user_note_liability.set(U256::from(100_000_000)); // 100 USDC liability
+
+        let nullifier = FixedBytes::<32>::from_slice(&[0x0a; 32]);
+        let change_cm = FixedBytes::<32>::from_slice(&[0x01; 32]);
+        let quote_hash = FixedBytes::<32>::from_slice(&[0x05; 32]);
+
+        let proof_a = vec![0x11; 128].into();
+        let proof_b = vec![0x22; 256].into();
+        let proof_c = vec![0x33; 128].into();
+
+        let result = contract.spend_private_note(
+            initial_root,
+            nullifier,
+            change_cm,
+            merchant,
+            U256::from(5_000_000), // 5 USDC
+            U256::from(22_500),    // protocol fee
+            U256::from(23_000),    // execution fee
+            U256::from(25_000),    // max execution fee
+            quote_hash,
+            U256::from(2000),      // expiry
+            U256::from(1),         // has_change = 1
+            proof_a,
+            proof_b,
+            proof_c,
+        );
+
+        assert_eq!(result, Ok(true));
+        assert!(contract.note_nullifiers.get(nullifier));
+        // Remaining liability = 100M - 5M - 22.5k - 23k = 94_954_500
+        assert_eq!(contract.user_note_liability.get(), U256::from(94_954_500));
+        assert_eq!(contract.accumulated_execution_fees.get(), U256::from(23_000));
+        assert_eq!(contract.accrued_execution_fee_liability.get(), U256::from(23_000));
+        assert_eq!(contract.realized_protocol_fees.get(), U256::from(22_500));
+        assert_eq!(contract.note_tree_next_index.get(), U256::from(1));
+    }
+
+    #[test]
+    fn test_spend_private_note_double_spend_rejected() {
+        reset_test_state();
+        let owner = address!("1111111111111111111111111111111111111111");
+        let merchant = address!("2222222222222222222222222222222222222222");
+        set_msg_sender(owner);
+        set_block_timestamp(1000);
+
+        let mut contract = Nimbus::default();
+        contract.init(owner, Address::ZERO, Address::ZERO).unwrap();
+
+        let initial_root = FixedBytes::<32>::from_slice(&crate::poseidon_w5_constants::EMPTY_TREE_ROOT_BYTES);
+        contract.accepted_note_roots.insert(initial_root, U256::from(1000));
+        contract.user_note_liability.set(U256::from(100_000_000));
+
+        let nullifier = FixedBytes::<32>::from_slice(&[0x0b; 32]);
+        let change_cm = FixedBytes::<32>::from_slice(&[0x02; 32]);
+
+        // First spend succeeds
+        contract.spend_private_note(
+            initial_root,
+            nullifier,
+            change_cm,
+            merchant,
+            U256::from(5_000_000),
+            U256::from(22_500),
+            U256::from(23_000),
+            U256::from(25_000),
+            FixedBytes::ZERO,
+            U256::from(2000),
+            U256::from(1),
+            vec![0x11; 128].into(),
+            vec![0x22; 256].into(),
+            vec![0x33; 128].into(),
+        ).unwrap();
+
+        // Second spend with identical nullifier MUST revert
+        let result = contract.spend_private_note(
+            initial_root,
+            nullifier,
+            change_cm,
+            merchant,
+            U256::from(5_000_000),
+            U256::from(22_500),
+            U256::from(23_000),
+            U256::from(25_000),
+            FixedBytes::ZERO,
+            U256::from(2000),
+            U256::from(1),
+            vec![0x11; 128].into(),
+            vec![0x22; 256].into(),
+            vec![0x33; 128].into(),
+        );
+
+        assert_eq!(result, Err(b"NOTE_ALREADY_SPENT".to_vec()));
+    }
+
+    #[test]
+    fn test_spend_private_note_unaccepted_root_rejected() {
+        reset_test_state();
+        let owner = address!("1111111111111111111111111111111111111111");
+        let mut contract = Nimbus::default();
+        contract.init(owner, Address::ZERO, Address::ZERO).unwrap();
+
+        let fake_root = FixedBytes::<32>::from_slice(&[0xee; 32]);
+        let nullifier = FixedBytes::<32>::from_slice(&[0xcc; 32]);
+
+        let result = contract.spend_private_note(
+            fake_root,
+            nullifier,
+            FixedBytes::ZERO,
+            Address::ZERO,
+            U256::from(1_000_000),
+            U256::ZERO,
+            U256::ZERO,
+            U256::ZERO,
+            FixedBytes::ZERO,
+            U256::ZERO,
+            U256::ZERO,
+            vec![0x11; 128].into(),
+            vec![0x22; 256].into(),
+            vec![0x33; 128].into(),
+        );
+
+        assert_eq!(result, Err(b"UNACCEPTED_NOTE_ROOT".to_vec()));
+    }
+
+    #[test]
+    fn test_spend_private_note_expired_rejected() {
+        reset_test_state();
+        let owner = address!("1111111111111111111111111111111111111111");
+        let mut contract = Nimbus::default();
+        contract.init(owner, Address::ZERO, Address::ZERO).unwrap();
+
+        let root = FixedBytes::<32>::from_slice(&crate::poseidon_w5_constants::EMPTY_TREE_ROOT_BYTES);
+        contract.accepted_note_roots.insert(root, U256::from(1000));
+        set_block_timestamp(5000);
+
+        let result = contract.spend_private_note(
+            root,
+            FixedBytes::ZERO,
+            FixedBytes::ZERO,
+            Address::ZERO,
+            U256::from(1_000_000),
+            U256::ZERO,
+            U256::ZERO,
+            U256::ZERO,
+            FixedBytes::ZERO,
+            U256::from(4999), // expired
+            U256::ZERO,
+            vec![0x11; 128].into(),
+            vec![0x22; 256].into(),
+            vec![0x33; 128].into(),
+        );
+
+        assert_eq!(result, Err(b"TRANSACTION_EXPIRED".to_vec()));
+    }
+
+    #[test]
+    fn test_spend_private_note_execution_fee_exceeded_rejected() {
+        reset_test_state();
+        let owner = address!("1111111111111111111111111111111111111111");
+        let mut contract = Nimbus::default();
+        contract.init(owner, Address::ZERO, Address::ZERO).unwrap();
+
+        let root = FixedBytes::<32>::from_slice(&crate::poseidon_w5_constants::EMPTY_TREE_ROOT_BYTES);
+        contract.accepted_note_roots.insert(root, U256::from(1000));
+
+        let result = contract.spend_private_note(
+            root,
+            FixedBytes::ZERO,
+            FixedBytes::ZERO,
+            Address::ZERO,
+            U256::from(1_000_000),
+            U256::ZERO,
+            U256::from(30_000), // actual fee
+            U256::from(25_000), // max fee
+            FixedBytes::ZERO,
+            U256::ZERO,
+            U256::ZERO,
+            vec![0x11; 128].into(),
+            vec![0x22; 256].into(),
+            vec![0x33; 128].into(),
+        );
+
+        assert_eq!(result, Err(b"EXECUTION_FEE_EXCEEDS_MAX".to_vec()));
+    }
+
+    #[test]
+    fn test_spend_private_note_zero_change_inconsistent_commitment_rejected() {
+        reset_test_state();
+        let owner = address!("1111111111111111111111111111111111111111");
+        let mut contract = Nimbus::default();
+        contract.init(owner, Address::ZERO, Address::ZERO).unwrap();
+
+        let root = FixedBytes::<32>::from_slice(&crate::poseidon_w5_constants::EMPTY_TREE_ROOT_BYTES);
+        contract.accepted_note_roots.insert(root, U256::from(1000));
+
+        let non_zero_commitment = FixedBytes::<32>::from_slice(&[0x77; 32]);
+
+        let result = contract.spend_private_note(
+            root,
+            FixedBytes::ZERO,
+            non_zero_commitment,
+            Address::ZERO,
+            U256::from(1_000_000),
+            U256::ZERO,
+            U256::ZERO,
+            U256::ZERO,
+            FixedBytes::ZERO,
+            U256::ZERO,
+            U256::ZERO, // has_change = 0 but non_zero_commitment
+            vec![0x11; 128].into(),
+            vec![0x22; 256].into(),
+            vec![0x33; 128].into(),
+        );
+
+        assert_eq!(result, Err(b"NONZERO_COMMITMENT_WITH_ZERO_CHANGE".to_vec()));
+    }
+
+    #[test]
+    fn test_spend_private_note_insufficient_note_liability_rejected() {
+        reset_test_state();
+        let owner = address!("1111111111111111111111111111111111111111");
+        let mut contract = Nimbus::default();
+        contract.init(owner, Address::ZERO, Address::ZERO).unwrap();
+
+        let root = FixedBytes::<32>::from_slice(&crate::poseidon_w5_constants::EMPTY_TREE_ROOT_BYTES);
+        contract.accepted_note_roots.insert(root, U256::from(1000));
+        contract.user_note_liability.set(U256::from(1_000_000)); // only 1 USDC liability
+
+        let result = contract.spend_private_note(
+            root,
+            FixedBytes::ZERO,
+            FixedBytes::ZERO,
+            Address::ZERO,
+            U256::from(5_000_000), // requires 5 USDC
+            U256::ZERO,
+            U256::ZERO,
+            U256::ZERO,
+            FixedBytes::ZERO,
+            U256::ZERO,
+            U256::ZERO,
+            vec![0x11; 128].into(),
+            vec![0x22; 256].into(),
+            vec![0x33; 128].into(),
+        );
+
+        assert_eq!(result, Err(b"INSUFFICIENT_NOTE_LIABILITY".to_vec()));
+    }
+
+    #[test]
+    fn test_spend_private_note_invalid_groth16_proof_rejected() {
+        reset_test_state();
+        let owner = address!("1111111111111111111111111111111111111111");
+        let mut contract = Nimbus::default();
+        contract.init(owner, Address::ZERO, Address::ZERO).unwrap();
+
+        let root = FixedBytes::<32>::from_slice(&crate::poseidon_w5_constants::EMPTY_TREE_ROOT_BYTES);
+        contract.accepted_note_roots.insert(root, U256::from(1000));
+        contract.user_note_liability.set(U256::from(100_000_000));
+
+        // Set mock pairing check to return false (0)
+        set_pairing_result(false);
+
+        let result = contract.spend_private_note(
+            root,
+            FixedBytes::ZERO,
+            FixedBytes::ZERO,
+            Address::ZERO,
+            U256::from(1_000_000),
+            U256::ZERO,
+            U256::ZERO,
+            U256::ZERO,
+            FixedBytes::ZERO,
+            U256::ZERO,
+            U256::ZERO,
+            vec![0x11; 128].into(),
+            vec![0x22; 256].into(),
+            vec![0x33; 128].into(),
+        );
+
+        assert_eq!(result, Err(b"INVALID_GROTH16_NOTE_PROOF".to_vec()));
     }
 }
