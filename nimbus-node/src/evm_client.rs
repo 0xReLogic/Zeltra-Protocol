@@ -71,6 +71,7 @@ sol! {
     function getCleanRootTimestamp(bytes32 root) external view returns (uint256);
     function isNullifierSpent(bytes32 nullifier) external view returns (bool);
     function isSanctioned(address addr) external view returns (bool);
+    function totalDepositedPrincipal() external view returns (uint256);
 
     struct EVMTokenAmount {
         address token;
@@ -1296,6 +1297,40 @@ impl EvmClient {
 
         if result.len() >= 32 {
             Ok(U256::from_be_slice(&result[..32]).to::<u64>())
+        } else {
+            Ok(0)
+        }
+    }
+
+    /// Fetches the current total deposited principal (shielded pool TVL) from the contract (DEC-027).
+    pub async fn get_pool_tvl(&self) -> Result<u64> {
+        let call_data = totalDepositedPrincipalCall {}.abi_encode();
+
+        let tx = TransactionRequest::default()
+            .with_to(self.contract_address)
+            .with_input(Bytes::from(call_data));
+
+        let result = match self.provider.call(tx.clone()).await {
+            Ok(res) => res,
+            Err(e) => {
+                if let Some(ref fallback) = self.fallback_provider {
+                    fallback
+                        .call(tx)
+                        .await
+                        .context("Fallback RPC totalDepositedPrincipal failed")?
+                } else {
+                    return Err(e).context("Failed to call totalDepositedPrincipal on-chain");
+                }
+            }
+        };
+
+        if result.len() >= 32 {
+            let val = U256::from_be_slice(&result[..32]);
+            if val > U256::from(u64::MAX) {
+                Ok(u64::MAX)
+            } else {
+                Ok(val.to::<u64>())
+            }
         } else {
             Ok(0)
         }

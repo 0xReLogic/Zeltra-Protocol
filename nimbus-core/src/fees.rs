@@ -4,13 +4,83 @@ pub const PRIVATE_SPEND_FEE_BPS: u64 = 45; // 0.45% (< 30 days)
 pub const DEFAULT_RELAYER_MARKUP_BPS: u64 = 1_500; // 15%
 
 pub const THIRTY_DAYS_SECS: u64 = 30 * 24 * 60 * 60;
-pub const SPEND_FEE_30DAY_BPS: u64 = 40; // 0.40% (>= 30 days / 1 month hold)
+pub const SPEND_FEE_30DAY_BPS: u64 = 40; // 0.40% (>= 30 days / 1 month hold legacy default)
+
+// DEC-027 Dynamic Liquidity-Outflow Economic Fee Model (Kinked Reserve-Velocity Curve)
+pub const DYNAMIC_FEE_FLOOR_BPS: u64 = 35; // 0.35% (R_floor: thick TVL / low velocity)
+pub const DYNAMIC_FEE_BASE_SLOPE_BPS: u64 = 10; // 0.10% (R_base: up to 45 bps at U_optimal)
+pub const DYNAMIC_FEE_SURGE_SLOPE_BPS: u64 = 25; // 0.25% (R_surge: up to 70 bps max at U = 1.0)
+pub const DYNAMIC_FEE_OPTIMAL_UTILIZATION_BPS: u64 = 2_000; // 20.00% daily volume / TVL
+pub const DYNAMIC_FEE_CEILING_BPS: u64 = 70; // 0.70% absolute maximum surge fee
+pub const HOLDING_DISCOUNT_30DAY_BPS: u64 = 5; // 5 bps discount for >= 30 days hold
 
 pub fn spend_fee_bps_for_holding(holding_secs: u64) -> u64 {
     if holding_secs >= THIRTY_DAYS_SECS {
         SPEND_FEE_30DAY_BPS
     } else {
         PRIVATE_SPEND_FEE_BPS
+    }
+}
+
+/// Calculates dynamic outflow spend fee rate in basis points (DEC-027 Kinked Reserve-Velocity Curve).
+///
+/// Mathematical Model:
+/// - Let U = min(1.0, rolling_outflow_24h / pool_tvl)
+/// - If U <= U_optimal (20%):
+///   Fee = R_floor + ceil(U / U_optimal * R_base)  [35 bps -> 45 bps]
+/// - If U > U_optimal (20% -> 100%):
+///   Fee = R_floor + R_base + ceil((U - U_optimal) / (1 - U_optimal) * R_surge)  [45 bps -> 70 bps]
+/// - If holding_secs >= 30 days, a 5 bps discount is applied (capped at floor - 5 = 30 bps min).
+/// - If pool_tvl == 0, defaults fail-closed to maximum surge fee (70 bps, or 65 bps with discount).
+pub fn calculate_dynamic_outflow_fee_bps(
+    rolling_outflow_usdc: u64,
+    pool_tvl_usdc: u64,
+    holding_secs: u64,
+) -> u64 {
+    let unadjusted_fee = if pool_tvl_usdc == 0 {
+        DYNAMIC_FEE_CEILING_BPS
+    } else if rolling_outflow_usdc == 0 {
+        DYNAMIC_FEE_FLOOR_BPS
+    } else {
+        // Calculate U in basis points [0..10_000] using u128 to prevent overflow
+        let u_bps = (rolling_outflow_usdc as u128)
+            .saturating_mul(FEE_DENOMINATOR_BPS as u128)
+            .div_ceil(pool_tvl_usdc as u128);
+        let u_bps = (u_bps.min(FEE_DENOMINATOR_BPS as u128)) as u64;
+
+        if u_bps <= DYNAMIC_FEE_OPTIMAL_UTILIZATION_BPS {
+            // First slope: R_floor + ceil(u_bps * R_base / U_optimal)
+            let slope = ceil_div(
+                u_bps.saturating_mul(DYNAMIC_FEE_BASE_SLOPE_BPS),
+                DYNAMIC_FEE_OPTIMAL_UTILIZATION_BPS,
+            )
+            .unwrap_or(0);
+            DYNAMIC_FEE_FLOOR_BPS.saturating_add(slope)
+        } else {
+            // Second slope: R_floor + R_base + ceil((u_bps - U_optimal) * R_surge / (10_000 - U_optimal))
+            let excess_u = u_bps.saturating_sub(DYNAMIC_FEE_OPTIMAL_UTILIZATION_BPS);
+            let excess_range =
+                FEE_DENOMINATOR_BPS.saturating_sub(DYNAMIC_FEE_OPTIMAL_UTILIZATION_BPS);
+            let surge_slope = ceil_div(
+                excess_u.saturating_mul(DYNAMIC_FEE_SURGE_SLOPE_BPS),
+                excess_range,
+            )
+            .unwrap_or(0);
+            DYNAMIC_FEE_FLOOR_BPS
+                .saturating_add(DYNAMIC_FEE_BASE_SLOPE_BPS)
+                .saturating_add(surge_slope)
+        }
+    };
+
+    let bounded_fee = unadjusted_fee.clamp(DYNAMIC_FEE_FLOOR_BPS, DYNAMIC_FEE_CEILING_BPS);
+
+    if holding_secs >= THIRTY_DAYS_SECS {
+        let min_discounted = DYNAMIC_FEE_FLOOR_BPS.saturating_sub(HOLDING_DISCOUNT_30DAY_BPS);
+        bounded_fee
+            .saturating_sub(HOLDING_DISCOUNT_30DAY_BPS)
+            .max(min_discounted)
+    } else {
+        bounded_fee
     }
 }
 
@@ -258,6 +328,85 @@ mod tests {
         assert_eq!(
             quote.user_total_debit,
             100_000_000 + 450_000 + 20_000 + 3_000 + 800_000
+        );
+    }
+
+    #[test]
+    fn test_dynamic_fee_zero_tvl_fallback() {
+        // Zero TVL should fail-closed to maximum ceiling (70 bps)
+        assert_eq!(calculate_dynamic_outflow_fee_bps(1_000, 0, 0), 70);
+        // With holding discount (>= 30 days): 70 - 5 = 65 bps
+        assert_eq!(
+            calculate_dynamic_outflow_fee_bps(1_000, 0, THIRTY_DAYS_SECS),
+            65
+        );
+    }
+
+    #[test]
+    fn test_dynamic_fee_zero_outflow_floor() {
+        // Zero outflow with healthy TVL (100k USDC) yields floor fee (35 bps)
+        let tvl = 100_000_000_000;
+        assert_eq!(calculate_dynamic_outflow_fee_bps(0, tvl, 0), 35);
+        // With holding discount: 35 - 5 = 30 bps
+        assert_eq!(
+            calculate_dynamic_outflow_fee_bps(0, tvl, THIRTY_DAYS_SECS),
+            30
+        );
+    }
+
+    #[test]
+    fn test_dynamic_fee_optimal_utilization_curve() {
+        let tvl = 100_000_000_000; // 100,000 USDC
+
+        // 10% daily utilization (halfway to U_optimal 20%):
+        // 35 + ceil(1000 * 10 / 2000) = 35 + 5 = 40 bps
+        let outflow_10pct = 10_000_000_000;
+        assert_eq!(calculate_dynamic_outflow_fee_bps(outflow_10pct, tvl, 0), 40);
+
+        // 20% daily utilization (exactly U_optimal 20%):
+        // 35 + ceil(2000 * 10 / 2000) = 35 + 10 = 45 bps (matches legacy default!)
+        let outflow_20pct = 20_000_000_000;
+        assert_eq!(calculate_dynamic_outflow_fee_bps(outflow_20pct, tvl, 0), 45);
+        // With holding discount: 45 - 5 = 40 bps (matches legacy 30-day default!)
+        assert_eq!(
+            calculate_dynamic_outflow_fee_bps(outflow_20pct, tvl, THIRTY_DAYS_SECS),
+            40
+        );
+    }
+
+    #[test]
+    fn test_dynamic_fee_surge_pricing_above_optimal() {
+        let tvl = 100_000_000_000; // 100,000 USDC
+
+        // 60% daily utilization (U_bps = 6000, excess = 4000 out of 8000 range):
+        // 35 + 10 + ceil(4000 * 25 / 8000) = 45 + 13 = 58 bps
+        let outflow_60pct = 60_000_000_000;
+        assert_eq!(calculate_dynamic_outflow_fee_bps(outflow_60pct, tvl, 0), 58);
+
+        // 100% daily utilization (extreme bank-run stress):
+        // 45 + ceil(8000 * 25 / 8000) = 45 + 25 = 70 bps (capped at ceiling)
+        let outflow_100pct = 100_000_000_000;
+        assert_eq!(
+            calculate_dynamic_outflow_fee_bps(outflow_100pct, tvl, 0),
+            70
+        );
+
+        // Even if outflow exceeds TVL, capped at 70 bps ceiling
+        let outflow_200pct = 200_000_000_000;
+        assert_eq!(
+            calculate_dynamic_outflow_fee_bps(outflow_200pct, tvl, 0),
+            70
+        );
+    }
+
+    #[test]
+    fn test_dynamic_fee_overflow_protection_large_values() {
+        // Very large TVL ($100B USDC in micro-units = 10^17)
+        let huge_tvl = 100_000_000_000_000_000;
+        let huge_outflow = 20_000_000_000_000_000; // 20%
+        assert_eq!(
+            calculate_dynamic_outflow_fee_bps(huge_outflow, huge_tvl, 0),
+            45
         );
     }
 }

@@ -48,12 +48,14 @@ pub use threshold::{
 
 // Re-export fee policy helpers
 pub use fees::{
-    ceil_div, deposit_fee, fee_round_up, gross_up_for_exact_net, gross_up_private_spend_amount,
-    net_after_fee, private_spend_fee, quote_cross_chain_private_spend_with_fee,
-    quote_execution_fee, quote_execution_fee_with_pass_through, quote_private_spend,
-    quote_private_spend_with_fee, spend_fee_bps_for_holding, SpendQuote,
-    DEFAULT_RELAYER_MARKUP_BPS, DEPOSIT_FEE_BPS, FEE_DENOMINATOR_BPS, PRIVATE_SPEND_FEE_BPS,
-    SPEND_FEE_30DAY_BPS, THIRTY_DAYS_SECS,
+    calculate_dynamic_outflow_fee_bps, ceil_div, deposit_fee, fee_round_up, gross_up_for_exact_net,
+    gross_up_private_spend_amount, net_after_fee, private_spend_fee,
+    quote_cross_chain_private_spend_with_fee, quote_execution_fee,
+    quote_execution_fee_with_pass_through, quote_private_spend, quote_private_spend_with_fee,
+    spend_fee_bps_for_holding, SpendQuote, DEFAULT_RELAYER_MARKUP_BPS, DEPOSIT_FEE_BPS,
+    DYNAMIC_FEE_BASE_SLOPE_BPS, DYNAMIC_FEE_CEILING_BPS, DYNAMIC_FEE_FLOOR_BPS,
+    DYNAMIC_FEE_OPTIMAL_UTILIZATION_BPS, DYNAMIC_FEE_SURGE_SLOPE_BPS, FEE_DENOMINATOR_BPS,
+    HOLDING_DISCOUNT_30DAY_BPS, PRIVATE_SPEND_FEE_BPS, SPEND_FEE_30DAY_BPS, THIRTY_DAYS_SECS,
 };
 
 // Re-export compliance circuit
