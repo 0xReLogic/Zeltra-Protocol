@@ -66,3 +66,16 @@ Dokumen ini memetakan paper terpilih untuk lapisan relayer dan cluster konsensus
   * Komponen: [`nimbus-node/src/settlement/batcher.rs`](file:///workspaces/Zeltra-Protocol/nimbus-node/src/settlement/batcher.rs) dan antrian `batch_spend()`.
   * Memastikan penghematan gas dari batch settlement (2-8 spend) secara adil menekan beban biaya eksekusi aktual bagi pengguna, membatasi keuntungan relayer hanya pada markup transparan 15% tanpa ekstraksi MEV tersembunyi.
 
+---
+
+## 6. Budgeted Threshold Signatures: Velocity Limiting Layer (IACR ePrint 2026/2176)
+* **File Jurnal:** [`jurnal/Budgeted-Threshold-Signatures.md`](file:///workspaces/Zeltra-Protocol/jurnal/Budgeted-Threshold-Signatures.md)
+* **Problem di Sistem Klasik:**
+  Guardian cluster di Nimbus bertindak sebagai penandatangan buta (*stateless blind signer* 3-of-5) yang tidak boleh melihat saldo atau nominal transaksi. Namun sistem tetap membutuhkan pembatasan laju (*rate/velocity limiting*) untuk mencegah spamming request tanda tangan atau pengurasan modal secara mendadak. Menerapkan batas nominal akan merusak *blindness* kriptografis.
+* **Inovasi Paper:**
+  Budgeted Threshold Signatures (BTS): Memungkinkan kuorum threshold menandatangani pesan hanya jika pemohon belum melampaui kuota tertentu (misal: "Epoch 24H, Tiket ke-N") menggunakan bukti tag kuota terpisah di finite field. Guardian memverifikasi kuota frekuensi secara deterministik tanpa pernah mengetahui identitas pemohon atau jumlah dana yang ditransaksikan.
+* **Implementasi di Nimbus Node / Guardian:**
+  * Komponen: Modul penjadwalan kuota di [`nimbus-node/src/cluster/guardian.rs`](file:///workspaces/Zeltra-Protocol/nimbus-node/src/cluster/guardian.rs) dan agregator tanda tangan di [`nimbus-node/src/cluster/leader.rs`](file:///workspaces/Zeltra-Protocol/nimbus-node/src/cluster/leader.rs).
+  * Menjamin kuorum Guardian dapat membatasi kecepatan (*velocity rate limit*) serangan flooding tanda tangan tanpa pernah mengorbankan kebutaan (blindness) data pengguna.
+
+

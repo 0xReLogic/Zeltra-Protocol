@@ -75,3 +75,18 @@ Dokumen ini memetakan paper terpilih untuk lapisan kriptografi fundamental Nimbu
   * Komponen: [`nimbus-core/src/merkle.rs`](file:///workspaces/Zeltra-Protocol/nimbus-core/src/merkle.rs) dan pemetaan nullifier ZK-UTXO.
   * Memastikan struktur pohon komitmen LeanIMT dan hash nullifier bersifat *Strongly History-Independent*: pihak luar yang mengaudit state ledger hanya melihat status validitas saat ini tanpa dapat merekonstruksi urutan transaksi masa lalu antar pengguna.
 
+---
+
+## 7. Improved Issuer-Hiding BBS+: Multi-Issuer Anonymity (IACR ePrint 2026/555)
+* **File Jurnal:** [`jurnal/Improved-Issuer-Hiding-BBS-based-Anonymous-Credentials.md`](file:///workspaces/Zeltra-Protocol/jurnal/Improved-Issuer-Hiding-BBS-based-Anonymous-Credentials.md)
+* **Problem di Sistem Klasik:**
+  Pada sistem kredensial anonim multi-issuer tradisional, verifikasi keanggotaan publik memerlukan penyimpanan daftar seluruh public key issuer on-chain atau ukuran proof membengkak $O(M)$ seiring bertambahnya issuer. Selain itu, ada kerentanan kolusi di mana issuer dapat melacak kapan kredensial digunakan jika tidak ada proteksi identitas penerbit yang terpisah.
+* **Inovasi Paper:**
+  Skema BBS+ signed-policy di Algebraic Group Model dengan fitur *Accountable Issuer Hiding (AIH)*:
+  1. **Penyimpanan On-Chain $O(1)$:** Smart contract hanya menyimpan satu kunci kebijakan induk (*master policy root*), terlepas dari berapapun jumlah issuer terdaftar.
+  2. **Akuntabilitas Kriptografis:** Identitas penerbit asli disembunyikan dalam enkripsi ElGamal in-circuit saat presentasi kredensial. Jika terdeteksi kecurangan (fraud/double issuance), kunci dapat dibuka oleh kuorum governance untuk eksekusi slashing.
+* **Implementasi di Nimbus Core:**
+  * Komponen: [`nimbus-core/src/bbs.rs`](file:///workspaces/Zeltra-Protocol/nimbus-core/src/) dan [`nimbus-core/src/circuit.rs`](file:///workspaces/Zeltra-Protocol/nimbus-core/src/circuit.rs).
+  * Memungkinkan penerbitan kredensial KYC/kepatuhan multi-entitas (misal dari berbagai CEX atau entitas perbankan) secara terdesentralisasi tanpa membocorkan identitas issuer spesifik ke block explorer publik, namun tetap dapat diaudit oleh kuorum jika terjadi pelanggaran hukum.
+
+

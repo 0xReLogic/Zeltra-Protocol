@@ -62,3 +62,43 @@ Dokumen ini memetakan paper terpilih untuk arsitektur client SDK dan manajemen w
   * `SpendScope` adalah enum yang di-encode ke dalam BLS credential saat issuance, diverifikasi di contract via tambahan gadget circuit pada `PrivateNoteCircuit`.
   * Use case langsung: AI agent yang mengelola micro-payment untuk API calls (GPT, compute, storage) tidak bisa di-exploit untuk drain wallet ke merchant arbitrary — scope constraint di-enforce secara kriptografis on-chain, bukan hanya di level aplikasi.
   * Komponen: [`nimbus-sdk/src/wallet/agent_wallet.rs`](file:///workspaces/Zeltra-Protocol/nimbus-sdk/src/wallet/agent_wallet.rs) (baru), integrate dengan `DelegProof-EIP-7702` untuk gasless execution.
+
+---
+
+## 6. zkTLS Invoice Attestation for Autonomous Agents (IACR ePrint 2026/199 — Pivot dari zkAgent)
+* **File Jurnal:** [`jurnal/zkAgent-Verifiable-LLM-Agent-Execution-One-Shot-Transcript-Proofs.md`](file:///workspaces/Zeltra-Protocol/jurnal/zkAgent-Verifiable-LLM-Agent-Execution-One-Shot-Transcript-Proofs.md)
+* **Problem di Sistem Klasik:**
+  Mengeksekusi pembuktian ZK secara penuh atas seluruh inferensi LLM (*full model execution trace*) untuk setiap transaksi mikro agen AI ($0.05) terbukti tidak layak secara komputasi (*computationally infeasible*), menghabiskan gigabyte RAM dan waktu pembuktian bermenit-menit.
+* **Inovasi Paper & Pivot:**
+  Pivot dari model inferensi penuh ke *zkTLS Invoice Attestation*: SDK membuktikan secara kriptografis bahwa agen AI menerima faktur penagihan yang sah dari endpoint merchant/API web (misal Stripe, AWS Billing, OpenAI API) melalui sesi TLS terautentikasi tanpa membocorkan kunci API atau data rahasia pengguna.
+* **Implementasi di Nimbus SDK:**
+  * Komponen: `nimbus-sdk/src/agent.rs` dan modul kepatuhan `nimbus-sdk/src/compliance/`.
+  * Memungkinkan agen AI mengikat pembayaran Note UTXO secara atomik ke komitmen bukti zkTLS faktur web, mencegah *ghost billing* atau pengeluaran fiktif.
+
+---
+
+## 7. Coral-CFG: Structured Business Data Parsing in Client SDK (IACR ePrint 2025/1420)
+* **File Jurnal:** [`jurnal/Coral-CFG-Proofs.md`](file:///workspaces/Zeltra-Protocol/jurnal/Coral-CFG-Proofs.md)
+* **Problem di Sistem Klasik:**
+  Mengekstrak dan memverifikasi field tertentu dari payload terstruktur bisnis (JSON, TOML, format faktur B2B) di dalam sirkuit ZK konvensional membutuhkan puluhan ribu R1CS constraints yang membuat klien browser/ponsel mengalami crash memori.
+* **Inovasi Paper:**
+  Parser ZK berbasis tata bahasa bebas konteks (CFG) menggunakan pohon biner Left-Child Right-Sibling (LCRS) dan *Segmented Memory (Nebula)*. Mampu memparsing dan membuktikan field nilai uang, mata uang, dan status pembayaran dalam waktu 1–3 detik CPU lokal klien.
+* **Implementasi di Nimbus SDK:**
+  * Komponen: `nimbus-sdk/src/compliance/cfg.rs`.
+  * Mengekstrak komitmen faktur bisnis secara 100% lokal di SDK tanpa membocorkan rincian invoice ke relayer atau validator blockchain, kompatibel langsung dengan spend note ZK-UTXO.
+
+---
+
+## 8. Device-Binding Anonymous Credentials for Mobile Wallets (IACR ePrint 2026/965)
+* **File Jurnal:** [`jurnal/Device-Binding-Anonymous-Credentials-Legacy-Phones.md`](file:///workspaces/Zeltra-Protocol/jurnal/Device-Binding-Anonymous-Credentials-Legacy-Phones.md)
+* **Problem di Sistem Klasik:**
+  Prinsip Nimbus menetapkan penyimpanan note ZK-UTXO 100% di sisi klien (zeroized on drop). Ancaman terbesarnya adalah malware infostealer yang menyalin note dari memori perangkat lunak. Namun, chip hardware Secure Enclave / TEE di miliaran ponsel pintar iOS & Android terkunci secara paten pada kurva ECDSA P-256 dan tidak mendukung operasi kurva pairing BLS12-381.
+* **Inovasi Paper:**
+  Protokol *Proof-of-Possession Bulletproofs (PoP-BP)* di atas kurva representasi T-256 yang memisahkan domain Secure Enclave P-256 dengan BLS12-381:
+  - Ukuran bukti sangat ringkas: ~1.47 kB (jauh di bawah limit calldata L2).
+  - Waktu pembuktian prover di ponsel modern: ~208 ms; verifikasi: 35–52 ms.
+  - Kompatibel penuh dengan kredensial anonim BLS12-381 + BBS+.
+* **Implementasi di Nimbus SDK:**
+  * Komponen: `nimbus-sdk/src/credential.rs`.
+  * Mengikat note belanja ke otorisasi Secure Enclave/biometrik fisik pengguna. Sekalipun file note dicuri dari memori perangkat lunak oleh infostealer, note tersebut secara matematis mustahil dibelanjakan tanpa kunci privat yang tersimpan di dalam hardware Secure Enclave perangkat fisik.
+

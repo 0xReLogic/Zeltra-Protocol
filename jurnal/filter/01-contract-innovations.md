@@ -77,3 +77,29 @@ Dokumen ini memetakan paper terpilih untuk arsitektur smart contract Nimbus ([`n
 * **Implementasi di Nimbus Stylus:**
   * Komponen: [`nimbus-contracts/src/storage.rs`](file:///workspaces/Zeltra-Protocol/nimbus-contracts/src/storage.rs) (circular buffer `accepted_note_roots` dan LeanIMT Merkle tree).
   * Menjaga ukuran storage Stylus WASM tetap terkendali dan hemat gas, mencegah memory bloat pada validator Arbitrum.
+
+---
+
+## 7. ZK Email (NFA-based Regex): Identity & Recovery Engine (IACR ePrint 2026)
+* **File Jurnal:** [`jurnal/ZK-Proofs-Regex-Email-Verification.md`](file:///workspaces/Zeltra-Protocol/jurnal/ZK-Proofs-Regex-Email-Verification.md)
+* **Problem di Sistem Klasik:**
+  Verifikasi bukti kepemilikan email DKIM secara on-chain di EVM/Stylus konvensional membutuhkan evaluasi string regex yang memakan jutaan gas dan puluhan ribu constraint sirkuit jika menggunakan automata DFA naif.
+* **Inovasi Paper:**
+  Penggunaan $\varepsilon$-free Non-deterministic Finite Automata (NFA) dengan model *off-circuit matching* dan *in-circuit path verification*. Pembuktian regex header DKIM email dipadatkan secara dramatis sehingga verifikasinya murah dan efisien dieksekusi native di WASM Arbitrum Stylus.
+* **Implementasi di Nimbus Stylus:**
+  * Komponen: [`nimbus-contracts/src/verifier/`](file:///workspaces/Zeltra-Protocol/nimbus-contracts/src/) dan modul pemulihan dompet.
+  * **Social Recovery:** Pengguna dapat memulihkan akses kunci note atau mereset viewing key menggunakan bukti DKIM email terverifikasi on-chain tanpa pihak ketiga tepercaya.
+  * **Enterprise Whitelisting:** Pembuktian mandat zero-knowledge dari domain korporat (misal `@perusahaan.com`) langsung diverifikasi di kontrak Stylus untuk memenuhi syarat kepatuhan B2B tanpa mengungkap alamat email spesifik karyawan.
+
+---
+
+## 8. NI-DKG on Blockchain: Zero-Complaint Guardian Setup (IACR ePrint 2026/552)
+* **File Jurnal:** [`jurnal/NI-DKG-Non-Interactive-Distributed-Key-Generation-Blockchain-Zero-Knowledge-Proofs.md`](file:///workspaces/Zeltra-Protocol/jurnal/NI-DKG-Non-Interactive-Distributed-Key-Generation-Blockchain-Zero-Knowledge-Proofs.md)
+* **Problem di Sistem Klasik:**
+  Protokol Distributed Key Generation (DKG) interaktif tradisional membutuhkan fase sanggahan (*complaint phase*) multi-ronde. Jika terjadi network partition atau serangan sensor transaksi di L2, fase sanggahan bisa macet (*griefing delay*), menyebabkan kegagalan rotasi kunci kuorum Guardian.
+* **Inovasi Paper:**
+  Non-Interactive DKG (NI-DKG) berbasis blockchain dengan zero-knowledge proofs. Setiap node kandidat mengunggah komitmen koefisien polinomial Feldman beserta bukti zk-SNARK validitas pembagian kunci di muka. Smart contract secara deterministik memvalidasi keabsahan data tanpa memerlukan fase komplain interaktif antar node.
+* **Implementasi di Nimbus Stylus:**
+  * Komponen: Kontrak pendaftaran dan rotasi kuorum Guardian di [`nimbus-contracts/src/storage.rs`](file:///workspaces/Zeltra-Protocol/nimbus-contracts/src/storage.rs).
+  * Mengotomatisasi rotasi kuorum threshold Guardian (misal ekspansi dari 3-of-5 ke 5-of-7) secara langsung on-chain di Stylus tanpa risiko macet atau sensor gas.
+
