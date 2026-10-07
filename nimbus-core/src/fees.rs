@@ -4,14 +4,13 @@ pub const PRIVATE_SPEND_FEE_BPS: u64 = 45; // 0.45% (< 30 days)
 pub const DEFAULT_RELAYER_MARKUP_BPS: u64 = 1_500; // 15%
 
 pub const THIRTY_DAYS_SECS: u64 = 30 * 24 * 60 * 60;
-pub const SPEND_FEE_30DAY_BPS: u64 = 40; // 0.40% (>= 30 days / 1 month hold)
+pub const SPEND_FEE_30DAY_BPS: u64 = 45; // DEC-028: Unified flat 45 bps (holding-time discount abolished)
 
-pub fn spend_fee_bps_for_holding(holding_secs: u64) -> u64 {
-    if holding_secs >= THIRTY_DAYS_SECS {
-        SPEND_FEE_30DAY_BPS
-    } else {
-        PRIVATE_SPEND_FEE_BPS
-    }
+/// Protocol spend fee in basis points.
+/// In DEC-028, holding-time fee discounts are abolished to eliminate root age gaming and
+/// maintain 100% predictable cash accounting ($10 - $3 = $7). Always returns 45 bps.
+pub fn spend_fee_bps_for_holding(_holding_secs: u64) -> u64 {
+    PRIVATE_SPEND_FEE_BPS
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -219,12 +218,13 @@ mod tests {
     }
 
     #[test]
-    fn holding_time_fee_tiers() {
+    fn holding_time_fee_tiers_unified_flat() {
+        // DEC-028: Holding-time discount is abolished; spend fee is flat 45 bps across all durations
         assert_eq!(spend_fee_bps_for_holding(0), 45);
         assert_eq!(spend_fee_bps_for_holding(59), 45);
         assert_eq!(spend_fee_bps_for_holding(THIRTY_DAYS_SECS - 1), 45);
-        assert_eq!(spend_fee_bps_for_holding(THIRTY_DAYS_SECS), 40);
-        assert_eq!(spend_fee_bps_for_holding(THIRTY_DAYS_SECS + 1), 40);
+        assert_eq!(spend_fee_bps_for_holding(THIRTY_DAYS_SECS), 45);
+        assert_eq!(spend_fee_bps_for_holding(THIRTY_DAYS_SECS + 1), 45);
     }
 
     #[test]

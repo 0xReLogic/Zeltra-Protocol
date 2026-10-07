@@ -131,11 +131,10 @@ Refund path: if quorum fails or k never released → 24h timelock → user claim
 | Fee | Rate | Where |
 |---|---|---|
 | Deposit | 0 bps (0.00% - Zero-friction inflow) | `deposit.rs` + `fees.rs` |
-| Spend default (< 30 days) | 45 bps (0.45%) | `spend.rs` + `fees.rs` |
-| Spend hold ≥ 30 days | 40 bps (0.40% - 5 bps discount) | `spend.rs` + `fees.rs` |
+| Spend Protocol Outflow | 45 bps (0.45% Flat - DEC-028) | `spend.rs` + `fees.rs` |
 | Relayer Execution | Gas reimbursement + 15% markup | `quote.rs` + `fees.rs` |
 
-Holding time is calculated from `clean_association_roots` root registration timestamp. Quote endpoint (`/api/quote/private-spend?association_root=...`) returns the applicable tier and discount to the user before they commit. Root timestamps are cached in node memory after first RPC query.
+Under DEC-028, holding-time fee discounts are abolished to eliminate root age gaming and maintain 100% predictable cash accounting ($10 - $3 = $7). Protocol spend fee is unified to a flat 45 bps across all spends.
 
 ## Key Files to Read
 

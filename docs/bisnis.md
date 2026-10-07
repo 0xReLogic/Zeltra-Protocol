@@ -119,8 +119,7 @@ Untuk meminimalkan celah eksploitasi dan serangan governance DAO (seperti inside
 | Aktivitas | Biaya target | Penerima | Keterangan |
 |---|---:|---|---|
 | **Deposit / Shield** | **0,00% (0 bps)** | N/A | **Zero-Friction Inflow**. 100% dana masuk ke saldo note, refund darurat kembali 100% utuh tanpa potongan. |
-| **Private Spend (< 30 hari)** | **0,45% (45 bps)** | Protocol treasury | Mengkompensasi 0% fee deposit dengan biaya transaksi wajar saat belanja/transfer. |
-| **Private Spend (≥ 30 hari)** | **0,40% (40 bps)** | Protocol treasury | **Diskon 5 bps** bagi penyimpan saldo jangka panjang (insentif likuiditas pool). |
+| **Private Spend (Outflow)** | **0,45% (45 bps Flat)** | Protocol treasury | **Unified Flat Outflow Fee (DEC-028)**. Mengeliminasi celah arbitrase umur root dan menjaga akuntansi uang kas tetap 100% terprediksi ($10 - $3 = $7). |
 | **Execution Fee** | Gas aktual + 15% markup | Relayer | Penggantian gas L2 Arbitrum (~$0,02) + markup margin operasional node relayer. |
 | **Fast / Cross-Chain Settlement** | Quote dinamis | Relayer/LP, jaringan, treasury | Ditetapkan per rute CCIP. |
 | **SDK & Integrasi** | Gratis | N/A | Open-source client libraries. |
@@ -131,7 +130,7 @@ Biaya pengguna terdiri dari protocol fee dan fixed execution quote:
 
 ```text
 Network Fee =
-    protocol fee 0,45% dari nominal transaksi (default) / 0,40% (hold >= 30 hari)
+    protocol fee 0,45% flat dari nominal transaksi (DEC-028)
   + gas reimbursement
   + relayer markup
 ```
@@ -299,7 +298,7 @@ Dokumen ini menjelaskan **model bisnis target dan roadmap arsitektur**. Status t
 * **Jaringan Threshold:** 1 Leader + 4 Guardian (3-of-5 threshold) dengan rilis atomik masking key `k` setelah deposit confirmed.
 * **Settlement Engine:** SQLite/SQLCipher persistent queue dengan auto-retry, status machine durable, dan leasing worker.
 * **Batch Spend:** Entrypoint Stylus `batch_spend()` (2-8 item) terdeploy dengan EIP-712 execution quote validation. Gas benchmark riil tersimpan di `docs/gas_latency_benchmark.md`.
-* **Fee Structure & Immutability:** Deposit 0% (zero-friction), spend 45 bps (default) / 40 bps (≥ 30 hari hold), relayer gas + 15% markup. Tanpa DAO attack surface.
+* **Fee Structure & Immutability:** Deposit 0% (zero-friction), spend 45 bps flat (DEC-028), relayer gas + 15% markup. Tanpa DAO attack surface.
 
 ### Yang Sedang Berjalan (Phase 2 - Jalur B: ZK-UTXO Note Balance):
 * **Gate C0 Security Repair (`nimbus-core`):** Pengerjaan sirkuit Groth16 Arkworks untuk private note dengan change output:

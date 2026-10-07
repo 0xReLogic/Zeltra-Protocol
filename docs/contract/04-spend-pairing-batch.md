@@ -51,18 +51,13 @@ Jika nullifier tidak cocok dengan parameter transaksi, kontrak seketika revert d
 
 ---
 
-## 3. Diskon Fee Berbasis Waktu (*Holding-Time Discount*)
+## 3. Kebijakan Fee Transaksi Keluar (Flat 45 bps Outflow Fee — DEC-028)
 
-Besaran biaya protokol (*protocol fee*) dihitung secara transparan di atas nominal invoice:
+Besaran biaya protokol (*protocol fee*) dihitung secara transparan dan deterministik di atas nominal invoice:
 
-* **Tarif Default (< 30 Hari):** `45 bps` (0.45%).
-* **Holding Time ≥ 30 Hari:** Diskon ke `40 bps` (0.40%).
-* **Tier 7 Hari Dieliminasi:** Mencegah kompleksitas percabangan kode dan menutup celah manipulasi batas waktu.
-
-### Pembuktian Waktu Tanpa Membocorkan Privasi:
-Waktu kepemilikan dibuktikan melalui pendaftaran root himpunan asosiasi bersih:
-$$\Delta t = \text{block.timestamp} - \text{clean\_association\_roots}[root]$$
-Pengguna membuktikan keanggotaan dalam himpunan root tersebut tanpa membuka identitas kapan deposit mereka dilakukan secara persis. Kontrak meng-emit event `ProtocolFee` dan `ExecutionFee`.
+* **Tarif Protokol Spend:** `45 bps` (0.45% Flat permanen per DEC-028).
+* **Eliminasi Diskon 30 Hari:** Berdasarkan DEC-028, diskon 5 bps berbasis umur root dieliminasi secara total untuk menutup celah arbitrase root historis dan menghemat gas SLOAD smart contract Stylus.
+* **Akuntansi Terprediksi:** Menjaga mental model kas nyata pengguna ($10 bayar $3 kembali $7) tetap 100% konsisten. Kontrak meng-emit event `ProtocolFee` dan `ExecutionFee`.
 
 ---
 

@@ -58,13 +58,10 @@ File referensi: [`nimbus-core/src/fees.rs`](file:///workspaces/Zeltra-Protocol/n
        (a + b - 1) / b
    }
    ```
-2. **Besaran Tarif Fee (Immutable Constants):**
+2. **Besaran Tarif Fee (Immutable Constants — DEC-028):**
    * **Deposit Fee:** `0 bps` (0.00% - Zero-Friction Inflow).
-   * **Private Spend Fee (Default):** `45 bps` (0.45%).
-   * **Long-Term Holding Discount (≥ 30 Hari):** Diskon ke `40 bps` (0.40%).
+   * **Private Spend Fee (Outflow):** `45 bps` (0.45% Flat permanen per DEC-028).
+   * **Diskon Holding 30 Hari Dihapus:** Dieliminasi untuk mencegah eksploitasi arbitrase umur root dan menjaga keselarasan filosofi *Volume Over TVL*.
    * **Relayer Execution Fee:** Estimasi gas L2 aktual + markup `15%` (default `1.500 bps`).
-3. **Holding Time Proof:**
-   Dihitung secara anonim dan gas-efisien di smart contract on-chain menggunakan timestamp registrasi root:
-   `mapping(bytes32 => uint256) clean_association_roots`.
-4. **Proteksi Anti-Exploit:**
-   Menghindari kompleksitas DAO governance setter untuk fee demi menutup celah eksploitasi flashloan voting atau governance hijacking. Aturan fee bersifat deterministik dan matematis.
+3. **Akuntansi Terprediksi & Proteksi Anti-Exploit:**
+   Menghindari kompleksitas DAO governance setter untuk fee demi menutup celah eksploitasi flashloan voting atau governance hijacking. Aturan fee bersifat deterministik, matematis, dan 100% konsisten ($10 bayar $3 kembali $7).

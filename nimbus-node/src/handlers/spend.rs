@@ -584,204 +584,255 @@ pub async fn handle_private_note_spend(
         }
     }
 
-    // 8. Public inputs canonical scalar check & semantic binding (DEC-022 & DEC-025)
-    if !payload.public_inputs.is_empty() {
-        if payload.public_inputs.len() != 12 {
+    // 8. Public inputs canonical scalar check, semantic binding & target domain verification (DEC-022, DEC-025, DEC-028)
+    // DEC-028 (Fix R4): public_inputs is strictly required to have exactly 12 scalars.
+    // Empty or omitted inputs are rejected fail-closed to prevent preflight bypass.
+    if payload.public_inputs.len() != 12 {
+        return Json(PrivateNoteSpendResponse {
+            status: "REJECTED".to_string(),
+            message: format!(
+                "Expected 12 public inputs for PrivateNoteCircuit, got {}",
+                payload.public_inputs.len()
+            ),
+            queue_position: 0,
+            estimated_gas_usdc: None,
+        });
+    }
+
+    let mut parsed_inputs = Vec::with_capacity(12);
+    for (idx, pi_hex) in payload.public_inputs.iter().enumerate() {
+        let bytes = match hex::decode(pi_hex.trim_start_matches("0x")) {
+            Ok(b) if b.len() == 32 => b,
+            _ => {
+                return Json(PrivateNoteSpendResponse {
+                    status: "REJECTED".to_string(),
+                    message: format!("public_inputs[{}] must be a 32-byte hex scalar", idx),
+                    queue_position: 0,
+                    estimated_gas_usdc: None,
+                });
+            }
+        };
+        let mut fixed = [0u8; 32];
+        fixed.copy_from_slice(&bytes);
+
+        // Canonical scalar check: Fr < r
+        if nimbus_core::from_evm_scalar(&fixed).is_none() {
             return Json(PrivateNoteSpendResponse {
                 status: "REJECTED".to_string(),
-                message: format!(
-                    "Expected 12 public inputs for PrivateNoteCircuit, got {}",
-                    payload.public_inputs.len()
-                ),
+                message: format!("public_inputs[{}] is a non-canonical scalar (>= r)", idx),
                 queue_position: 0,
                 estimated_gas_usdc: None,
             });
         }
+        parsed_inputs.push(fixed);
+    }
 
-        let mut parsed_inputs = Vec::with_capacity(12);
-        for (idx, pi_hex) in payload.public_inputs.iter().enumerate() {
-            let bytes = match hex::decode(pi_hex.trim_start_matches("0x")) {
-                Ok(b) if b.len() == 32 => b,
-                _ => {
+    // Semantic public input binding (DEC-022 boundary gap defense)
+    if parsed_inputs[0] != note_root_bytes[..] {
+        return Json(PrivateNoteSpendResponse {
+            status: "REJECTED".to_string(),
+            message: "public_inputs[0] does not match note_root".to_string(),
+            queue_position: 0,
+            estimated_gas_usdc: None,
+        });
+    }
+    if parsed_inputs[1] != nullifier_bytes[..] {
+        return Json(PrivateNoteSpendResponse {
+            status: "REJECTED".to_string(),
+            message: "public_inputs[1] does not match input_nullifier".to_string(),
+            queue_position: 0,
+            estimated_gas_usdc: None,
+        });
+    }
+
+    let mut expected_comm = [0u8; 32];
+    if let Some(ref comm) = payload.output_commitment {
+        if let Ok(b) = hex::decode(comm.trim_start_matches("0x")) {
+            if b.len() == 32 {
+                expected_comm.copy_from_slice(&b);
+            }
+        }
+    }
+    if parsed_inputs[2] != expected_comm {
+        return Json(PrivateNoteSpendResponse {
+            status: "REJECTED".to_string(),
+            message: "public_inputs[2] does not match output_commitment".to_string(),
+            queue_position: 0,
+            estimated_gas_usdc: None,
+        });
+    }
+
+    let mut expected_recipient = [0u8; 32];
+    expected_recipient[12..].copy_from_slice(recipient_addr.as_slice());
+    if parsed_inputs[3] != expected_recipient {
+        return Json(PrivateNoteSpendResponse {
+            status: "REJECTED".to_string(),
+            message: "public_inputs[3] does not match recipient address".to_string(),
+            queue_position: 0,
+            estimated_gas_usdc: None,
+        });
+    }
+
+    let expected_merchant = U256::from(payload.merchant_amount).to_be_bytes::<32>();
+    if parsed_inputs[4] != expected_merchant {
+        return Json(PrivateNoteSpendResponse {
+            status: "REJECTED".to_string(),
+            message: "public_inputs[4] does not match merchant_amount".to_string(),
+            queue_position: 0,
+            estimated_gas_usdc: None,
+        });
+    }
+
+    let expected_proto = U256::from(payload.protocol_fee).to_be_bytes::<32>();
+    if parsed_inputs[5] != expected_proto {
+        return Json(PrivateNoteSpendResponse {
+            status: "REJECTED".to_string(),
+            message: "public_inputs[5] does not match protocol_fee".to_string(),
+            queue_position: 0,
+            estimated_gas_usdc: None,
+        });
+    }
+
+    let expected_exec = U256::from(payload.execution_fee).to_be_bytes::<32>();
+    if parsed_inputs[6] != expected_exec {
+        return Json(PrivateNoteSpendResponse {
+            status: "REJECTED".to_string(),
+            message: "public_inputs[6] does not match execution_fee".to_string(),
+            queue_position: 0,
+            estimated_gas_usdc: None,
+        });
+    }
+
+    let mut expected_qh = [0u8; 32];
+    if let Some(ref qh) = payload.quote_hash {
+        if let Ok(b) = hex::decode(qh.trim_start_matches("0x")) {
+            if b.len() == 32 {
+                expected_qh.copy_from_slice(&b);
+            }
+        }
+    }
+    if parsed_inputs[7] != expected_qh {
+        return Json(PrivateNoteSpendResponse {
+            status: "REJECTED".to_string(),
+            message: "public_inputs[7] does not match quote_hash".to_string(),
+            queue_position: 0,
+            estimated_gas_usdc: None,
+        });
+    }
+
+    // DEC-028 (Fix R3): Strict target domain verification for chain_id (index 8) and contract_address (index 9)
+    let (expected_chain_bytes, expected_contract_bytes_opt) =
+        if let Some(client) = state.evm_client.as_ref() {
+            let target_chain_id = match client.chain_id().await {
+                Ok(id) => id,
+                Err(_) => {
                     return Json(PrivateNoteSpendResponse {
-                        status: "REJECTED".to_string(),
-                        message: format!("public_inputs[{}] must be a 32-byte hex scalar", idx),
+                        status: "ERROR".to_string(),
+                        message: "Failed to query target chain ID from EVM client".to_string(),
                         queue_position: 0,
                         estimated_gas_usdc: None,
                     });
                 }
             };
-            let mut fixed = [0u8; 32];
-            fixed.copy_from_slice(&bytes);
+            let mut contract_bytes = [0u8; 32];
+            contract_bytes[12..].copy_from_slice(client.contract_address_raw().as_slice());
+            (
+                U256::from(target_chain_id).to_be_bytes::<32>(),
+                Some(contract_bytes),
+            )
+        } else {
+            let chain_id = std::env::var("NIMBUS_CHAIN_ID")
+                .ok()
+                .and_then(|s| s.parse::<u64>().ok())
+                .unwrap_or(421614);
+            let contract_opt = std::env::var("NIMBUS_CONTRACT_ADDRESS")
+                .ok()
+                .and_then(|addr_str| parse_contract_address_to_32bytes(&addr_str));
+            (U256::from(chain_id).to_be_bytes::<32>(), contract_opt)
+        };
 
-            // Canonical scalar check: Fr < r
-            if nimbus_core::from_evm_scalar(&fixed).is_none() {
-                return Json(PrivateNoteSpendResponse {
-                    status: "REJECTED".to_string(),
-                    message: format!("public_inputs[{}] is a non-canonical scalar (>= r)", idx),
-                    queue_position: 0,
-                    estimated_gas_usdc: None,
-                });
-            }
-            parsed_inputs.push(fixed);
-        }
+    if parsed_inputs[8] != expected_chain_bytes {
+        return Json(PrivateNoteSpendResponse {
+            status: "REJECTED".to_string(),
+            message: "public_inputs[8] does not match target chain_id".to_string(),
+            queue_position: 0,
+            estimated_gas_usdc: None,
+        });
+    }
 
-        // Semantic public input binding (DEC-022 boundary gap defense)
-        if parsed_inputs[0] != note_root_bytes[..] {
+    if let Some(expected_contract) = expected_contract_bytes_opt {
+        if parsed_inputs[9] != expected_contract {
             return Json(PrivateNoteSpendResponse {
                 status: "REJECTED".to_string(),
-                message: "public_inputs[0] does not match note_root".to_string(),
+                message: "public_inputs[9] does not match target contract_address".to_string(),
                 queue_position: 0,
                 estimated_gas_usdc: None,
             });
         }
-        if parsed_inputs[1] != nullifier_bytes[..] {
-            return Json(PrivateNoteSpendResponse {
-                status: "REJECTED".to_string(),
-                message: "public_inputs[1] does not match input_nullifier".to_string(),
-                queue_position: 0,
-                estimated_gas_usdc: None,
-            });
-        }
+    }
 
-        let mut expected_comm = [0u8; 32];
-        if let Some(ref comm) = payload.output_commitment {
-            if let Ok(b) = hex::decode(comm.trim_start_matches("0x")) {
-                if b.len() == 32 {
-                    expected_comm.copy_from_slice(&b);
-                }
-            }
-        }
-        if parsed_inputs[2] != expected_comm {
-            return Json(PrivateNoteSpendResponse {
-                status: "REJECTED".to_string(),
-                message: "public_inputs[2] does not match output_commitment".to_string(),
-                queue_position: 0,
-                estimated_gas_usdc: None,
-            });
-        }
+    let expected_exp = U256::from(payload.expiry.unwrap_or(0)).to_be_bytes::<32>();
+    if parsed_inputs[10] != expected_exp {
+        return Json(PrivateNoteSpendResponse {
+            status: "REJECTED".to_string(),
+            message: "public_inputs[10] does not match expiry".to_string(),
+            queue_position: 0,
+            estimated_gas_usdc: None,
+        });
+    }
 
-        let mut expected_recipient = [0u8; 32];
-        expected_recipient[12..].copy_from_slice(recipient_addr.as_slice());
-        if parsed_inputs[3] != expected_recipient {
-            return Json(PrivateNoteSpendResponse {
-                status: "REJECTED".to_string(),
-                message: "public_inputs[3] does not match recipient address".to_string(),
-                queue_position: 0,
-                estimated_gas_usdc: None,
-            });
-        }
+    let expected_hc = U256::from(has_change_u64).to_be_bytes::<32>();
+    if parsed_inputs[11] != expected_hc {
+        return Json(PrivateNoteSpendResponse {
+            status: "REJECTED".to_string(),
+            message: "public_inputs[11] does not match has_change flag".to_string(),
+            queue_position: 0,
+            estimated_gas_usdc: None,
+        });
+    }
 
-        let expected_merchant = U256::from(payload.merchant_amount).to_be_bytes::<32>();
-        if parsed_inputs[4] != expected_merchant {
-            return Json(PrivateNoteSpendResponse {
-                status: "REJECTED".to_string(),
-                message: "public_inputs[4] does not match merchant_amount".to_string(),
-                queue_position: 0,
-                estimated_gas_usdc: None,
-            });
+    // 8.5. Local Groth16 Proof Preflight Verification (DEC-026 Mitigasi C-01)
+    // Defends the relayer against gas-griefing attacks by verifying the Groth16 proof
+    // on node CPU before enqueuing or spending gas for on-chain broadcast.
+    let mut proof_a_bytes = [0u8; 128];
+    if let Ok(b) = hex::decode(payload.proof_a_neg.trim_start_matches("0x")) {
+        if b.len() == 128 {
+            proof_a_bytes.copy_from_slice(&b);
         }
+    }
+    let mut proof_b_bytes = [0u8; 256];
+    if let Ok(b) = hex::decode(payload.proof_b.trim_start_matches("0x")) {
+        if b.len() == 256 {
+            proof_b_bytes.copy_from_slice(&b);
+        }
+    }
+    let mut proof_c_bytes = [0u8; 128];
+    if let Ok(b) = hex::decode(payload.proof_c.trim_start_matches("0x")) {
+        if b.len() == 128 {
+            proof_c_bytes.copy_from_slice(&b);
+        }
+    }
 
-        let expected_proto = U256::from(payload.protocol_fee).to_be_bytes::<32>();
-        if parsed_inputs[5] != expected_proto {
-            return Json(PrivateNoteSpendResponse {
-                status: "REJECTED".to_string(),
-                message: "public_inputs[5] does not match protocol_fee".to_string(),
-                queue_position: 0,
-                estimated_gas_usdc: None,
-            });
+    let mut fr_public_inputs = [nimbus_core::Fr::default(); 12];
+    for (idx, pi) in parsed_inputs.iter().enumerate().take(12) {
+        if let Some(fr) = nimbus_core::from_evm_scalar(pi) {
+            fr_public_inputs[idx] = fr;
         }
+    }
 
-        let expected_exec = U256::from(payload.execution_fee).to_be_bytes::<32>();
-        if parsed_inputs[6] != expected_exec {
-            return Json(PrivateNoteSpendResponse {
-                status: "REJECTED".to_string(),
-                message: "public_inputs[6] does not match execution_fee".to_string(),
-                queue_position: 0,
-                estimated_gas_usdc: None,
-            });
-        }
-
-        let mut expected_qh = [0u8; 32];
-        if let Some(ref qh) = payload.quote_hash {
-            if let Ok(b) = hex::decode(qh.trim_start_matches("0x")) {
-                if b.len() == 32 {
-                    expected_qh.copy_from_slice(&b);
-                }
-            }
-        }
-        if parsed_inputs[7] != expected_qh {
-            return Json(PrivateNoteSpendResponse {
-                status: "REJECTED".to_string(),
-                message: "public_inputs[7] does not match quote_hash".to_string(),
-                queue_position: 0,
-                estimated_gas_usdc: None,
-            });
-        }
-
-        let expected_exp = U256::from(payload.expiry.unwrap_or(0)).to_be_bytes::<32>();
-        if parsed_inputs[10] != expected_exp {
-            return Json(PrivateNoteSpendResponse {
-                status: "REJECTED".to_string(),
-                message: "public_inputs[10] does not match expiry".to_string(),
-                queue_position: 0,
-                estimated_gas_usdc: None,
-            });
-        }
-
-        let expected_hc = U256::from(has_change_u64).to_be_bytes::<32>();
-        if parsed_inputs[11] != expected_hc {
-            return Json(PrivateNoteSpendResponse {
-                status: "REJECTED".to_string(),
-                message: "public_inputs[11] does not match has_change flag".to_string(),
-                queue_position: 0,
-                estimated_gas_usdc: None,
-            });
-        }
-
-        // 8.5. Local Groth16 Proof Preflight Verification (DEC-026 Mitigasi C-01)
-        // Defends the relayer against gas-griefing attacks by verifying the Groth16 proof
-        // on node CPU before enqueuing or spending gas for on-chain broadcast.
-        let mut proof_a_bytes = [0u8; 128];
-        if let Ok(b) = hex::decode(payload.proof_a_neg.trim_start_matches("0x")) {
-            if b.len() == 128 {
-                proof_a_bytes.copy_from_slice(&b);
-            }
-        }
-        let mut proof_b_bytes = [0u8; 256];
-        if let Ok(b) = hex::decode(payload.proof_b.trim_start_matches("0x")) {
-            if b.len() == 256 {
-                proof_b_bytes.copy_from_slice(&b);
-            }
-        }
-        let mut proof_c_bytes = [0u8; 128];
-        if let Ok(b) = hex::decode(payload.proof_c.trim_start_matches("0x")) {
-            if b.len() == 128 {
-                proof_c_bytes.copy_from_slice(&b);
-            }
-        }
-
-        let mut fr_public_inputs = [nimbus_core::Fr::default(); 12];
-        for (idx, pi) in parsed_inputs.iter().enumerate().take(12) {
-            if let Some(fr) = nimbus_core::from_evm_scalar(pi) {
-                fr_public_inputs[idx] = fr;
-            }
-        }
-
-        if !nimbus_core::verify_evm_note_proof(
-            &proof_a_bytes,
-            &proof_b_bytes,
-            &proof_c_bytes,
-            &fr_public_inputs,
-        ) {
-            return Json(PrivateNoteSpendResponse {
-                status: "REJECTED".to_string(),
-                message: "Invalid Groth16 proof: preflight verification failed (C-01 defense)"
-                    .to_string(),
-                queue_position: 0,
-                estimated_gas_usdc: None,
-            });
-        }
+    if !nimbus_core::verify_evm_note_proof(
+        &proof_a_bytes,
+        &proof_b_bytes,
+        &proof_c_bytes,
+        &fr_public_inputs,
+    ) {
+        return Json(PrivateNoteSpendResponse {
+            status: "REJECTED".to_string(),
+            message: "Invalid Groth16 proof: preflight verification failed (C-01 defense)"
+                .to_string(),
+            queue_position: 0,
+            estimated_gas_usdc: None,
+        });
     }
 
     // 9. EIP-712 Quote Verification (if signed quote provided)
@@ -1461,6 +1512,24 @@ pub async fn handle_ccip_refund(
     }
 }
 
+fn parse_contract_address_to_32bytes(addr_str: &str) -> Option<[u8; 32]> {
+    let clean = addr_str.trim_start_matches("0x");
+    if clean.len() == 40 {
+        if let Ok(b) = hex::decode(clean) {
+            let mut out = [0u8; 32];
+            out[12..].copy_from_slice(&b);
+            return Some(out);
+        }
+    } else if clean.len() == 64 {
+        if let Ok(b) = hex::decode(clean) {
+            let mut out = [0u8; 32];
+            out.copy_from_slice(&b);
+            return Some(out);
+        }
+    }
+    None
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1659,5 +1728,68 @@ mod tests {
             .0
             .message
             .contains("restricted under public sanctions policy"));
+    }
+
+    #[tokio::test]
+    async fn test_handle_private_note_spend_reject_empty_public_inputs() {
+        let (state, _tmp) = setup_test_state().await;
+        let mut req = sample_valid_private_note_request();
+        // DEC-028 (Fix R4): empty public inputs must be rejected immediately, not bypass preflight
+        req.public_inputs = vec![];
+
+        let resp = handle_private_note_spend(State(state), Json(req)).await;
+        assert_eq!(resp.0.status, "REJECTED");
+        assert!(resp.0.message.contains("Expected 12 public inputs"));
+    }
+
+    #[tokio::test]
+    async fn test_handle_private_note_spend_reject_wrong_public_inputs_count() {
+        let (state, _tmp) = setup_test_state().await;
+        let mut req = sample_valid_private_note_request();
+        req.public_inputs.truncate(11);
+
+        let resp = handle_private_note_spend(State(state), Json(req)).await;
+        assert_eq!(resp.0.status, "REJECTED");
+        assert!(resp
+            .0
+            .message
+            .contains("Expected 12 public inputs for PrivateNoteCircuit, got 11"));
+    }
+
+    #[tokio::test]
+    async fn test_handle_private_note_spend_reject_domain_mismatch_chain_id() {
+        let (state, _tmp) = setup_test_state().await;
+        let mut req = sample_valid_private_note_request();
+        // DEC-028 (Fix R3): Cross-domain chain_id mismatch (e.g. proof generated for L1 chain_id = 1)
+        req.public_inputs[8] = format!("0x{:064x}", 1);
+
+        let resp = handle_private_note_spend(State(state), Json(req)).await;
+        assert_eq!(resp.0.status, "REJECTED");
+        assert!(resp
+            .0
+            .message
+            .contains("public_inputs[8] does not match target chain_id"));
+    }
+
+    #[tokio::test]
+    async fn test_handle_private_note_spend_reject_domain_mismatch_contract_address() {
+        let (state, _tmp) = setup_test_state().await;
+        let mut req = sample_valid_private_note_request();
+        // DEC-028 (Fix R3): Target contract address mismatch
+        // Set expected contract address to 0x00...012c (300)
+        std::env::set_var(
+            "NIMBUS_CONTRACT_ADDRESS",
+            "0x000000000000000000000000000000000000012c",
+        );
+        // Tamper with public_inputs[9]
+        req.public_inputs[9] = format!("0x{:064x}", 999);
+
+        let resp = handle_private_note_spend(State(state), Json(req)).await;
+        std::env::remove_var("NIMBUS_CONTRACT_ADDRESS");
+        assert_eq!(resp.0.status, "REJECTED");
+        assert!(resp
+            .0
+            .message
+            .contains("public_inputs[9] does not match target contract_address"));
     }
 }

@@ -272,6 +272,7 @@ pub struct PrivateSpendQuoteRequest {
     #[serde(default)]
     pub relayer_markup_bps: Option<u64>,
     #[serde(default)]
+    #[allow(dead_code)]
     pub association_root: Option<String>,
     /// Optional CCIP destination chain selector for cross-chain fee quote transparency
     #[serde(default)]

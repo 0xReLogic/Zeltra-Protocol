@@ -671,20 +671,12 @@ impl Nimbus {
 
         // 3. EXECUTE EFFECTS AND INTERACTIONS
         for i in 0..len {
-            let mut fee_bps = U256::from(45); // 0.45%
+            let fee_bps = U256::from(45); // 0.45% Flat Protocol Fee (DEC-028)
 
             if roots[i] != FixedBytes::ZERO {
                 let root_timestamp = self.clean_association_roots.get(roots[i]);
                 if root_timestamp == U256::ZERO {
                     return Err(b"INVALID_ASSOCIATION_ROOT".to_vec());
-                }
-                let delta_t = current_time
-                    .checked_sub(root_timestamp)
-                    .unwrap_or(U256::ZERO);
-                let thirty_days = U256::from(30 * 24 * 60 * 60);
-
-                if delta_t >= thirty_days {
-                    fee_bps = U256::from(40); // 0.40% (1 month hold)
                 }
             }
 
@@ -2496,7 +2488,7 @@ mod tests {
         );
 
         // Scenario D: Spend using valid root with delta_t = 31 days (>= 30 days)
-        // registration = 1000, current = 1000 + 31 * 86400 = 2679400 -> 0.40% fee (40,000)
+        // Under DEC-028, holding discount is abolished; fee remains unified flat 0.45% (45,000)
         set_block_timestamp(1000 + 31 * 86400);
         let nonce_d = FixedBytes::repeat_byte(0x04);
         let (alpha_neg4, _hm4, pk_iss4, nullifier4) = register_mock_issuer_with_nonce(
@@ -2523,10 +2515,10 @@ mod tests {
             )
             .unwrap());
         let after_spend_principal = contract.total_deposited_principal().unwrap();
-        // spend_fee = (10,000,000 * 40 + 9999) / 10000 = 40,000
+        // spend_fee = (10,000,000 * 45 + 9999) / 10000 = 45,000
         assert_eq!(
             initial_principal - after_spend_principal,
-            U256::from(10_040_000)
+            U256::from(10_045_000)
         );
     }
 

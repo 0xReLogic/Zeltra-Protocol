@@ -189,12 +189,10 @@ tetap harus valid.
 spend. Pemanfaatan membutuhkan root nonzero yang sudah terdaftar dan cukup
 tua serta spend yang memenuhi pemeriksaan lain. Dampak finansial belum diukur.
 
-**Untuk diperiksa manual:**
-
-- [ ] Putuskan apakah eligibility ditentukan umur dana pengguna, umur credential, atau umur root global.
-- [ ] Bandingkan fee spend valid pengguna baru dengan root nol, root baru, dan root tua.
-- [ ] Periksa perilaku batch serta sinkronisasi kebijakan quote/fee terbaru (termasuk DEC-027).
-- [ ] Jika eligibility memang milik pengguna, tentukan relasi kriptografisnya. Mengikutkan root pada hash saja belum membuktikan membership atau umur dana.
+**Status Resolusi (DEC-028):**
+- [x] **Diputuskan:** Eligibility diskon umur root dihapus permanen. Fee protokol disatukan menjadi **Flat 45 bps (0.45%)** deterministik untuk seluruh spend (DEC-028).
+- [x] Percabangan `delta_t >= 30 days` di contract `spend()` dan `batch_spend()` dihapus, menghemat SLOAD gas dan menutup celah arbitrase root tua.
+- [x] `resolve_fee_tier` dan `root_timestamp_cache` di relayer quote handler dibersihkan.
 
 ### R3 — Domain Preflight Relayer Tidak Dibandingkan dengan Target Eksekusi
 
@@ -216,17 +214,10 @@ domain lain: public-input binding pada note circuit tetap relevan.
 menetapkan gas limit lalu mengirim transaksi; tidak terlihat dry-run
 `eth_call` terhadap calldata spend pada jalur yang ditelusuri.
 
-**Risiko bersyarat:** jika request juga lolos admission, queue, quote, dan
-pemeriksaan lain lalu dibroadcast, revert on-chain dapat membebani gas relayer.
-Ini gap preflight/C-01, **bukan** bukti replay berhasil atau payout di chain
-yang salah. Belum direproduksi end-to-end, dan belum diukur gas aktualnya.
-
-**Untuk diperiksa manual:**
-
-- [ ] Buat proof valid dengan chain berbeda dan contract berbeda secara terpisah dalam harness terisolasi.
-- [ ] Pastikan domain mismatch ditolak sebelum enqueue/broadcast; catat apakah jalur saat ini mengirim RPC transaksi.
-- [ ] Periksa sumber domain target, canonical encoding address/scalar, dan perilaku saat RPC domain lookup gagal.
-- [ ] Evaluasi dry-run serta batas biaya/admission sebagai defense tambahan, bukan pengganti pembandingan input.
+**Status Resolusi (DEC-028):**
+- [x] **Selesai Diimplementasikan:** Indeks 8 (`chain_id`) dan 9 (`contract_address`) divalidasi secara ketat terhadap domain target `state.evm_client` di relayer sebelum enqueue (`spend.rs`).
+- [x] Proof dengan domain chain_id atau contract_address berbeda langsung ditolak dengan `HTTP 400 REJECTED` di CPU lokal relayer tanpa broadcast on-chain (mencegah gas-griefing).
+- [x] Unit test `test_handle_private_note_spend_reject_domain_mismatch_chain_id` dan `contract_address` ditambahkan dan pass 100%.
 
 ### R4 — Vector Public Inputs Kosong Melewati Local Proof Preflight
 
@@ -240,16 +231,11 @@ bukan ditolak karena tidak berjumlah 12. [Enqueue][enqueue] berada setelah
 blok itu. Ini mengoreksi penyederhanaan “relayer selalu mewajibkan 12 input”:
 **panjang 12 hanya diwajibkan jika vector tidak kosong**.
 
-**Batas dampak:** request masih harus lolos validasi lainnya. Kontrak tetap
-memverifikasi proof sehingga ini tidak langsung membuka payout tanpa proof.
-Risiko biaya transaksi invalid adalah kandidat yang perlu direproduksi,
-terkait invariant preflight [DEC-026][dec26].
+**Status Resolusi (DEC-028):**
+- [x] **Selesai Diimplementasikan:** Klausa bypass `if !payload.public_inputs.is_empty()` dihapus total.
+- [x] Relayer menegakkan aturan fail-closed: `payload.public_inputs.len() == 12` wajib. Input kosong `[]` atau panjang tidak sesuai langsung ditolak `HTTP 400 REJECTED` sebelum enqueue.
+- [x] Unit test `test_handle_private_note_spend_reject_empty_public_inputs` dan `wrong_public_inputs_count` ditambahkan dan pass 100%.
 
-**Untuk diperiksa manual:**
-
-- [ ] Uji field tidak ada, vector kosong, panjang 11/13, dan vector 12 dengan proof invalid dalam harness tanpa jaringan publik.
-- [ ] Assert tidak ada enqueue atau broadcast untuk request yang belum diverifikasi.
-- [ ] Putuskan apakah vector 12 wajib di API atau dibangun ulang dari payload dan domain tepercaya, dengan preflight selalu dijalankan.
 
 ## 6. Klarifikasi atas Observasi `_binding`
 

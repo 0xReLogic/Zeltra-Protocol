@@ -39,21 +39,11 @@ pub async fn handle_private_spend_quote(
         ));
     }
 
-    // Determine fee tier from association_root if provided
-    let (fee_bps, fee_tier, discount_bps) =
-        match resolve_fee_tier(&state, query.association_root.as_deref()).await {
-            Ok(info) => info,
-            Err(msg) => {
-                return Json(error_response(
-                    query.merchant_amount,
-                    relayer_gas_cost,
-                    ccip_network_fee,
-                    destination_chain_selector,
-                    relayer_markup_bps,
-                    &msg,
-                ));
-            }
-        };
+    // DEC-028: Protocol spend fee is unified to flat 45 bps (0.45%) permanently.
+    // Holding-time discount tiers and root aging gaming are abolished.
+    let fee_bps = nimbus_core::PRIVATE_SPEND_FEE_BPS;
+    let fee_tier = None;
+    let discount_bps = None;
 
     // Calculate spend quote: markup is applied ONLY to relayer gas, CCIP fee is pass-through
     let quote_opt = match ccip_network_fee {
@@ -190,78 +180,6 @@ pub async fn handle_private_spend_quote(
         message: "Sign the ExecutionQuote message in your wallet to authorize this spend"
             .to_string(),
     })
-}
-
-/// Resolves the applicable fee tier. Returns (fee_bps, tier_label, discount_bps).
-/// If no root provided or root not found, falls back to default 45 bps (PRIVATE_SPEND_FEE_BPS).
-async fn resolve_fee_tier(
-    state: &AppState,
-    association_root: Option<&str>,
-) -> Result<(u64, Option<String>, Option<u64>), String> {
-    let Some(root) = association_root else {
-        return Ok((nimbus_core::PRIVATE_SPEND_FEE_BPS, None, None));
-    };
-
-    let root_timestamp = get_root_timestamp(state, root).await?;
-    if root_timestamp == 0 {
-        return Ok((
-            nimbus_core::PRIVATE_SPEND_FEE_BPS,
-            Some("unregistered".to_string()),
-            None,
-        ));
-    }
-
-    let now = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap()
-        .as_secs();
-
-    let holding_secs = now.saturating_sub(root_timestamp);
-    let fee_bps = nimbus_core::spend_fee_bps_for_holding(holding_secs);
-    let discount = nimbus_core::PRIVATE_SPEND_FEE_BPS.saturating_sub(fee_bps);
-
-    let tier = if fee_bps == nimbus_core::SPEND_FEE_30DAY_BPS {
-        "30+ days (long-term discount)"
-    } else {
-        "default"
-    };
-
-    Ok((
-        fee_bps,
-        Some(tier.to_string()),
-        if discount > 0 { Some(discount) } else { None },
-    ))
-}
-
-/// Gets root timestamp from cache or RPC, populating cache on miss.
-async fn get_root_timestamp(state: &AppState, root_hex: &str) -> Result<u64, String> {
-    let normalized = root_hex.trim_start_matches("0x").to_lowercase();
-
-    // Check cache
-    {
-        let cache = state.root_timestamp_cache.lock().await;
-        if let Some(&ts) = cache.get(&normalized) {
-            return Ok(ts);
-        }
-    }
-
-    // Cache miss — query RPC
-    let Some(ref evm) = state.evm_client else {
-        return Ok(0);
-    };
-
-    let ts = evm
-        .get_clean_root_timestamp(root_hex)
-        .await
-        .map_err(|e| format!("RPC query failed: {}", e))?;
-
-    // Populate cache
-    {
-        let mut cache = state.root_timestamp_cache.lock().await;
-        cache.insert(normalized, ts);
-    }
-
-    Ok(ts)
 }
 
 fn default_gas_cost() -> u64 {

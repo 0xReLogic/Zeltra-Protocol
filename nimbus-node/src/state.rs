@@ -46,6 +46,7 @@ pub struct AppState {
     pub rpc_circuit_breaker: CircuitBreaker,
 
     /// Cache for clean_association_roots: root_hex -> registration timestamp
+    #[allow(dead_code)]
     pub root_timestamp_cache: Arc<Mutex<HashMap<String, u64>>>,
 
     /// Relayer Ethereum address (for EIP-712 quote signing)

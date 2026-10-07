@@ -1273,6 +1273,7 @@ impl EvmClient {
         Ok(hex::encode(signature.as_bytes()))
     }
 
+    #[allow(dead_code)]
     pub async fn get_clean_root_timestamp(&self, root_hex: &str) -> Result<u64> {
         let root_bytes =
             hex::decode(root_hex.trim_start_matches("0x")).context("Invalid root hex")?;
@@ -1368,6 +1369,11 @@ impl EvmClient {
     /// Get the contract address as a hex string
     pub fn contract_address(&self) -> String {
         format!("{:?}", self.contract_address)
+    }
+
+    /// Get the raw contract address
+    pub fn contract_address_raw(&self) -> Address {
+        self.contract_address
     }
 
     /// Get the chain ID from the provider

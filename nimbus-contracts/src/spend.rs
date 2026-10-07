@@ -195,21 +195,13 @@ impl Nimbus {
         }
 
         // `amount` is the exact merchant/recipient payout. Fees are debited on top.
-        // Private spend / transaction fee: flat 0.45% (default), or holding-time discount (0.40% >= 30 days)
-        let mut fee_bps = U256::from(45); // 0.45%
+        // Private spend / transaction fee: unified flat 0.45% (DEC-028)
+        let fee_bps = U256::from(45); // 0.45% Flat
 
         if root != FixedBytes::ZERO {
             let root_timestamp = self.clean_association_roots.get(root);
             if root_timestamp == U256::ZERO {
                 return Err(b"INVALID_ASSOCIATION_ROOT".to_vec());
-            }
-            let delta_t = current_time
-                .checked_sub(root_timestamp)
-                .unwrap_or(U256::ZERO);
-            let thirty_days = U256::from(30 * 24 * 60 * 60);
-
-            if delta_t >= thirty_days {
-                fee_bps = U256::from(40); // 0.40% (1 month hold)
             }
         }
 
