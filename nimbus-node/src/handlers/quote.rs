@@ -192,88 +192,45 @@ pub async fn handle_private_spend_quote(
     })
 }
 
-/// Resolves the applicable fee tier (DEC-027 Dynamic Liquidity-Outflow Economic Fee Model).
-/// Returns (fee_bps, tier_label, discount_bps).
-/// - If EVM client is available and pool TVL > 0, calculates dynamic fee based on rolling 24h outflow.
-/// - If holding duration >= 30 days, applies 5 bps discount.
-/// - Falls back to static tier (45 bps / 40 bps) if offline, in tests, or if TVL is unqueried.
+/// Resolves the applicable fee tier. Returns (fee_bps, tier_label, discount_bps).
+/// If no root provided or root not found, falls back to default 45 bps (PRIVATE_SPEND_FEE_BPS).
 async fn resolve_fee_tier(
     state: &AppState,
     association_root: Option<&str>,
 ) -> Result<(u64, Option<String>, Option<u64>), String> {
-    // 1. Calculate holding duration if association root is provided
-    let mut holding_secs = 0;
-    let mut root_unregistered = false;
-
-    if let Some(root) = association_root {
-        let root_timestamp = get_root_timestamp(state, root).await?;
-        if root_timestamp == 0 {
-            root_unregistered = true;
-        } else {
-            let now = std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_secs();
-            holding_secs = now.saturating_sub(root_timestamp);
-        }
-    }
-
-    // 2. Query on-chain pool TVL (total deposited principal)
-    let pool_tvl_opt = match state.evm_client.as_ref() {
-        Some(evm) => match evm.get_pool_tvl().await {
-            Ok(tvl) if tvl > 0 => Some(tvl),
-            _ => None,
-        },
-        None => None,
+    let Some(root) = association_root else {
+        return Ok((nimbus_core::PRIVATE_SPEND_FEE_BPS, None, None));
     };
 
-    // 3. Resolve dynamic or fallback fee
-    if let Some(pool_tvl) = pool_tvl_opt {
-        let rolling_outflow = state.db.get_rolling_outflow_24h().await.unwrap_or(0);
-
-        let fee_bps =
-            nimbus_core::calculate_dynamic_outflow_fee_bps(rolling_outflow, pool_tvl, holding_secs);
-
-        let discount_bps = if holding_secs >= nimbus_core::THIRTY_DAYS_SECS {
-            Some(nimbus_core::HOLDING_DISCOUNT_30DAY_BPS)
-        } else {
-            None
-        };
-
-        let u_bps =
-            ((rolling_outflow as u128).saturating_mul(10_000) / (pool_tvl as u128).max(1)) as u64;
-        let u_pct = u_bps as f64 / 100.0;
-
-        let tier_desc = if root_unregistered {
-            format!("dynamic ({:.2}% 24h util, unregistered root)", u_pct)
-        } else if discount_bps.is_some() {
-            format!("dynamic ({:.2}% 24h util, 30+ days discount)", u_pct)
-        } else {
-            format!("dynamic ({:.2}% 24h util)", u_pct)
-        };
-
-        Ok((fee_bps, Some(tier_desc), discount_bps))
-    } else {
-        // Fallback: static fee tier (when offline, in tests, or zero on-chain TVL)
-        let fee_bps = nimbus_core::spend_fee_bps_for_holding(holding_secs);
-        let discount = nimbus_core::PRIVATE_SPEND_FEE_BPS.saturating_sub(fee_bps);
-
-        let tier = if root_unregistered {
-            Some("unregistered".to_string())
-        } else if fee_bps == nimbus_core::SPEND_FEE_30DAY_BPS {
-            Some("30+ days (long-term discount)".to_string())
-        } else if association_root.is_some() {
-            Some("default".to_string())
-        } else {
-            None
-        };
-
-        Ok((
-            fee_bps,
-            tier,
-            if discount > 0 { Some(discount) } else { None },
-        ))
+    let root_timestamp = get_root_timestamp(state, root).await?;
+    if root_timestamp == 0 {
+        return Ok((
+            nimbus_core::PRIVATE_SPEND_FEE_BPS,
+            Some("unregistered".to_string()),
+            None,
+        ));
     }
+
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs();
+
+    let holding_secs = now.saturating_sub(root_timestamp);
+    let fee_bps = nimbus_core::spend_fee_bps_for_holding(holding_secs);
+    let discount = nimbus_core::PRIVATE_SPEND_FEE_BPS.saturating_sub(fee_bps);
+
+    let tier = if fee_bps == nimbus_core::SPEND_FEE_30DAY_BPS {
+        "30+ days (long-term discount)"
+    } else {
+        "default"
+    };
+
+    Ok((
+        fee_bps,
+        Some(tier.to_string()),
+        if discount > 0 { Some(discount) } else { None },
+    ))
 }
 
 /// Gets root timestamp from cache or RPC, populating cache on miss.
@@ -378,8 +335,8 @@ mod tests {
     use std::collections::HashMap;
 
     async fn test_state() -> AppState {
-        let tmp_dir = tempfile::TempDir::new().unwrap().keep();
-        let db_path = tmp_dir.join("quote_test.db");
+        let tmp = tempfile::TempDir::new().unwrap();
+        let db_path = tmp.path().join("quote_test.db");
         let db = Database::new(&db_path).await.unwrap();
         AppState::new(
             db,
@@ -474,49 +431,5 @@ mod tests {
         .await;
 
         assert_eq!(response.0.status, "ERROR");
-    }
-
-    #[tokio::test]
-    async fn resolve_fee_tier_fallback_offline() {
-        let state = test_state().await;
-
-        // 1. Without association root -> defaults to 45 bps (no tier description)
-        let (fee_bps, tier, discount) = resolve_fee_tier(&state, None).await.unwrap();
-        assert_eq!(fee_bps, nimbus_core::PRIVATE_SPEND_FEE_BPS);
-        assert!(tier.is_none());
-        assert!(discount.is_none());
-
-        // 2. With unregistered association root -> 45 bps, Some("unregistered"), no discount
-        let dummy_root = "0x111122223333444455556666777788889999aaaabbbbccccddddeeeeffff0000";
-        let (fee_bps, tier, discount) = resolve_fee_tier(&state, Some(dummy_root)).await.unwrap();
-        assert_eq!(fee_bps, nimbus_core::PRIVATE_SPEND_FEE_BPS);
-        assert_eq!(tier.as_deref(), Some("unregistered"));
-        assert!(discount.is_none());
-    }
-
-    #[tokio::test]
-    async fn resolve_fee_tier_with_simulated_dynamic_velocity() {
-        let state = test_state().await;
-
-        // When rolling outflow is queried from db (empty = 0)
-        let outflow = state.db.get_rolling_outflow_24h().await.unwrap();
-        assert_eq!(outflow, 0);
-
-        // Calculate dynamic fee with healthy TVL (100k USDC) and zero outflow
-        let tvl = 100_000_000_000u64;
-        let fee_floor = nimbus_core::calculate_dynamic_outflow_fee_bps(outflow, tvl, 0);
-        assert_eq!(fee_floor, nimbus_core::DYNAMIC_FEE_FLOOR_BPS); // 35 bps
-
-        // With 20% TVL outflow (20,000 USDC) -> reaches optimal 45 bps
-        let fee_optimal = nimbus_core::calculate_dynamic_outflow_fee_bps(20_000_000_000, tvl, 0);
-        assert_eq!(fee_optimal, 45);
-
-        // With 30+ days holding discount -> 40 bps
-        let fee_disc = nimbus_core::calculate_dynamic_outflow_fee_bps(
-            20_000_000_000,
-            tvl,
-            nimbus_core::THIRTY_DAYS_SECS,
-        );
-        assert_eq!(fee_disc, 40);
     }
 }

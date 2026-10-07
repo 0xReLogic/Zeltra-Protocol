@@ -1959,30 +1959,6 @@ impl Database {
         .await?
     }
 
-    /// Get rolling 24-hour confirmed outflow volume in USDC base units (DEC-027).
-    /// Used by dynamic outflow fee pricing to calculate pool velocity (V_out / TVL).
-    pub async fn get_rolling_outflow_24h(&self) -> Result<u64> {
-        let path = self.path.clone();
-        let db_key = database_key()?;
-
-        task::spawn_blocking(move || -> Result<u64> {
-            let conn = open_connection(&path, &db_key)?;
-            let now = unix_timestamp()?;
-            let cutoff = now.saturating_sub(86_400); // 24 hours ago
-
-            let total: i64 = conn.query_row(
-                "SELECT COALESCE(SUM(amount), 0)
-                 FROM spend_queue
-                 WHERE (status = 'confirmed' OR processed = 1) AND created_at >= ?",
-                params![cutoff],
-                |row| row.get(0),
-            )?;
-
-            Ok(total.max(0) as u64)
-        })
-        .await?
-    }
-
     /// Get database statistics (for monitoring)
     pub async fn get_stats(&self) -> Result<DbStats> {
         let path = self.path.clone();
@@ -2730,46 +2706,5 @@ mod tests {
         assert_eq!(updated_metrics.claimed_execution_fees_usdc, 15_000_000);
         assert_eq!(updated_metrics.unclaimed_execution_fees_usdc, 25_000_000);
         assert_eq!(updated_metrics.total_execution_fees_usdc, 40_000_000);
-    }
-
-    #[tokio::test]
-    async fn test_rolling_outflow_24h_calculation() {
-        std::env::set_var("NIMBUS_DB_KEY", "test-encryption-key");
-        let tmp = TempDir::new().unwrap();
-        let db_path = tmp.path().join("rolling_outflow.db");
-        let db = Database::new(&db_path).await.unwrap();
-
-        // 1. Initially zero outflow
-        assert_eq!(db.get_rolling_outflow_24h().await.unwrap(), 0);
-
-        // 2. Enqueue two spends (10 USDC and 25 USDC)
-        let mut req1 = sample_spend("0xoutflow-1");
-        req1.amount = 10_000_000;
-        let q1 = db.enqueue_spend(&req1).await.unwrap().unwrap();
-
-        let mut req2 = sample_spend("0xoutflow-2");
-        req2.amount = 25_000_000;
-        let q2 = db.enqueue_spend(&req2).await.unwrap().unwrap();
-
-        // Still 0 before confirmation (unconfirmed/pending spends do not count as settled outflow)
-        assert_eq!(db.get_rolling_outflow_24h().await.unwrap(), 0);
-
-        // Worker claims the queued spends (status transitions from 'queued' to 'broadcasting')
-        let claimed = db.claim_spends(10, 60).await.unwrap();
-        assert_eq!(claimed.len(), 2);
-
-        // 3. Confirm first spend -> 10 USDC outflow
-        db.mark_spend_submitted(q1, "0xtx1").await.unwrap();
-        db.mark_spend_confirmed(q1, &req1.nullifier, "0xtx1", 100)
-            .await
-            .unwrap();
-        assert_eq!(db.get_rolling_outflow_24h().await.unwrap(), 10_000_000);
-
-        // 4. Confirm second spend -> 10 + 25 = 35 USDC outflow
-        db.mark_spend_submitted(q2, "0xtx2").await.unwrap();
-        db.mark_spend_confirmed(q2, &req2.nullifier, "0xtx2", 101)
-            .await
-            .unwrap();
-        assert_eq!(db.get_rolling_outflow_24h().await.unwrap(), 35_000_000);
     }
 }
