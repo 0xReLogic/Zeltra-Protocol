@@ -61,3 +61,17 @@ Dokumen ini memetakan paper terpilih untuk lapisan kriptografi fundamental Nimbu
   * Komponen utama: [`nimbus-core/src/bbs_credential.rs`](file:///workspaces/Zeltra-Protocol/nimbus-core/src/bbs_credential.rs) (baru) dan [`nimbus-node/src/guardian/credential_issuer.rs`](file:///workspaces/Zeltra-Protocol/nimbus-node/src/guardian/credential_issuer.rs) (baru).
   * Alur baru: User memblind atribut `session_id` dan `deposit_address` sebelum mengirim issuance request ke guardian cluster. Guardian hanya menandatangani blinded commitment — tidak pernah melihat nilai asli. User unmask setelah threshold signature terkumpul.
   * Dampak keamanan: Menghapus asumsi "guardian tidak kolusi" dari threat model Nimbus. Bahkan jika semua 5 guardian berkolusi, mereka tidak dapat menghubungkan credential yang diterbitkan ke transaksi deposit spesifik.
+
+---
+
+## 6. Auditable Data Structures: Strong History-Independence (IACR ePrint 2016/755)
+* **File Jurnal / PDF:** [`jurnal/pdf/2016-755.pdf`](file:///workspaces/Zeltra-Protocol/jurnal/pdf/2016-755.pdf)
+* **Penulis:** Michael T. Goodrich, Evgenios M. Kornaropoulos, Michael Mitzenmacher, Roberto Tamassia
+* **Problem di Sistem Klasik:**
+  Struktur data pohon kriptografis standar (seperti Merkle trees, skip lists, dynamic dictionaries) sering kali membocorkan riwayat urutan operasi (*history leakage*). Pola penyisipan daun atau node internal dapat digunakan oleh penyerang untuk merekonstruksi kronologi urutan transaksi historis antar pengguna.
+* **Inovasi Paper:**
+  Merumuskan standar dan pembuktian formal untuk *Strongly History-Independent (SHI)* auditable data structures. Struktur data SHI menjamin bahwa representasi memori dan status kriptografis hanya bergantung secara eksklusif pada himpunan data aktif saat ini, dan secara independen seragam terhadap urutan penyisipan atau penghapusan masa lalu.
+* **Implementasi di Nimbus Core:**
+  * Komponen: [`nimbus-core/src/merkle.rs`](file:///workspaces/Zeltra-Protocol/nimbus-core/src/merkle.rs) dan pemetaan nullifier ZK-UTXO.
+  * Memastikan struktur pohon komitmen LeanIMT dan hash nullifier bersifat *Strongly History-Independent*: pihak luar yang mengaudit state ledger hanya melihat status validitas saat ini tanpa dapat merekonstruksi urutan transaksi masa lalu antar pengguna.
+

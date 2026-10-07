@@ -1,10 +1,10 @@
-# DEC-027: Dynamic Liquidity-Outflow Economic Fee Model, Inflow Compliance Gate, and Relayer Anti-Limbo Mempool Lifecycle
+# DEC-027: Predictable Outflow Economic Model, Inflow Compliance Gate, and Relayer Anti-Limbo Mempool Lifecycle
 
 - **Status:** Proposed & Accepted (Architecture Core Decision)
 - **Author:** Zeltra Protocol Architecture Team
-- **Date:** 2026-10-05
-- **Impact Areas:** `nimbus-core` (dynamic fee pricing curve & velocity accounting), `nimbus-node` (deposit ingress screening, dynamic mempool lease watchdog), `nimbus-contracts` (deposit refund invariant guarantees), `research/economics`
-- **Architectural Paradigm:** *"Solvency by Mathematics, Security at Ingress, Self-Custody at Mempool"*
+- **Date:** 2026-10-05 (Updated 2026-10-07)
+- **Impact Areas:** `nimbus-core` (fee policy & solvency invariants), `nimbus-node` (deposit ingress screening, dynamic mempool lease watchdog), `nimbus-contracts` (deposit refund invariant guarantees), `research/economics`
+- **Architectural Paradigm:** *"Solvency by Mathematics, Predictability for Users, Security at Ingress, Self-Custody at Mempool"*
 
 ---
 
@@ -13,46 +13,38 @@
 Evaluasi independen terhadap Zeltra Protocol menyoroti tiga tantangan struktural yang berpotensi mengancam keberlanjutan ekonomi, kepatuhan hukum, dan pengalaman pengguna:
 
 1. **Free-Parking Risk vs. TVL Anonymity Shield:**
-   Protokol mematok biaya deposit permanen 0 bps dan hanya menarik biaya saat pengeluaran (outflow 40–45 bps). Muncul kekhawatiran bahwa jika paus kripto atau agen AI menyimpan jutaan USDC secara pasif (brankas dingin on-chain), relayer tetap menanggung biaya operasional (indexing, Merkle tree state, RPC node) tanpa pemasukan. Usulan reviewer untuk memarkir dana di protokol pinjaman pihak ketiga (misal: Aave) ditolak mentah-mentah karena memperkenalkan *composability risk* dan ancaman insolvensi eksternal.
+   Protokol mematok biaya deposit permanen 0 bps dan hanya menarik biaya saat pengeluaran (outflow 40–45 bps). Muncul kekhawatiran bahwa jika paus kripto atau agen AI menyimpan jutaan USDC secara pasif (brankas dingin on-chain), relayer tetap menanggung biaya operasional (indexing, Merkle tree state, RPC node) tanpa pemasukan. Usulan reviewer luar untuk memarkir dana di protokol pinjaman pihak ketiga (misal: Aave/Compound) **ditolak mentah-mentah** karena memperkenalkan *composability risk* dan ancaman insolvensi eksternal yang melanggar invariant `Assets >= Liabilities`.
 2. **Kelemahan Penyaringan Penerima (Recipient-Only Filter Flaw):**
-   Menyaring alamat sanksi OFAC murni di sisi penerima (*spend recipient*) adalah celah fatal: peretas tidak pernah mengirim dana curian ke alamat yang sudah masuk daftar hitam (seperti Tornado Router atau alamat Lazarus); mereka selalu menarik dana ke alamat baru (*fresh wallet*). Jika penyaringan hanya ada di pintu keluar, dana hasil eksploitasi dapat masuk secara bebas.
+   Menyaring alamat sanksi OFAC murni di sisi penerima (*spend recipient*) adalah celah fatal: peretas tidak pernah mengirim dana curian ke alamat yang sudah masuk daftar hitam (seperti Tornado Router atau alamat Lazarus); mereka selalu menarik dana ke alamat baru (*fresh wallet*). Jika penyaringan hanya ada di pintu keluar, dana hasil eksploitasi dapat masuk secara bebas mencemari *shielded pool*.
 3. **Mempool Stalling & Hilangnya Kedaulatan Pengguna (Mempool Limbo):**
    Jika lonjakan gas jaringan menyebabkan transaksi spend macet di mempool melebihi batas `max_gas_bumps` (3x), relayer menghentikan upaya (*sleep*). Karena nullifier dikunci di database relayer lokal untuk mencegah *double-spending*, dana pengguna terjebak dalam status `failed settlement` tanpa kepastian, melanggar prinsip *strict self-custody*.
 
-Keputusan arsitektur ini merumuskan mitigasi terintegrasi untuk ketiga persoalan di atas.
+Keputusan arsitektur ini merumuskan mitigasi terintegrasi untuk persoalan di atas dengan mengutamakan kenyamanan pengguna, prediktabilitas agen AI, dan ketahanan kriptografi tingkat institusi.
 
 ---
 
-## 2. Dynamic Liquidity-Outflow Fee Model (Kinked Reserve-Velocity Curve)
+## 2. Predictable Flat Fee Rails & Penolakan Model Dynamic Fee (Economic Predictability over Surge Volatility)
 
-### A. Prinsip Dasar: TVL adalah Perisai Privasi (Anonymity Shield)
-Tanpa Total Value Locked (TVL) yang besar dan mengendap, kolam privasi (*anonymity set*) menjadi rapuh terhadap analisis waktu (*timing*) dan nominal (*amount clustering*). Oleh karena itu, modal pasif **tidak boleh dihukum dengan biaya diam harian (*idle fees*)** yang merusak kepercayaan penyimpan dana.
+### A. Mengapa Model Dynamic Fee / Kinked Curve Ditolak ("Haram" bagi Pengguna Kripto & AI Agent)
+Meskipun model biaya dinamis berbasis utilisasi (*kinked utilization curve* ala Aave/Uniswap) tampak menarik secara teoretis, analisis mendalam terhadap perilaku pasar kripto (*crypto-native psychology*) dan otomatisasi agen AI membuktikan bahwa kurva dinamis pada rel privasi menghasilkan efek destruktif:
 
-Sebagai gantinya, protokol menerapkan model **Dynamic Outflow Fee berbasis Rasio Utilisasi Penarikan ($U$)**, diadaptasi dari prinsip *kinked interest-rate model* (Aave/Compound) dan *dynamic AMM fee curves* (Uniswap v4 hooks), namun dihitung murni secara internal tanpa interaksi kontrak eksternal.
+1. **Kehancuran Mental Accounting UX ($10 - $3 = $7):**
+   Keunggulan produk utama Zeltra adalah *"Privacy 9.5/10, Product 10/10"* dengan kecepatan Apple Pay / QRIS dan akuntansi mental uang kas nyata. Jika pengguna membayar $3 dari note $10, mereka mengharapkan kembalian uang pas $7 (dikurangi fee tetap yang sudah diketahui di awal). Jika biaya penarikan berfluktuasi antara 35 bps hingga 70 bps tergantung volume penarikan orang lain di blok tersebut, pengguna merasa "dijebak" atau "dipalak" saat jaringan sibuk.
+2. **Kegagalan Deterministik pada Agen AI (Budget Allowance Breaking):**
+   AI Agent beroperasi otonom menggunakan kuota pengeluaran terikat (*task-scoped allowance* via EIP-7702 / x402). Fluktuasi tarif keluar dinamis memicu kesalahan *underfunded execution* dan kegagalan transaksi sistemik saat lonjakan pasar terjadi.
+3. **Eliminasi Vektor Eksploitasi Flash-Loan & Manipulasi Oracle:**
+   Sebagaimana terbukti pada post-mortem Euler Finance (2023) dan zkLend (2024), kurva dinamis yang bergantung pada rasio cadangan membuka celah serangan pinjaman kilat (*flash loan fee manipulation*). Dengan menetapkan tarif flat transparan, attack surface manipulasi fee intra-blok terhapus 100%.
 
-### B. Formulasi Matematis
-Definisikan rasio penarikan pool pada jendela waktu bergulir $\tau$ (misal: 24 jam):
-$$U_t = \frac{\Delta V_{\text{out, } \tau}}{T_t}$$
+### B. Formulasi Tarif Terprediksi (Predictable Transparent Fee Rails)
+Zeltra Protocol menetapkan struktur biaya tetap yang transparan dan deterministik:
 
-di mana:
-* $\Delta V_{\text{out, } \tau}$ = Total volume pengeluaran/penarikan dalam jendela waktu $\tau$
-* $T_t$ = Total Shielded Balance (kolam USDC di smart contract) pada waktu $t$
-* $U_{\text{optimal}}$ = Ambang batas perputaran normal (ditetapkan pada $0.20$ atau 20% TVL per hari)
+* **Deposit Inflow:** **0 bps (0.00% Permanen)** — Bebas gesekan, mendorong adopsi modal tanpa hambatan.
+* **Spend Outflow Standard (< 30 hari):** **45 bps (0.45% Flat)** — Biaya protokol terprediksi untuk transaksi harian.
+* **Spend Outflow Long-Term Hold (≥ 30 hari):** **40 bps (0.40% Flat — Diskon Loyalitas 5 bps)** — Dihitung secara objektif dari timestamp registrasi Merkle root (`clean_association_roots`) di smart contract.
+* **Eksekusi Relayer:** **Gas Reimbursement Aktual + 15% Markup Transparan** — Terikat secara kriptografis pada kuotasi EIP-712 dengan batas kedaluwarsa 5–15 menit.
 
-Formula penetapan tarif keluar $\text{Fee}(U)$:
-$$\text{Fee}(U) = \begin{cases} 
-R_{\text{floor}} + \left(\frac{U}{U_{\text{optimal}}}\right) \times R_{\text{base}} & \text{jika } U \le U_{\text{optimal}} \\ 
-R_{\text{floor}} + R_{\text{base}} + \left(\frac{U - U_{\text{optimal}}}{1 - U_{\text{optimal}}}\right) \times R_{\text{surge}} & \text{jika } U > U_{\text{optimal}} 
-\end{cases}$$
-
-Parameter default:
-* $R_{\text{floor}} = 35 \text{ bps}$ (0.35% — diskon saat TVL sangat tebal dan likuiditas melimpah)
-* $R_{\text{base}} = 10 \text{ bps}$ (Mencapai 45 bps pada kondisi utilisasi optimal $U_{\text{optimal}}$)
-* $R_{\text{surge}} = 25 \text{ bps}$ (Maksimal 70 bps pada saat terjadi penarikan masif / *bank-run stress*)
-
-### C. Efek Teori Permainan (Game-Theoretic Dynamics)
-1. **Insentif TVL:** Semakin besar modal yang diparkir oleh paus, $T_t$ semakin besar, $U_t$ semakin rendah, sehingga seluruh ekosistem (agen AI dan ritel) menikmati tarif keluar termurah (35 bps).
-2. **Pertahanan Bank-Run:** Penarikan mendadak dalam skala masif secara otomatis memicu *surge pricing*, mengompensasi kas infrastruktur relayer dan mendorong penarik dana untuk membagi jadwal transaksi secara bertahap.
+### C. Filosofi Keberlanjutan: Volume over TVL Velocity
+Keberlanjutan finansial relayer dan ekosistem dicapai melalui **kecepatan perputaran modal (velocity)** dari pembayaran agen AI dan retail mikro, bukan dari memeras penarikan pengguna dengan *surge penalty* atau memungut biaya diam (*idle fees*). TVL yang tebal berfungsi sebagai *anonymity shield* yang memperluas *privacy set* bagi seluruh peserta ekosistem.
 
 ---
 
@@ -69,7 +61,7 @@ Peretas yang mengeksploitasi protokol DeFi memindahkan dana dari alamat korban/k
    * Pemeriksaan dinamis via *free view call* (`eth_call`) terhadap smart contract Oracle Sanctions resmi di Arbitrum.
    * Melindungi relayer terhadap alamat yang baru saja dilaporkan dalam beberapa menit terakhir dan belum tersinkronisasi ke berkas JSON lokal.
 
-### C. Ketiadaan Kebutuhan Sirkuit ZK-Compliance Tambahan
+### C. Ketiadaan Kebutuhan Sirkuit ZK-Compliance Tambahan pada Inflow
 Reviewer mengusulkan penambahan sirkuit ZK-Compliance $N$-derajat di sisi klien. Pendekatan ini ditolak untuk transaksi sehari-hari karena:
 * Menghancurkan performa UX (waktu pembuktian di perangkat seluler membengkak dari 1.2 detik menjadi >6 detik).
 * Pengguna Zeltra sudah memiliki komitmen kriptografis ZK-UTXO (Groth16). Untuk kebutuhan penarikan ke CEX atau audit pajak, SDK menyediakan fitur *Selective Disclosure on-demand* (menghasilkan bukti kepemilikan dan timestamp deposit) tanpa membebani transaksi privat reguler.
@@ -129,13 +121,13 @@ Untuk mencegah dana pengguna terkunci dalam status limbo di database relayer aki
 
 Berdasarkan studi empiris atas insiden keamanan DeFi dan audit Account Abstraction (2023–2026), berikut adalah pemetaan kegagalan nyata (*exploit post-mortems*) dan mitigasi arsitektur DEC-027:
 
-### A. 🔴 Vektor 1: Manipulasi Kurva Dynamic Fee via Flash-Deposit (Studi Kasus: Post-Mortem Euler Finance & zkLend)
+### A. 🔴 Vektor 1: Risiko Volatilitas Fee & Manipulasi Kurva (Alasan Penolakan Model Dinamik)
 * **Preseden Nyata (Post-Mortem):**
-  Insiden peretasan likuiditas (Euler Finance 2023, zkLend 2024) membuktikan bahwa kurva utilisasi instan yang bergantung pada rasio cadangan spot (*spot balance*) rentan dimanipulasi dalam satu blok (*single-block flash loan attack*). Penyerang dapat meminjam modal raksasa secara kilat untuk mendorong rasio $U$ ke titik ekstrem, memicu lompatan fee buatan (*surge price spikes*), lalu mengekstrak keuntungan arbitrase atau memeras pengguna lain.
+  Insiden peretasan likuiditas (Euler Finance 2023, zkLend 2024) membuktikan bahwa kurva utilisasi instan yang bergantung pada rasio cadangan spot (*spot balance*) rentan dimanipulasi dalam satu blok (*single-block flash loan attack*).
 * **Mitigasi Zeltra:**
-  1. **Time-Weighted Average Velocity (TWAV):** Penghitungan volume keluar $\Delta V_{\text{out, } \tau}$ menolak *spot balance* dan wajib menggunakan rata-rata tertimbang waktu bergulir 24 jam ($\tau = 86400$ detik). Fluktuasi likuiditas kilat intra-blok teredam secara matematis.
-  2. **EIP-712 Quote Fee Binding (DEC-020):** Biaya keluar dikunci pada saat penerbitan quote dengan masa berlaku terbatas (maksimal 5–15 menit) dan ditandatangani secara kriptografis oleh relayer. Penyerang tidak dapat memanipulasi biaya transaksi yang quotenya telah diterbitkan.
-  3. **Invariant I1:** *Outflow fee rate cannot be manipulated intra-block by flash capital.*
+  1. Protokol menolak formula dinamis yang mudah dimanipulasi dan menerapkan **Flat Predictable Fee Rails** (45 bps standard / 40 bps diskon 30 hari).
+  2. Biaya eksekusi relayer dikunci secara kriptografis melalui skema EIP-712 Quote Binding (DEC-020).
+  3. **Invariant I1:** *Outflow fee rate is predictable, deterministic, and impervious to intra-block liquidity manipulation.*
 
 ### B. 🔴 Vektor 2: Desinkronisasi Mempool & False-Expiry Double-Spend Race (Studi Kasus: ERC-4337 & ERC-7562 Mempool Griefing Audits)
 * **Preseden Nyata (Post-Mortem):**
@@ -155,57 +147,26 @@ Berdasarkan studi empiris atas insiden keamanan DeFi dan audit Account Abstracti
   3. **Anti-Spam Economic Bound:** Smart contract Stylus menegakkan deposit minimum sebesar 5 USDC (`MIN_SPEND_AMOUNT_USDC`), menggugurkan serangan banjir transaksi mikro berbiaya nol.
   4. **Invariant I3:** *No deposit may be resolved or unmasked without passing fail-closed compliance verification.*
 
-### D. 🔴 Vektor 4: Ekstraksi MEV pada Batch Spend (Diselesaikan via Otter [2026/1877])
-* **Preseden Nyata (Post-Mortem):**
-  Dalam sistem bundling dan batching transaksi (misal: Flashbots bundle reordering, MEV sandwiching), relayer atau pencari MEV sering kali mengambil untung kotor dari selisih penghematan gas skala ekonomis (*batch amortization surplus*) tanpa membagikannya kepada pengguna akhir.
-* **Mitigasi Zeltra (Otter Surplus Redistribution):**
-  1. Protokol mengadopsi mekanisme *Surplus Redistribution* dari paper Elaine Shi et al. (IACR ePrint 2026/1877): Penghematan gas dari batching secara otomatis dibagikan kembali untuk menekan biaya eksekusi aktual pengguna.
-  2. Markup relayer dibatasi secara transparan pada 15% (`FEE_MARKUP_BPS`), diverifikasi secara kriptografis terhadap quote EIP-712.
-  3. **Invariant I4:** *Relayer batching cannot extract unearned surplus beyond the transparent 15% execution markup.*
-
 ---
 
 ## 6. Matriks Dampak & Rencana Implementasi
 
 | Komponen | Perubahan Arsitektur | File Terkait |
 | :--- | :--- | :--- |
-| **`nimbus-core`** | Implementasi fungsi `calculate_dynamic_outflow_fee(volume, tvl)` berbasis kinked curve | `fees.rs` |
+| **`nimbus-core`** | Pemeliharaan invariant formula flat predictable fee (45 bps standard / 40 bps diskon 30 hari) | `fees.rs` |
 | **`nimbus-node`** | Penambahan 2-layer sanctions screening pada ingress `handle_deposit` / reveal | `handlers/deposit.rs` |
 | **`nimbus-node`** | Implementasi berkala `mempool_lease_watchdog` dengan verifikasi `is_nullifier_spent` sebelum unspent lease | `database.rs`, `main.rs` |
 | **`nimbus-contracts`**| Mempertahankan `NIMBUS_REFUND_DELAY = 86400` sebagai *fail-closed invariant* tanpa penambahan kode berisiko | `deposit.rs` |
+| **`nimbus-sdk`** | Sinkronisasi status mempool `UNSPENT` pada dompet pengguna saat lease kedaluwarsa | `note_wallet.rs` |
 
 ---
 
-## 7. Integrasi Literatur Ilmiah Terkini (IACR Papers)
+## 7. Referensi Bibliografi & Studi Kasus Terkait
 
-Arsitektur DEC-027 secara langsung didasari dan diperkuat oleh riset kriptografi teruji:
-
-1. **ammBoost: State Growth Control for AMMs (IACR ePrint 2024/1021):**
-   - *Penulis:* Nicolas Michel, Mohamed E. Najd, Ghada Almashaqbeh (2024/2025).
-   - *Relevansi untuk Zeltra:* Menjawab kritik terkait pembengkakan state LeanIMT Merkle Tree on-chain. Zeltra mengadopsi prinsip *bounded historical root window* dan *cryptographic state pruning* dari paper ini, membatasi ukuran storage di Stylus WASM agar relayer dan node tidak mengalami degradasi performa atau kehabisan ruang penyimpanan.
-2. **Auditable Data Structures: Strong History-Independence (IACR ePrint 2016/755):**
-   - *Penulis:* Michael T. Goodrich, Evgenios M. Kornaropoulos, Michael Mitzenmacher, Roberto Tamassia.
-   - *Relevansi untuk Zeltra:* Membuktikan secara matematis bahwa struktur pohon Merkle dan pemetaan nullifier Zeltra bersifat *Strongly History-Independent (SHI)*: pengamat luar yang menganalisis state on-chain HANYA dapat melihat status validitas saat ini, dan secara kriptografis MUSTAHIL merekonstruksi kronologi/urutan transaksi masa lalu antar pengguna.
-3. **Otter: A Provably MEV-Resilient Automated Market Maker via Surplus Redistribution (IACR ePrint 2026/1877):**
-   - *Penulis:* Elaine Shi, Mengqian Zhang, Hao Chung, Yuhao Li (September 2026).
-   - *Relevansi untuk Zeltra:* Diterapkan pada mekanisme `batch_spend()` (DEC-006 & DEC-014). Mencegah bot pencari MEV melakukan frontrunning/sandwich pada bundle transaksi relayer di mempool Arbitrum, sekaligus menjamin pengembalian surplus eksekusi gas ke pengguna secara adil melalui model redistribusi surplus terbukti.
-
----
-
-## 8. Referensi Literatur Akademis & Dokumen Terkait
-
-1. **ammBoost: State Growth Control for AMMs** — Nicolas Michel, Mohamed E. Najd, Ghada Almashaqbeh. *IACR Cryptology ePrint Archive*, Report 2024/1021 (2025).
-   - *Arsip Lokal:* [`jurnal/pdf/2024-1021.pdf`](file:///workspaces/Zeltra-Protocol/jurnal/pdf/2024-1021.pdf).
-2. **Auditable Data Structures** — Michael T. Goodrich, Evgenios M. Kornaropoulos, Michael Mitzenmacher, Roberto Tamassia. *IACR Cryptology ePrint Archive*, Report 2016/755 (2016).
-   - *Arsip Lokal:* [`jurnal/pdf/2016-755.pdf`](file:///workspaces/Zeltra-Protocol/jurnal/pdf/2016-755.pdf).
-3. **Otter: A Provably MEV-Resilient Automated Market Maker via Surplus Redistribution** — Elaine Shi, Mengqian Zhang, Hao Chung, Yuhao Li. *IACR Cryptology ePrint Archive*, Report 2026/1877 (2026).
-   - *Arsip Lokal:* [`jurnal/pdf/2026-1877.pdf`](file:///workspaces/Zeltra-Protocol/jurnal/pdf/2026-1877.pdf).
-4. **Aave v3 Technical Paper: Interest Rate Strategy and Kinked Reserve Utilization Mechanics** — Emilio Frangella, Ernesto Boado (Aave Companies).
-5. **Blockchain Privacy and Regulatory Compliance: Towards a Practical Equilibrium** — Vitalik Buterin, Jacob Illum, Matthias Nadler, Fabian Schär, Ameen Soleimani. *Blockchain: Research and Applications*, Vol. 5, Issue 2 (2024).
-6. **ERC-4337 & ERC-7562: Account Abstraction Alt-Mempool Validation and Griefing Defense Audits** — OpenZeppelin, Alchemy, TrustSec (2023–2025).
-7. **Euler Finance & zkLend Flash-Loan Utilization Curve Exploits: Incident Analysis & Post-Mortem Reports** — BlockSec, Cyfrin, Sherlock (2023–2024).
-8. **Tornado Cash Frontend Compromise & Governance Takeover Post-Mortem Analysis** — OpenZeppelin, CertiK, SlowMist (2023–2024).
-9. **DEC-026: Receiver-Enforced Modular Compliance and Relayer Exposure Mitigation** — Zeltra Protocol, Oktober 2026.
-
+1. **Euler Finance & zkLend Flash-Loan Utilization Curve Exploits: Incident Analysis & Post-Mortem Reports** — BlockSec, Cyfrin, Sherlock (2023–2024). [Dasar penolakan dynamic pool surge curves pada privacy rails].
+2. **ERC-4337 & ERC-7562: Account Abstraction Alt-Mempool Validation and Griefing Defense Audits** — OpenZeppelin, Alchemy, TrustSec (2023–2025). [Dasar desain leasing 15 menit dan unspent watchdog].
+3. **Tornado Cash Frontend Compromise & Router Bypass Post-Mortem Analysis** — OpenZeppelin, CertiK, SlowMist (2022–2024). [Dasar fail-closed 2-layer sanctions screening].
+4. **Blockchain Privacy and Regulatory Compliance: Towards a Practical Equilibrium** — Vitalik Buterin, Jacob Illum, Matthias Nadler, Fabian Schär, Ameen Soleimani. *Blockchain: Research and Applications*, Vol. 5, Issue 2 (2024).
+5. **DEC-026: Receiver-Enforced Modular Compliance and Relayer Exposure Mitigation** — Zeltra Protocol Architecture Team (Oktober 2026).
 
 

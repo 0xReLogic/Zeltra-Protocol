@@ -64,3 +64,16 @@ Dokumen ini memetakan paper terpilih untuk arsitektur smart contract Nimbus ([`n
   * **Keyset rotation:** Kontrak `nimbus-contracts/src/storage.rs` harus enforce atomic key transition — `trusted_issuer_keys` lama di-disable dalam satu transaksi yang sama dengan aktivasi key baru, tanpa window overlap.
   * **Denomination fingerprinting:** Fungsi `deposit()` dan `spend()` harus enforce denomination bucketing (misal: hanya 10, 100, 1000 USDC) agar amount tidak bisa digunakan sebagai identifier.
   * **Cross-session timing:** Settlement batcher di `batcher.rs` harus menambahkan random delay (1–5 blok) sebelum on-chain submission untuk memutus timing correlation antara deposit event dan spend event.
+
+---
+
+## 6. ammBoost: State Growth Control for AMMs (IACR ePrint 2024/1021)
+* **File Jurnal / PDF:** [`jurnal/pdf/2024-1021.pdf`](file:///workspaces/Zeltra-Protocol/jurnal/pdf/2024-1021.pdf)
+* **Penulis:** Nicolas Michel, Mohamed E. Najd, Ghada Almashaqbeh (2024/2025)
+* **Problem di Sistem Klasik:**
+  Pertumbuhan pohon Merkle dan state accumulator on-chain yang tak terbatas menyebabkan pembengkakan storage kontrak dan degradasi performa sinkronisasi node.
+* **Inovasi Paper:**
+  Mekanisme *bounded historical root window* dan *cryptographic state pruning* terverifikasi: membatasi kedalaman riwayat root yang disimpan on-chain tanpa merusak verifikasi bukti keanggotaan Merkle.
+* **Implementasi di Nimbus Stylus:**
+  * Komponen: [`nimbus-contracts/src/storage.rs`](file:///workspaces/Zeltra-Protocol/nimbus-contracts/src/storage.rs) (circular buffer `accepted_note_roots` dan LeanIMT Merkle tree).
+  * Menjaga ukuran storage Stylus WASM tetap terkendali dan hemat gas, mencegah memory bloat pada validator Arbitrum.

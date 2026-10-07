@@ -52,3 +52,17 @@ Dokumen ini memetakan paper terpilih untuk lapisan relayer dan cluster konsensus
   * Alur baru opsional di Fase 3: User menyertakan *service payment note* kecil (misal 0.01 USDC) bersamaan dengan issuance request. Guardian atomically receive payment saat mereka submit partial signature valid.
   * Komponen: [`nimbus-node/src/cluster/guardian.rs`](file:///workspaces/Zeltra-Protocol/nimbus-node/src/cluster/guardian.rs) — payment channel state machine per guardian.
   * Dampak: Relayer tidak lagi menjadi single point of payment knowledge. Volume transaksi guardian tersebar dan tidak bisa dikorelasikan dengan deposit flow oleh pihak manapun.
+
+---
+
+## 5. Otter: A Provably MEV-Resilient Automated Market Maker via Surplus Redistribution (IACR ePrint 2026/1877)
+* **File Jurnal / PDF:** [`jurnal/pdf/2026-1877.pdf`](file:///workspaces/Zeltra-Protocol/jurnal/pdf/2026-1877.pdf)
+* **Penulis:** Elaine Shi, Mengqian Zhang, Hao Chung, Yuhao Li (September 2026)
+* **Problem di Sistem Klasik:**
+  Dalam sistem bundling dan batching transaksi (misal Flashbots bundle reordering, MEV sandwiching), relayer atau bot pencari MEV sering kali mengekstraksi keuntungan kotor dari selisih penghematan gas skala ekonomis (*batch amortization surplus*) tanpa mengembalikannya kepada pengguna akhir, atau memanipulasi urutan transaksi.
+* **Inovasi Paper:**
+  Merumuskan model desain AMM dan mekanisme lelang/bundling yang tahan MEV secara terbukti (*provably MEV-resilient*) melalui *Surplus Redistribution*. Surplus efisiensi eksekusi dari batching secara otomatis diredistribusikan secara proporsional kepada para partisipan transaksi, memitigasi ekstraksi nilai gelap oleh intermediary.
+* **Implementasi di Nimbus Node:**
+  * Komponen: [`nimbus-node/src/settlement/batcher.rs`](file:///workspaces/Zeltra-Protocol/nimbus-node/src/settlement/batcher.rs) dan antrian `batch_spend()`.
+  * Memastikan penghematan gas dari batch settlement (2-8 spend) secara adil menekan beban biaya eksekusi aktual bagi pengguna, membatasi keuntungan relayer hanya pada markup transparan 15% tanpa ekstraksi MEV tersembunyi.
+
