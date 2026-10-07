@@ -299,7 +299,7 @@ kriptografi. Tidak diperbaiki dalam PR ini.
 [event]: https://github.com/0xReLogic/Zeltra-Protocol/blob/de740d464461e47f87941e09c530ef03f7097b52/nimbus-contracts/src/events.rs#L61-L70
 [legacy-root-fee]: https://github.com/0xReLogic/Zeltra-Protocol/blob/de740d464461e47f87941e09c530ef03f7097b52/nimbus-contracts/src/spend.rs#L173-L225
 [batch-root-fee]: https://github.com/0xReLogic/Zeltra-Protocol/blob/de740d464461e47f87941e09c530ef03f7097b52/nimbus-contracts/src/lib.rs#L649-L695
-[spend-hash]: https://github.com/0xReLogic/Zeltra-Protocol/blob/de740d464461e47f87941e09c530ef03f7097b52/nimbus-contracts/src/helpers.rs#L101-L120
+[spend-hash]: https://github.com/0xReLogic/Zeltra-Protocol/blob/de740d464461e47f87941e09c530ef03f7097b52/nimbus-contracts/src/helpers.rs#L101-L119
 [relayer-inputs]: https://github.com/0xReLogic/Zeltra-Protocol/blob/de740d464461e47f87941e09c530ef03f7097b52/nimbus-node/src/handlers/spend.rs#L587-L785
 [relayer-preflight]: https://github.com/0xReLogic/Zeltra-Protocol/blob/de740d464461e47f87941e09c530ef03f7097b52/nimbus-node/src/handlers/spend.rs#L743-L785
 [dto]: https://github.com/0xReLogic/Zeltra-Protocol/blob/de740d464461e47f87941e09c530ef03f7097b52/nimbus-node/src/dto.rs#L193-L203
