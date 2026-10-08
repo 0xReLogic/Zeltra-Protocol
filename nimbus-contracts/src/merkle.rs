@@ -153,11 +153,11 @@ impl Nimbus {
         let domain = load_domain_merkle_node();
 
         let mut current = leaf_fr;
-        let mut index = next_idx;
+        let mut index = next_idx.to::<u64>();
 
         for level in 0..MERKLE_TREE_DEPTH {
             let level_u256 = U256::from(level);
-            if (index % U256::from(2)) == U256::ZERO {
+            if (index & 1) == 0 {
                 // Left child: record in frontier, sibling is canonical empty subtree hash
                 self.note_tree_filled_subtrees
                     .insert(level_u256, FixedBytes::from(to_evm_scalar(&current)));
@@ -170,7 +170,7 @@ impl Nimbus {
                     .ok_or_else(|| b"CORRUPTED_FRONTIER".to_vec())?;
                 current = merkle_hash(sibling_fr, current, &rc, &mds, domain);
             }
-            index /= U256::from(2);
+            index >>= 1;
         }
 
         let new_root_bytes = FixedBytes::from(to_evm_scalar(&current));
