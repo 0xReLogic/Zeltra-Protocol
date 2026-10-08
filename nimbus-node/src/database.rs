@@ -1988,6 +1988,7 @@ impl Database {
     }
 
     /// Get batch IDs that have unclaimed execution fees
+    #[allow(dead_code)]
     pub async fn get_unclaimed_batch_ids(&self) -> Result<Vec<String>> {
         let path = self.path.clone();
         let db_key = database_key()?;
@@ -2006,6 +2007,40 @@ impl Database {
                 .collect();
 
             Ok(batch_ids)
+        })
+        .await?
+    }
+
+    /// Get unclaimed batches with metadata for receipt and accounting reconciliation (DEC-031)
+    pub async fn get_unclaimed_batches_with_details(&self) -> Result<Vec<UnclaimedBatchInfo>> {
+        let path = self.path.clone();
+        let db_key = database_key()?;
+
+        task::spawn_blocking(move || -> Result<Vec<UnclaimedBatchInfo>> {
+            let conn = open_connection(&path, &db_key)?;
+
+            let mut stmt = conn
+                .prepare(
+                    "SELECT batch_id, tx_hash, execution_fee_usdc, item_count, created_at \
+                     FROM spend_batches WHERE claimed = 0 ORDER BY created_at ASC",
+                )
+                .context("Failed to prepare unclaimed batch query")?;
+
+            let batches: Vec<UnclaimedBatchInfo> = stmt
+                .query_map([], |row| {
+                    Ok(UnclaimedBatchInfo {
+                        batch_id: row.get(0)?,
+                        tx_hash: row.get(1)?,
+                        execution_fee_usdc: row.get::<_, i64>(2)? as u64,
+                        item_count: row.get::<_, i64>(3)? as usize,
+                        created_at: row.get(4)?,
+                    })
+                })
+                .context("Failed to query unclaimed batch details")?
+                .filter_map(|r| r.ok())
+                .collect();
+
+            Ok(batches)
         })
         .await?
     }
@@ -2232,6 +2267,15 @@ impl Database {
         })
         .await?
     }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct UnclaimedBatchInfo {
+    pub batch_id: String,
+    pub tx_hash: String,
+    pub execution_fee_usdc: u64,
+    pub item_count: usize,
+    pub created_at: i64,
 }
 
 #[derive(Debug, Clone, PartialEq)]

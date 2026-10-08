@@ -9,20 +9,6 @@ use std::str::FromStr;
 /// Quote expiry time in seconds (5 minutes)
 const QUOTE_EXPIRY_SECS: u64 = 300;
 
-/// Parameters for building a fallback quote response (when EIP-712 hashes unavailable)
-struct FallbackQuoteParams<'a> {
-    quote: &'a nimbus_core::SpendQuote,
-    fee_bps: u64,
-    relayer_markup_bps: u64,
-    relayer_gas_cost: u64,
-    ccip_network_fee: Option<u64>,
-    destination_chain_selector: Option<u64>,
-    fee_tier: Option<String>,
-    discount_bps: Option<u64>,
-    quote_id: Option<String>,
-    quote_expiry: Option<u64>,
-}
-
 pub async fn handle_private_spend_quote(
     State(state): State<AppState>,
     Query(query): Query<PrivateSpendQuoteRequest>,
@@ -98,45 +84,55 @@ pub async fn handle_private_spend_quote(
         .as_secs()
         + QUOTE_EXPIRY_SECS;
 
-    // Get contract address and chain ID from state (optional for testing)
-    let (contract_address, chain_id) = match state.evm_client.as_ref() {
-        Some(client) => {
-            let chain_id = match client.chain_id().await {
-                Ok(id) => id,
-                Err(_) => {
-                    return Json(fallback_quote_response(FallbackQuoteParams {
-                        quote: &quote,
-                        fee_bps,
-                        relayer_markup_bps,
+    // Get contract address and chain ID from state or environment (fail-closed if unavailable, DEC-028/DEC-031)
+    let domain_opt: Option<(String, u64)> = if let Some(client) = state.evm_client.as_ref() {
+        match client.chain_id().await {
+            Ok(id) => Some((client.contract_address(), id)),
+            Err(_) => None,
+        }
+    } else {
+        None
+    };
+
+    let (contract_address, chain_id) = match domain_opt {
+        Some((addr, id)) => (addr, id),
+        None => {
+            // Fallback to configured environment variables
+            let env_chain_id = std::env::var("NIMBUS_CHAIN_ID")
+                .ok()
+                .and_then(|s| s.parse::<u64>().ok());
+            let env_contract = std::env::var("NIMBUS_CONTRACT_ADDRESS").ok();
+            match (env_contract, env_chain_id) {
+                (Some(addr), Some(id)) if !addr.trim().is_empty() => (addr, id),
+                _ => {
+                    // DEC-031: Eliminate fallback quote with status OK without signing domain.
+                    // Fail-closed: return error response when domain is missing.
+                    return Json(error_response(
+                        query.merchant_amount,
                         relayer_gas_cost,
                         ccip_network_fee,
                         destination_chain_selector,
-                        fee_tier,
-                        discount_bps,
-                        quote_id: Some(quote_id_hex),
-                        quote_expiry: Some(quote_expiry),
-                    }));
+                        relayer_markup_bps,
+                        "EIP-712 signing domain unavailable: target chain and contract domain required",
+                    ));
                 }
-            };
-            (client.contract_address(), chain_id)
-        }
-        None => {
-            return Json(fallback_quote_response(FallbackQuoteParams {
-                quote: &quote,
-                fee_bps,
-                relayer_markup_bps,
-                relayer_gas_cost,
-                ccip_network_fee,
-                destination_chain_selector,
-                fee_tier,
-                discount_bps,
-                quote_id: Some(quote_id_hex),
-                quote_expiry: Some(quote_expiry),
-            }));
+            }
         }
     };
 
-    let contract_addr = Address::from_str(&contract_address).unwrap_or(Address::ZERO);
+    let contract_addr = match Address::from_str(&contract_address) {
+        Ok(addr) if addr != Address::ZERO => addr,
+        _ => {
+            return Json(error_response(
+                query.merchant_amount,
+                relayer_gas_cost,
+                ccip_network_fee,
+                destination_chain_selector,
+                relayer_markup_bps,
+                "Invalid contract address configured for EIP-712 signing domain",
+            ));
+        }
+    };
     let relayer_addr = Address::from_str(&state.relayer_address).unwrap_or(Address::ZERO);
 
     // Build EIP-712 ExecutionQuote struct
@@ -241,31 +237,6 @@ fn error_response(
     }
 }
 
-fn fallback_quote_response(params: FallbackQuoteParams) -> PrivateSpendQuoteResponse {
-    PrivateSpendQuoteResponse {
-        status: "OK".to_string(),
-        merchant_amount: params.quote.merchant_amount,
-        contract_amount: params.quote.contract_amount,
-        protocol_fee: params.quote.protocol_fee,
-        gas_cost: params.quote.gas_cost,
-        relayer_markup: params.quote.relayer_markup,
-        execution_fee: params.quote.execution_fee,
-        user_total_debit: params.quote.user_total_debit,
-        fee_bps: params.fee_bps,
-        relayer_markup_bps: params.relayer_markup_bps,
-        relayer_gas_cost: Some(params.relayer_gas_cost),
-        ccip_network_fee: params.ccip_network_fee,
-        destination_chain_selector: params.destination_chain_selector,
-        fee_tier: params.fee_tier,
-        discount_bps: params.discount_bps,
-        quote_id: params.quote_id,
-        quote_expiry: params.quote_expiry,
-        domain_separator: None,
-        struct_hash: None,
-        message: "Quote generated (EIP-712 hashes unavailable)".to_string(),
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -273,6 +244,12 @@ mod tests {
     use std::collections::HashMap;
 
     async fn test_state() -> AppState {
+        // Set environment variables for test deterministic signing domain
+        std::env::set_var("NIMBUS_CHAIN_ID", "421614");
+        std::env::set_var(
+            "NIMBUS_CONTRACT_ADDRESS",
+            "0x1111111111111111111111111111111111111111",
+        );
         let tmp = tempfile::TempDir::new().unwrap();
         let db_path = tmp.path().join("quote_test.db");
         let db = Database::new(&db_path).await.unwrap();
@@ -314,6 +291,8 @@ mod tests {
         assert!(response.0.destination_chain_selector.is_none());
         assert!(response.0.fee_tier.is_none());
         assert!(response.0.discount_bps.is_none());
+        assert!(response.0.domain_separator.is_some());
+        assert!(response.0.struct_hash.is_some());
     }
 
     #[tokio::test]
@@ -351,6 +330,8 @@ mod tests {
             response.0.user_total_debit,
             100_000_000 + 450_000 + 20_000 + 3_000 + 800_000
         );
+        assert!(response.0.domain_separator.is_some());
+        assert!(response.0.struct_hash.is_some());
     }
 
     #[tokio::test]
@@ -369,5 +350,85 @@ mod tests {
         .await;
 
         assert_eq!(response.0.status, "ERROR");
+    }
+
+    #[tokio::test]
+    async fn test_quote_fails_closed_when_signing_domain_missing() {
+        // Explicitly remove domain environment variables
+        std::env::remove_var("NIMBUS_CHAIN_ID");
+        std::env::remove_var("NIMBUS_CONTRACT_ADDRESS");
+
+        let tmp = tempfile::TempDir::new().unwrap();
+        let db_path = tmp.path().join("quote_test_missing_domain.db");
+        let db = Database::new(&db_path).await.unwrap();
+        let state = AppState::new(
+            db,
+            nimbus_core::Fr::from(1u64),
+            1,
+            nimbus_core::IssuerPublicKey(nimbus_core::G2Projective::default()),
+            HashMap::new(),
+            None,
+        )
+        .await;
+
+        let response = handle_private_spend_quote(
+            State(state),
+            Query(PrivateSpendQuoteRequest {
+                merchant_amount: 100_000_000,
+                estimated_gas_cost: Some(20_000),
+                relayer_markup_bps: Some(1_500),
+                association_root: None,
+                destination_chain_selector: None,
+            }),
+        )
+        .await;
+
+        // DEC-031: Must fail-closed with status ERROR, never return status OK without signing domain!
+        assert_eq!(response.0.status, "ERROR");
+        assert!(response.0.domain_separator.is_none());
+        assert!(response.0.struct_hash.is_none());
+        assert!(response.0.message.contains("signing domain unavailable"));
+    }
+
+    #[tokio::test]
+    async fn test_quote_fails_closed_when_contract_address_invalid() {
+        std::env::set_var("NIMBUS_CHAIN_ID", "421614");
+        std::env::set_var(
+            "NIMBUS_CONTRACT_ADDRESS",
+            "0x0000000000000000000000000000000000000000",
+        );
+
+        let tmp = tempfile::TempDir::new().unwrap();
+        let db_path = tmp.path().join("quote_test_invalid_contract.db");
+        let db = Database::new(&db_path).await.unwrap();
+        let state = AppState::new(
+            db,
+            nimbus_core::Fr::from(1u64),
+            1,
+            nimbus_core::IssuerPublicKey(nimbus_core::G2Projective::default()),
+            HashMap::new(),
+            None,
+        )
+        .await;
+
+        let response = handle_private_spend_quote(
+            State(state),
+            Query(PrivateSpendQuoteRequest {
+                merchant_amount: 100_000_000,
+                estimated_gas_cost: Some(20_000),
+                relayer_markup_bps: Some(1_500),
+                association_root: None,
+                destination_chain_selector: None,
+            }),
+        )
+        .await;
+
+        assert_eq!(response.0.status, "ERROR");
+        assert!(response.0.domain_separator.is_none());
+        assert!(response.0.struct_hash.is_none());
+        assert!(
+            response.0.message.contains("Invalid contract address")
+                || response.0.message.contains("signing domain unavailable")
+        );
     }
 }

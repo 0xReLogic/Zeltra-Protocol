@@ -330,6 +330,39 @@ pub struct BatchMetricsDto {
     pub unclaimed_execution_fees_usdc: u64,
 }
 
+/// Solvency and accounting reconciliation metrics (DEC-031)
+/// Zero user data is exposed: only aggregate balances and liabilities.
+#[derive(Clone, Debug, Serialize, Deserialize, Default, PartialEq)]
+pub struct SolvencyMetricsDto {
+    /// Solvency status: "SOLVENT", "MISMATCH_WARNING", "INSOLVENT_ALERT", or "DEGRADED"
+    pub solvency_status: String,
+    /// Total USDC assets held in the Stylus contract
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub contract_balance_usdc: Option<u64>,
+    /// Total liabilities (user note + refundable deposit + accrued fee)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub total_liabilities_usdc: Option<u64>,
+    /// User note liability on-chain
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub user_note_liability_usdc: Option<u64>,
+    /// Refundable deposit liability on-chain
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub refundable_deposit_liability_usdc: Option<u64>,
+    /// Accrued execution fee liability on-chain
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub contract_accrued_execution_fee_usdc: Option<u64>,
+    /// Local database unclaimed execution fees from confirmed receipts
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub db_unclaimed_execution_fee_usdc: Option<u64>,
+    /// Reconciliation drift: contract_accrued - db_unclaimed
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reconciliation_drift_usdc: Option<i64>,
+    /// Whether contract assets >= total liabilities
+    pub is_solvent: bool,
+    /// Whether contract accrued fee == DB unclaimed fee
+    pub is_accounting_matched: bool,
+}
+
 #[derive(Serialize)]
 pub struct HealthResponse {
     pub status: String,
@@ -343,6 +376,9 @@ pub struct HealthResponse {
     /// Batch profitability and operational metrics (DEC-020)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub batch_metrics: Option<BatchMetricsDto>,
+    /// Solvency and accounting reconciliation metrics (DEC-031)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub solvency_metrics: Option<SolvencyMetricsDto>,
     /// CCIP cross-chain spends awaiting destination confirmation
     #[serde(skip_serializing_if = "Option::is_none")]
     pub ccip_pending_count: Option<i64>,

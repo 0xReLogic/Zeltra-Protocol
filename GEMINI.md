@@ -51,6 +51,7 @@ Dokumen ini adalah memori konteks persisten untuk agen AI saat bekerja di reposi
   - Reorg-safe indexing window dengan ambang batas konfirmasi finalitas dan checkpoint persistent di tabel `indexer_state`.
   - Verifikasi kriptografis kurva eliptis $k \cdot \text{pk}_{\text{iss}} == \text{com}_k$ enforced *fail-closed* sebelum rilis kunci $k$.
 * **DEC-025 Relayer ZK Note Spend Settlement:** Single-item direct settlement, idempotensi 24h, dan proteksi race-condition status nullifier.
+* **DEC-031 Relayer Three-Way Reconciliation & Solvency Observability:** Three-way reconciliation engine (`reconcile_execution_fees`) mencocokkan akrual kontrak on-chain, DB SQLite (`spend_batches`), dan confirmed receipts (`status == 1`); pemusnahan quote fallback tanpa signing domain (fail-closed EIP-712 domain binding); serta observabilitas solvensi makro pada `/health` tanpa membuka privasi user.
 
 ---
 
@@ -58,11 +59,7 @@ Dokumen ini adalah memori konteks persisten untuk agen AI saat bekerja di reposi
 
 Mengacu pada master checklist [`todo.md`](file:///workspaces/Zeltra-Protocol/todo.md) & [`docs/todos/private-note-balance.md`](file:///workspaces/Zeltra-Protocol/docs/todos/private-note-balance.md):
 
-1. **Relayer Reconciliation & Solvency Observability (Gate F Pending):**
-   * Claim worker reconcile contract fee accrual, DB accrual, dan confirmed receipts.
-   * Hilangkan quote fallback tanpa signing domain.
-   * Health endpoint expose solvency/accounting metrics tanpa membocorkan data user.
-2. **Hard-Test E2E Arbitrum Sepolia (Gate G):**
+1. **Hard-Test E2E Arbitrum Sepolia (Gate G):**
    * Deposit $\rightarrow$ partial spend $\rightarrow$ change note $\rightarrow$ second spend $\rightarrow$ withdraw-all di testnet.
    * Crash recovery & idempotency boundary testing.
 3. **Cross-Chain CCIP Testing & Verification (Phase 4):**

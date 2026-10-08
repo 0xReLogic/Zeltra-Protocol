@@ -71,6 +71,15 @@ sol! {
     function getCleanRootTimestamp(bytes32 root) external view returns (uint256);
     function isNullifierSpent(bytes32 nullifier) external view returns (bool);
     function isSanctioned(address addr) external view returns (bool);
+    function userNoteLiability() external view returns (uint256);
+    function refundableDepositLiability() external view returns (uint256);
+    function accruedExecutionFeeLiability() external view returns (uint256);
+    function getAccumulatedFees() external view returns (uint256);
+    function stablecoin() external view returns (address);
+
+    interface IERC20 {
+        function balanceOf(address account) external view returns (uint256);
+    }
 
     struct EVMTokenAmount {
         address token;
@@ -1355,6 +1364,122 @@ impl EvmClient {
             Ok(result.last().copied().unwrap_or(0) != 0)
         } else {
             Ok(false)
+        }
+    }
+
+    /// Query accrued execution fee liability owed to the relayer (DEC-016 & DEC-031)
+    pub async fn get_accrued_execution_fee_liability(&self) -> Result<u64> {
+        let call_data = accruedExecutionFeeLiabilityCall {}.abi_encode();
+        let tx = TransactionRequest::default()
+            .with_to(self.contract_address)
+            .with_input(Bytes::from(call_data));
+
+        match self.provider.call(tx).await {
+            Ok(result) if result.len() >= 32 => Ok(U256::from_be_slice(&result[..32]).to::<u64>()),
+            _ => self.get_accumulated_fees().await,
+        }
+    }
+
+    /// Query total accumulated execution fees from contract (view)
+    pub async fn get_accumulated_fees(&self) -> Result<u64> {
+        let call_data = getAccumulatedFeesCall {}.abi_encode();
+        let tx = TransactionRequest::default()
+            .with_to(self.contract_address)
+            .with_input(Bytes::from(call_data));
+
+        let result = self
+            .provider
+            .call(tx)
+            .await
+            .context("Failed to call getAccumulatedFees")?;
+
+        if result.len() >= 32 {
+            Ok(U256::from_be_slice(&result[..32]).to::<u64>())
+        } else {
+            Ok(0)
+        }
+    }
+
+    /// Query user note liability on-chain (DEC-016 & DEC-031)
+    pub async fn get_user_note_liability(&self) -> Result<u64> {
+        let call_data = userNoteLiabilityCall {}.abi_encode();
+        let tx = TransactionRequest::default()
+            .with_to(self.contract_address)
+            .with_input(Bytes::from(call_data));
+
+        let result = self
+            .provider
+            .call(tx)
+            .await
+            .context("Failed to call userNoteLiability")?;
+
+        if result.len() >= 32 {
+            Ok(U256::from_be_slice(&result[..32]).to::<u64>())
+        } else {
+            Ok(0)
+        }
+    }
+
+    /// Query refundable deposit liability on-chain (DEC-016 & DEC-031)
+    pub async fn get_refundable_deposit_liability(&self) -> Result<u64> {
+        let call_data = refundableDepositLiabilityCall {}.abi_encode();
+        let tx = TransactionRequest::default()
+            .with_to(self.contract_address)
+            .with_input(Bytes::from(call_data));
+
+        let result = self
+            .provider
+            .call(tx)
+            .await
+            .context("Failed to call refundableDepositLiability")?;
+
+        if result.len() >= 32 {
+            Ok(U256::from_be_slice(&result[..32]).to::<u64>())
+        } else {
+            Ok(0)
+        }
+    }
+
+    /// Query stablecoin token address configured in contract
+    pub async fn get_stablecoin_address(&self) -> Result<Address> {
+        let call_data = stablecoinCall {}.abi_encode();
+        let tx = TransactionRequest::default()
+            .with_to(self.contract_address)
+            .with_input(Bytes::from(call_data));
+
+        if let Ok(result) = self.provider.call(tx).await {
+            if result.len() >= 32 {
+                return Ok(Address::from_slice(&result[12..32]));
+            }
+        }
+
+        let addr_str = std::env::var("NIMBUS_STABLECOIN_ADDRESS")
+            .unwrap_or_else(|_| "0x75faf114eafb1bdbe2f0316df893fd58ce46aa4d".to_string());
+        Address::from_str(&addr_str).context("Invalid fallback stablecoin address")
+    }
+
+    /// Query USDC contract balance held by the Stylus contract (DEC-031)
+    pub async fn get_contract_usdc_balance(&self) -> Result<u64> {
+        let stablecoin_addr = self.get_stablecoin_address().await?;
+        let call_data = IERC20::balanceOfCall {
+            account: self.contract_address,
+        }
+        .abi_encode();
+
+        let tx = TransactionRequest::default()
+            .with_to(stablecoin_addr)
+            .with_input(Bytes::from(call_data));
+
+        let result = self
+            .provider
+            .call(tx)
+            .await
+            .context("Failed to call balanceOf on stablecoin")?;
+
+        if result.len() >= 32 {
+            Ok(U256::from_be_slice(&result[..32]).to::<u64>())
+        } else {
+            Ok(0)
         }
     }
 

@@ -1433,6 +1433,38 @@ async fn process_single_spend(state: &AppState, item: QueuedSpend) {
                         outcome.block_number,
                     )
                     .await;
+
+                // Track single spend execution fee in spend_batches for three-way reconciliation (DEC-031)
+                let execution_fee_usdc = request
+                    .execution_fee
+                    .or(request.max_execution_fee)
+                    .unwrap_or(0);
+                if execution_fee_usdc > 0 {
+                    let total_cost_eth = (outcome.gas_used as f64
+                        * outcome.effective_gas_price as f64)
+                        / 1_000_000_000_000_000_000.0;
+                    let eth_price = state.get_eth_price().await;
+                    let actual_gas_cost_usdc = total_cost_eth * eth_price;
+                    let margin_usdc =
+                        (execution_fee_usdc as f64 / 1_000_000.0) - actual_gas_cost_usdc;
+
+                    if let Err(e) = state
+                        .db
+                        .store_batch_metadata(
+                            &outcome.tx_hash,
+                            1,
+                            &outcome.tx_hash,
+                            outcome.gas_used,
+                            outcome.effective_gas_price,
+                            total_cost_eth,
+                            margin_usdc,
+                            execution_fee_usdc,
+                        )
+                        .await
+                    {
+                        eprintln!("SETTLEMENT: failed to store single spend metadata: {}", e);
+                    }
+                }
             }
         }
         Ok(outcome) => {

@@ -123,12 +123,7 @@ wallet publik milik user.
 
 ## Gate F - Node, Quote, dan Batch
 
-> **Status Gate F Phase 1 (Direct Settlement Pipeline):** **SELESAI (100%)** — Sesuai [`DEC-025`](file:///workspaces/Zeltra-Protocol/research/decisions/DEC-025-relayer-zk-note-spend-settlement-atomic-batching-and-reconciliation.md), relayer telah mengimplementasikan pipeline validasi fail-closed, endpoint ingress `/api/v1/spend-private-note`, pre-flight kanonikalitas 12 skalar (`from_evm_scalar`), semantic public input binding (DEC-022), single-item direct settlement dispatcher `EvmClient::broadcast_spend_private_note_transaction`, pencegahan double-spend on-chain (`is_nullifier_spent`) & SQLite, durable enqueue, idempotensi 24h, dan receipt confirmation tracking (91/91 node tests pass).
-
-### Pending Tasks Gate F:
-- [ ] Claim worker reconcile contract accrual, DB accrual, dan receipts.
-- [ ] Hilangkan fallback quote yang mengembalikan status OK tanpa signing domain.
-- [ ] Health endpoint expose solvency/accounting mismatch tanpa membuka user data.
+> **Status Gate F:** **SELESAI (100% Full Pipeline & Solvency Observability)** — Sesuai [`DEC-025`](file:///workspaces/Zeltra-Protocol/research/decisions/DEC-025-relayer-zk-note-spend-settlement-atomic-batching-and-reconciliation.md) & [`DEC-031`](file:///workspaces/Zeltra-Protocol/research/decisions/DEC-031-relayer-reconciliation-solvency-observability-quote-domain-binding.md), relayer telah mengimplementasikan pipeline validasi fail-closed, endpoint ingress `/api/v1/spend-private-note`, pre-flight kanonikalitas 12 skalar, semantic public input binding, dual-layer double-spend guard (`is_nullifier_spent`), single-item & batch settlement dispatcher, three-way reconciliation engine (`reconcile_execution_fees`), pemusnahan total fallback quote berstatus OK tanpa signing domain, dan zero-leakage solvency observability di endpoint `/health` (68/68 node tests pass, clippy clean).
 
 ---
 
