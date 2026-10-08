@@ -164,7 +164,7 @@ Karena itu:
 - batch menambah waktu tunggu normal maksimal sekitar 1 detik dan hard timeout
   sekitar 2 detik sebelum broadcast;
 - cross-chain dan transaksi dengan deadline dekat tidak dipaksa menunggu batch;
-- pendapatan protokol berasal dari transaksi spend `0,45%` (atau `0,40%` untuk hold ≥ 30 hari);
+- pendapatan protokol berasal dari transaksi spend flat `0,45%` (45 bps - DEC-028);
 - pendapatan relayer berasal dari reimbursement gas, markup gas 15%, dan margin batch;
 - biaya harus ditampilkan sebagai satu quote transparan sebelum pengguna menandatangani.
 

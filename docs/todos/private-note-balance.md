@@ -134,7 +134,7 @@ wallet publik milik user.
 
 ## Gate G - Hard Test Arbitrum Sepolia
 
-- [ ] Deposit 100 USDC menghasilkan net note exact setelah 0.20% fee.
+- [ ] Deposit 100 USDC menghasilkan net note exact 100 USDC (0 bps / 0.00% deposit fee).
 - [ ] Spend 5 USDC membayar merchant tepat 5 USDC.
 - [ ] Protocol fee dan execution fee cocok dengan signed quote.
 - [ ] Change note sama dengan input dikurangi seluruh debit.

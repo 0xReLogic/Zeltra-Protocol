@@ -30,7 +30,7 @@
 
 ### B. Volume-Driven Over TVL (Kecepatan Perputaran Uang)
 * Zeltra bukan protokol serakah yang menarik biaya diam (idle fee) ala bank konvensional.
-* Keberlanjutan ekonomi protokol bertumpu pada **velocity of money (volume harian)** melalui fee spend yang sangat kompetitif (40–45 bps) dan relayer execution gas reimbursement.
+* Keberlanjutan ekonomi protokol bertumpu pada **velocity of money (volume harian)** melalui fee spend yang sangat kompetitif (flat 45 bps / 0.45% - DEC-028) dan relayer execution gas reimbursement.
 
 ### C. Mathematical Solvency (Anti-Fractional Reserve)
 * **Invariant Mutlak:** `Assets On-Chain >= Total Liabilities`.

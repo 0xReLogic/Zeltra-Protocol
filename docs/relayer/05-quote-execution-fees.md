@@ -22,7 +22,7 @@ Saat client memanggil endpoint `GET /api/quote/private-spend`:
 ```text
 Total Yang Didebit Dari Saldo Pengguna =
     Nominal Invoice Merchant (Diterima 100% utuh oleh merchant)
-  + Biaya Protokol (0.25% default, atau diskon holding time)
+  + Biaya Protokol (Flat 45 bps / 0.45% - DEC-028)
   + Biaya Eksekusi Relayer (Reimbursement Gas + Markup Relayer 15%)
 ```
 
@@ -30,7 +30,7 @@ Total Yang Didebit Dari Saldo Pengguna =
 1. **Relayer Execution Gas (`relayer_gas_cost`):** Estimasi biaya gas eksekusi relayer on-chain aktual dari RPC node Arbitrum yang dikonversi ke unit stablecoin USDC (misal ~0.02 USDC).
 2. **CCIP Network Fee (`ccip_network_fee`):** Biaya lintas rantai Chainlink CCIP (hanya jika parameter `destination_chain_selector` disertakan, default ~0.80 USDC / 800.000 base units). Nilai ini transparan dipisahkan dari relayer execution gas di response JSON.
 3. **Markup Relayer (`relayer_markup`):** Tambahan komisi operasional flat **15%** (`DEFAULT_RELAYER_MARKUP_BPS = 1500`) yang dihitung **HANYA dari `relayer_gas_cost` lokal**, TIDAK PERNAH mem-markup `ccip_network_fee` (karena CCIP adalah fee pass-through murni pihak ketiga Chainlink).
-4. **Diskon Waktu Simpan (*Holding Time*):** Node memeriksa timestamp `association_root` di cache memori. Jika dana sudah di-hold $\ge 7$ hari $\to$ fee turun ke 0.20%; jika $\ge 30$ hari $\to$ fee turun ke 0.10%.
+4. **Biaya Protokol Flat (DEC-028):** Unified flat **45 bps (0.45%)** untuk seluruh spend. Diskon holding time telah dihapus permanen guna mencegah root-age gaming dan memastikan akuntansi kas dapat diprediksi 100%.
 
 ### Transparansi UX (Same-Chain vs Cross-Chain):
 - **Same-Chain Spend:** `ccip_network_fee = null`, `destination_chain_selector = null`. Pengguna hanya membayar gas eksekusi lokal + markup relayer (15%).
