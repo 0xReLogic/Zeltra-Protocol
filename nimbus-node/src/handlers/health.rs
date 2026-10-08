@@ -52,12 +52,15 @@ pub async fn health_check(
         "OK".to_string()
     };
 
+    let eth_price = Some(state.get_eth_price().await);
+
     Json(HealthResponse {
         status,
         queued_transactions,
         processed_nullifiers,
         relayer_wallet_balance_eth,
         relayer_accumulated_profit_usdc,
+        eth_price_usdc: eth_price,
         batch_metrics,
         ccip_pending_count: ccip_pending,
         ccip_failure_count: ccip_failure,

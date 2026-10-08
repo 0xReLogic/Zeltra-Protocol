@@ -78,3 +78,20 @@ Pada model ZK-UTXO ([`DEC-016`](file:///workspaces/Zeltra-Protocol/research/deci
    * Di smart contract Stylus ([`nimbus-contracts/src/spend.rs`](file:///workspaces/Zeltra-Protocol/nimbus-contracts/src/spend.rs)) dan di ingress relayer, berlaku invariant ketat:
      $$\text{execution\_fee} \le \text{max\_execution\_fee}$$
    * Jika relayer mencoba memotong fee di atas kesepakatan kuotasi pengguna, transaksi otomatis revert dengan kode `EXECUTION_FEE_EXCEEDS_MAX`.
+
+---
+
+## 5. Integrasi Oracle Chainlink ETH/USD & Akuntansi Margin Relayer (DEC-029)
+
+Untuk menghitung biaya gas aktual dalam USDC dan melacak margin keuntungan operasional batch secara akurat:
+1. **Chainlink Data Feeds (`AggregatorV3Interface`):**
+   * Relayer membaca harga ETH/USD secara langsung dari oracle Chainlink on-chain via `eth_call` (0 gas cost):
+     - **Arbitrum Sepolia:** `0xd30e2101a97dcbAeBCBC04F14C3f624E67A35165`
+     - **Arbitrum One:** `0x639Fe6ab55C921f74e7fac1ee960C0B6293ba612`
+   * Fungsi `get_chainlink_eth_price` memvalidasi bahwa nilai harga positif dan tidak kedaluwarsa (`staleness_threshold_secs <= 3600s`).
+2. **Fail-Safe Fallback:**
+   * Jika panggilan RPC ke oracle gagal atau data stale, relayer secara otomatis menggunakan fallback dari environment variable `NIMBUS_ETH_PRICE_USDC` (default: `$3,500.0`).
+3. **Penyimpanan Metrik & Observabilitas:**
+   * Kolom `margin_usdc` pada tabel `spend_batches` dihitung berdasarkan harga pasar aktual:
+     $$\text{margin\_usdc} = \text{total\_revenue\_usdc} - (\text{total\_cost\_eth} \times \text{eth\_price})$$
+   * Nilai harga aktif juga diexpose via endpoint `/health` (`eth_price_usdc`) untuk transparansi solvabilitas relayer.

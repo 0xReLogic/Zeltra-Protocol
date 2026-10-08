@@ -337,6 +337,9 @@ pub struct HealthResponse {
     pub processed_nullifiers: usize,
     pub relayer_wallet_balance_eth: f64,
     pub relayer_accumulated_profit_usdc: f64,
+    /// Active ETH price in USDC used for margin accounting (DEC-029)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub eth_price_usdc: Option<f64>,
     /// Batch profitability and operational metrics (DEC-020)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub batch_metrics: Option<BatchMetricsDto>,

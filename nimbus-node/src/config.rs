@@ -183,6 +183,75 @@ impl ReceiptFinalityConfig {
     }
 }
 
+/// Default Chainlink ETH/USD aggregator on Arbitrum Sepolia
+pub const ARBITRUM_SEPOLIA_CHAINLINK_ETH_USD: &str =
+    "0xd30e2101a97dcbAeBCBC04F14C3f624E67A35165";
+
+/// Default Chainlink ETH/USD aggregator on Arbitrum One Mainnet
+pub const ARBITRUM_ONE_CHAINLINK_ETH_USD: &str =
+    "0x639Fe6ab55C921f74e7fac1ee960C0B6293ba612";
+
+/// Pricing and oracle configuration for gas reimbursement and margin tracking (DEC-029).
+#[derive(Debug, Clone)]
+pub struct PricingConfig {
+    /// Chainlink ETH/USD price feed aggregator address
+    pub eth_feed_address: Option<String>,
+    /// Fallback static ETH price in USDC if oracle is unavailable or stale
+    pub fallback_eth_price: f64,
+    /// Cache TTL for price feed in seconds (default 300s = 5m)
+    pub cache_ttl_secs: u64,
+    /// Max age of oracle round data before declaring stale (default 3600s = 1 hour)
+    pub staleness_threshold_secs: u64,
+}
+
+impl Default for PricingConfig {
+    fn default() -> Self {
+        Self {
+            eth_feed_address: Some(ARBITRUM_SEPOLIA_CHAINLINK_ETH_USD.to_string()),
+            fallback_eth_price: 3500.0,
+            cache_ttl_secs: 300,
+            staleness_threshold_secs: 3600,
+        }
+    }
+}
+
+impl PricingConfig {
+    pub fn from_env() -> Self {
+        let feed = std::env::var("NIMBUS_CHAINLINK_ETH_FEED")
+            .ok()
+            .or_else(|| {
+                // If mainnet mode, default to Arbitrum One; otherwise Sepolia
+                if runtime_mode() == RuntimeMode::Mainnet {
+                    Some(ARBITRUM_ONE_CHAINLINK_ETH_USD.to_string())
+                } else {
+                    Some(ARBITRUM_SEPOLIA_CHAINLINK_ETH_USD.to_string())
+                }
+            });
+
+        let fallback_eth_price = std::env::var("NIMBUS_ETH_PRICE_USDC")
+            .ok()
+            .and_then(|v| v.parse::<f64>().ok())
+            .unwrap_or(3500.0);
+
+        let cache_ttl_secs = std::env::var("NIMBUS_ETH_PRICE_CACHE_TTL_SECS")
+            .ok()
+            .and_then(|v| v.parse::<u64>().ok())
+            .unwrap_or(300);
+
+        let staleness_threshold_secs = std::env::var("NIMBUS_ETH_PRICE_STALENESS_SECS")
+            .ok()
+            .and_then(|v| v.parse::<u64>().ok())
+            .unwrap_or(3600);
+
+        Self {
+            eth_feed_address: feed,
+            fallback_eth_price,
+            cache_ttl_secs,
+            staleness_threshold_secs,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -196,5 +265,17 @@ mod tests {
         for value in ["development", "dev", "test", ""] {
             assert!(!RuntimeMode::from_value(value).is_strict());
         }
+    }
+
+    #[test]
+    fn pricing_config_defaults_are_valid() {
+        let config = PricingConfig::default();
+        assert_eq!(
+            config.eth_feed_address.as_deref(),
+            Some(ARBITRUM_SEPOLIA_CHAINLINK_ETH_USD)
+        );
+        assert!((config.fallback_eth_price - 3500.0).abs() < f64::EPSILON);
+        assert_eq!(config.cache_ttl_secs, 300);
+        assert_eq!(config.staleness_threshold_secs, 3600);
     }
 }

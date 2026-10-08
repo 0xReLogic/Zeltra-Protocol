@@ -147,7 +147,7 @@ Total debit pengguna              100,4730 USDC
 Merchant menerima                 100,0000 USDC
 ```
 
-Relayer membayar gas dalam ETH terlebih dahulu. Execution quote ditetapkan
+Relayer membayar gas dalam ETH terlebih dahulu. Biaya gas aktual dikonversi ke USDC menggunakan harga pasar real-time dari Oracle Chainlink Data Feeds ETH/USD (DEC-029) dengan fallback aman `NIMBUS_ETH_PRICE_USDC`. Execution quote ditetapkan
 sebelum user menandatangani dan terdiri dari estimasi gas dalam stablecoin plus
 markup relayer (misal 15% dari gas quote). Jika beberapa transaksi berhasil
 dibatch dengan biaya aktual lebih rendah, selisihnya menjadi margin efisiensi relayer.

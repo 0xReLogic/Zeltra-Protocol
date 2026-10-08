@@ -94,6 +94,18 @@ sol! {
         function ccipSend(uint64 destinationChainSelector, EVM2AnyMessage calldata message) external payable returns (bytes32);
         function getFee(uint64 destinationChainSelector, EVM2AnyMessage calldata message) external view returns (uint256);
     }
+
+    interface IAggregatorV3 {
+        function latestRoundData() external view returns (
+            uint80 roundId,
+            int256 answer,
+            uint256 startedAt,
+            uint256 updatedAt,
+            uint80 answeredInRound
+        );
+        function decimals() external view returns (uint8);
+        function description() external view returns (string memory);
+    }
 }
 
 pub struct EvmClient {
@@ -1364,6 +1376,123 @@ impl EvmClient {
         } else {
             Ok(false)
         }
+    }
+
+    /// Query Chainlink ETH/USD AggregatorV3 price on-chain via eth_call (0 gas cost) (DEC-029).
+    ///
+    /// Validates:
+    /// 1. Price answer > 0 (sanity check)
+    /// 2. Price is not stale (updatedAt within staleness_threshold_secs)
+    /// 3. Normalizes based on aggregator decimals (default 8 for USD pairs)
+    pub async fn get_chainlink_eth_price(
+        &self,
+        feed_address: &Address,
+        staleness_threshold_secs: u64,
+    ) -> Result<f64> {
+        let call_data = IAggregatorV3::latestRoundDataCall {}.abi_encode();
+        let tx = TransactionRequest::default()
+            .with_to(*feed_address)
+            .with_input(Bytes::from(call_data));
+
+        let result = match self.provider.call(tx.clone()).await {
+            Ok(res) => res,
+            Err(e) => {
+                if let Some(ref fallback) = self.fallback_provider {
+                    fallback
+                        .call(tx)
+                        .await
+                        .context("Fallback RPC latestRoundData failed")?
+                } else {
+                    return Err(anyhow::anyhow!("Primary RPC latestRoundData failed: {}", e));
+                }
+            }
+        };
+
+        if result.is_empty() {
+            anyhow::bail!("Chainlink latestRoundData returned empty bytes");
+        }
+
+        let decoded = IAggregatorV3::latestRoundDataCall::abi_decode_returns(&result)
+            .context("Failed to decode latestRoundData return values")?;
+
+        let answer = decoded.answer;
+        let updated_at: u64 = decoded.updatedAt.to::<u64>();
+        let answered_in_round = decoded.answeredInRound;
+        let round_id = decoded.roundId;
+
+        // 1. Sanity check: non-positive answer
+        let zero_i256 = alloy::primitives::I256::ZERO;
+        if answer <= zero_i256 {
+            anyhow::bail!("Chainlink returned non-positive ETH price: {}", answer);
+        }
+
+        // 2. Round completeness check (answeredInRound >= roundId)
+        if answered_in_round < round_id {
+            anyhow::bail!(
+                "Chainlink round incomplete: answeredInRound ({}) < roundId ({})",
+                answered_in_round,
+                round_id
+            );
+        }
+
+        let now_secs = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs();
+
+        // 3. Future timestamp check
+        if updated_at > now_secs + 300 {
+            anyhow::bail!(
+                "Chainlink updatedAt is in future: updated_at={}, now={}",
+                updated_at,
+                now_secs
+            );
+        }
+
+        // 4. Staleness check
+        if staleness_threshold_secs > 0 && now_secs.saturating_sub(updated_at) > staleness_threshold_secs {
+            anyhow::bail!(
+                "Chainlink ETH price is stale: updated_at={}, now={}, age={}s > threshold={}s",
+                updated_at,
+                now_secs,
+                now_secs.saturating_sub(updated_at),
+                staleness_threshold_secs
+            );
+        }
+
+        // Query decimals if available, default to 8 for Chainlink USD pairs
+        let decimals_data = IAggregatorV3::decimalsCall {}.abi_encode();
+        let decimals_tx = TransactionRequest::default()
+            .with_to(*feed_address)
+            .with_input(Bytes::from(decimals_data));
+
+        let decimals: u8 = match self.provider.call(decimals_tx).await {
+            Ok(dec_bytes) => {
+                IAggregatorV3::decimalsCall::abi_decode_returns(&dec_bytes)
+                    .unwrap_or(8)
+            }
+            Err(_) => 8,
+        };
+
+        // Convert I256 answer to f64 scaled by 10^decimals
+        let answer_str = answer.to_string();
+        let raw_val: f64 = answer_str
+            .parse::<f64>()
+            .map_err(|e| anyhow::anyhow!("Failed to parse oracle answer string: {}", e))?;
+
+        let divisor = 10f64.powi(decimals as i32);
+        let eth_price_usdc = raw_val / divisor;
+
+        // 5. Hard min/max circuit breaker bounds ($100.0 <= price <= $100,000.0)
+        // Prevents decimal corruption, flash loan anomalies, or bad feeder data
+        if eth_price_usdc < 100.0 || eth_price_usdc > 100_000.0 {
+            anyhow::bail!(
+                "Chainlink ETH price outside reasonable bounds: ${:.2}",
+                eth_price_usdc
+            );
+        }
+
+        Ok(eth_price_usdc)
     }
 
     /// Get the contract address as a hex string

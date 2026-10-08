@@ -5,6 +5,7 @@ use crate::database::Database;
 use crate::evm_client::EvmClient;
 use crate::key_rotation::{KeyManager, KeyRotationConfig};
 use std::collections::HashMap;
+use std::str::FromStr;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::Mutex;
@@ -51,6 +52,15 @@ pub struct AppState {
 
     /// Relayer Ethereum address (for EIP-712 quote signing)
     pub relayer_address: String,
+
+    /// Pricing and oracle configuration (DEC-029)
+    pub pricing_config: crate::config::PricingConfig,
+
+    /// Cached current ETH price in USDC (updated periodically or on-demand from Chainlink)
+    pub current_eth_price_usdc: Arc<Mutex<f64>>,
+
+    /// Timestamp of the last successful price fetch (Unix seconds)
+    pub last_price_fetch_timestamp: Arc<Mutex<u64>>,
 }
 
 impl AppState {
@@ -82,6 +92,8 @@ impl AppState {
         let key_manager = KeyManager::new(share_sk, share_index, issuer_public_key, key_config);
         let vault_circuit_breaker = key_manager.vault_circuit_breaker.clone();
 
+        let pricing_config = crate::config::PricingConfig::from_env();
+
         Self {
             db,
             key_manager,
@@ -105,7 +117,50 @@ impl AppState {
             root_timestamp_cache: Arc::new(Mutex::new(HashMap::new())),
             relayer_address: std::env::var("NIMBUS_RELAYER_ADDRESS")
                 .unwrap_or_else(|_| "0x0000000000000000000000000000000000000000".to_string()),
+            pricing_config: pricing_config.clone(),
+            current_eth_price_usdc: Arc::new(Mutex::new(pricing_config.fallback_eth_price)),
+            last_price_fetch_timestamp: Arc::new(Mutex::new(0)),
         }
+    }
+
+    /// Fetch current ETH price in USDC using Chainlink oracle with fallback (DEC-029).
+    pub async fn get_eth_price(&self) -> f64 {
+        let now_secs = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs();
+
+        // Check if cached price is still fresh (within cache_ttl_secs)
+        let last_fetch = *self.last_price_fetch_timestamp.lock().await;
+        if last_fetch > 0 && now_secs.saturating_sub(last_fetch) < self.pricing_config.cache_ttl_secs {
+            return *self.current_eth_price_usdc.lock().await;
+        }
+
+        if let (Some(ref evm), Some(ref feed_str)) = (
+            &self.evm_client,
+            &self.pricing_config.eth_feed_address,
+        ) {
+            if let Ok(feed_addr) = alloy::primitives::Address::from_str(feed_str) {
+                match evm
+                    .get_chainlink_eth_price(&feed_addr, self.pricing_config.staleness_threshold_secs)
+                    .await
+                {
+                    Ok(price) => {
+                        *self.current_eth_price_usdc.lock().await = price;
+                        *self.last_price_fetch_timestamp.lock().await = now_secs;
+                        return price;
+                    }
+                    Err(e) => {
+                        eprintln!(
+                            "PRICING WARNING: Chainlink oracle query failed: {}. Using fallback/cached price.",
+                            e
+                        );
+                    }
+                }
+            }
+        }
+
+        *self.current_eth_price_usdc.lock().await
     }
 
     /// Sign a blinded message using the key manager (with rotation support)
