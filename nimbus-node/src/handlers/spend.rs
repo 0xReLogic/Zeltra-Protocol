@@ -12,6 +12,14 @@ use alloy::primitives::Address;
 use axum::Json;
 use std::str::FromStr;
 
+/// Default ETH price in USDC for cost estimation (fallback if env var not set)
+const DEFAULT_ETH_PRICE_USDC: f64 = 3500.0;
+
+/// Gas limit estimates for different transaction types
+const GAS_LIMIT_PRIVATE_NOTE: f64 = 2_500_000.0;
+const GAS_LIMIT_CROSS_CHAIN: f64 = 1_200_000.0;
+const GAS_LIMIT_STANDARD: f64 = 1_500_000.0;
+
 pub async fn handle_spend(
     axum::extract::State(state): axum::extract::State<AppState>,
     Json(payload): Json<SpendRequest>,
@@ -1203,7 +1211,7 @@ async fn process_same_chain_batch(state: &AppState, items: Vec<QueuedSpend>) {
             let eth_price = std::env::var("NIMBUS_ETH_PRICE_USDC")
                 .ok()
                 .and_then(|v| v.parse::<f64>().ok())
-                .unwrap_or(3500.0);
+                .unwrap_or(DEFAULT_ETH_PRICE_USDC);
             let actual_gas_cost_usdc = total_cost_eth * eth_price;
             let margin_usdc = total_revenue_usdc - actual_gas_cost_usdc;
 
@@ -1271,11 +1279,11 @@ async fn process_single_spend(state: &AppState, item: QueuedSpend) {
 
     let gas_price = evm_client.get_gas_price().await.unwrap_or(20_000_000);
     let gas_limit = if request.is_private_note() {
-        2_500_000f64
+        GAS_LIMIT_PRIVATE_NOTE
     } else if request.cross_chain.is_some() {
-        1_200_000f64
+        GAS_LIMIT_CROSS_CHAIN
     } else {
-        1_500_000f64
+        GAS_LIMIT_STANDARD
     };
     let estimated_cost_eth = (gas_limit * gas_price as f64) / 1_000_000_000_000_000_000.0;
 
