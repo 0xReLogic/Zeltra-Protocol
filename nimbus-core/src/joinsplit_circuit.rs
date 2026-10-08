@@ -714,10 +714,67 @@ mod tests {
     }
 
     #[test]
+    fn test_joinsplit_negative_value_modular_underflow_rejected() {
+        let cs = ConstraintSystem::<Fr>::new_ref();
+        let mut circuit = create_dummy_joinsplit_circuit();
+
+        // Attempt modular underflow: Fr::from(-1) = Fr::MODULUS - 1
+        // Without 64-bit range constraints, a user could satisfy value conservation
+        // by wrapping around the field modulus r.
+        let neg_one = -Fr::from(1u64);
+        circuit.in1_value = Some(neg_one);
+
+        circuit.generate_constraints(cs.clone()).unwrap();
+        assert!(
+            !cs.is_satisfied().unwrap(),
+            "Modular underflow / negative input value must fail 64-bit range constraints!"
+        );
+    }
+
+    #[test]
+    fn test_joinsplit_flags_packed_manipulation_rejected() {
+        // Test 1: flags_packed out of range (e.g. 4 or 3 when only 0 change notes exist)
+        let cs = ConstraintSystem::<Fr>::new_ref();
+        let mut circuit = create_dummy_joinsplit_circuit();
+        // create_dummy_joinsplit_circuit has has_change_1 = 0, has_change_2 = 0 (flags_packed = 0)
+        // Maliciously tamper flags_packed to 1 without setting change note
+        circuit.flags_packed = Some(Fr::from(1u64));
+
+        circuit.generate_constraints(cs.clone()).unwrap();
+        assert!(
+            !cs.is_satisfied().unwrap(),
+            "Tampered flags_packed mismatching actual change flags must be unsatisfied!"
+        );
+
+        // Test 2: Non-boolean change flag witness (e.g., has_change_1 = 2)
+        let cs2 = ConstraintSystem::<Fr>::new_ref();
+        let mut circuit2 = create_dummy_joinsplit_circuit();
+        circuit2.has_change_1 = Some(Fr::from(2u64));
+        circuit2.flags_packed = Some(Fr::from(2u64));
+
+        circuit2.generate_constraints(cs2.clone()).unwrap();
+        assert!(
+            !cs2.is_satisfied().unwrap(),
+            "Non-boolean has_change flag must fail boolean constraints!"
+        );
+
+        // Test 3: Non-boolean is_dummy witness (e.g. is_dummy = 2)
+        let cs3 = ConstraintSystem::<Fr>::new_ref();
+        let mut circuit3 = create_dummy_joinsplit_circuit();
+        circuit3.in2_is_dummy = Some(Fr::from(2u64));
+
+        circuit3.generate_constraints(cs3.clone()).unwrap();
+        assert!(
+            !cs3.is_satisfied().unwrap(),
+            "Non-boolean is_dummy flag must fail boolean constraints!"
+        );
+    }
+
+    #[test]
     fn test_joinsplit_dummy_input_positive_value_rejected() {
         let cs = ConstraintSystem::<Fr>::new_ref();
         let mut circuit = create_dummy_joinsplit_circuit();
-        // Maliciously claim dummy note has positive value
+        // Maliciously claim dummy note has positive value (v_in_2 > 0 with is_dummy_2 = 1)
         circuit.in2_value = Some(Fr::from(1_000_000u64));
         circuit.in2_is_dummy = Some(Fr::from(1u64));
 
