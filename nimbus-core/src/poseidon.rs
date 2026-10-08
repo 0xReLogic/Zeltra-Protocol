@@ -577,20 +577,19 @@ fn w5_mds_mul(
     state: &[FpVar<Fr>; POSEIDON_W5_WIDTH],
     mds: &[Vec<Fr>],
 ) -> Result<[FpVar<Fr>; POSEIDON_W5_WIDTH], SynthesisError> {
-    let w = POSEIDON_W5_WIDTH;
-    let mut result: Vec<FpVar<Fr>> = (0..w).map(|_| FpVar::Constant(Fr::from(0u64))).collect();
-    for i in 0..w {
-        for j in 0..w {
+    let mut result: [FpVar<Fr>; POSEIDON_W5_WIDTH] = [
+        FpVar::Constant(Fr::from(0u64)),
+        FpVar::Constant(Fr::from(0u64)),
+        FpVar::Constant(Fr::from(0u64)),
+        FpVar::Constant(Fr::from(0u64)),
+        FpVar::Constant(Fr::from(0u64)),
+    ];
+    for i in 0..POSEIDON_W5_WIDTH {
+        for j in 0..POSEIDON_W5_WIDTH {
             result[i] = &result[i] + &state[j] * mds[i][j];
         }
     }
-    Ok([
-        result[0].clone(),
-        result[1].clone(),
-        result[2].clone(),
-        result[3].clone(),
-        result[4].clone(),
-    ])
+    Ok(result)
 }
 
 #[cfg(test)]
