@@ -14,9 +14,7 @@ use ark_bls12_381::{Bls12_381, Fr};
 use ark_relations::gr1cs::{ConstraintSynthesizer, ConstraintSystemRef, SynthesisError};
 use ark_snark::SNARK;
 
-use crate::poseidon::{
-    compute_nullifier, generate_mds_matrix, generate_round_constants, poseidon_hash, POSEIDON_SEED,
-};
+use crate::poseidon::{compute_nullifier, poseidon_hash};
 
 /// Compliance circuit that verifies spend validity.
 ///
@@ -46,8 +44,7 @@ impl ConstraintSynthesizer<Fr> for ComplianceCircuit {
         use ark_r1cs_std::eq::EqGadget;
         use ark_r1cs_std::fields::fp::{AllocatedFp, FpVar};
 
-        let rc = generate_round_constants(POSEIDON_SEED);
-        let mds = generate_mds_matrix(POSEIDON_SEED);
+        let (rc, mds) = &*crate::poseidon::CACHED_W3_PARAMS;
 
         // Allocate public inputs via gr1cs API
         let _root_var =

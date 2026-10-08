@@ -19,11 +19,7 @@ use crate::note::{
     domain_dummy_nullifier, domain_merkle_node, domain_note_commitment, domain_nullifier,
     domain_quote_binding, MERKLE_TREE_DEPTH,
 };
-use crate::poseidon::{
-    generate_mds_matrix as generate_w3_mds, generate_round_constants as generate_w3_rc,
-    generate_w5_mds_matrix, generate_w5_round_constants, poseidon_hash as poseidon_w3_hash,
-    poseidon_w5_hash, POSEIDON_SEED,
-};
+use crate::poseidon::{poseidon_hash as poseidon_w3_hash, poseidon_w5_hash};
 
 /// Number of public inputs in the Universal 2-in-2-out JoinSplit circuit (DEC-030).
 pub const NUM_JOINSPLIT_PUBLIC_INPUTS: usize = 14;
@@ -208,10 +204,8 @@ impl ConstraintSynthesizer<Fr> for JoinSplitCircuit {
         let zero = FpVar::Constant(Fr::from(0u64));
         let one = FpVar::Constant(Fr::from(1u64));
 
-        let w5_rc = generate_w5_round_constants();
-        let w5_mds = generate_w5_mds_matrix();
-        let w3_rc = generate_w3_rc(POSEIDON_SEED);
-        let w3_mds = generate_w3_mds(POSEIDON_SEED);
+        let (w5_rc, w5_mds) = &*crate::poseidon::CACHED_W5_PARAMS;
+        let (w3_rc, w3_mds) = &*crate::poseidon::CACHED_W3_PARAMS;
 
         let domain_merkle = domain_merkle_node();
         let domain_note = domain_note_commitment();

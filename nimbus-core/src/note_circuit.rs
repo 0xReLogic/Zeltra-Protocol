@@ -11,11 +11,7 @@ use ark_std::rand::rngs::StdRng;
 use ark_std::rand::SeedableRng;
 
 use crate::note::MERKLE_TREE_DEPTH;
-use crate::poseidon::{
-    generate_mds_matrix as generate_w3_mds, generate_round_constants as generate_w3_rc,
-    generate_w5_mds_matrix, generate_w5_round_constants, poseidon_hash as poseidon_w3_hash,
-    poseidon_w5_hash, POSEIDON_SEED,
-};
+use crate::poseidon::{poseidon_hash as poseidon_w3_hash, poseidon_w5_hash};
 
 /// Number of public inputs in the PrivateNoteCircuit.
 /// MVP: 12 inputs (no reserved nullifier/output slots).
@@ -121,11 +117,9 @@ impl ConstraintSynthesizer<Fr> for PrivateNoteCircuit {
     fn generate_constraints(self, cs: ConstraintSystemRef<Fr>) -> Result<(), SynthesisError> {
         use ark_r1cs_std::eq::EqGadget;
 
-        // Precompute Poseidon parameters
-        let w3_rc = generate_w3_rc(POSEIDON_SEED);
-        let w3_mds = generate_w3_mds(POSEIDON_SEED);
-        let w5_rc = generate_w5_round_constants();
-        let w5_mds = generate_w5_mds_matrix();
+        // Precomputed Poseidon parameters (cached globally in static LazyLock)
+        let (w3_rc, w3_mds) = &*crate::poseidon::CACHED_W3_PARAMS;
+        let (w5_rc, w5_mds) = &*crate::poseidon::CACHED_W5_PARAMS;
 
         // Domain tags
         let domain_note = crate::note::domain_note_commitment();

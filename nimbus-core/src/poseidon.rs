@@ -15,6 +15,23 @@ use ark_r1cs_std::fields::fp::FpVar;
 use ark_r1cs_std::fields::FieldVar;
 use ark_relations::gr1cs::SynthesisError;
 use ark_std::rand::SeedableRng;
+use std::sync::LazyLock;
+
+/// Cached precomputed parameters for Poseidon Width-3 (seed = POSEIDON_SEED).
+pub static CACHED_W3_PARAMS: LazyLock<(Vec<Fr>, Vec<Vec<Fr>>)> = LazyLock::new(|| {
+    (
+        generate_round_constants(POSEIDON_SEED),
+        generate_mds_matrix(POSEIDON_SEED),
+    )
+});
+
+/// Cached precomputed parameters for Poseidon Width-5 (seed = POSEIDON_W5_SEED).
+pub static CACHED_W5_PARAMS: LazyLock<(Vec<Fr>, Vec<Vec<Fr>>)> = LazyLock::new(|| {
+    (
+        generate_w5_round_constants(),
+        generate_w5_mds_matrix(),
+    )
+});
 
 /// Poseidon parameters for BLS12-381 scalar field
 /// Width t=3, alpha=5, R_F=8, R_P=57
@@ -372,10 +389,9 @@ pub fn native_poseidon_permutation(state: &mut [Fr; 3], round_constants: &[Fr], 
 /// This is the non-circuit version used by the prover to compute the
 /// public nullifier input before generating the proof.
 pub fn compute_nullifier(secret: Fr, randomness: Fr) -> Fr {
-    let rc = generate_round_constants(POSEIDON_SEED);
-    let mds = generate_mds_matrix(POSEIDON_SEED);
+    let (rc, mds) = &*CACHED_W3_PARAMS;
     let mut state = [secret, randomness, Fr::from(0u64)];
-    native_poseidon_permutation(&mut state, &rc, &mds);
+    native_poseidon_permutation(&mut state, rc, mds);
     state[0]
 }
 
@@ -501,10 +517,9 @@ pub fn native_w5_poseidon_permutation(
 /// State layout: [input_0, input_1, input_2, input_3, domain_tag]
 /// Returns state[0] after permutation.
 pub fn native_poseidon_w5(inputs: &[Fr; 4], domain_tag: Fr) -> Fr {
-    let rc = generate_w5_round_constants();
-    let mds = generate_w5_mds_matrix();
+    let (rc, mds) = &*CACHED_W5_PARAMS;
     let mut state = [inputs[0], inputs[1], inputs[2], inputs[3], domain_tag];
-    native_w5_poseidon_permutation(&mut state, &rc, &mds);
+    native_w5_poseidon_permutation(&mut state, rc, mds);
     state[0]
 }
 
