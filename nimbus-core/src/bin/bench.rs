@@ -181,5 +181,57 @@ fn main() {
         );
     }
 
+    // 9. Groth16 2-in-2-out JoinSplit Circuit Prover & Verifier
+    {
+        println!("--------------------------------------------------------------------------------");
+        println!("Benchmarking Groth16 Universal 2-in-2-out JoinSplit Circuit...");
+        let setup_start = Instant::now();
+        let keys = generate_joinsplit_circuit_keys().expect("joinsplit circuit setup");
+        let setup_ms = setup_start.elapsed().as_millis();
+        println!("JoinSplit Setup Time: {} ms", setup_ms);
+
+        let circuit = create_dummy_joinsplit_circuit();
+        let pub_inputs = extract_joinsplit_public_inputs(&circuit);
+
+        const ZK_ITERATIONS: u32 = 10;
+        let mut proof_sample = None;
+
+        let prove_start = Instant::now();
+        for _ in 0..ZK_ITERATIONS {
+            let p = generate_joinsplit_proof(circuit.clone(), &keys.proving_key)
+                .expect("joinsplit prove failed");
+            proof_sample = Some(p);
+        }
+        let prove_elapsed = prove_start.elapsed();
+        let prove_avg_ms = prove_elapsed.as_secs_f64() * 1000.0 / ZK_ITERATIONS as f64;
+        let prove_ops_per_sec = ZK_ITERATIONS as f64 / prove_elapsed.as_secs_f64();
+        println!(
+            "{:<30} | {:<12.2} | {:<12.2} | {:<12.2}",
+            "JoinSplit Groth16 Prove (2-in-2-out)",
+            prove_elapsed.as_millis() as f64,
+            prove_avg_ms,
+            prove_ops_per_sec
+        );
+
+        let proof = proof_sample.unwrap();
+        const VERIFY_ITERATIONS: u32 = 100;
+        let verify_start = Instant::now();
+        for _ in 0..VERIFY_ITERATIONS {
+            let valid = verify_joinsplit_proof(&keys.verifying_key, &proof, &pub_inputs)
+                .expect("joinsplit verify failed");
+            assert!(valid);
+        }
+        let verify_elapsed = verify_start.elapsed();
+        let verify_avg_ms = verify_elapsed.as_secs_f64() * 1000.0 / VERIFY_ITERATIONS as f64;
+        let verify_ops_per_sec = VERIFY_ITERATIONS as f64 / verify_elapsed.as_secs_f64();
+        println!(
+            "{:<30} | {:<12.2} | {:<12.2} | {:<12.2}",
+            "JoinSplit Groth16 Verify",
+            verify_elapsed.as_millis() as f64,
+            verify_avg_ms,
+            verify_ops_per_sec
+        );
+    }
+
     println!("================================================================================");
 }
