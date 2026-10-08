@@ -661,6 +661,18 @@ impl Nimbus {
             return Err(b"NOTE_ALREADY_SPENT".to_vec());
         }
 
+        // Fail-Fast Check: Validate total debit and note liability BEFORE expensive ZK precompile calls
+        let total_debit = merchant_amount
+            .checked_add(protocol_fee)
+            .ok_or_else(|| b"TOTAL_DEBIT_OVERFLOW".to_vec())?
+            .checked_add(execution_fee)
+            .ok_or_else(|| b"TOTAL_DEBIT_OVERFLOW".to_vec())?;
+
+        let user_liab = self.user_note_liability.get();
+        if user_liab < total_debit {
+            return Err(b"INSUFFICIENT_NOTE_LIABILITY".to_vec());
+        }
+
         // Construct 12 public input scalars in big-endian EVM format
         let mut recipient_bytes = [0u8; 32];
         recipient_bytes[12..].copy_from_slice(recipient.as_slice());
@@ -722,16 +734,6 @@ impl Nimbus {
         }
 
         // Multi-liability accounting (DEC-016 Gate B)
-        let total_debit = merchant_amount
-            .checked_add(protocol_fee)
-            .ok_or_else(|| b"TOTAL_DEBIT_OVERFLOW".to_vec())?
-            .checked_add(execution_fee)
-            .ok_or_else(|| b"TOTAL_DEBIT_OVERFLOW".to_vec())?;
-
-        let user_liab = self.user_note_liability.get();
-        if user_liab < total_debit {
-            return Err(b"INSUFFICIENT_NOTE_LIABILITY".to_vec());
-        }
         self.user_note_liability.set(user_liab - total_debit);
 
         let new_accumulated_fees = self
