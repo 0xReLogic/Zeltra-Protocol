@@ -116,3 +116,23 @@ Dokumen ini memetakan paper terpilih untuk arsitektur client SDK dan manajemen w
   * Komponen: [`nimbus-sdk/src/wallet/agent_wallet.rs`](file:///workspaces/Zeltra-Protocol/nimbus-sdk/src/wallet/agent_wallet.rs) dan modul delegasi gasless.
   * Menjamin delegasi pembayaran mikro otonom pada agen AI bebas dari eksploitasi cross-chain replay, front-run init, dan penipuan eksekusi kontrak jahat.
 
+---
+
+## 10. ZK-SNARK Stealth Addresses: Hash-Commitment Ownership Proofs (IEEE 2026)
+* **Link Paper:** [`https://ieeexplore.ieee.org/document/11676814/`](https://ieeexplore.ieee.org/document/11676814/)
+* **Problem di Sistem Klasik:**
+  Skema stealth address konvensional (Umbra, ERC-5564) bergantung penuh pada Elliptic Curve Diffie-Hellman (ECDH) untuk derivasi address spending key publik. Ini menciptakan 3 masalah:
+  1. Alamat stealth tetap terekspos sebagai address EVM biasa di explorer on-chain.
+  2. Penerima harus memiliki native gas (ETH) di address baru tersebut untuk memindahkan dana keluar atau bergantung pada relayer eksternal yang terpisah.
+  3. Logika kepemilikan terkunci mati pada spending key ECDSA statis dan tidak dapat diperluas ke kondisi kepemilikan yang dapat diprogram (*programmable predicates*).
+* **Inovasi Paper:**
+  Menggantikan derivasi address ECDH dengan skema komitmen hash Poseidon yang dibuktikan lewat ZK-SNARK (Groth16):
+  - Mengikat rahasia pengirim dan penerima ke dalam *authentication tag* berbasis hash Poseidon yang disimpan di smart contract stealth wallet:
+    $$\text{Tag} = \text{Poseidon}(\text{secret}_{\text{sender}}, \text{secret}_{\text{recipient}})$$
+  - Kepemilikan dibuktikan dengan menyerahkan Groth16 proof atas pengetahuan kedua rahasia tanpa pernah membukanya ke publik.
+  - Mempertahankan ECIES (Elliptic Curve Integrated Encryption Scheme) hanya untuk transport ephemeral key ringan.
+  - Mentransformasikan kepemilikan stealth wallet dari sekadar spending key statis menjadi **Programmable ZK Predicate** yang dapat disisipi aturan arbitrer di dalam sirkuit.
+* **Implementasi di Nimbus SDK & Core:**
+  * Komponen: [`nimbus-sdk/src/wallet/note_wallet.rs`](file:///workspaces/Zeltra-Protocol/nimbus-sdk/src/wallet/note_wallet.rs) (stealth scanning & ephemeral key transport via ECIES) dan [`nimbus-core/src/note_circuit.rs`](file:///workspaces/Zeltra-Protocol/nimbus-core/src/note_circuit.rs).
+  * Use Case Zeltra: **Direct Stealth Push Payments**. Memungkinkan pengguna Zeltra mengirim dana dari private note pool langsung ke pihak luar/merchant yang hanya mempublikasikan *Stealth Meta-Address* (tanpa mengungkap address publik aslinya di Arbiscan). Penerima dapat mengklaim atau membelanjakan dana via relayer gasless Zeltra tanpa pernah memegang saldo gas ETH on-chain.
+
