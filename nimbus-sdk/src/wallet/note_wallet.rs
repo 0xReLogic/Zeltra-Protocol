@@ -18,8 +18,9 @@ use chacha20poly1305::{
     ChaCha20Poly1305, Nonce,
 };
 use nimbus_core::{
-    derive_nullifier, derive_nullifier_key, fr_from_be_bytes, fr_to_be_bytes, generate_note_proof,
-    note_commitment, to_evm_g1, to_evm_g2, MERKLE_TREE_DEPTH,
+    compute_empty_hashes, derive_nullifier, derive_nullifier_key, domain_dummy_nullifier,
+    fr_from_be_bytes, fr_to_be_bytes, generate_joinsplit_proof, generate_note_proof,
+    native_poseidon_w5, note_commitment, to_evm_g1, to_evm_g2, JoinSplitCircuit, MERKLE_TREE_DEPTH,
 };
 use rand::rngs::OsRng;
 use serde::{Deserialize, Serialize};
@@ -113,11 +114,13 @@ impl Drop for WalletNote {
     }
 }
 
-/// Result of Coin Selection
+/// Result of Coin Selection (supporting 1-note and 2-note JoinSplit — DEC-030)
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SelectedSpend {
     pub input_commitment_hex: String,
     pub input_value: u64,
+    pub second_input_commitment_hex: Option<String>,
+    pub second_input_value: u64,
     pub merchant_amount: u64,
     pub protocol_fee: u64,
     pub execution_fee: u64,
@@ -126,7 +129,19 @@ pub struct SelectedSpend {
     pub has_change: bool,
 }
 
-/// Spend Proof Payload generated locally by client SDK
+impl SelectedSpend {
+    /// Returns true if this spend uses 2 input notes (JoinSplit).
+    pub fn is_joinsplit(&self) -> bool {
+        self.second_input_commitment_hex.is_some()
+    }
+
+    /// Returns the combined total of all input notes.
+    pub fn total_input_value(&self) -> u64 {
+        self.input_value + self.second_input_value
+    }
+}
+
+/// Spend Proof Payload generated locally by client SDK (1-in 1-out PrivateNoteCircuit)
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct SpendProofPayload {
     pub session_id: String,
@@ -148,6 +163,34 @@ pub struct SpendProofPayload {
     pub proof_b_hex: String,            // 256 bytes EVM format
     pub proof_c_hex: String,            // 128 bytes EVM format
     pub public_inputs_hex: Vec<String>, // 12 x 32 bytes EVM scalars
+}
+
+/// Universal 2-in-2-out JoinSplit Spend Proof Payload generated locally by client SDK (DEC-030)
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct JoinSplitSpendProofPayload {
+    pub session_id: String,
+    pub input_commitment_1_hex: String,
+    pub input_commitment_2_hex: Option<String>,
+    pub input_nullifier_1_hex: String,
+    pub input_nullifier_2_hex: String,
+    pub note_root_hex: String,
+    pub output_commitment_1_hex: String,
+    pub output_commitment_2_hex: String,
+    pub recipient_hex: String,
+    pub merchant_amount: u64,
+    pub protocol_fee: u64,
+    pub execution_fee: u64,
+    pub max_execution_fee: u64,
+    pub quote_hash_hex: String,
+    pub chain_id: u64,
+    pub contract_address_hex: String,
+    pub expiry: u64,
+    pub has_change_1: bool,
+    pub has_change_2: bool,
+    pub proof_a_neg_hex: String,        // 128 bytes EVM format
+    pub proof_b_hex: String,            // 256 bytes EVM format
+    pub proof_c_hex: String,            // 128 bytes EVM format
+    pub public_inputs_hex: Vec<String>, // 14 x 32 bytes EVM scalars
 }
 
 /// Errors occurring within the Private Note Wallet
@@ -365,11 +408,13 @@ impl PrivateNoteWallet {
         Ok(())
     }
 
-    /// Privacy-Preserving Stochastic Coin Selection (DEC-024)
+    /// Privacy-Preserving Tiered Stochastic Knapsack Coin Selection (DEC-024 / DEC-030)
     ///
-    /// 1. Prioritizes Exact Match (`has_change == 0`) to eliminate change note fingerprinting.
-    /// 2. If no exact match, selects the smallest single note >= required_amount (Best Fit).
-    /// 3. Reclaims expired reservations if lease has expired.
+    /// 1. Branch 1: Prioritizes Exact Match (`has_change == 0`) to eliminate change note fingerprinting.
+    /// 2. Branch 2: Single-Note Best Fit (Minimal Change).
+    /// 3. Branch 3: 2-Note Knapsack Optimization (JoinSplit Execution) when no single note is large enough.
+    ///    Minimizes change with a stochastic tie-breaking bucket (±5% tolerance) for privacy.
+    /// 4. Reclaims expired reservations if lease has expired.
     pub fn select_note_for_spend(
         &self,
         merchant_amount: u64,
@@ -402,14 +447,15 @@ impl PrivateNoteWallet {
             })
             .collect();
 
-        if spendable_candidates.is_empty() {
+        let total_available: u64 = spendable_candidates.iter().map(|n| n.value).sum();
+        if total_available < total_required {
             return Err(WalletError::InsufficientBalance {
                 requested: total_required,
-                available: 0,
+                available: total_available,
             });
         }
 
-        // Branch 1: Exact Match Search (Zero-Change Priority)
+        // Branch 1: Exact Match Search (Zero-Change Priority - 1 Note)
         if let Some(exact_note) = spendable_candidates
             .iter()
             .find(|n| n.value == total_required)
@@ -417,6 +463,8 @@ impl PrivateNoteWallet {
             return Ok(SelectedSpend {
                 input_commitment_hex: exact_note.commitment_hex.clone(),
                 input_value: exact_note.value,
+                second_input_commitment_hex: None,
+                second_input_value: 0,
                 merchant_amount,
                 protocol_fee,
                 execution_fee,
@@ -426,33 +474,88 @@ impl PrivateNoteWallet {
             });
         }
 
-        // Branch 2: Best Fit (Smallest Note >= total_required)
-        let mut sufficient_notes: Vec<&&WalletNote> = spendable_candidates
+        // Branch 2: Single-Note Best Fit (Smallest Note > total_required)
+        let mut single_notes: Vec<&&WalletNote> = spendable_candidates
             .iter()
-            .filter(|n| n.value >= total_required)
+            .filter(|n| n.value > total_required)
             .collect();
 
-        if sufficient_notes.is_empty() {
-            let available: u64 = spendable_candidates.iter().map(|n| n.value).sum();
-            return Err(WalletError::InsufficientBalance {
-                requested: total_required,
-                available,
+        if !single_notes.is_empty() {
+            single_notes.sort_by_key(|n| n.value);
+            let selected_note = single_notes[0];
+            let change_amount = selected_note.value - total_required;
+            return Ok(SelectedSpend {
+                input_commitment_hex: selected_note.commitment_hex.clone(),
+                input_value: selected_note.value,
+                second_input_commitment_hex: None,
+                second_input_value: 0,
+                merchant_amount,
+                protocol_fee,
+                execution_fee,
+                total_required,
+                change_amount,
+                has_change: change_amount > 0,
             });
         }
 
-        sufficient_notes.sort_by_key(|n| n.value);
-        let selected_note = sufficient_notes[0];
-        let change_amount = selected_note.value - total_required;
+        // Branch 3: 2-Note Knapsack Optimization (JoinSplit Execution - DEC-030)
+        // No single note suffices, search pairs (n_i, n_j) where sum >= total_required
+        let n = spendable_candidates.len();
+        let mut pair_candidates: Vec<(usize, usize, u64)> = Vec::new(); // (i, j, excess)
 
-        Ok(SelectedSpend {
-            input_commitment_hex: selected_note.commitment_hex.clone(),
-            input_value: selected_note.value,
-            merchant_amount,
-            protocol_fee,
-            execution_fee,
-            total_required,
-            change_amount,
-            has_change: change_amount > 0,
+        for i in 0..n {
+            for j in (i + 1)..n {
+                if let Some(sum) = spendable_candidates[i]
+                    .value
+                    .checked_add(spendable_candidates[j].value)
+                {
+                    if sum >= total_required {
+                        pair_candidates.push((i, j, sum - total_required));
+                    }
+                }
+            }
+        }
+
+        if !pair_candidates.is_empty() {
+            let min_excess = pair_candidates.iter().map(|(_, _, ex)| *ex).min().unwrap();
+            let tolerance = (min_excess as f64 * 0.05).ceil() as u64;
+            let threshold = min_excess.saturating_add(tolerance);
+
+            let pool: Vec<&(usize, usize, u64)> = pair_candidates
+                .iter()
+                .filter(|(_, _, ex)| *ex <= threshold)
+                .collect();
+
+            use rand::seq::SliceRandom;
+            let mut rng = rand::thread_rng();
+            let chosen = pool
+                .choose(&mut rng)
+                .copied()
+                .unwrap_or(&pair_candidates[0]);
+
+            let note_1 = spendable_candidates[chosen.0];
+            let note_2 = spendable_candidates[chosen.1];
+            let sum = note_1.value + note_2.value;
+            let change_amount = sum - total_required;
+
+            return Ok(SelectedSpend {
+                input_commitment_hex: note_1.commitment_hex.clone(),
+                input_value: note_1.value,
+                second_input_commitment_hex: Some(note_2.commitment_hex.clone()),
+                second_input_value: note_2.value,
+                merchant_amount,
+                protocol_fee,
+                execution_fee,
+                total_required,
+                change_amount,
+                has_change: change_amount > 0,
+            });
+        }
+
+        // Branch 4: Insufficient Balance for 1-note or 2-note spend
+        Err(WalletError::InsufficientBalance {
+            requested: total_required,
+            available: total_available,
         })
     }
 
@@ -507,6 +610,12 @@ impl PrivateNoteWallet {
         current_time_secs: u64,
         pk: &ark_groth16::ProvingKey<Bls12_381>,
     ) -> Result<SpendProofPayload, WalletError> {
+        if selected.is_joinsplit() {
+            return Err(WalletError::CryptoError(
+                "Selected spend requires 2-note JoinSplit; please use prepare_joinsplit_spend_proof or pay_joinsplit".into(),
+            ));
+        }
+
         // Reserve the input note
         self.reserve_note(
             &selected.input_commitment_hex,
@@ -722,6 +831,446 @@ impl PrivateNoteWallet {
         )
     }
 
+    /// Prepares a Universal 2-in-2-out JoinSplit Groth16 proof locally using `nimbus-core` JoinSplitCircuit (DEC-030).
+    ///
+    /// Supports both 1-note spend (using Canonical Dummy Zero-Note as input 2) and 2-note JoinSplit.
+    /// NEVER transmits the private spending key or note witnesses to any relayer.
+    #[allow(clippy::too_many_arguments)]
+    pub fn prepare_joinsplit_spend_proof(
+        &mut self,
+        selected: &SelectedSpend,
+        session_id: &str,
+        recipient_evm_address: &str,
+        max_execution_fee: u64,
+        quote_hash_hex: &str,
+        chain_id: u64,
+        contract_address_hex: &str,
+        expiry: u64,
+        current_time_secs: u64,
+        joinsplit_pk: &ark_groth16::ProvingKey<Bls12_381>,
+    ) -> Result<JoinSplitSpendProofPayload, WalletError> {
+        // 1. Reserve Note 1
+        self.reserve_note(
+            &selected.input_commitment_hex,
+            session_id,
+            current_time_secs,
+            DEFAULT_RESERVATION_TTL_SECS,
+        )?;
+
+        // 2. Reserve Note 2 if 2-note JoinSplit
+        if let Some(ref cm2_hex) = selected.second_input_commitment_hex {
+            if let Err(e) = self.reserve_note(
+                cm2_hex,
+                session_id,
+                current_time_secs,
+                DEFAULT_RESERVATION_TTL_SECS,
+            ) {
+                // Rollback note 1 on failure
+                let _ = self.rollback_spend(session_id);
+                return Err(e);
+            }
+        }
+
+        // 3. Load witnesses for Input Note 1
+        let input_note_1 = self
+            .notes
+            .get(&selected.input_commitment_hex)
+            .ok_or_else(|| WalletError::NoteNotFound(selected.input_commitment_hex.clone()))?
+            .clone();
+
+        let leaf_index_1 = input_note_1
+            .leaf_index
+            .ok_or_else(|| WalletError::NoteMissingWitness("input 1 leaf_index".into()))?;
+        let merkle_path_1_strings = input_note_1
+            .merkle_path_hex
+            .as_ref()
+            .ok_or_else(|| WalletError::NoteMissingWitness("input 1 merkle_path".into()))?;
+
+        if merkle_path_1_strings.len() != MERKLE_TREE_DEPTH {
+            return Err(WalletError::CryptoError(
+                "Invalid Merkle path depth for input 1".into(),
+            ));
+        }
+
+        let mut merkle_path_1 = [Fr::from(0u64); MERKLE_TREE_DEPTH];
+        for (i, p_hex) in merkle_path_1_strings.iter().enumerate() {
+            merkle_path_1[i] = parse_fr_from_hex(p_hex)?;
+        }
+
+        let sk = self.spending_key()?;
+        let in1_rho = parse_fr_from_hex(&input_note_1.rho_hex)?;
+        let in1_rand = parse_fr_from_hex(&input_note_1.randomness_hex)?;
+
+        let in1_cm = note_commitment(input_note_1.value, sk, in1_rho, in1_rand);
+        let nk = self.nullifier_key()?;
+        let nullifier_1 = derive_nullifier(nk, in1_cm, leaf_index_1);
+        let note_root = nimbus_core::compute_merkle_root(in1_cm, leaf_index_1, &merkle_path_1);
+
+        // 4. Load witnesses or generate dummy for Input Note 2
+        let (in2_val, in2_rho, in2_rand, in2_index, in2_path, in2_is_dummy, in2_nonce, nullifier_2) =
+            if let Some(ref cm2_hex) = selected.second_input_commitment_hex {
+                let input_note_2 = self
+                    .notes
+                    .get(cm2_hex)
+                    .ok_or_else(|| WalletError::NoteNotFound(cm2_hex.clone()))?
+                    .clone();
+
+                let leaf_index_2 = input_note_2
+                    .leaf_index
+                    .ok_or_else(|| WalletError::NoteMissingWitness("input 2 leaf_index".into()))?;
+                let merkle_path_2_strings = input_note_2
+                    .merkle_path_hex
+                    .as_ref()
+                    .ok_or_else(|| WalletError::NoteMissingWitness("input 2 merkle_path".into()))?;
+
+                if merkle_path_2_strings.len() != MERKLE_TREE_DEPTH {
+                    return Err(WalletError::CryptoError(
+                        "Invalid Merkle path depth for input 2".into(),
+                    ));
+                }
+
+                let mut merkle_path_2 = [Fr::from(0u64); MERKLE_TREE_DEPTH];
+                for (i, p_hex) in merkle_path_2_strings.iter().enumerate() {
+                    merkle_path_2[i] = parse_fr_from_hex(p_hex)?;
+                }
+
+                let rho_2 = parse_fr_from_hex(&input_note_2.rho_hex)?;
+                let rand_2 = parse_fr_from_hex(&input_note_2.randomness_hex)?;
+                let cm_2 = note_commitment(input_note_2.value, sk, rho_2, rand_2);
+                let nf_2 = derive_nullifier(nk, cm_2, leaf_index_2);
+
+                let root_2 = nimbus_core::compute_merkle_root(cm_2, leaf_index_2, &merkle_path_2);
+                if root_2 != note_root {
+                    return Err(WalletError::CryptoError(format!(
+                    "Divergent Merkle roots between input 1 ({}) and input 2 ({}); please synchronize note witnesses",
+                    hex::encode(fr_to_be_bytes(&note_root)),
+                    hex::encode(fr_to_be_bytes(&root_2))
+                )));
+                }
+
+                (
+                    Fr::from(input_note_2.value),
+                    rho_2,
+                    rand_2,
+                    Fr::from(leaf_index_2),
+                    merkle_path_2,
+                    Fr::from(0u64), // not dummy
+                    Fr::from(0u64),
+                    nf_2,
+                )
+            } else {
+                // Canonical Dummy Zero-Note (DEC-030 Seksi 3.B)
+                let empty_hashes = compute_empty_hashes();
+                let mut empty_path = [Fr::from(0u64); MERKLE_TREE_DEPTH];
+                empty_path.copy_from_slice(&empty_hashes[..MERKLE_TREE_DEPTH]);
+
+                let mut rng = OsRng;
+                let dummy_nonce = Fr::rand(&mut rng);
+                let dummy_nf = native_poseidon_w5(
+                    &[nk, dummy_nonce, Fr::from(0u64), Fr::from(0u64)],
+                    domain_dummy_nullifier(),
+                );
+
+                (
+                    Fr::from(0u64),
+                    Fr::from(0u64),
+                    Fr::from(0u64),
+                    Fr::from(0u64),
+                    empty_path,
+                    Fr::from(1u64), // is dummy
+                    dummy_nonce,
+                    dummy_nf,
+                )
+            };
+
+        // 5. Change Note 1 (Output 1)
+        let (ch1_val, ch1_cm, ch1_rho, ch1_rand) = if selected.has_change {
+            let mut rng = OsRng;
+            let c_rho = Fr::rand(&mut rng);
+            let c_rand = Fr::rand(&mut rng);
+            let c_cm = note_commitment(selected.change_amount, sk, c_rho, c_rand);
+
+            let c_cm_hex = hex::encode(fr_to_be_bytes(&c_cm));
+            let c_rho_hex = hex::encode(fr_to_be_bytes(&c_rho));
+            let c_rand_hex = hex::encode(fr_to_be_bytes(&c_rand));
+            let sk_hex = hex::encode(fr_to_be_bytes(&sk));
+
+            // Persist unconfirmed change note (2PC Phase 1)
+            let change_note = WalletNote {
+                commitment_hex: c_cm_hex,
+                value: selected.change_amount,
+                owner_key_hex: sk_hex,
+                rho_hex: c_rho_hex,
+                randomness_hex: c_rand_hex,
+                leaf_index: None,
+                merkle_path_hex: None,
+                status: NoteStatus::Unconfirmed,
+                created_at_secs: current_time_secs,
+                session_id: Some(session_id.to_string()),
+            };
+            self.notes
+                .insert(change_note.commitment_hex.clone(), change_note);
+
+            (Fr::from(selected.change_amount), c_cm, c_rho, c_rand)
+        } else {
+            (
+                Fr::from(0u64),
+                Fr::from(0u64),
+                Fr::from(0u64),
+                Fr::from(0u64),
+            )
+        };
+
+        // Output 2 is zero in standard payment/consolidation
+        let ch2_val = Fr::from(0u64);
+        let ch2_cm = Fr::from(0u64);
+        let ch2_rho = Fr::from(0u64);
+        let ch2_rand = Fr::from(0u64);
+
+        // 6. EVM parameters & domain scope
+        let recipient_bytes = parse_bytes32_from_hex(recipient_evm_address, true)?;
+        let recipient_fr = Fr::from_be_bytes_mod_order(&recipient_bytes);
+
+        let quote_bytes = parse_bytes32_from_hex(quote_hash_hex, false)?;
+        let quote_fr = Fr::from_be_bytes_mod_order(&quote_bytes);
+
+        let contract_bytes = parse_bytes32_from_hex(contract_address_hex, true)?;
+        let contract_fr = Fr::from_be_bytes_mod_order(&contract_bytes);
+
+        let has_change_1_fr = if selected.has_change {
+            Fr::from(1u64)
+        } else {
+            Fr::from(0u64)
+        };
+        let has_change_2_fr = Fr::from(0u64);
+        let flags_packed_fr = has_change_1_fr; // bit 0 = has_change_1, bit 1 = 0
+
+        // 7. Construct JoinSplitCircuit
+        let circuit = JoinSplitCircuit {
+            note_root: Some(note_root),
+            input_nullifier_1: Some(nullifier_1),
+            input_nullifier_2: Some(nullifier_2),
+            output_commitment_1: Some(ch1_cm),
+            output_commitment_2: Some(ch2_cm),
+            recipient: Some(recipient_fr),
+            merchant_amount: Some(Fr::from(selected.merchant_amount)),
+            protocol_fee: Some(Fr::from(selected.protocol_fee)),
+            execution_fee: Some(Fr::from(selected.execution_fee)),
+            quote_hash: Some(quote_fr),
+            chain_id: Some(Fr::from(chain_id)),
+            contract_address: Some(contract_fr),
+            expiry: Some(Fr::from(expiry)),
+            flags_packed: Some(flags_packed_fr),
+
+            in1_value: Some(Fr::from(input_note_1.value)),
+            in1_owner_key: Some(sk),
+            in1_rho: Some(in1_rho),
+            in1_randomness: Some(in1_rand),
+            in1_leaf_index: Some(Fr::from(leaf_index_1)),
+            in1_merkle_path: Some(merkle_path_1),
+
+            in2_value: Some(in2_val),
+            in2_owner_key: Some(sk),
+            in2_rho: Some(in2_rho),
+            in2_randomness: Some(in2_rand),
+            in2_leaf_index: Some(in2_index),
+            in2_merkle_path: Some(in2_path),
+            in2_is_dummy: Some(in2_is_dummy),
+            in2_session_nonce: Some(in2_nonce),
+
+            out1_value: Some(ch1_val),
+            out1_owner_key: Some(sk),
+            out1_rho: Some(ch1_rho),
+            out1_randomness: Some(ch1_rand),
+
+            out2_value: Some(ch2_val),
+            out2_owner_key: Some(sk),
+            out2_rho: Some(ch2_rho),
+            out2_randomness: Some(ch2_rand),
+
+            has_change_1: Some(has_change_1_fr),
+            has_change_2: Some(has_change_2_fr),
+        };
+
+        // 8. Generate Groth16 Proof
+        let proof = generate_joinsplit_proof(circuit, joinsplit_pk).map_err(|e| {
+            WalletError::CryptoError(format!("JoinSplit proof generation failed: {e:?}"))
+        })?;
+
+        // 9. Format EVM Proof Points
+        let proof_a_neg = to_evm_g1(&-proof.a);
+        let proof_b = to_evm_g2(&proof.b);
+        let proof_c = to_evm_g1(&proof.c);
+
+        // 10. Format 14 Public Inputs
+        let public_inputs = vec![
+            hex::encode(fr_to_be_bytes(&note_root)),
+            hex::encode(fr_to_be_bytes(&nullifier_1)),
+            hex::encode(fr_to_be_bytes(&nullifier_2)),
+            hex::encode(fr_to_be_bytes(&ch1_cm)),
+            hex::encode(fr_to_be_bytes(&ch2_cm)),
+            hex::encode(recipient_bytes),
+            hex::encode(fr_to_be_bytes(&Fr::from(selected.merchant_amount))),
+            hex::encode(fr_to_be_bytes(&Fr::from(selected.protocol_fee))),
+            hex::encode(fr_to_be_bytes(&Fr::from(selected.execution_fee))),
+            hex::encode(quote_bytes),
+            hex::encode(fr_to_be_bytes(&Fr::from(chain_id))),
+            hex::encode(contract_bytes),
+            hex::encode(fr_to_be_bytes(&Fr::from(expiry))),
+            hex::encode(fr_to_be_bytes(&flags_packed_fr)),
+        ];
+
+        Ok(JoinSplitSpendProofPayload {
+            session_id: session_id.to_string(),
+            input_commitment_1_hex: selected.input_commitment_hex.clone(),
+            input_commitment_2_hex: selected.second_input_commitment_hex.clone(),
+            input_nullifier_1_hex: hex::encode(fr_to_be_bytes(&nullifier_1)),
+            input_nullifier_2_hex: hex::encode(fr_to_be_bytes(&nullifier_2)),
+            note_root_hex: hex::encode(fr_to_be_bytes(&note_root)),
+            output_commitment_1_hex: hex::encode(fr_to_be_bytes(&ch1_cm)),
+            output_commitment_2_hex: hex::encode(fr_to_be_bytes(&ch2_cm)),
+            recipient_hex: recipient_evm_address.to_string(),
+            merchant_amount: selected.merchant_amount,
+            protocol_fee: selected.protocol_fee,
+            execution_fee: selected.execution_fee,
+            max_execution_fee,
+            quote_hash_hex: quote_hash_hex.to_string(),
+            chain_id,
+            contract_address_hex: contract_address_hex.to_string(),
+            expiry,
+            has_change_1: selected.has_change,
+            has_change_2: false,
+            proof_a_neg_hex: hex::encode(proof_a_neg),
+            proof_b_hex: hex::encode(proof_b),
+            proof_c_hex: hex::encode(proof_c),
+            public_inputs_hex: public_inputs,
+        })
+    }
+
+    /// High-level client API: executes coin selection and generates a JoinSplit spend proof payload (DEC-030).
+    #[allow(clippy::too_many_arguments)]
+    pub fn pay_joinsplit(
+        &mut self,
+        recipient_evm_address: &str,
+        merchant_amount: u64,
+        protocol_fee: u64,
+        execution_fee: u64,
+        max_execution_fee: u64,
+        quote_hash_hex: &str,
+        chain_id: u64,
+        contract_address_hex: &str,
+        expiry: u64,
+        current_time_secs: u64,
+        joinsplit_pk: &ark_groth16::ProvingKey<Bls12_381>,
+    ) -> Result<JoinSplitSpendProofPayload, WalletError> {
+        let selected = self.select_note_for_spend(
+            merchant_amount,
+            protocol_fee,
+            execution_fee,
+            current_time_secs,
+        )?;
+
+        let session_id = format!(
+            "joinsplit_{}_{}",
+            current_time_secs,
+            hex::encode(rand::random::<[u8; 8]>())
+        );
+
+        self.prepare_joinsplit_spend_proof(
+            &selected,
+            &session_id,
+            recipient_evm_address,
+            max_execution_fee,
+            quote_hash_hex,
+            chain_id,
+            contract_address_hex,
+            expiry,
+            current_time_secs,
+            joinsplit_pk,
+        )
+    }
+
+    /// In-Pool Autonomous Consolidation (DEC-030 Branch 4).
+    ///
+    /// Combines two fragmented notes (`note_cm_1` and `note_cm_2`) into a single
+    /// consolidated change note within the shielded pool without revealing balances
+    /// to public accounts on-chain.
+    #[allow(clippy::too_many_arguments)]
+    pub fn consolidate_notes(
+        &mut self,
+        note_cm_1: &str,
+        note_cm_2: &str,
+        session_id: &str,
+        execution_fee: u64,
+        max_execution_fee: u64,
+        quote_hash_hex: &str,
+        chain_id: u64,
+        contract_address_hex: &str,
+        expiry: u64,
+        current_time_secs: u64,
+        joinsplit_pk: &ark_groth16::ProvingKey<Bls12_381>,
+    ) -> Result<JoinSplitSpendProofPayload, WalletError> {
+        let (val1, val2) = {
+            let n1 = self
+                .notes
+                .get(note_cm_1)
+                .ok_or_else(|| WalletError::NoteNotFound(note_cm_1.to_string()))?;
+            let n2 = self
+                .notes
+                .get(note_cm_2)
+                .ok_or_else(|| WalletError::NoteNotFound(note_cm_2.to_string()))?;
+
+            if !matches!(n1.status, NoteStatus::Unspent) {
+                return Err(WalletError::NoteNotSpendable(note_cm_1.to_string()));
+            }
+            if !matches!(n2.status, NoteStatus::Unspent) {
+                return Err(WalletError::NoteNotSpendable(note_cm_2.to_string()));
+            }
+            (n1.value, n2.value)
+        };
+
+        let total_in = val1
+            .checked_add(val2)
+            .ok_or_else(|| WalletError::CryptoError("Combined note value overflow".into()))?;
+
+        if total_in <= execution_fee {
+            return Err(WalletError::CryptoError(
+                "Combined note value cannot cover execution fee".into(),
+            ));
+        }
+
+        let consolidated_value = total_in - execution_fee;
+
+        let selected = SelectedSpend {
+            input_commitment_hex: note_cm_1.to_string(),
+            input_value: val1,
+            second_input_commitment_hex: Some(note_cm_2.to_string()),
+            second_input_value: val2,
+            merchant_amount: 0,
+            protocol_fee: 0,
+            execution_fee,
+            total_required: execution_fee,
+            change_amount: consolidated_value,
+            has_change: true,
+        };
+
+        // Recipient is Address::ZERO for autonomous in-pool consolidation
+        let zero_address = "0x0000000000000000000000000000000000000000";
+
+        self.prepare_joinsplit_spend_proof(
+            &selected,
+            session_id,
+            zero_address,
+            max_execution_fee,
+            quote_hash_hex,
+            chain_id,
+            contract_address_hex,
+            expiry,
+            current_time_secs,
+            joinsplit_pk,
+        )
+    }
+
     /// High-level client API: transfers funds to another EVM address or stealth address.
     #[allow(clippy::too_many_arguments)]
     pub fn send_to_wallet(
@@ -803,6 +1352,8 @@ impl PrivateNoteWallet {
             let selected = SelectedSpend {
                 input_commitment_hex: cm,
                 input_value: val,
+                second_input_commitment_hex: None,
+                second_input_value: 0,
                 merchant_amount: net_merchant,
                 protocol_fee: protocol_fee_per_note,
                 execution_fee: execution_fee_per_note,
@@ -847,7 +1398,7 @@ impl PrivateNoteWallet {
         change_merkle_path: Option<Vec<String>>,
         new_merkle_root: Option<&str>,
     ) -> Result<(), WalletError> {
-        // 1. Mark input note as Spent
+        // 1. Mark input note(s) as Spent
         let mut found_input = false;
         for note in self.notes.values_mut() {
             if note.session_id.as_deref() == Some(session_id) {
@@ -857,7 +1408,6 @@ impl PrivateNoteWallet {
                         spent_at_secs: current_time_secs,
                     };
                     found_input = true;
-                    break;
                 }
             }
         }
@@ -869,6 +1419,76 @@ impl PrivateNoteWallet {
         }
 
         // 2. Promote Change Note to Unspent (if present and witness provided)
+        if let (Some(idx), Some(path)) = (change_leaf_index, change_merkle_path) {
+            for note in self.notes.values_mut() {
+                if note.session_id.as_deref() == Some(session_id)
+                    && note.status == NoteStatus::Unconfirmed
+                {
+                    note.leaf_index = Some(idx);
+                    note.merkle_path_hex = Some(path);
+                    note.status = NoteStatus::Unspent;
+                    break;
+                }
+            }
+        }
+
+        if let Some(root) = new_merkle_root {
+            self.current_merkle_root_hex = Some(root.to_string());
+        }
+
+        Ok(())
+    }
+
+    /// Finalizes a 2-note JoinSplit spend transaction receipt (DEC-030).
+    ///
+    /// Transitions input note 1 to `Spent(nullifier_1)` and input note 2 (if present)
+    /// to `Spent(nullifier_2)`, then promotes the change note to `Unspent`.
+    #[allow(clippy::too_many_arguments)]
+    pub fn commit_joinsplit_spend(
+        &mut self,
+        session_id: &str,
+        nullifier_1_hex: &str,
+        nullifier_2_hex: Option<&str>,
+        current_time_secs: u64,
+        change_leaf_index: Option<u64>,
+        change_merkle_path: Option<Vec<String>>,
+        new_merkle_root: Option<&str>,
+    ) -> Result<(), WalletError> {
+        let mut reserved_cms: Vec<String> = Vec::new();
+        for (cm, note) in &self.notes {
+            if note.session_id.as_deref() == Some(session_id) {
+                if let NoteStatus::Reserved { .. } = &note.status {
+                    reserved_cms.push(cm.clone());
+                }
+            }
+        }
+
+        if reserved_cms.is_empty() {
+            return Err(WalletError::NoteNotFound(format!(
+                "Session {session_id} input notes"
+            )));
+        }
+
+        // Mark note 1 as Spent with nullifier 1
+        if let Some(note1) = self.notes.get_mut(&reserved_cms[0]) {
+            note1.status = NoteStatus::Spent {
+                nullifier_hex: nullifier_1_hex.to_string(),
+                spent_at_secs: current_time_secs,
+            };
+        }
+
+        // If there is a note 2, mark as Spent with nullifier 2
+        if reserved_cms.len() > 1 {
+            let n2_hex = nullifier_2_hex.unwrap_or(nullifier_1_hex);
+            if let Some(note2) = self.notes.get_mut(&reserved_cms[1]) {
+                note2.status = NoteStatus::Spent {
+                    nullifier_hex: n2_hex.to_string(),
+                    spent_at_secs: current_time_secs,
+                };
+            }
+        }
+
+        // Promote Change Note to Unspent (if present and witness provided)
         if let (Some(idx), Some(path)) = (change_leaf_index, change_merkle_path) {
             for note in self.notes.values_mut() {
                 if note.session_id.as_deref() == Some(session_id)
@@ -1487,5 +2107,319 @@ mod tests {
         // 20-byte address rejected when padding not allowed
         let err_pad = parse_bytes32_from_hex(addr, false);
         assert!(err_pad.is_err());
+    }
+
+    #[test]
+    fn test_coin_selection_tiered_knapsack_joinsplit() {
+        let seed = [50u8; 32];
+        let mut wallet = PrivateNoteWallet::new(&seed);
+        let path = dummy_merkle_path();
+
+        // User has two notes of 10 USDC each (total 20 USDC)
+        let (_, cm1) = wallet.create_deposit_note(10_000_000, 1000).unwrap();
+        let (_, cm2) = wallet.create_deposit_note(10_000_000, 1000).unwrap();
+        wallet
+            .confirm_deposit(&cm1, 0, path.clone(), "0xroot")
+            .unwrap();
+        wallet.confirm_deposit(&cm2, 1, path, "0xroot").unwrap();
+
+        // User spends 15 USDC total (14.5 merchant + 0.3 pfee + 0.2 efee)
+        // Neither single note suffices; Branch 3 Knapsack must select both notes!
+        let selected = wallet
+            .select_note_for_spend(14_500_000, 300_000, 200_000, 1010)
+            .unwrap();
+
+        assert!(selected.is_joinsplit());
+        assert_eq!(selected.total_input_value(), 20_000_000);
+        assert_eq!(selected.total_required, 15_000_000);
+        assert_eq!(selected.change_amount, 5_000_000);
+        assert!(selected.has_change);
+        assert!(
+            (selected.input_commitment_hex == cm1
+                && selected.second_input_commitment_hex.as_deref() == Some(&cm2))
+                || (selected.input_commitment_hex == cm2
+                    && selected.second_input_commitment_hex.as_deref() == Some(&cm1))
+        );
+    }
+
+    #[test]
+    fn test_coin_selection_insufficient_even_with_joinsplit() {
+        let seed = [51u8; 32];
+        let mut wallet = PrivateNoteWallet::new(&seed);
+        let path = dummy_merkle_path();
+
+        // Two notes of 5 USDC each (total 10 USDC)
+        let (_, cm1) = wallet.create_deposit_note(5_000_000, 1000).unwrap();
+        let (_, cm2) = wallet.create_deposit_note(5_000_000, 1000).unwrap();
+        wallet
+            .confirm_deposit(&cm1, 0, path.clone(), "0xroot")
+            .unwrap();
+        wallet.confirm_deposit(&cm2, 1, path, "0xroot").unwrap();
+
+        // Spending 15 USDC fails with InsufficientBalance
+        let err = wallet.select_note_for_spend(14_000_000, 700_000, 300_000, 1010);
+        assert_eq!(
+            err,
+            Err(WalletError::InsufficientBalance {
+                requested: 15_000_000,
+                available: 10_000_000,
+            })
+        );
+    }
+
+    #[test]
+    fn test_prepare_joinsplit_spend_proof_1_note_with_dummy() {
+        let seed = [52u8; 32];
+        let mut wallet = PrivateNoteWallet::new(&seed);
+        let path = dummy_merkle_path();
+
+        let (_, cm1) = wallet.create_deposit_note(50_000_000, 1000).unwrap();
+        wallet.confirm_deposit(&cm1, 0, path, "0xroot").unwrap();
+
+        // Single note spend (20 USDC from 50 USDC note)
+        let selected = wallet
+            .select_note_for_spend(20_000_000, 100_000, 50_000, 1000)
+            .unwrap();
+        assert!(!selected.is_joinsplit());
+
+        let keys = nimbus_core::generate_joinsplit_circuit_keys().unwrap();
+
+        let payload = wallet
+            .prepare_joinsplit_spend_proof(
+                &selected,
+                "session_js_single",
+                "0x1111111111111111111111111111111111111111",
+                60_000,
+                "0x2222222222222222222222222222222222222222222222222222222222222222",
+                421614,
+                "0x3333333333333333333333333333333333333333",
+                2000,
+                1000,
+                &keys.proving_key,
+            )
+            .unwrap();
+
+        assert_eq!(payload.public_inputs_hex.len(), 14);
+        assert_eq!(payload.proof_a_neg_hex.len(), 256);
+        assert_eq!(payload.proof_b_hex.len(), 512);
+        assert_eq!(payload.proof_c_hex.len(), 256);
+        assert!(payload.has_change_1);
+        assert!(!payload.has_change_2);
+
+        // Verify with nimbus_core::verify_joinsplit_proof
+        let mut pis = Vec::new();
+        for h in &payload.public_inputs_hex {
+            pis.push(parse_fr_from_hex(h).unwrap());
+        }
+
+        let from_evm_a = nimbus_core::from_evm_g1(
+            &hex::decode(&payload.proof_a_neg_hex)
+                .unwrap()
+                .try_into()
+                .unwrap(),
+        )
+        .unwrap();
+        let from_evm_b = nimbus_core::from_evm_g2(
+            &hex::decode(&payload.proof_b_hex)
+                .unwrap()
+                .try_into()
+                .unwrap(),
+        )
+        .unwrap();
+        let from_evm_c = nimbus_core::from_evm_g1(
+            &hex::decode(&payload.proof_c_hex)
+                .unwrap()
+                .try_into()
+                .unwrap(),
+        )
+        .unwrap();
+
+        let reconstructed_proof = ark_groth16::Proof {
+            a: -from_evm_a,
+            b: from_evm_b,
+            c: from_evm_c,
+        };
+
+        let verified =
+            nimbus_core::verify_joinsplit_proof(&keys.verifying_key, &reconstructed_proof, &pis)
+                .unwrap();
+        assert!(
+            verified,
+            "Universal JoinSplit proof with dummy 2nd note must verify"
+        );
+    }
+
+    #[test]
+    fn test_prepare_joinsplit_spend_proof_2_notes_and_commit() {
+        let seed = [53u8; 32];
+        let mut wallet = PrivateNoteWallet::new(&seed);
+
+        let sk = wallet.spending_key().unwrap();
+        let empty = nimbus_core::compute_empty_hashes();
+
+        // Note 1: 10 USDC
+        let (note1, cm1) = wallet.create_deposit_note(10_000_000, 1000).unwrap();
+        // Note 2: 10 USDC
+        let (note2, cm2) = wallet.create_deposit_note(10_000_000, 1000).unwrap();
+
+        let rho1 = parse_fr_from_hex(&note1.rho_hex).unwrap();
+        let rand1 = parse_fr_from_hex(&note1.randomness_hex).unwrap();
+        let fr_cm1 = nimbus_core::note_commitment(10_000_000, sk, rho1, rand1);
+
+        let rho2 = parse_fr_from_hex(&note2.rho_hex).unwrap();
+        let rand2 = parse_fr_from_hex(&note2.randomness_hex).unwrap();
+        let fr_cm2 = nimbus_core::note_commitment(10_000_000, sk, rho2, rand2);
+
+        // Path for leaf 0: sibling at index 0 is cm2
+        let mut path1: [Fr; MERKLE_TREE_DEPTH] = empty[..MERKLE_TREE_DEPTH].try_into().unwrap();
+        path1[0] = fr_cm2;
+        let root = nimbus_core::compute_merkle_root(fr_cm1, 0, &path1);
+
+        // Path for leaf 1: sibling at index 0 is cm1
+        let mut path2 = path1;
+        path2[0] = fr_cm1;
+        assert_eq!(nimbus_core::compute_merkle_root(fr_cm2, 1, &path2), root);
+
+        let path1_hex: Vec<String> = path1
+            .iter()
+            .map(|p| hex::encode(fr_to_be_bytes(p)))
+            .collect();
+        let path2_hex: Vec<String> = path2
+            .iter()
+            .map(|p| hex::encode(fr_to_be_bytes(p)))
+            .collect();
+        let root_hex = format!("0x{}", hex::encode(fr_to_be_bytes(&root)));
+
+        wallet
+            .confirm_deposit(&cm1, 0, path1_hex, &root_hex)
+            .unwrap();
+        wallet
+            .confirm_deposit(&cm2, 1, path2_hex, &root_hex)
+            .unwrap();
+        assert_eq!(wallet.balance(), 20_000_000);
+
+        let keys = nimbus_core::generate_joinsplit_circuit_keys().unwrap();
+
+        // Pay 15 USDC using 2-note JoinSplit
+        let payload = wallet
+            .pay_joinsplit(
+                "0x1111111111111111111111111111111111111111",
+                14_500_000,
+                300_000,
+                200_000,
+                250_000,
+                "0x2222222222222222222222222222222222222222222222222222222222222222",
+                421614,
+                "0x3333333333333333333333333333333333333333",
+                2000,
+                1010,
+                &keys.proving_key,
+            )
+            .unwrap();
+
+        assert_eq!(payload.public_inputs_hex.len(), 14);
+
+        // Commit the JoinSplit spend
+        let change_path = dummy_merkle_path();
+        wallet
+            .commit_joinsplit_spend(
+                &payload.session_id,
+                &payload.input_nullifier_1_hex,
+                Some(&payload.input_nullifier_2_hex),
+                1015,
+                Some(2),
+                Some(change_path),
+                Some("0xnew_root_js"),
+            )
+            .unwrap();
+
+        // Remaining balance must be change amount (5 USDC)
+        assert_eq!(wallet.balance(), 5_000_000);
+        let n1_status = &wallet.notes.get(&cm1).unwrap().status;
+        let n2_status = &wallet.notes.get(&cm2).unwrap().status;
+        assert!(matches!(n1_status, NoteStatus::Spent { .. }));
+        assert!(matches!(n2_status, NoteStatus::Spent { .. }));
+    }
+
+    #[test]
+    fn test_consolidate_notes_in_pool() {
+        let seed = [54u8; 32];
+        let mut wallet = PrivateNoteWallet::new(&seed);
+        let sk = wallet.spending_key().unwrap();
+        let empty = nimbus_core::compute_empty_hashes();
+
+        let (note1, cm1) = wallet.create_deposit_note(10_000_000, 1000).unwrap();
+        let (note2, cm2) = wallet.create_deposit_note(15_000_000, 1000).unwrap();
+
+        let rho1 = parse_fr_from_hex(&note1.rho_hex).unwrap();
+        let rand1 = parse_fr_from_hex(&note1.randomness_hex).unwrap();
+        let fr_cm1 = nimbus_core::note_commitment(10_000_000, sk, rho1, rand1);
+
+        let rho2 = parse_fr_from_hex(&note2.rho_hex).unwrap();
+        let rand2 = parse_fr_from_hex(&note2.randomness_hex).unwrap();
+        let fr_cm2 = nimbus_core::note_commitment(15_000_000, sk, rho2, rand2);
+
+        let mut path1: [Fr; MERKLE_TREE_DEPTH] = empty[..MERKLE_TREE_DEPTH].try_into().unwrap();
+        path1[0] = fr_cm2;
+        let root = nimbus_core::compute_merkle_root(fr_cm1, 0, &path1);
+
+        let mut path2 = path1;
+        path2[0] = fr_cm1;
+
+        let path1_hex: Vec<String> = path1
+            .iter()
+            .map(|p| hex::encode(fr_to_be_bytes(p)))
+            .collect();
+        let path2_hex: Vec<String> = path2
+            .iter()
+            .map(|p| hex::encode(fr_to_be_bytes(p)))
+            .collect();
+        let root_hex = format!("0x{}", hex::encode(fr_to_be_bytes(&root)));
+
+        wallet
+            .confirm_deposit(&cm1, 0, path1_hex, &root_hex)
+            .unwrap();
+        wallet
+            .confirm_deposit(&cm2, 1, path2_hex, &root_hex)
+            .unwrap();
+        assert_eq!(wallet.balance(), 25_000_000);
+
+        let keys = nimbus_core::generate_joinsplit_circuit_keys().unwrap();
+
+        let payload = wallet
+            .consolidate_notes(
+                &cm1,
+                &cm2,
+                "session_consolidate_1",
+                100_000, // 0.1 USDC exec fee
+                150_000,
+                "0x2222222222222222222222222222222222222222222222222222222222222222",
+                421614,
+                "0x3333333333333333333333333333333333333333",
+                2000,
+                1010,
+                &keys.proving_key,
+            )
+            .unwrap();
+
+        assert_eq!(payload.merchant_amount, 0);
+        assert_eq!(payload.execution_fee, 100_000);
+
+        // Commit consolidation
+        let change_path = dummy_merkle_path();
+        wallet
+            .commit_joinsplit_spend(
+                "session_consolidate_1",
+                &payload.input_nullifier_1_hex,
+                Some(&payload.input_nullifier_2_hex),
+                1015,
+                Some(2),
+                Some(change_path),
+                Some("0xroot_consolidated"),
+            )
+            .unwrap();
+
+        // 25_000_000 - 100_000 = 24_900_000
+        assert_eq!(wallet.balance(), 24_900_000);
     }
 }

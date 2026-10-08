@@ -72,7 +72,7 @@ impl ConstraintSynthesizer<Fr> for ComplianceCircuit {
         // Constraint 1: Nullifier = Poseidon(secret, randomness)
         // This is a proper cryptographic hash constraint — collision-resistant
         // and non-algebraic, preventing double-spending via nullifier forgery.
-        let computed_nullifier = poseidon_hash(&secret_fp, &randomness_fp, &rc, &mds)?;
+        let computed_nullifier = poseidon_hash(&secret_fp, &randomness_fp, rc, mds)?;
 
         // Wrap the public nullifier variable as FpVar for enforce_equal
         let nullifier_fp = FpVar::Var(AllocatedFp::new(self.nullifier, nullifier_var, cs.clone()));

@@ -26,12 +26,8 @@ pub static CACHED_W3_PARAMS: LazyLock<(Vec<Fr>, Vec<Vec<Fr>>)> = LazyLock::new(|
 });
 
 /// Cached precomputed parameters for Poseidon Width-5 (seed = POSEIDON_W5_SEED).
-pub static CACHED_W5_PARAMS: LazyLock<(Vec<Fr>, Vec<Vec<Fr>>)> = LazyLock::new(|| {
-    (
-        generate_w5_round_constants(),
-        generate_w5_mds_matrix(),
-    )
-});
+pub static CACHED_W5_PARAMS: LazyLock<(Vec<Fr>, Vec<Vec<Fr>>)> =
+    LazyLock::new(|| (generate_w5_round_constants(), generate_w5_mds_matrix()));
 
 /// Poseidon parameters for BLS12-381 scalar field
 /// Width t=3, alpha=5, R_F=8, R_P=57

@@ -309,8 +309,8 @@ impl ConstraintSynthesizer<Fr> for JoinSplitCircuit {
         let in1_cm = poseidon_w5_hash(
             &[in1_value.clone(), in1_owner.clone(), in1_rho, in1_rand],
             domain_note,
-            &w5_rc,
-            &w5_mds,
+            w5_rc,
+            w5_mds,
         )?;
 
         // Verify Merkle path for Note 1
@@ -320,8 +320,8 @@ impl ConstraintSynthesizer<Fr> for JoinSplitCircuit {
             &in1_index,
             self.in1_leaf_index,
             &in1_path,
-            &w5_rc,
-            &w5_mds,
+            w5_rc,
+            w5_mds,
             domain_merkle,
         )?;
         computed_root_1.enforce_equal(&note_root_var)?;
@@ -330,14 +330,14 @@ impl ConstraintSynthesizer<Fr> for JoinSplitCircuit {
         let nk_1 = poseidon_w3_hash(
             &in1_owner,
             &FpVar::Constant(domain_nullifier),
-            &w3_rc,
-            &w3_mds,
+            w3_rc,
+            w3_mds,
         )?;
         let computed_nf_1 = poseidon_w5_hash(
             &[nk_1, in1_cm, in1_index, zero.clone()],
             domain_nullifier,
-            &w5_rc,
-            &w5_mds,
+            w5_rc,
+            w5_mds,
         )?;
         computed_nf_1.enforce_equal(&nullifier_1_var)?;
 
@@ -349,8 +349,8 @@ impl ConstraintSynthesizer<Fr> for JoinSplitCircuit {
         let in2_cm = poseidon_w5_hash(
             &[in2_value.clone(), in2_owner.clone(), in2_rho, in2_rand],
             domain_note,
-            &w5_rc,
-            &w5_mds,
+            w5_rc,
+            w5_mds,
         )?;
 
         // c. Merkle check: conditional on (1 - is_dummy_2)
@@ -360,8 +360,8 @@ impl ConstraintSynthesizer<Fr> for JoinSplitCircuit {
             &in2_index,
             self.in2_leaf_index,
             &in2_path,
-            &w5_rc,
-            &w5_mds,
+            w5_rc,
+            w5_mds,
             domain_merkle,
         )?;
         let root2_diff = &computed_root_2 - &note_root_var;
@@ -371,20 +371,20 @@ impl ConstraintSynthesizer<Fr> for JoinSplitCircuit {
         let nk_2 = poseidon_w3_hash(
             &in2_owner,
             &FpVar::Constant(domain_nullifier),
-            &w3_rc,
-            &w3_mds,
+            w3_rc,
+            w3_mds,
         )?;
         let real_nf_2 = poseidon_w5_hash(
             &[nk_2.clone(), in2_cm, in2_index, zero.clone()],
             domain_nullifier,
-            &w5_rc,
-            &w5_mds,
+            w5_rc,
+            w5_mds,
         )?;
         let dummy_nf_2 = poseidon_w5_hash(
             &[nk_2, in2_nonce_var, zero.clone(), zero.clone()],
             domain_dummy_nullifier,
-            &w5_rc,
-            &w5_mds,
+            w5_rc,
+            w5_mds,
         )?;
 
         // expected_nf_2 = is_dummy * dummy_nf_2 + (1 - is_dummy) * real_nf_2
@@ -397,8 +397,8 @@ impl ConstraintSynthesizer<Fr> for JoinSplitCircuit {
         let ch1_cm = poseidon_w5_hash(
             &[out1_val.clone(), out1_owner, out1_rho, out1_rand],
             domain_note,
-            &w5_rc,
-            &w5_mds,
+            w5_rc,
+            w5_mds,
         )?;
         (&out1_val * &one_minus_ch1).enforce_equal(&zero)?;
         let expected_out_cm1 = &has_ch1_var * &ch1_cm;
@@ -408,8 +408,8 @@ impl ConstraintSynthesizer<Fr> for JoinSplitCircuit {
         let ch2_cm = poseidon_w5_hash(
             &[out2_val.clone(), out2_owner, out2_rho, out2_rand],
             domain_note,
-            &w5_rc,
-            &w5_mds,
+            w5_rc,
+            w5_mds,
         )?;
         (&out2_val * &one_minus_ch2).enforce_equal(&zero)?;
         let expected_out_cm2 = &has_ch2_var * &ch2_cm;
@@ -435,10 +435,10 @@ impl ConstraintSynthesizer<Fr> for JoinSplitCircuit {
         let scope_hash = poseidon_w5_hash(
             &[recipient_var, chain_id_var, contract_addr_var, expiry_var],
             domain_binding,
-            &w5_rc,
-            &w5_mds,
+            w5_rc,
+            w5_mds,
         )?;
-        let _binding = poseidon_w3_hash(&quote_hash_var, &scope_hash, &w3_rc, &w3_mds)?;
+        let _binding = poseidon_w3_hash(&quote_hash_var, &scope_hash, w3_rc, w3_mds)?;
 
         Ok(())
     }

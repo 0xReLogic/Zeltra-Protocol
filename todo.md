@@ -20,7 +20,7 @@ Komponen inti berikut **sudah selesai dan diverifikasi**:
 * **Relayer Hardening & Compliance (DEC-026):** Local Groth16 preflight verification di CPU relayer (`verify_evm_note_proof`) sebagai mitigasi C-01 anti gas-griefing, serta screening sanksi publik aktif (OFAC SDN List di layer HTTP) dengan penolakan langsung (`403 / REJECTED`) pada spend handler dan validation.
 * **Inflow Compliance Gate & Mempool Anti-Limbo Lifecycle (DEC-027):** 2-layer sanctions screening pada deposit ingress (OFAC in-memory + Chainalysis on-chain Oracle), dynamic 15-minute lease, mempool lease watchdog background worker dengan strict on-chain simulation (`is_nullifier_spent`), dan restorasi self-custody di `PrivateNoteWallet` (`reclaim_expired_reservations`).
 * **Ingress Hardening, Flat Fee & Domain Binding (DEC-028):** Wajib 12 public inputs fail-closed (Fix R4), verifikasi domain target `chain_id` & `contract_address` (Fix R3), penyatuan fee spend flat 45 bps permanen tanpa diskon umur root (Fix R2), dan penegasan batas statement `ComplianceCircuit` (Fix R1).
-* **Multi-UTXO JoinSplit & Client Hardening (DEC-030):** Universal 2-in-2-out JoinSplit Groth16 circuit terdeploy di `nimbus-core` (14 public inputs, Option A constant topology, 448 range constraints, 5/5 circuit unit tests pass). Client SDK `nimbus-sdk` hardened: Argon2id + ChaCha20Poly1305 AEAD backup (backward-compatible V1), `zeroize` memory security barrier, anti-ghost note `update_note_witness`, dan canonical hex parsers (24/24 sdk tests pass).
+* **Multi-UTXO JoinSplit & Client Hardening (DEC-030):** Universal 2-in-2-out JoinSplit Groth16 circuit terdeploy di `nimbus-core` (14 public inputs, Option A constant topology, 448 range constraints). Client SDK `nimbus-sdk` ter-upgrade penuh: Tiered Stochastic Knapsack Coin Selection (1-note & 2-note JoinSplit, toleransi ±5%), in-pool autonomous consolidation (`consolidate_notes`), Argon2id + ChaCha20Poly1305 AEAD backup, `zeroize` memory security barrier, anti-ghost note `update_note_witness`, dan canonical hex parsers (29/29 sdk tests pass).
 
 ---
 
@@ -54,9 +54,8 @@ Ref: [`docs/todos/private-note-balance.md`](file:///workspaces/Zeltra-Protocol/d
 
 ## 3. Client SDK Private Wallet State (`nimbus-sdk`)
 
-> **Status Gate E:** SELESAI (100%) — `PrivateNoteWallet` mengelola saldo UTXO, coin selection, local proof generation, dan persistensi terenkripsi (DEC-024).
+> **Status Gate E:** SELESAI (100%) — `PrivateNoteWallet` mengelola saldo UTXO, coin selection, local proof generation, dan persistensi terenkripsi (DEC-024). Tiered Stochastic Knapsack Coin Selection & in-pool `consolidate_notes()` telah terintegrasi (DEC-030, 29/29 tests pass).
 
-- [ ] Upgrade Coin Selection ke Tiered Stochastic Knapsack (1-note & 2-note JoinSplit) + in-pool `consolidate_notes()` ([`DEC-030`](file:///workspaces/Zeltra-Protocol/research/decisions/DEC-030-multi-utxo-joinsplit-coin-selection-zeroize-and-aead-backup.md)).
 - [ ] WebAssembly / Browser packaging test runner untuk eksekusi sirkuit client-side secara non-blocking via Web Worker.
 
 ---

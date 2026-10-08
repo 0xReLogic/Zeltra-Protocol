@@ -181,8 +181,8 @@ impl ConstraintSynthesizer<Fr> for PrivateNoteCircuit {
                 in_rand.clone(),
             ],
             domain_note,
-            &w5_rc,
-            &w5_mds,
+            w5_rc,
+            w5_mds,
         )?;
 
         // ═══════════════════════════════════════════════════════════════
@@ -226,8 +226,8 @@ impl ConstraintSynthesizer<Fr> for PrivateNoteCircuit {
             current = poseidon_w5_hash(
                 &[left, right, zero.clone(), zero.clone()],
                 domain_merkle,
-                &w5_rc,
-                &w5_mds,
+                w5_rc,
+                w5_mds,
             )?;
         }
 
@@ -244,18 +244,14 @@ impl ConstraintSynthesizer<Fr> for PrivateNoteCircuit {
         //    nf = Poseidon_W5(nk, commitment, leaf_index, 0; domain_nullifier)
         // ═══════════════════════════════════════════════════════════════
 
-        let nullifier_key = poseidon_w3_hash(
-            &in_owner,
-            &FpVar::Constant(domain_nullifier),
-            &w3_rc,
-            &w3_mds,
-        )?;
+        let nullifier_key =
+            poseidon_w3_hash(&in_owner, &FpVar::Constant(domain_nullifier), w3_rc, w3_mds)?;
 
         let computed_nf = poseidon_w5_hash(
             &[nullifier_key, in_commitment, in_index, zero.clone()],
             domain_nullifier,
-            &w5_rc,
-            &w5_mds,
+            w5_rc,
+            w5_mds,
         )?;
 
         computed_nf.enforce_equal(&nullifier_var)?;
@@ -268,8 +264,8 @@ impl ConstraintSynthesizer<Fr> for PrivateNoteCircuit {
         let change_cm = poseidon_w5_hash(
             &[ch_value.clone(), ch_owner, ch_rho, ch_rand],
             domain_note,
-            &w5_rc,
-            &w5_mds,
+            w5_rc,
+            w5_mds,
         )?;
 
         // Gate C0 Fix 2:
@@ -321,12 +317,12 @@ impl ConstraintSynthesizer<Fr> for PrivateNoteCircuit {
                 expiry_var.clone(),
             ],
             domain_binding,
-            &w5_rc,
-            &w5_mds,
+            w5_rc,
+            w5_mds,
         )?;
 
         // Non-linearly combine quote_hash and scope_hash
-        let _binding = poseidon_w3_hash(&quote_hash_var, &scope_hash, &w3_rc, &w3_mds)?;
+        let _binding = poseidon_w3_hash(&quote_hash_var, &scope_hash, w3_rc, w3_mds)?;
 
         // ═══════════════════════════════════════════════════════════════
         // 10. Input value > 0 (non-zero)

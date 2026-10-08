@@ -183,7 +183,9 @@ fn main() {
 
     // 9. Groth16 2-in-2-out JoinSplit Circuit Prover & Verifier
     {
-        println!("--------------------------------------------------------------------------------");
+        println!(
+            "--------------------------------------------------------------------------------"
+        );
         println!("Benchmarking Groth16 Universal 2-in-2-out JoinSplit Circuit...");
         let setup_start = Instant::now();
         let keys = generate_joinsplit_circuit_keys().expect("joinsplit circuit setup");

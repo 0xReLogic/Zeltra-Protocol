@@ -65,7 +65,9 @@ pub use compliance_circuit::{
 };
 
 // Re-export Poseidon hash & canonical Grain LFSR (DEC-021)
-pub use poseidon::{compute_nullifier, generate_grain_round_constants, native_poseidon_w5, GrainLfsr};
+pub use poseidon::{
+    compute_nullifier, generate_grain_round_constants, native_poseidon_w5, GrainLfsr,
+};
 
 // Re-export Private Note V1 (DEC-016A)
 pub use note::{
