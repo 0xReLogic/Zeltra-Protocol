@@ -20,6 +20,7 @@ Komponen inti berikut **sudah selesai dan diverifikasi**:
 * **Relayer Hardening & Compliance (DEC-026):** Local Groth16 preflight verification di CPU relayer (`verify_evm_note_proof`) sebagai mitigasi C-01 anti gas-griefing, serta screening sanksi publik aktif (OFAC SDN List di layer HTTP) dengan penolakan langsung (`403 / REJECTED`) pada spend handler dan validation.
 * **Inflow Compliance Gate & Mempool Anti-Limbo Lifecycle (DEC-027):** 2-layer sanctions screening pada deposit ingress (OFAC in-memory + Chainalysis on-chain Oracle), dynamic 15-minute lease, mempool lease watchdog background worker dengan strict on-chain simulation (`is_nullifier_spent`), dan restorasi self-custody di `PrivateNoteWallet` (`reclaim_expired_reservations`).
 * **Ingress Hardening, Flat Fee & Domain Binding (DEC-028):** Wajib 12 public inputs fail-closed (Fix R4), verifikasi domain target `chain_id` & `contract_address` (Fix R3), penyatuan fee spend flat 45 bps permanen tanpa diskon umur root (Fix R2), dan penegasan batas statement `ComplianceCircuit` (Fix R1).
+* **Multi-UTXO JoinSplit & Client Hardening (DEC-030):** Universal 2-in-2-out JoinSplit Groth16 circuit terdeploy di `nimbus-core` (14 public inputs, Option A constant topology, 448 range constraints, 5/5 circuit unit tests pass). Client SDK `nimbus-sdk` hardened: Argon2id + ChaCha20Poly1305 AEAD backup (backward-compatible V1), `zeroize` memory security barrier, anti-ghost note `update_note_witness`, dan canonical hex parsers (24/24 sdk tests pass).
 
 ---
 
@@ -36,7 +37,7 @@ Arsitektur yang dipilih secara definitif: **Arah B (ZK-UTXO Model - Gates A s/d 
 > 3. [`https://github.com/zk-kit/zk-kit`](https://github.com/zk-kit/zk-kit) — Monorepo reusable ZK libraries Ethereum Foundation (LeanIMT, IMT, Poseidon hashing, tree proof).
 
 ### Gate C0 - Security Repair Private Note Circuit
-Ref: [`docs/todos/private-note-balance.md`](file:///workspaces/Zeltra-Protocol/docs/todos/private-note-balance.md), [`DEC-016A (Frozen Spec)`](file:///workspaces/Zeltra-Protocol/research/decisions/DEC-016A-private-note-spec-freeze.md), & [`DEC-016B (Shortcuts Fix)`](file:///workspaces/Zeltra-Protocol/research/decisions/DEC-016B-mvp-circuit-shortcuts.md)
+Ref: [`docs/todos/private-note-balance.md`](file:///workspaces/Zeltra-Protocol/docs/todos/private-note-balance.md), [`DEC-016A (Frozen Spec)`](file:///workspaces/Zeltra-Protocol/research/decisions/DEC-016A-private-note-spec-freeze.md), [`DEC-016B (Shortcuts Fix)`](file:///workspaces/Zeltra-Protocol/research/decisions/DEC-016B-mvp-circuit-shortcuts.md), & [`DEC-030 (Multi-UTXO JoinSplit)`](file:///workspaces/Zeltra-Protocol/research/decisions/DEC-030-multi-utxo-joinsplit-coin-selection-zeroize-and-aead-backup.md)
 
 - [ ] Simpan proving/verifying key sebagai artifact versioned; cache development key pada test runner.
 - [ ] Jalankan MPC ceremony hanya setelah seluruh constraint dan public-input ABI dibekukan serta direview.
@@ -55,6 +56,7 @@ Ref: [`docs/todos/private-note-balance.md`](file:///workspaces/Zeltra-Protocol/d
 
 > **Status Gate E:** SELESAI (100%) — `PrivateNoteWallet` mengelola saldo UTXO, coin selection, local proof generation, dan persistensi terenkripsi (DEC-024).
 
+- [ ] Upgrade Coin Selection ke Tiered Stochastic Knapsack (1-note & 2-note JoinSplit) + in-pool `consolidate_notes()` ([`DEC-030`](file:///workspaces/Zeltra-Protocol/research/decisions/DEC-030-multi-utxo-joinsplit-coin-selection-zeroize-and-aead-backup.md)).
 - [ ] WebAssembly / Browser packaging test runner untuk eksekusi sirkuit client-side secara non-blocking via Web Worker.
 
 ---

@@ -4,6 +4,7 @@ mod compliance_circuit;
 mod crypto;
 mod evm;
 mod fees;
+pub mod joinsplit_circuit;
 mod note;
 mod note_circuit;
 mod poseidon;
@@ -69,9 +70,10 @@ pub use poseidon::{compute_nullifier, generate_grain_round_constants, GrainLfsr}
 // Re-export Private Note V1 (DEC-016A)
 pub use note::{
     compute_empty_hashes, compute_merkle_root, derive_nullifier, derive_nullifier_key,
-    domain_initial_note, domain_merkle_node, domain_note_commitment, domain_nullifier,
-    fr_from_be_bytes, fr_to_be_bytes, merkle_append, merkle_hash, note_commitment,
-    verify_merkle_proof, verify_value_conservation, PrivateNoteV1, MERKLE_TREE_DEPTH,
+    domain_dummy_nullifier, domain_initial_note, domain_merkle_node, domain_note_commitment,
+    domain_nullifier, fr_from_be_bytes, fr_to_be_bytes, merkle_append, merkle_hash,
+    note_commitment, verify_merkle_proof, verify_value_conservation, PrivateNoteV1,
+    MERKLE_TREE_DEPTH,
 };
 
 // Re-export accounting state machine (DEC-016A Gate B)
@@ -83,6 +85,14 @@ pub use note_circuit::{
     generate_note_circuit_keys, generate_note_proof, get_or_init_note_circuit_keys,
     get_prepared_note_vk, verify_evm_note_proof, verify_note_proof, NoteCircuitKeys,
     PrivateNoteCircuit, NOTE_CIRCUIT_SETUP_SEED, NUM_PUBLIC_INPUTS,
+};
+
+// Re-export Universal 2-in-2-out JoinSplit Circuit (DEC-030 Gate C0)
+pub use joinsplit_circuit::{
+    create_dummy_joinsplit_circuit, extract_joinsplit_public_inputs,
+    generate_joinsplit_circuit_keys, generate_joinsplit_proof, verify_joinsplit_proof,
+    JoinSplitCircuit, JoinSplitCircuitKeys, JOINSPLIT_CIRCUIT_SETUP_SEED,
+    NUM_JOINSPLIT_PUBLIC_INPUTS,
 };
 
 #[cfg(test)]

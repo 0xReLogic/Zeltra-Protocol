@@ -17,8 +17,10 @@ pub use wallet::*;
 pub use wasm_types::*;
 pub use zk_wasm::*;
 
+pub use zeroize::{Zeroize, ZeroizeOnDrop, Zeroizing};
+
 /// Securely zero out memory of a value to prevent sensitive data leakage.
-/// Uses volatile writes to ensure the compiler doesn't optimize it away.
+/// Uses volatile writes and a compiler memory barrier to prevent Dead Store Elimination (DSE).
 pub fn secure_zeroize<T>(val: &mut T) {
     let ptr = val as *mut T as *mut u8;
     let size = std::mem::size_of::<T>();
@@ -27,29 +29,17 @@ pub fn secure_zeroize<T>(val: &mut T) {
             std::ptr::write_volatile(ptr.add(i), 0);
         }
     }
+    core::sync::atomic::compiler_fence(core::sync::atomic::Ordering::SeqCst);
 }
 
-/// Securely zero out a byte vector.
+/// Securely zero out a byte vector using audited zeroize compiler barriers.
 pub fn secure_zeroize_vec(val: &mut Vec<u8>) {
-    let ptr = val.as_mut_ptr();
-    for i in 0..val.len() {
-        unsafe {
-            std::ptr::write_volatile(ptr.add(i), 0);
-        }
-    }
-    val.clear();
+    val.zeroize();
 }
 
 /// Securely zero out a string's underlying heap representation.
 pub fn secure_zeroize_string(val: &mut String) {
-    let bytes = unsafe { val.as_mut_vec() };
-    let ptr = bytes.as_mut_ptr();
-    for i in 0..bytes.len() {
-        unsafe {
-            std::ptr::write_volatile(ptr.add(i), 0);
-        }
-    }
-    bytes.clear();
+    val.zeroize();
 }
 
 /// Computes HMAC-SHA256 of a message with a given key.

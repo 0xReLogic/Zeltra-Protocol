@@ -10,8 +10,13 @@
 //! - IACR ePrint 2026/513: Zheng & Han, "zkBSA: Auditable and Compliant Stealth Addresses for Blockchains" (Stealth recipient transfers).
 //! - ACM CCS 2024/2025: "Attacking Anonymity Set in Tornado Cash via Wallet Fingerprints" (Stochastic bucket coin selection).
 
+use argon2::{Algorithm, Argon2, Params, Version};
 use ark_bls12_381::{Bls12_381, Fr};
 use ark_ff::{PrimeField, UniformRand};
+use chacha20poly1305::{
+    aead::{Aead, KeyInit},
+    ChaCha20Poly1305, Nonce,
+};
 use nimbus_core::{
     derive_nullifier, derive_nullifier_key, fr_from_be_bytes, fr_to_be_bytes, generate_note_proof,
     note_commitment, to_evm_g1, to_evm_g2, MERKLE_TREE_DEPTH,
@@ -26,6 +31,45 @@ pub const DUST_THRESHOLD: u64 = 1_000;
 
 /// Default lease TTL for note reservations in seconds (2 minutes)
 pub const DEFAULT_RESERVATION_TTL_SECS: u64 = 120;
+
+/// Safely parses an arkworks Fr scalar from a 0x-prefixed or raw hex string (DEC-030).
+pub fn parse_fr_from_hex(hex_str: &str) -> Result<Fr, WalletError> {
+    let clean = hex_str.strip_prefix("0x").unwrap_or(hex_str);
+    let bytes = hex::decode(clean).map_err(|e| WalletError::InvalidHex(e.to_string()))?;
+    if bytes.len() != 32 {
+        return Err(WalletError::CryptoError(format!(
+            "Invalid scalar byte length: expected 32, got {}",
+            bytes.len()
+        )));
+    }
+    let mut arr = [0u8; 32];
+    arr.copy_from_slice(&bytes);
+    fr_from_be_bytes(&arr)
+        .ok_or_else(|| WalletError::CryptoError("Non-canonical field scalar".into()))
+}
+
+/// Safely parses a 32-byte scalar array or 20-byte EVM address (left-padded to 32 bytes) from hex (DEC-030).
+pub fn parse_bytes32_from_hex(
+    hex_str: &str,
+    pad_20_byte_address: bool,
+) -> Result<[u8; 32], WalletError> {
+    let clean = hex_str.strip_prefix("0x").unwrap_or(hex_str);
+    let dec = hex::decode(clean).map_err(|e| WalletError::InvalidHex(e.to_string()))?;
+    let mut buf = [0u8; 32];
+    if dec.len() == 20 && pad_20_byte_address {
+        buf[12..].copy_from_slice(&dec);
+        Ok(buf)
+    } else if dec.len() == 32 {
+        buf.copy_from_slice(&dec);
+        Ok(buf)
+    } else {
+        Err(WalletError::InvalidHex(format!(
+            "Invalid byte length: expected {}32, got {}",
+            if pad_20_byte_address { "20 or " } else { "" },
+            dec.len()
+        )))
+    }
+}
 
 /// Note Lifecycle Status
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -188,30 +232,12 @@ impl PrivateNoteWallet {
 
     /// Spending key as Fr
     pub fn spending_key(&self) -> Result<Fr, WalletError> {
-        let bytes = hex::decode(&self.spending_key_hex)
-            .map_err(|e| WalletError::InvalidHex(e.to_string()))?;
-        if bytes.len() != 32 {
-            return Err(WalletError::CryptoError(
-                "Invalid spending key length".into(),
-            ));
-        }
-        let mut arr = [0u8; 32];
-        arr.copy_from_slice(&bytes);
-        fr_from_be_bytes(&arr).ok_or_else(|| WalletError::CryptoError("Non-canonical Fr".into()))
+        parse_fr_from_hex(&self.spending_key_hex)
     }
 
     /// Nullifier key as Fr
     pub fn nullifier_key(&self) -> Result<Fr, WalletError> {
-        let bytes = hex::decode(&self.nullifier_key_hex)
-            .map_err(|e| WalletError::InvalidHex(e.to_string()))?;
-        if bytes.len() != 32 {
-            return Err(WalletError::CryptoError(
-                "Invalid nullifier key length".into(),
-            ));
-        }
-        let mut arr = [0u8; 32];
-        arr.copy_from_slice(&bytes);
-        fr_from_be_bytes(&arr).ok_or_else(|| WalletError::CryptoError("Non-canonical Fr".into()))
+        parse_fr_from_hex(&self.nullifier_key_hex)
     }
 
     /// Aggregate balance of all fully confirmed, spendable notes.
@@ -281,6 +307,37 @@ impl PrivateNoteWallet {
 
     /// Confirms a deposit once mined on-chain, associating its Merkle leaf index and path.
     pub fn confirm_deposit(
+        &mut self,
+        commitment_hex: &str,
+        leaf_index: u64,
+        merkle_path: Vec<String>,
+        root_hex: &str,
+    ) -> Result<(), WalletError> {
+        let note = self
+            .notes
+            .get_mut(commitment_hex)
+            .ok_or_else(|| WalletError::NoteNotFound(commitment_hex.to_string()))?;
+
+        if merkle_path.len() != MERKLE_TREE_DEPTH {
+            return Err(WalletError::CryptoError(format!(
+                "Invalid Merkle path length: expected {}, got {}",
+                MERKLE_TREE_DEPTH,
+                merkle_path.len()
+            )));
+        }
+
+        note.leaf_index = Some(leaf_index);
+        note.merkle_path_hex = Some(merkle_path);
+        note.status = NoteStatus::Unspent;
+        self.current_merkle_root_hex = Some(root_hex.to_string());
+
+        Ok(())
+    }
+
+    /// Updates the Merkle witness and promotes an Unconfirmed or stale note to Unspent (DEC-030).
+    ///
+    /// Essential for asynchronous LeanIMT indexing (eliminates Ghost Notes) and local witness fast-forwarding.
+    pub fn update_note_witness(
         &mut self,
         commitment_hex: &str,
         leaf_index: u64,
@@ -478,30 +535,12 @@ impl PrivateNoteWallet {
 
         let mut merkle_path = [Fr::from(0u64); MERKLE_TREE_DEPTH];
         for (i, p_hex) in merkle_path_strings.iter().enumerate() {
-            let b = hex::decode(p_hex).map_err(|e| WalletError::InvalidHex(e.to_string()))?;
-            let mut arr = [0u8; 32];
-            arr.copy_from_slice(&b);
-            merkle_path[i] = fr_from_be_bytes(&arr)
-                .ok_or_else(|| WalletError::CryptoError("Non-canonical path Fr".into()))?;
+            merkle_path[i] = parse_fr_from_hex(p_hex)?;
         }
 
         let sk = self.spending_key()?;
-        let in_rho = {
-            let b = hex::decode(&input_note.rho_hex)
-                .map_err(|e| WalletError::InvalidHex(e.to_string()))?;
-            let mut arr = [0u8; 32];
-            arr.copy_from_slice(&b);
-            fr_from_be_bytes(&arr)
-                .ok_or_else(|| WalletError::CryptoError("Non-canonical rho".into()))?
-        };
-        let in_rand = {
-            let b = hex::decode(&input_note.randomness_hex)
-                .map_err(|e| WalletError::InvalidHex(e.to_string()))?;
-            let mut arr = [0u8; 32];
-            arr.copy_from_slice(&b);
-            fr_from_be_bytes(&arr)
-                .ok_or_else(|| WalletError::CryptoError("Non-canonical randomness".into()))?
-        };
+        let in_rho = parse_fr_from_hex(&input_note.rho_hex)?;
+        let in_rand = parse_fr_from_hex(&input_note.randomness_hex)?;
 
         let in_cm = note_commitment(input_note.value, sk, in_rho, in_rand);
         let nk = self.nullifier_key()?;
@@ -549,55 +588,13 @@ impl PrivateNoteWallet {
         };
 
         // Parse EVM public input scalars
-        let recipient_bytes = {
-            let clean = recipient_evm_address
-                .strip_prefix("0x")
-                .unwrap_or(recipient_evm_address);
-            let dec = hex::decode(clean).map_err(|e| WalletError::InvalidHex(e.to_string()))?;
-            let mut buf = [0u8; 32];
-            if dec.len() == 20 {
-                buf[12..].copy_from_slice(&dec);
-            } else if dec.len() == 32 {
-                buf.copy_from_slice(&dec);
-            } else {
-                return Err(WalletError::InvalidHex(
-                    "Invalid recipient address length".into(),
-                ));
-            }
-            buf
-        };
+        let recipient_bytes = parse_bytes32_from_hex(recipient_evm_address, true)?;
         let recipient_fr = Fr::from_be_bytes_mod_order(&recipient_bytes);
 
-        let quote_bytes = {
-            let clean = quote_hash_hex.strip_prefix("0x").unwrap_or(quote_hash_hex);
-            let dec = hex::decode(clean).map_err(|e| WalletError::InvalidHex(e.to_string()))?;
-            let mut buf = [0u8; 32];
-            if dec.len() == 32 {
-                buf.copy_from_slice(&dec);
-            } else {
-                return Err(WalletError::InvalidHex("Invalid quote hash length".into()));
-            }
-            buf
-        };
+        let quote_bytes = parse_bytes32_from_hex(quote_hash_hex, false)?;
         let quote_fr = Fr::from_be_bytes_mod_order(&quote_bytes);
 
-        let contract_bytes = {
-            let clean = contract_address_hex
-                .strip_prefix("0x")
-                .unwrap_or(contract_address_hex);
-            let dec = hex::decode(clean).map_err(|e| WalletError::InvalidHex(e.to_string()))?;
-            let mut buf = [0u8; 32];
-            if dec.len() == 20 {
-                buf[12..].copy_from_slice(&dec);
-            } else if dec.len() == 32 {
-                buf.copy_from_slice(&dec);
-            } else {
-                return Err(WalletError::InvalidHex(
-                    "Invalid contract address length".into(),
-                ));
-            }
-            buf
-        };
+        let contract_bytes = parse_bytes32_from_hex(contract_address_hex, true)?;
         let contract_fr = Fr::from_be_bytes_mod_order(&contract_bytes);
 
         let has_change_fr = if selected.has_change {
@@ -975,36 +972,45 @@ impl PrivateNoteWallet {
             .sum()
     }
 
-    /// Exports an encrypted backup of the wallet state using password-derived encryption.
+    /// Exports an encrypted backup of the wallet state using Argon2id + ChaCha20-Poly1305 AEAD (DEC-030 / RFC 9106 + RFC 8439).
     pub fn export_backup(&self, password: &str) -> Result<String, WalletError> {
         let serialized = serde_json::to_string(self)
             .map_err(|e| WalletError::SerializationError(e.to_string()))?;
 
-        // Derive key: HMAC-SHA256(password, "nimbus.wallet.backup.v1")
-        let key = crate::hmac_sha256(password.as_bytes(), b"nimbus.wallet.backup.v1");
+        // 1. Generate fresh 32-byte salt and 12-byte nonce
+        let mut salt = [0u8; 32];
+        let mut nonce_bytes = [0u8; 12];
+        rand::RngCore::fill_bytes(&mut OsRng, &mut salt);
+        rand::RngCore::fill_bytes(&mut OsRng, &mut nonce_bytes);
 
-        // Integrity MAC: HMAC-SHA256(key, serialized_json)
-        let mac = crate::hmac_sha256(&key, serialized.as_bytes());
+        // 2. Derive 32-byte key using Argon2id (RFC 9106)
+        // Memory: 16 MiB (16384 KiB) for responsive execution & WASM compatibility, 3 iterations, 1 lane
+        let params = Params::new(16_384, 3, 1, Some(32))
+            .map_err(|e| WalletError::CryptoError(format!("Argon2 params error: {e}")))?;
+        let argon2 = Argon2::new(Algorithm::Argon2id, Version::V0x13, params);
 
-        // Simple XOR stream encryption for backup portability
-        let mut ciphertext = serialized.into_bytes();
-        let mut stream_hasher = Sha256::new();
-        stream_hasher.update(key);
-        stream_hasher.update(mac);
-        let mut block = stream_hasher.finalize();
+        let mut derived_key = [0u8; 32];
+        argon2
+            .hash_password_into(password.as_bytes(), &salt, &mut derived_key)
+            .map_err(|e| WalletError::CryptoError(format!("Argon2 KDF error: {e}")))?;
 
-        for (i, byte) in ciphertext.iter_mut().enumerate() {
-            if i % 32 == 0 && i > 0 {
-                let mut next_hasher = Sha256::new();
-                next_hasher.update(block);
-                block = next_hasher.finalize();
-            }
-            *byte ^= block[i % 32];
-        }
+        // 3. Encrypt with ChaCha20-Poly1305 AEAD (RFC 8439)
+        let cipher = ChaCha20Poly1305::new_from_slice(&derived_key)
+            .map_err(|e| WalletError::CryptoError(format!("Cipher init error: {e}")))?;
+        let nonce = Nonce::from(nonce_bytes);
+
+        let ciphertext = cipher
+            .encrypt(&nonce, serialized.as_bytes())
+            .map_err(|e| WalletError::CryptoError(format!("AEAD encryption error: {e}")))?;
+
+        // Securely erase derived key from memory
+        crate::secure_zeroize(&mut derived_key);
 
         let backup_payload = serde_json::json!({
-            "version": 1,
-            "mac_hex": hex::encode(mac),
+            "version": 2,
+            "kdf": "argon2id",
+            "salt_hex": hex::encode(salt),
+            "nonce_hex": hex::encode(nonce_bytes),
             "ciphertext_hex": hex::encode(ciphertext),
         });
 
@@ -1012,46 +1018,98 @@ impl PrivateNoteWallet {
             .map_err(|e| WalletError::SerializationError(e.to_string()))
     }
 
-    /// Imports and decrypts a wallet backup.
+    /// Imports and decrypts a wallet backup (Supports V2 Argon2id-ChaCha20Poly1305 and legacy V1).
     pub fn import_backup(backup_json: &str, password: &str) -> Result<Self, WalletError> {
         let val: serde_json::Value =
             serde_json::from_str(backup_json).map_err(|_| WalletError::BackupDecryptionFailed)?;
 
-        let mac_hex = val["mac_hex"]
-            .as_str()
-            .ok_or(WalletError::BackupDecryptionFailed)?;
-        let ciphertext_hex = val["ciphertext_hex"]
-            .as_str()
-            .ok_or(WalletError::BackupDecryptionFailed)?;
+        let version = val["version"].as_u64().unwrap_or(1);
+        if version == 2 {
+            let salt_hex = val["salt_hex"]
+                .as_str()
+                .ok_or(WalletError::BackupDecryptionFailed)?;
+            let nonce_hex = val["nonce_hex"]
+                .as_str()
+                .ok_or(WalletError::BackupDecryptionFailed)?;
+            let ciphertext_hex = val["ciphertext_hex"]
+                .as_str()
+                .ok_or(WalletError::BackupDecryptionFailed)?;
 
-        let expected_mac = hex::decode(mac_hex).map_err(|_| WalletError::BackupDecryptionFailed)?;
-        let mut ciphertext =
-            hex::decode(ciphertext_hex).map_err(|_| WalletError::BackupDecryptionFailed)?;
+            let salt = hex::decode(salt_hex).map_err(|_| WalletError::BackupDecryptionFailed)?;
+            let nonce_bytes =
+                hex::decode(nonce_hex).map_err(|_| WalletError::BackupDecryptionFailed)?;
+            let ciphertext =
+                hex::decode(ciphertext_hex).map_err(|_| WalletError::BackupDecryptionFailed)?;
 
-        let key = crate::hmac_sha256(password.as_bytes(), b"nimbus.wallet.backup.v1");
-
-        let mut stream_hasher = Sha256::new();
-        stream_hasher.update(key);
-        stream_hasher.update(&expected_mac);
-        let mut block = stream_hasher.finalize();
-
-        for (i, byte) in ciphertext.iter_mut().enumerate() {
-            if i % 32 == 0 && i > 0 {
-                let mut next_hasher = Sha256::new();
-                next_hasher.update(block);
-                block = next_hasher.finalize();
+            if salt.len() != 32 || nonce_bytes.len() != 12 {
+                return Err(WalletError::BackupDecryptionFailed);
             }
-            *byte ^= block[i % 32];
-        }
 
-        let computed_mac = crate::hmac_sha256(&key, &ciphertext);
-        if computed_mac.as_slice() != expected_mac.as_slice() {
-            return Err(WalletError::BackupDecryptionFailed);
-        }
+            let mut nonce_arr = [0u8; 12];
+            nonce_arr.copy_from_slice(&nonce_bytes);
+            let nonce = Nonce::from(nonce_arr);
 
-        let plaintext =
-            String::from_utf8(ciphertext).map_err(|_| WalletError::BackupDecryptionFailed)?;
-        serde_json::from_str(&plaintext).map_err(|_| WalletError::BackupDecryptionFailed)
+            let params = Params::new(16_384, 3, 1, Some(32))
+                .map_err(|_| WalletError::BackupDecryptionFailed)?;
+            let argon2 = Argon2::new(Algorithm::Argon2id, Version::V0x13, params);
+
+            let mut derived_key = [0u8; 32];
+            argon2
+                .hash_password_into(password.as_bytes(), &salt, &mut derived_key)
+                .map_err(|_| WalletError::BackupDecryptionFailed)?;
+
+            let cipher = ChaCha20Poly1305::new_from_slice(&derived_key)
+                .map_err(|_| WalletError::BackupDecryptionFailed)?;
+
+            let plaintext_bytes = cipher.decrypt(&nonce, ciphertext.as_slice()).map_err(|_| {
+                crate::secure_zeroize(&mut derived_key);
+                WalletError::BackupDecryptionFailed
+            })?;
+
+            crate::secure_zeroize(&mut derived_key);
+
+            let plaintext = String::from_utf8(plaintext_bytes)
+                .map_err(|_| WalletError::BackupDecryptionFailed)?;
+            serde_json::from_str(&plaintext).map_err(|_| WalletError::BackupDecryptionFailed)
+        } else {
+            // Legacy V1 backup fallback for backward compatibility
+            let mac_hex = val["mac_hex"]
+                .as_str()
+                .ok_or(WalletError::BackupDecryptionFailed)?;
+            let ciphertext_hex = val["ciphertext_hex"]
+                .as_str()
+                .ok_or(WalletError::BackupDecryptionFailed)?;
+
+            let expected_mac =
+                hex::decode(mac_hex).map_err(|_| WalletError::BackupDecryptionFailed)?;
+            let mut ciphertext =
+                hex::decode(ciphertext_hex).map_err(|_| WalletError::BackupDecryptionFailed)?;
+
+            let key = crate::hmac_sha256(password.as_bytes(), b"nimbus.wallet.backup.v1");
+
+            let mut stream_hasher = Sha256::new();
+            stream_hasher.update(key);
+            stream_hasher.update(&expected_mac);
+            let mut block = stream_hasher.finalize();
+
+            for (i, byte) in ciphertext.iter_mut().enumerate() {
+                if i % 32 == 0 && i > 0 {
+                    let mut next_hasher = Sha256::new();
+                    next_hasher.update(block);
+                    block = next_hasher.finalize();
+                }
+                *byte ^= block[i % 32];
+            }
+
+            let computed_mac = crate::hmac_sha256(&key, &ciphertext);
+            if computed_mac.as_slice() != expected_mac.as_slice() {
+                return Err(WalletError::BackupDecryptionFailed);
+            }
+
+            let plaintext =
+                String::from_utf8(ciphertext).map_err(|_| WalletError::BackupDecryptionFailed)?;
+            serde_json::from_str(&plaintext).map_err(|_| WalletError::BackupDecryptionFailed)
+        }
     }
 }
 
@@ -1330,5 +1388,104 @@ mod tests {
         assert_eq!(wallet.balance(), 0);
         wallet.sync_mempool_expiry("session_manual_sync").unwrap();
         assert_eq!(wallet.balance(), 50_000_000);
+    }
+
+    #[test]
+    fn test_encrypted_backup_tampering_rejected() {
+        let seed = [43u8; 32];
+        let mut wallet = PrivateNoteWallet::new(&seed);
+        let path = dummy_merkle_path();
+
+        let (_, cm1) = wallet.create_deposit_note(30_000_000, 2000).unwrap();
+        wallet
+            .confirm_deposit(&cm1, 2, path, "0xroot_tamper")
+            .unwrap();
+
+        let backup = wallet.export_backup("Password123!").unwrap();
+
+        // 1. Tamper with ciphertext
+        let mut parsed: serde_json::Value = serde_json::from_str(&backup).unwrap();
+        let ct_hex = parsed["ciphertext_hex"].as_str().unwrap().to_string();
+        let mut ct_bytes = hex::decode(&ct_hex).unwrap();
+        ct_bytes[0] ^= 0xff; // flip bits
+        parsed["ciphertext_hex"] = serde_json::Value::String(hex::encode(ct_bytes));
+        let tampered_backup = serde_json::to_string(&parsed).unwrap();
+
+        let res = PrivateNoteWallet::import_backup(&tampered_backup, "Password123!");
+        assert_eq!(res.err(), Some(WalletError::BackupDecryptionFailed));
+
+        // 2. Tamper with salt
+        let mut parsed_salt: serde_json::Value = serde_json::from_str(&backup).unwrap();
+        parsed_salt["salt_hex"] = serde_json::Value::String(hex::encode([0u8; 32]));
+        let tampered_salt_backup = serde_json::to_string(&parsed_salt).unwrap();
+        let res_salt = PrivateNoteWallet::import_backup(&tampered_salt_backup, "Password123!");
+        assert_eq!(res_salt.err(), Some(WalletError::BackupDecryptionFailed));
+    }
+
+    #[test]
+    fn test_update_note_witness_lifecycle() {
+        let seed = [44u8; 32];
+        let mut wallet = PrivateNoteWallet::new(&seed);
+        let path = dummy_merkle_path();
+
+        let (note, cm) = wallet.create_deposit_note(70_000_000, 1000).unwrap();
+        assert_eq!(note.status, NoteStatus::Unconfirmed);
+        assert_eq!(wallet.balance(), 0);
+
+        // Negative: Invalid path length rejected
+        let invalid_path = vec!["0x1234".to_string(); 5]; // Depth is 20, not 5
+        let err_path = wallet.update_note_witness(&cm, 0, invalid_path, "0xroot1");
+        assert!(err_path.is_err());
+        assert_eq!(wallet.balance(), 0);
+
+        // Negative: Non-existent note rejected
+        let err_notfound = wallet.update_note_witness("0xdeadbeef", 0, path.clone(), "0xroot1");
+        assert_eq!(
+            err_notfound.err(),
+            Some(WalletError::NoteNotFound("0xdeadbeef".into()))
+        );
+
+        // Positive: Update witness promotes note to Unspent
+        wallet
+            .update_note_witness(&cm, 10, path.clone(), "0xroot_synced")
+            .unwrap();
+        assert_eq!(wallet.balance(), 70_000_000);
+        let updated_note = wallet.notes.get(&cm).unwrap();
+        assert_eq!(updated_note.status, NoteStatus::Unspent);
+        assert_eq!(updated_note.leaf_index, Some(10));
+        assert_eq!(
+            wallet.current_merkle_root_hex.as_deref(),
+            Some("0xroot_synced")
+        );
+    }
+
+    #[test]
+    fn test_parse_fr_and_bytes32_helpers() {
+        // Valid 32-byte scalar
+        let valid_fr = Fr::from(123456789u64);
+        let hex_fr = hex::encode(fr_to_be_bytes(&valid_fr));
+        let parsed = parse_fr_from_hex(&hex_fr).unwrap();
+        assert_eq!(parsed, valid_fr);
+
+        // With 0x prefix
+        let parsed_prefixed = parse_fr_from_hex(&format!("0x{hex_fr}")).unwrap();
+        assert_eq!(parsed_prefixed, valid_fr);
+
+        // Invalid hex length
+        let err_len = parse_fr_from_hex("0x1234");
+        assert!(err_len.is_err());
+
+        // 20-byte EVM address padded to 32 bytes
+        let addr = "0x5B38Da6a701c568545dCfcB03FcB875f56beddC4";
+        let padded = parse_bytes32_from_hex(addr, true).unwrap();
+        assert_eq!(&padded[0..12], &[0u8; 12]);
+        assert_eq!(
+            &padded[12..],
+            &hex::decode("5B38Da6a701c568545dCfcB03FcB875f56beddC4").unwrap()[..]
+        );
+
+        // 20-byte address rejected when padding not allowed
+        let err_pad = parse_bytes32_from_hex(addr, false);
+        assert!(err_pad.is_err());
     }
 }

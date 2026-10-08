@@ -57,6 +57,11 @@ pub fn domain_quote_binding() -> Fr {
     domain_from_label("nimbus.quote.binding.v1")
 }
 
+/// Domain tag for canonical dummy nullifier derivation (DEC-030 Option A Constant-Topology).
+pub fn domain_dummy_nullifier() -> Fr {
+    domain_from_label("nimbus.note.dummy.nullifier.v1")
+}
+
 // ═══════════════════════════════════════════════════════════════════════════
 // PrivateNoteV1
 // ═══════════════════════════════════════════════════════════════════════════
