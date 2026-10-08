@@ -184,12 +184,10 @@ impl ReceiptFinalityConfig {
 }
 
 /// Default Chainlink ETH/USD aggregator on Arbitrum Sepolia
-pub const ARBITRUM_SEPOLIA_CHAINLINK_ETH_USD: &str =
-    "0xd30e2101a97dcbAeBCBC04F14C3f624E67A35165";
+pub const ARBITRUM_SEPOLIA_CHAINLINK_ETH_USD: &str = "0xd30e2101a97dcbAeBCBC04F14C3f624E67A35165";
 
 /// Default Chainlink ETH/USD aggregator on Arbitrum One Mainnet
-pub const ARBITRUM_ONE_CHAINLINK_ETH_USD: &str =
-    "0x639Fe6ab55C921f74e7fac1ee960C0B6293ba612";
+pub const ARBITRUM_ONE_CHAINLINK_ETH_USD: &str = "0x639Fe6ab55C921f74e7fac1ee960C0B6293ba612";
 
 /// Pricing and oracle configuration for gas reimbursement and margin tracking (DEC-029).
 #[derive(Debug, Clone)]
@@ -217,16 +215,14 @@ impl Default for PricingConfig {
 
 impl PricingConfig {
     pub fn from_env() -> Self {
-        let feed = std::env::var("NIMBUS_CHAINLINK_ETH_FEED")
-            .ok()
-            .or_else(|| {
-                // If mainnet mode, default to Arbitrum One; otherwise Sepolia
-                if runtime_mode() == RuntimeMode::Mainnet {
-                    Some(ARBITRUM_ONE_CHAINLINK_ETH_USD.to_string())
-                } else {
-                    Some(ARBITRUM_SEPOLIA_CHAINLINK_ETH_USD.to_string())
-                }
-            });
+        let feed = std::env::var("NIMBUS_CHAINLINK_ETH_FEED").ok().or_else(|| {
+            // If mainnet mode, default to Arbitrum One; otherwise Sepolia
+            if runtime_mode() == RuntimeMode::Mainnet {
+                Some(ARBITRUM_ONE_CHAINLINK_ETH_USD.to_string())
+            } else {
+                Some(ARBITRUM_SEPOLIA_CHAINLINK_ETH_USD.to_string())
+            }
+        });
 
         let fallback_eth_price = std::env::var("NIMBUS_ETH_PRICE_USDC")
             .ok()

@@ -165,11 +165,7 @@ impl Nimbus {
         let mut current = leaf_fr;
         let mut index = next_idx.to::<u64>();
 
-        for (level, &empty_sibling) in empty_subtrees
-            .iter()
-            .enumerate()
-            .take(MERKLE_TREE_DEPTH)
-        {
+        for (level, &empty_sibling) in empty_subtrees.iter().enumerate().take(MERKLE_TREE_DEPTH) {
             let level_u256 = U256::from(level);
             if (index & 1) == 0 {
                 // Left child: record in frontier, sibling is canonical empty subtree hash

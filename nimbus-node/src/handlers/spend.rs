@@ -1048,8 +1048,15 @@ pub async fn handle_private_note_spend(
 }
 
 // Background batching logic with slippage protection and balance checks
+pub const DEFAULT_MEMPOOL_LEASE_SECS: i64 = 900; // 15 minutes default (DEC-027)
+
 pub async fn process_spend_batch(state: &AppState) {
-    let items = match state.db.claim_spends(50, 120).await {
+    let lease_seconds = std::env::var("NIMBUS_MEMPOOL_LEASE_SECS")
+        .ok()
+        .and_then(|v| v.parse::<i64>().ok())
+        .unwrap_or(DEFAULT_MEMPOOL_LEASE_SECS);
+
+    let items = match state.db.claim_spends(50, lease_seconds).await {
         Ok(items) => items,
         Err(e) => {
             eprintln!("SETTLEMENT: failed to claim persistent queue: {}", e);

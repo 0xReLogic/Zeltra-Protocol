@@ -926,6 +926,55 @@ impl PrivateNoteWallet {
         Ok(())
     }
 
+    /// Automatically detects expired note reservations and restores them to `Unspent` (DEC-027).
+    ///
+    /// Cleans up any unconfirmed change notes created for those sessions, restoring strict self-custody.
+    /// Returns the number of notes reclaimed.
+    pub fn reclaim_expired_reservations(&mut self, current_time_secs: u64) -> usize {
+        let mut expired_sessions = Vec::new();
+
+        for note in self.notes.values() {
+            if let NoteStatus::Reserved {
+                lease_expiry_secs,
+                session_id,
+            } = &note.status
+            {
+                if *lease_expiry_secs <= current_time_secs {
+                    expired_sessions.push(session_id.clone());
+                }
+            }
+        }
+
+        let mut reclaimed_count = 0;
+        for session_id in expired_sessions {
+            if self.rollback_spend(&session_id).is_ok() {
+                reclaimed_count += 1;
+            }
+        }
+
+        reclaimed_count
+    }
+
+    /// Explicitly syncs a mempool expiration for a session, restoring input note to `Unspent` (DEC-027).
+    pub fn sync_mempool_expiry(&mut self, session_id: &str) -> Result<(), WalletError> {
+        self.rollback_spend(session_id)
+    }
+
+    /// Calculates the effective spendable balance, treating expired reservations as unspent (DEC-027).
+    pub fn effective_balance(&self, current_time_secs: u64) -> u64 {
+        self.notes
+            .values()
+            .filter(|n| match &n.status {
+                NoteStatus::Unspent => true,
+                NoteStatus::Reserved {
+                    lease_expiry_secs, ..
+                } => *lease_expiry_secs <= current_time_secs,
+                _ => false,
+            })
+            .map(|n| n.value)
+            .sum()
+    }
+
     /// Exports an encrypted backup of the wallet state using password-derived encryption.
     pub fn export_backup(&self, password: &str) -> Result<String, WalletError> {
         let serialized = serde_json::to_string(self)
@@ -1244,5 +1293,42 @@ mod tests {
 
         // Balance should now equal the change note value
         assert_eq!(wallet.balance(), 29_850_000);
+    }
+
+    #[test]
+    fn test_reclaim_expired_reservations_and_effective_balance() {
+        let seed = [30u8; 32];
+        let mut wallet = PrivateNoteWallet::new(&seed);
+        let path = dummy_merkle_path();
+
+        let (_, cm1) = wallet.create_deposit_note(50_000_000, 1000).unwrap();
+        wallet.confirm_deposit(&cm1, 0, path, "0xroot").unwrap();
+
+        // Reserve for 60s at time 1000 (expires at 1060)
+        wallet
+            .reserve_note(&cm1, "session_expired_1", 1000, 60)
+            .unwrap();
+
+        assert_eq!(wallet.balance(), 0);
+        assert_eq!(wallet.effective_balance(1030), 0);
+        assert_eq!(wallet.effective_balance(1061), 50_000_000);
+
+        // Before expiry, reclaim yields 0
+        let reclaimed_early = wallet.reclaim_expired_reservations(1030);
+        assert_eq!(reclaimed_early, 0);
+        assert_eq!(wallet.balance(), 0);
+
+        // After expiry, reclaim yields 1 and restores balance
+        let reclaimed = wallet.reclaim_expired_reservations(1061);
+        assert_eq!(reclaimed, 1);
+        assert_eq!(wallet.balance(), 50_000_000);
+
+        // Explicit sync_mempool_expiry test
+        wallet
+            .reserve_note(&cm1, "session_manual_sync", 1100, 60)
+            .unwrap();
+        assert_eq!(wallet.balance(), 0);
+        wallet.sync_mempool_expiry("session_manual_sync").unwrap();
+        assert_eq!(wallet.balance(), 50_000_000);
     }
 }

@@ -80,6 +80,52 @@ pub fn update_sanctioned_addresses(new_set: HashSet<Address>) -> usize {
     count
 }
 
+/// Compliance check outcome across Layer 1 (OFAC in-memory) and Layer 2 (Chainalysis on-chain Oracle)
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ComplianceStatus {
+    Clean,
+    Sanctioned(&'static str),
+}
+
+/// Comprehensive compliance check for an address (DEC-026 / DEC-027).
+///
+/// 1. Layer 1: In-memory lookup against OFAC SDN list (<1ms, 0 gas).
+///    If sanctioned -> returns `Sanctioned("OFAC SDN")`.
+/// 2. Layer 2: On-chain Oracle fallback via `eth_call` (0 gas) if EVM client available.
+///    If Oracle confirms sanctioned -> returns `Sanctioned("Chainalysis Sanctions Oracle")`.
+///    If Oracle clean -> returns `Clean`.
+///    If Oracle errors / times out / rate limits -> logs warning and returns `Clean`
+///    (user rule: "kalau rpc gagal atau timeout biarin aja yg penting kita udh filter pakai ofac").
+pub async fn check_address_compliance(
+    address: &Address,
+    evm_client: Option<&crate::evm_client::EvmClient>,
+) -> ComplianceStatus {
+    // Layer 1: In-memory SDN screening
+    if is_address_sanctioned(address) {
+        return ComplianceStatus::Sanctioned("OFAC SDN List");
+    }
+
+    // Layer 2: On-chain Oracle check
+    if let Some(client) = evm_client {
+        match client.is_sanctioned_on_chain(address).await {
+            Ok(true) => {
+                return ComplianceStatus::Sanctioned("Chainalysis Sanctions Oracle (0x40C5...)");
+            }
+            Ok(false) => {
+                return ComplianceStatus::Clean;
+            }
+            Err(e) => {
+                eprintln!(
+                    "COMPLIANCE WARNING: On-chain oracle check failed for {}: {}. Proceeding based on local OFAC filter.",
+                    address, e
+                );
+            }
+        }
+    }
+
+    ComplianceStatus::Clean
+}
+
 /// Configurable safety limits for spend operations
 #[derive(Clone, Debug)]
 pub struct SafetyLimits {

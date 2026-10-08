@@ -10,6 +10,7 @@ mod handlers;
 mod http;
 mod key_rotation;
 mod kms;
+mod mempool_watchdog;
 mod sanctions_sync;
 mod state;
 mod validation;
@@ -302,6 +303,12 @@ async fn main() {
     let deposit_indexer_state = state.clone();
     tokio::spawn(async move {
         deposit_indexer::deposit_indexer_worker(deposit_indexer_state).await;
+    });
+
+    // Spawn mempool lease watchdog background worker (DEC-027)
+    let mempool_watchdog_state = state.clone();
+    tokio::spawn(async move {
+        mempool_watchdog::mempool_lease_watchdog_worker(mempool_watchdog_state).await;
     });
 
     let app = Router::new()

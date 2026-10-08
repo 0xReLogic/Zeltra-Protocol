@@ -1,8 +1,8 @@
 # DEC-027: Predictable Outflow Economic Model, Inflow Compliance Gate, and Relayer Anti-Limbo Mempool Lifecycle
 
-- **Status:** Proposed & Accepted (Architecture Core Decision)
+- **Status:** Fully Implemented & Verified (Production & Testnet Hardened)
 - **Author:** Zeltra Protocol Architecture Team
-- **Date:** 2026-10-05 (Updated 2026-10-07)
+- **Date:** 2026-10-05 (Updated & Completed 2026-10-08)
 - **Impact Areas:** `nimbus-core` (fee policy & solvency invariants), `nimbus-node` (deposit ingress screening, dynamic mempool lease watchdog), `nimbus-contracts` (deposit refund invariant guarantees), `research/economics`
 - **Architectural Paradigm:** *"Solvency by Mathematics, Predictability for Users, Security at Ingress, Self-Custody at Mempool"*
 
@@ -149,15 +149,15 @@ Berdasarkan studi empiris atas insiden keamanan DeFi dan audit Account Abstracti
 
 ---
 
-## 6. Matriks Dampak & Rencana Implementasi
+## 6. Matriks Dampak & Status Implementasi
 
-| Komponen | Perubahan Arsitektur | File Terkait |
-| :--- | :--- | :--- |
-| **`nimbus-core`** | Pemeliharaan invariant formula flat predictable fee (45 bps standard / 40 bps diskon 30 hari) | `fees.rs` |
-| **`nimbus-node`** | Penambahan 2-layer sanctions screening pada ingress `handle_deposit` / reveal | `handlers/deposit.rs` |
-| **`nimbus-node`** | Implementasi berkala `mempool_lease_watchdog` dengan verifikasi `is_nullifier_spent` sebelum unspent lease | `database.rs`, `main.rs` |
-| **`nimbus-contracts`**| Mempertahankan `NIMBUS_REFUND_DELAY = 86400` sebagai *fail-closed invariant* tanpa penambahan kode berisiko | `deposit.rs` |
-| **`nimbus-sdk`** | Sinkronisasi status mempool `UNSPENT` pada dompet pengguna saat lease kedaluwarsa | `note_wallet.rs` |
+| Komponen | Perubahan Arsitektur | File Terkait | Status |
+| :--- | :--- | :--- | :--- |
+| **`nimbus-core`** | Pemeliharaan formula flat predictable fee (unifikasi flat 45 bps permanen via DEC-028) | `fees.rs` | **COMPLETED & VERIFIED** |
+| **`nimbus-node`** | 2-layer sanctions screening pada ingress (`handle_leader_sign`, `handle_sign_share`, `handle_deposit`, `handle_reveal`) | `validation.rs`, `handlers/threshold.rs`, `handlers/deposit.rs`, `deposit_indexer.rs` | **COMPLETED & VERIFIED** |
+| **`nimbus-node`** | Implementasi periodik `mempool_lease_watchdog` dengan simulasi `is_nullifier_spent` sebelum pelepasan lease | `database.rs`, `evm_client.rs`, `mempool_watchdog.rs`, `main.rs` | **COMPLETED & VERIFIED** |
+| **`nimbus-contracts`**| Mempertahankan `NIMBUS_REFUND_DELAY = 86400` sebagai *fail-closed invariant* tanpa penambahan kode berisiko | `deposit.rs` | **COMPLETED & VERIFIED** |
+| **`nimbus-sdk`** | Sinkronisasi status mempool, pemulihan `reclaim_expired_reservations`, dan `effective_balance` | `wallet/note_wallet.rs` | **COMPLETED & VERIFIED** |
 
 ---
 

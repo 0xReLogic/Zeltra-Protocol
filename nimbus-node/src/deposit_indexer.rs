@@ -81,6 +81,16 @@ async fn index_deposit_events_tick(
     let events = client.get_deposit_events(from_block, to_block).await?;
 
     for ev in events {
+        if let Ok(client_addr) = std::str::FromStr::from_str(&ev.client) {
+            if crate::validation::is_address_sanctioned(&client_addr) {
+                eprintln!(
+                    "DEPOSIT_INDEXER ALERT: Ingress deposit event for session {} skipped: depositor {} is sanctioned (DEC-027)",
+                    ev.session_id, ev.client
+                );
+                continue;
+            }
+        }
+
         match state
             .db
             .confirm_deposit_on_chain(
@@ -137,6 +147,16 @@ pub async fn verify_session_on_chain(
             .check_deposit_tx_on_chain(tx_hash, session_id)
             .await?
         {
+            if let Ok(client_addr) = std::str::FromStr::from_str(&ev.client) {
+                if crate::validation::is_address_sanctioned(&client_addr) {
+                    eprintln!(
+                        "DEPOSIT_INDEXER ALERT: Direct verify rejected for session {}: depositor {} is sanctioned (DEC-027)",
+                        ev.session_id, ev.client
+                    );
+                    return Ok(false);
+                }
+            }
+
             let confirmed = state
                 .db
                 .confirm_deposit_on_chain(

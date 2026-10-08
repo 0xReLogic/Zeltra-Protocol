@@ -500,7 +500,7 @@ impl Database {
         self.update_queue(
             id,
             "UPDATE spend_queue
-             SET status = 'submitted', tx_hash = ?, lease_until = NULL, updated_at = ?
+             SET status = 'submitted', tx_hash = ?, updated_at = ?
              WHERE id = ? AND status = 'broadcasting'",
             Some(tx_hash),
             None,
@@ -775,6 +775,57 @@ impl Database {
             conn.execute(
                 "UPDATE spend_queue
                  SET status = 'queued', lease_until = NULL, updated_at = ?
+                 WHERE id = ? AND status IN ('broadcasting', 'submitted')",
+                params![now, id],
+            )?;
+            Ok(())
+        })
+        .await?
+    }
+
+    /// Retrieve active/in-flight spends whose leases have expired (DEC-027).
+    pub async fn get_expired_leased_spends(&self, now: i64) -> Result<Vec<UnreconciledSpend>> {
+        let path = self.path.clone();
+        let db_key = database_key()?;
+        task::spawn_blocking(move || -> Result<Vec<UnreconciledSpend>> {
+            let conn = open_connection(&path, &db_key)?;
+            let mut stmt = conn.prepare(
+                "SELECT id, nullifier, tx_hash, status
+                 FROM spend_queue
+                 WHERE status IN ('broadcasting', 'submitted')
+                   AND lease_until IS NOT NULL
+                   AND lease_until <= ?",
+            )?;
+            let rows = stmt.query_map(params![now], |row| {
+                Ok(UnreconciledSpend {
+                    id: row.get::<_, i64>(0)?,
+                    nullifier: row.get::<_, String>(1)?,
+                    tx_hash: row.get::<_, Option<String>>(2)?,
+                    status: row.get::<_, String>(3)?,
+                })
+            })?;
+            let mut results = Vec::new();
+            for r in rows {
+                results.push(r?);
+            }
+            Ok(results)
+        })
+        .await?
+    }
+
+    /// Mark an unspent spend as failed_expired to release the nullifier lease (DEC-027).
+    pub async fn expire_unspent_lease(&self, id: i64) -> Result<()> {
+        let path = self.path.clone();
+        let db_key = database_key()?;
+        task::spawn_blocking(move || -> Result<()> {
+            let conn = open_connection(&path, &db_key)?;
+            let now = unix_timestamp()?;
+            conn.execute(
+                "UPDATE spend_queue
+                 SET status = 'failed_expired',
+                     last_error = 'mempool lease expired without on-chain inclusion (DEC-027)',
+                     lease_until = NULL,
+                     updated_at = ?
                  WHERE id = ? AND status IN ('broadcasting', 'submitted')",
                 params![now, id],
             )?;

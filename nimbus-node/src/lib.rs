@@ -13,5 +13,7 @@ pub mod handlers;
 pub mod http;
 pub mod key_rotation;
 pub mod kms;
+pub mod mempool_watchdog;
+pub mod sanctions_sync;
 pub mod state;
 pub mod validation;

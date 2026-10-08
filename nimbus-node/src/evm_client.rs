@@ -430,6 +430,7 @@ impl EvmClient {
         let bump_pct = self.finality_config.gas_bump_percent;
         let max_bumps = self.finality_config.max_gas_bumps;
         let mut bump_count = 0;
+        let mut max_bump_wait_attempts = 0;
         let mut pending_tx_opt = Some(pending_tx);
 
         let receipt = loop {
@@ -549,11 +550,20 @@ impl EvmClient {
                         }
                     } else {
                         eprintln!(
-                            "RELAYER WARNING: Max gas bumps ({}) reached for nonce {}. Continuing to wait...",
+                            "RELAYER WARNING: Max gas bumps ({}) reached for nonce {}. Checking receipt before mempool handoff...",
                             max_bumps, nonce
                         );
                         if let Ok(Some(rcpt)) = self.get_receipt(&current_tx_hash).await {
                             break rcpt;
+                        }
+                        max_bump_wait_attempts += 1;
+                        if max_bump_wait_attempts >= 3 {
+                            anyhow::bail!(
+                                "Transaction {} stalled in mempool after reaching max gas bumps ({}) for nonce {}",
+                                current_tx_hash,
+                                max_bumps,
+                                nonce
+                            );
                         }
                         tokio::time::sleep(std::time::Duration::from_secs(5)).await;
                     }
@@ -1450,7 +1460,9 @@ impl EvmClient {
         }
 
         // 4. Staleness check
-        if staleness_threshold_secs > 0 && now_secs.saturating_sub(updated_at) > staleness_threshold_secs {
+        if staleness_threshold_secs > 0
+            && now_secs.saturating_sub(updated_at) > staleness_threshold_secs
+        {
             anyhow::bail!(
                 "Chainlink ETH price is stale: updated_at={}, now={}, age={}s > threshold={}s",
                 updated_at,
@@ -1468,8 +1480,7 @@ impl EvmClient {
 
         let decimals: u8 = match self.provider.call(decimals_tx).await {
             Ok(dec_bytes) => {
-                IAggregatorV3::decimalsCall::abi_decode_returns(&dec_bytes)
-                    .unwrap_or(8)
+                IAggregatorV3::decimalsCall::abi_decode_returns(&dec_bytes).unwrap_or(8)
             }
             Err(_) => 8,
         };

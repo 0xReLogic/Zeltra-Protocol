@@ -75,6 +75,38 @@ pub async fn handle_sign_share(
     use nimbus_core::*;
     use std::str::FromStr;
 
+    // Inflow Compliance Gate (DEC-027): Guardian validates client_address against sanctions
+    let client_addr = match alloy::primitives::Address::from_str(&payload.client_address) {
+        Ok(addr) => addr,
+        Err(e) => {
+            return Json(SignShareResponse {
+                status: "ERROR".to_string(),
+                share_index: None,
+                signature_share_hex: format!("Invalid client_address: {}", e),
+            });
+        }
+    };
+
+    match crate::validation::check_address_compliance(&client_addr, state.evm_client.as_deref())
+        .await
+    {
+        crate::validation::ComplianceStatus::Sanctioned(source) => {
+            eprintln!(
+                "COMPLIANCE ALERT: Guardian sign share rejected for sanctioned client {} per {} (DEC-027)",
+                client_addr, source
+            );
+            return Json(SignShareResponse {
+                status: "ERROR".to_string(),
+                share_index: None,
+                signature_share_hex: format!(
+                    "Client address is restricted under sanctions policy ({})",
+                    source
+                ),
+            });
+        }
+        crate::validation::ComplianceStatus::Clean => {}
+    }
+
     // 1. Verify the timestamp is within 60 seconds (unless in test mode).
     let is_test_env = cfg!(test)
         || std::env::var("NIMBUS_ENV")
@@ -346,6 +378,41 @@ pub async fn handle_leader_sign(
     Json(payload): Json<LeaderSignRequest>,
 ) -> Json<LeaderSignResponse> {
     use nimbus_core::*;
+    use std::str::FromStr;
+
+    // Inflow Compliance Gate (DEC-027): Leader validates client_address against sanctions
+    let client_addr = match alloy::primitives::Address::from_str(&payload.client_address) {
+        Ok(addr) => addr,
+        Err(e) => {
+            return Json(LeaderSignResponse {
+                status: format!("ERROR: Invalid client_address: {}", e),
+                session_id: payload.session_id,
+                com_k_hex: String::new(),
+                partial_signatures: vec![],
+            });
+        }
+    };
+
+    match crate::validation::check_address_compliance(&client_addr, state.evm_client.as_deref())
+        .await
+    {
+        crate::validation::ComplianceStatus::Sanctioned(source) => {
+            eprintln!(
+                "COMPLIANCE ALERT: Ingress leader signing rejected for sanctioned client {} per {} (DEC-027)",
+                client_addr, source
+            );
+            return Json(LeaderSignResponse {
+                status: format!(
+                    "REJECTED: Client address is restricted under sanctions policy ({})",
+                    source
+                ),
+                session_id: payload.session_id,
+                com_k_hex: String::new(),
+                partial_signatures: vec![],
+            });
+        }
+        crate::validation::ComplianceStatus::Clean => {}
+    }
 
     let blinded_bytes = match hex::decode(&payload.blinded_hex) {
         Ok(b) => b,
@@ -698,5 +765,80 @@ mod tests {
             Some(&different_hex),
         ));
         assert!(!issuer_public_key_matches(&configured, Some("invalid")));
+    }
+
+    #[tokio::test]
+    async fn test_leader_sign_rejects_sanctioned_client_address() {
+        use crate::database::Database;
+        use tempfile::TempDir;
+        let tmp = TempDir::new().unwrap();
+        let db_path = tmp.path().join("threshold_sanctions.db");
+        let db = Database::new(&db_path).await.unwrap();
+
+        let state = AppState::new(
+            db,
+            nimbus_core::Fr::from(100u64),
+            1,
+            nimbus_core::IssuerSecretKey(nimbus_core::Fr::from(100u64)).public_key(),
+            std::collections::HashMap::new(),
+            None,
+        )
+        .await;
+
+        let binding = crate::validation::sanctioned_evm_addresses();
+        let sanctioned_addr = binding.iter().next().unwrap().to_string();
+
+        let req = LeaderSignRequest {
+            session_id: "0xsid".to_string(),
+            amount: 10_000_000,
+            client_address: sanctioned_addr,
+            blinded_hex: "0x1234".to_string(),
+            guardian_urls: vec![],
+            pk_iss_hex: None,
+        };
+
+        let res = handle_leader_sign(axum::extract::State(state), Json(req)).await;
+        assert!(res
+            .0
+            .status
+            .starts_with("REJECTED: Client address is restricted"));
+    }
+
+    #[tokio::test]
+    async fn test_guardian_sign_share_rejects_sanctioned_client_address() {
+        use crate::database::Database;
+        use tempfile::TempDir;
+        let tmp = TempDir::new().unwrap();
+        let db_path = tmp.path().join("guardian_sanctions.db");
+        let db = Database::new(&db_path).await.unwrap();
+
+        let state = AppState::new(
+            db,
+            nimbus_core::Fr::from(100u64),
+            1,
+            nimbus_core::IssuerSecretKey(nimbus_core::Fr::from(100u64)).public_key(),
+            std::collections::HashMap::new(),
+            None,
+        )
+        .await;
+
+        let binding = crate::validation::sanctioned_evm_addresses();
+        let sanctioned_addr = binding.iter().next().unwrap().to_string();
+
+        let req = SignShareRequest {
+            session_id: "0xsid".to_string(),
+            amount: 10_000_000,
+            client_address: sanctioned_addr,
+            com_k_hex: "0x00".to_string(),
+            blinded_hex: "0x00".to_string(),
+            k_hex: "0x00".to_string(),
+            leader_address: "0x0000000000000000000000000000000000000001".to_string(),
+            timestamp: 1000,
+            signature_hex: "0x00".to_string(),
+        };
+
+        let res = handle_sign_share(axum::extract::State(state), Json(req)).await;
+        assert_eq!(res.0.status, "ERROR");
+        assert!(res.0.signature_share_hex.contains("sanctions policy"));
     }
 }

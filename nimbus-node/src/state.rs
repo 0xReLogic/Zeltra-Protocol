@@ -132,17 +132,21 @@ impl AppState {
 
         // Check if cached price is still fresh (within cache_ttl_secs)
         let last_fetch = *self.last_price_fetch_timestamp.lock().await;
-        if last_fetch > 0 && now_secs.saturating_sub(last_fetch) < self.pricing_config.cache_ttl_secs {
+        if last_fetch > 0
+            && now_secs.saturating_sub(last_fetch) < self.pricing_config.cache_ttl_secs
+        {
             return *self.current_eth_price_usdc.lock().await;
         }
 
-        if let (Some(ref evm), Some(ref feed_str)) = (
-            &self.evm_client,
-            &self.pricing_config.eth_feed_address,
-        ) {
+        if let (Some(ref evm), Some(ref feed_str)) =
+            (&self.evm_client, &self.pricing_config.eth_feed_address)
+        {
             if let Ok(feed_addr) = alloy::primitives::Address::from_str(feed_str) {
                 match evm
-                    .get_chainlink_eth_price(&feed_addr, self.pricing_config.staleness_threshold_secs)
+                    .get_chainlink_eth_price(
+                        &feed_addr,
+                        self.pricing_config.staleness_threshold_secs,
+                    )
                     .await
                 {
                     Ok(price) => {

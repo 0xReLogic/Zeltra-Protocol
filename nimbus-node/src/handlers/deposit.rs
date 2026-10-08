@@ -28,6 +28,32 @@ pub async fn handle_deposit(
 
     let com_k_hex = payload.com_k.trim_start_matches("0x").to_string();
 
+    // Inflow Compliance Gate (DEC-027): Verify depositor address is not sanctioned
+    if let Ok(Some(sess)) = state.db.get_session_for_reveal(&payload.session_id).await {
+        use std::str::FromStr;
+        if let Ok(client_addr) = alloy_primitives::Address::from_str(&sess.client_address) {
+            if let crate::validation::ComplianceStatus::Sanctioned(source) =
+                crate::validation::check_address_compliance(
+                    &client_addr,
+                    state.evm_client.as_deref(),
+                )
+                .await
+            {
+                eprintln!(
+                    "COMPLIANCE ALERT: Deposit rejected for sanctioned depositor {} per {} (DEC-027)",
+                    client_addr, source
+                );
+                return Json(DepositResponse {
+                    status: "REJECTED".to_string(),
+                    message: format!(
+                        "Depositor address {} is restricted under sanctions policy ({})",
+                        client_addr, source
+                    ),
+                });
+            }
+        }
+    }
+
     // 1. Check if deposit is already confirmed on-chain in DB
     let is_confirmed = state
         .db
@@ -164,6 +190,29 @@ pub async fn handle_reveal(
             message: "Session has already been resolved".to_string(),
             masking_key_hex: None,
         });
+    }
+
+    // Inflow Compliance Gate (DEC-027): Verify client address is not sanctioned before revealing masking key k
+    use std::str::FromStr;
+    if let Ok(client_addr) = alloy_primitives::Address::from_str(&session.client_address) {
+        if let crate::validation::ComplianceStatus::Sanctioned(source) =
+            crate::validation::check_address_compliance(&client_addr, state.evm_client.as_deref())
+                .await
+        {
+            eprintln!(
+                "CRITICAL COMPLIANCE ALERT: Masking key reveal rejected for sanctioned client {} per {} (DEC-027)",
+                client_addr, source
+            );
+            return Json(RevealResponse {
+                status: "REJECTED".to_string(),
+                valid: false,
+                message: format!(
+                    "Client address {} is restricted under sanctions policy ({})",
+                    client_addr, source
+                ),
+                masking_key_hex: None,
+            });
+        }
     }
 
     // 3. Cryptographic Verification: com_k == k * pk_iss on G2 (DEC-018)
@@ -478,5 +527,41 @@ mod tests {
         .await;
         assert_eq!(res_nonexistent.0.status, "ERROR");
         assert!(!res_nonexistent.0.valid);
+
+        // 5. Negative: Sanctioned client address in session is rejected (DEC-027 Inflow Compliance Gate)
+        let binding = crate::validation::sanctioned_evm_addresses();
+        let sanctioned_addr = binding.iter().next().unwrap().to_string();
+        let session_sanctioned = "0xsession_sanctioned";
+        db.insert_signing_session(
+            session_sanctioned,
+            &com_k_hex,
+            amount,
+            &sanctioned_addr,
+            &k_hex,
+        )
+        .await
+        .unwrap();
+        assert!(db
+            .confirm_deposit_on_chain(
+                session_sanctioned,
+                amount,
+                &sanctioned_addr,
+                "0xtx_sanc",
+                102
+            )
+            .await
+            .unwrap());
+
+        let res_sanctioned = handle_reveal(
+            State(state.clone()),
+            Json(RevealRequest {
+                session_id: session_sanctioned.to_string(),
+            }),
+        )
+        .await;
+        assert_eq!(res_sanctioned.0.status, "REJECTED");
+        assert!(!res_sanctioned.0.valid);
+        assert_eq!(res_sanctioned.0.masking_key_hex, None);
+        assert!(res_sanctioned.0.message.contains("sanctions policy"));
     }
 }
