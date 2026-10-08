@@ -6,6 +6,23 @@ use axum::Json;
 use nimbus_sdk::eip712::{compute_quote_hashes, ExecutionQuote};
 use std::str::FromStr;
 
+/// Quote expiry time in seconds (5 minutes)
+const QUOTE_EXPIRY_SECS: u64 = 300;
+
+/// Parameters for building a fallback quote response (when EIP-712 hashes unavailable)
+struct FallbackQuoteParams<'a> {
+    quote: &'a nimbus_core::SpendQuote,
+    fee_bps: u64,
+    relayer_markup_bps: u64,
+    relayer_gas_cost: u64,
+    ccip_network_fee: Option<u64>,
+    destination_chain_selector: Option<u64>,
+    fee_tier: Option<String>,
+    discount_bps: Option<u64>,
+    quote_id: Option<String>,
+    quote_expiry: Option<u64>,
+}
+
 pub async fn handle_private_spend_quote(
     State(state): State<AppState>,
     Query(query): Query<PrivateSpendQuoteRequest>,
@@ -79,7 +96,7 @@ pub async fn handle_private_spend_quote(
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap()
         .as_secs()
-        + 300; // 5 minutes expiry
+        + QUOTE_EXPIRY_SECS;
 
     // Get contract address and chain ID from state (optional for testing)
     let (contract_address, chain_id) = match state.evm_client.as_ref() {
@@ -87,57 +104,35 @@ pub async fn handle_private_spend_quote(
             let chain_id = match client.chain_id().await {
                 Ok(id) => id,
                 Err(_) => {
-                    // Fallback: return quote without EIP-712 hashes
-                    return Json(PrivateSpendQuoteResponse {
-                        status: "OK".to_string(),
-                        merchant_amount: quote.merchant_amount,
-                        contract_amount: quote.contract_amount,
-                        protocol_fee: quote.protocol_fee,
-                        gas_cost: quote.gas_cost,
-                        relayer_markup: quote.relayer_markup,
-                        execution_fee: quote.execution_fee,
-                        user_total_debit: quote.user_total_debit,
+                    return Json(fallback_quote_response(FallbackQuoteParams {
+                        quote: &quote,
                         fee_bps,
                         relayer_markup_bps,
-                        relayer_gas_cost: Some(relayer_gas_cost),
+                        relayer_gas_cost,
                         ccip_network_fee,
                         destination_chain_selector,
                         fee_tier,
                         discount_bps,
                         quote_id: Some(quote_id_hex),
                         quote_expiry: Some(quote_expiry),
-                        domain_separator: None,
-                        struct_hash: None,
-                        message: "Quote generated (EIP-712 hashes unavailable)".to_string(),
-                    });
+                    }));
                 }
             };
             (client.contract_address(), chain_id)
         }
         None => {
-            // Fallback: return quote without EIP-712 hashes (for testing)
-            return Json(PrivateSpendQuoteResponse {
-                status: "OK".to_string(),
-                merchant_amount: quote.merchant_amount,
-                contract_amount: quote.contract_amount,
-                protocol_fee: quote.protocol_fee,
-                gas_cost: quote.gas_cost,
-                relayer_markup: quote.relayer_markup,
-                execution_fee: quote.execution_fee,
-                user_total_debit: quote.user_total_debit,
+            return Json(fallback_quote_response(FallbackQuoteParams {
+                quote: &quote,
                 fee_bps,
                 relayer_markup_bps,
-                relayer_gas_cost: Some(relayer_gas_cost),
+                relayer_gas_cost,
                 ccip_network_fee,
                 destination_chain_selector,
                 fee_tier,
                 discount_bps,
                 quote_id: Some(quote_id_hex),
                 quote_expiry: Some(quote_expiry),
-                domain_separator: None,
-                struct_hash: None,
-                message: "Quote generated (EIP-712 hashes unavailable)".to_string(),
-            });
+            }));
         }
     };
 
@@ -243,6 +238,31 @@ fn error_response(
         domain_separator: None,
         struct_hash: None,
         message: message.to_string(),
+    }
+}
+
+fn fallback_quote_response(params: FallbackQuoteParams) -> PrivateSpendQuoteResponse {
+    PrivateSpendQuoteResponse {
+        status: "OK".to_string(),
+        merchant_amount: params.quote.merchant_amount,
+        contract_amount: params.quote.contract_amount,
+        protocol_fee: params.quote.protocol_fee,
+        gas_cost: params.quote.gas_cost,
+        relayer_markup: params.quote.relayer_markup,
+        execution_fee: params.quote.execution_fee,
+        user_total_debit: params.quote.user_total_debit,
+        fee_bps: params.fee_bps,
+        relayer_markup_bps: params.relayer_markup_bps,
+        relayer_gas_cost: Some(params.relayer_gas_cost),
+        ccip_network_fee: params.ccip_network_fee,
+        destination_chain_selector: params.destination_chain_selector,
+        fee_tier: params.fee_tier,
+        discount_bps: params.discount_bps,
+        quote_id: params.quote_id,
+        quote_expiry: params.quote_expiry,
+        domain_separator: None,
+        struct_hash: None,
+        message: "Quote generated (EIP-712 hashes unavailable)".to_string(),
     }
 }
 
