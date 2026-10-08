@@ -17,14 +17,15 @@ Dokumen ini memetakan paper terpilih untuk arsitektur client SDK dan manajemen w
 ---
 
 ## 2. zkBSA: Auditable & Compliant Stealth Addresses (IACR ePrint 2026/513)
-* **File Jurnal:** [`jurnal/zkBSA-Auditable-Compliant-Stealth-Addresses-Blockchains.md`](file:///workspaces/Zeltra-Protocol/jurnal/zkBSA-Auditable-Compliant-Stealth-Addresses-Blockchains.md)
+* **File Jurnal:** [`jurnal/honorable/zkBSA-Auditable-Compliant-Stealth-Addresses-Blockchains.md`](file:///workspaces/Zeltra-Protocol/jurnal/honorable/zkBSA-Auditable-Compliant-Stealth-Addresses-Blockchains.md)
+* **Penulis:** Siyuan Zheng, Zhe Han (Maret 2026, Ant International)
 * **Problem di Sistem Klasik:**
-  Stealth address konvensional (ERC-5564) menghasilkan alamat satu kali pakai yang sepenuhnya terputus dari regulasi perbankan/AML, sehingga bursa terpusat (CEX) sering menolak deposit yang berasal dari stealth address.
+  Stealth address konvensional (ERC-5564) menghasilkan alamat satu kali pakai yang sepenuhnya terputus dari regulasi perbankan/AML, sehingga bursa terpusat (CEX) sering menolak deposit yang berasal dari stealth address karena tidak bisa diaudit.
 * **Inovasi Paper:**
-  Pengirim dapat menghasilkan alamat tersembunyi (stealth address) yang disertai bukti ZK bahwa alamat penerima terhubung dengan kredensial KYC valid, tanpa membocorkan identitas penerima di publik ledger.
+  Framework modular menggabungkan ERC-5564 stealth address, enkripsi kunci publik EC-ElGamal, komitmen whitelist, dan ZK proofs. Pengirim dapat membuktikan on-chain bahwa transaksi ditujukan ke penerima yang sah/terdaftar whitelist tanpa membuka identitas penerima kepada publik. Evaluasi menunjukkan pembuktian ZK selesai dalam <5.3 detik dan verifikasi on-chain tetap konstan hemat (~235k gas).
 * **Implementasi di Nimbus SDK:**
   * Method baru di wallet: `send_to_stealth_compliant(recipient_meta, kyc_attestation)`.
-  * Memungkinkan transfer antar-wallet di Nimbus diterima secara sah oleh platform kepatuhan tanpa melanggar privasi visual di block explorer Arbitrum.
+  * Memungkinkan deposit/transfer di Nimbus diterima secara sah oleh platform kepatuhan/CEX tanpa melanggar privasi penerima di Arbiscan. Resolusi tuntas untuk masalah *"The Glass Door Problem"* di Fase 3.
 
 ---
 
@@ -101,4 +102,17 @@ Dokumen ini memetakan paper terpilih untuk arsitektur client SDK dan manajemen w
 * **Implementasi di Nimbus SDK:**
   * Komponen: `nimbus-sdk/src/credential.rs`.
   * Mengikat note belanja ke otorisasi Secure Enclave/biometrik fisik pengguna. Sekalipun file note dicuri dari memori perangkat lunak oleh infostealer, note tersebut secara matematis mustahil dibelanjakan tanpa kunci privat yang tersimpan di dalam hardware Secure Enclave perangkat fisik.
+
+---
+
+## 9. DelegProof: Formal Accountability for Agent Delegation (IACR ePrint 2026/2060)
+* **File Jurnal:** [`jurnal/honorable/DelegProof-EIP-7702-Account-Delegation.md`](file:///workspaces/Zeltra-Protocol/jurnal/honorable/DelegProof-EIP-7702-Account-Delegation.md)
+* **Penulis:** Ruifeng Qian, Chengyu Dong, Lingyu Gao, Yuchang Zhang, Zengli Guo (September 2026)
+* **Problem di Sistem Klasik:**
+  Mekanisme delegasi eksekusi akun (EIP-7702 / ERC-4337) untuk AI Agent rentan terhadap 4 kelas serangan: (1) cross-chain replay serangan authorization chainId-0, (2) front-run initialization, (3) storage confusion lintas re-delegation, dan (4) ERC-1271 substitution attack yang mencapai 63% delegasi berbahaya di mainnet ($2.36M kerugian).
+* **Inovasi & Mitigasi Paper:**
+  Analisis simbolik formal pertama (Tamarin models) untuk delegasi EIP-7702. Membuktikan 3 mitigasi formal: (a) larangan otorisasi chainId-0 mencegah cross-chain replay, (b) account-bound initialization gate untuk init authorization, dan (c) namespaced storage slots mencegah kebingungan storage.
+* **Implementasi di Nimbus SDK:**
+  * Komponen: [`nimbus-sdk/src/wallet/agent_wallet.rs`](file:///workspaces/Zeltra-Protocol/nimbus-sdk/src/wallet/agent_wallet.rs) dan modul delegasi gasless.
+  * Menjamin delegasi pembayaran mikro otonom pada agen AI bebas dari eksploitasi cross-chain replay, front-run init, dan penipuan eksekusi kontrak jahat.
 

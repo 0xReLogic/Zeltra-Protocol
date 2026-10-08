@@ -78,4 +78,17 @@ Dokumen ini memetakan paper terpilih untuk lapisan relayer dan cluster konsensus
   * Komponen: Modul penjadwalan kuota di [`nimbus-node/src/cluster/guardian.rs`](file:///workspaces/Zeltra-Protocol/nimbus-node/src/cluster/guardian.rs) dan agregator tanda tangan di [`nimbus-node/src/cluster/leader.rs`](file:///workspaces/Zeltra-Protocol/nimbus-node/src/cluster/leader.rs).
   * Menjamin kuorum Guardian dapat membatasi kecepatan (*velocity rate limit*) serangan flooding tanda tangan tanpa pernah mengorbankan kebutaan (blindness) data pengguna.
 
+---
+
+## 7. High-Throughput Verifiable Distributed OPRF: Quorum Leaderless (n, t) = (9, 4) (IACR ePrint 2026/1953)
+* **File Jurnal:** [`jurnal/reference/High-Throughput-Verifiable-Distributed-OPRF.md`](file:///workspaces/Zeltra-Protocol/jurnal/reference/High-Throughput-Verifiable-Distributed-OPRF.md)
+* **Penulis:** IACR ePrint 2026/1953 (September 2026)
+* **Problem di Sistem Klasik:**
+  Transisi dari 3-of-5 (Leader-centric) ke 5-of-9 (Leaderless) di Blueprint Fase 2 membutuhkan protokol threshold OPRF / blind signing terdistribusi yang efisien. Pada $(n, t) = (9, 4)$, skema threshold OPRF konvensional mengalami kemacetan bandwidth dan memori yang sangat tinggi jika ada guardian nakal (*malicious servers*).
+* **Inovasi Paper:**
+  Protokol Verifiable Distributed OPRF (dOPRF) pertama dengan throughput tinggi yang tahan terhadap $t < n/2$ server jahat dan klien jahat. Menggunakan paradigma offline-online dengan verifikasi DZKP konstan-ronde, terbukti praktis dan terukur hingga skala kuorum $(n, t) = (9, 4)$ tanpa overhead bandwidth yang membengkak.
+* **Implementasi di Nimbus Node:**
+  * Komponen: Arsitektur cluster tanpa leader di [`nimbus-node/src/cluster/`](file:///workspaces/Zeltra-Protocol/nimbus-node/src/cluster/).
+  * Memungkinkan ekspansi Guardian Cluster dari 3-of-5 menjadi 5-of-9 independen di Fase 2 secara aman, memutus ketergantungan pada single leader, dan menjamin operasional asinkron yang tahan terhadap 4 guardian yang offline atau berkolusi.
+
 

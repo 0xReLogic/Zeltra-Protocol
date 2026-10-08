@@ -39,14 +39,16 @@ Dokumen ini memetakan paper terpilih untuk lapisan kriptografi fundamental Nimbu
 
 ---
 
-## 4. Failure Is Not Silent: Attacks on Blind Signatures (IACR ePrint 2026/09)
-* **File Jurnal:** [`jurnal/Failure-Not-Silent-Attacks-Blind-Signatures.md`](file:///workspaces/Zeltra-Protocol/jurnal/Failure-Not-Silent-Attacks-Blind-Signatures.md)
+## 4. Failure Is Not Silent: Attacks on Blind Signatures (IACR ePrint 2026/2043)
+* **File Jurnal:** [`jurnal/reference/Failure-Is-Not-Silent-Attacks-Blind-Signatures.md`](file:///workspaces/Zeltra-Protocol/jurnal/reference/Failure-Is-Not-Silent-Attacks-Blind-Signatures.md)
+* **Penulis:** Maksymilian Gorski, Lucjan Hanzlik (September 2026)
 * **Problem Kritis:**
-  Banyak skema blind signature yang mengabaikan *signer abort leakage*, di mana signer yang nakal dengan sengaja menyebabkan kegagalan parsial (abort) untuk mendelimitasi dan mengidentifikasi IP atau identitas requestor.
-* **Inovasi Paper:**
-  Merumuskan standar *Strong Blindness under Abort Attacks* dan teknik zero-knowledge blinding blindsizing untuk mencegah metadata leakage.
+  Banyak skema blind signature dan OPRF yang mengabaikan serangan *selective abort leakage*. Signer yang jahat (misal guardian/relayer nakal) dapat merekayasa respons agar verifikasi unmasking klien gagal (*abort*) jika dan hanya jika pesan rahasia pengguna memenuhi kriteria tertentu. Status abort/sukses menjadi *one-bit testing oracle* yang membocorkan isi pesan rahasia pengguna.
+* **Inovasi & Mitigasi Paper:**
+  Merumuskan standar *Strong Blindness under Abort Attacks* dan prinsip desain *Publicly Checkable Signature Derivation* (dalam definisi Fischlin-Schröder) serta zero-knowledge proof of honest signer evaluation agar tidak ada kebocoran bit rahasia melalui selective abort.
 * **Implementasi di Nimbus Core:**
-  * Memperkuat modul masking key release $k \cdot \text{pk}_{\text{iss}} == \text{com}_k$ (DEC-018) agar kegagalan validasi tidak pernah membocorkan bit rahasia dari unmasking request klien.
+  * Komponen: [`nimbus-core/src/blind_sign.rs`](file:///workspaces/Zeltra-Protocol/nimbus-core/src/blind_sign.rs) dan modul verifikasi threshold di [`nimbus-node/src/handlers/deposit.rs`](file:///workspaces/Zeltra-Protocol/nimbus-node/src/handlers/deposit.rs).
+  * Memperkuat verifikasi kriptografis fail-closed $k \cdot \text{pk}_{\text{iss}} == \text{com}_k$ (DEC-018) dengan pembuktian derivation publik, memastikan kegagalan validasi tidak pernah membocorkan bit rahasia dari kredensial unmasking klien.
 
 ---
 
@@ -88,5 +90,32 @@ Dokumen ini memetakan paper terpilih untuk lapisan kriptografi fundamental Nimbu
 * **Implementasi di Nimbus Core:**
   * Komponen: [`nimbus-core/src/bbs.rs`](file:///workspaces/Zeltra-Protocol/nimbus-core/src/) dan [`nimbus-core/src/circuit.rs`](file:///workspaces/Zeltra-Protocol/nimbus-core/src/circuit.rs).
   * Memungkinkan penerbitan kredensial KYC/kepatuhan multi-entitas (misal dari berbagai CEX atau entitas perbankan) secara terdesentralisasi tanpa membocorkan identitas issuer spesifik ke block explorer publik, namun tetap dapat diaudit oleh kuorum jika terjadi pelanggaran hukum.
+
+---
+
+## 8. Jacobian Diagnostics for Under-Constrained ZK Circuits (IACR ePrint 2026/1852)
+* **File Jurnal:** [`jurnal/reference/Jacobian-Diagnostics-Under-Constrained-ZK-Circuits.md`](file:///workspaces/Zeltra-Protocol/jurnal/reference/Jacobian-Diagnostics-Under-Constrained-ZK-Circuits.md)
+* **Penulis:** Vijay Singh (September 2026)
+* **Problem Kritis:**
+  Sirkuit aritmatika ZK yang *under-constrained* adalah sumber kegagalan soundness paling fatal di Web3 (sebagaimana terlihat pada temuan Issue #4 GitHub di mana public inputs tidak terikat relasi matematika). Penyerang dapat menetapkan saksi dengan nilai palsu (misal jumlah uang atau penerima fiktif) sambil tetap menghasilkan proof Groth16 yang valid.
+* **Inovasi Paper:**
+  Diagnostik aljabar berbasis linear algebra matriks Jacobian eksak. Mampu mengklasifikasikan sirkuit R1CS hingga 66.000 constraint dalam waktu $\le 1$ detik di hardware standar. Memverifikasi secara deterministik apakah sebuah variabel target memiliki derajat kebebasan tak terduga (*infinitesimal freedom / non-uniqueness certificate*).
+* **Implementasi di Nimbus Core:**
+  * Komponen: Test suite diagnostik di [`nimbus-core/src/note_circuit.rs`](file:///workspaces/Zeltra-Protocol/nimbus-core/src/note_circuit.rs) dan [`nimbus-core/src/joinsplit_circuit.rs`](file:///workspaces/Zeltra-Protocol/nimbus-core/src/joinsplit_circuit.rs).
+  * Menjalankan rank evaluation matriks Jacobian pada constraint system sebelum circuit freeze dan trusted setup ceremony untuk menjamin zero under-constrained wires pada seluruh sirkuit produksi.
+
+---
+
+## 9. Nopenena: Cryptographic Deniability for UTXO Blockchains with Dummy Notes (IACR ePrint 2024/903)
+* **File Jurnal:** [`jurnal/honorable/Nopenena-Untraceable-Payments-Small-Decoy-Sets.md`](file:///workspaces/Zeltra-Protocol/jurnal/honorable/Nopenena-Untraceable-Payments-Small-Decoy-Sets.md)
+* **Penulis:** Foteini Baldimtsi, Panagiotis Chatzigiannis, Konstantinos Chalkias
+* **Problem Kritis:**
+  Pada sistem pembayaran privat berbasis UTXO (seperti Zeltra dan Monero), pengembalian saldo sisa (*Change Note*) secara linier rentan terhadap analisis graf transaksi heuristik (*payment-graph analysis*). Pengamat on-chain dapat menebak nominal change note dan mengidentifikasi kepemilikan note lanjutan, menyebabkan degradasi anonymity set sebesar 40%–59%.
+* **Inovasi Paper:**
+  Protokol pembayaran rahasia berbasis decoy set kecil dengan ukuran proof ~80% lebih ringkas dari QuisQuis, yang membuktikan secara matematis sifat *cryptographic deniability*: pengamat luar tidak dapat membedakan mana note pembayaran riil dan mana dummy change note yang disuntikkan secara acak.
+* **Implementasi di Nimbus Core:**
+  * Komponen: Modul generator sirkuit di [`nimbus-core/src/note_circuit.rs`](file:///workspaces/Zeltra-Protocol/nimbus-core/src/note_circuit.rs) dan generator dummy note di [`nimbus-sdk/src/wallet/note_wallet.rs`](file:///workspaces/Zeltra-Protocol/nimbus-sdk/src/wallet/note_wallet.rs).
+  * Mengintegrasikan injeksi 1 atau 2 decoy dummy note bernilai acak/nol ke dalam komitmen pohon LeanIMT pada alur spend, memutus korelasi grafik saldo secara statistik dan menjamin privasi jangka panjang bagi AI Agent dan retail.
+
 
 
