@@ -32,10 +32,11 @@ nimbus-node/.env.test
 .env.test
 .env
 
-# Hidden directories and files (except .git, .agents, .graphifyignore)
+# Hidden directories and files (except .git, .agents, .graphifyignore, .github)
 .*
 !.git/
 !.agents/
 !.graphifyignore
+!.github/
 graphify-out/
 

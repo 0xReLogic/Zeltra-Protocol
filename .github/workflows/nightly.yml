@@ -1,0 +1,53 @@
+name: Nightly Maintenance
+
+on:
+  schedule:
+    # Run every Sunday at 03:00 UTC 
+    - cron: "0 3 * * 0"
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  maintenance:
+    name: Upstream Health & Vulnerability Scan
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libsqlite3-dev libssl-dev pkg-config
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      - name: Install security auditing tools
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-audit,cargo-deny,nextest
+
+      - name: Cache Cargo dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: "nightly-cache"
+
+      - name: Audit vulnerabilities (cargo audit)
+        run: cargo audit
+        continue-on-error: true
+
+      - name: Check license policies (cargo deny)
+        run: cargo deny check
+        continue-on-error: true
+
+      - name: Run workspace tests
+        run: cargo nextest run --workspace --all-targets
+
+      - name: Build Stylus contract WASM
+        run: cargo build -p nimbus_contracts --target wasm32-unknown-unknown --release

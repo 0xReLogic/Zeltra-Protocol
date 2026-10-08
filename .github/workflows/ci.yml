@@ -1,0 +1,187 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master, develop]
+  pull_request:
+    branches: [main, master, develop]
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+jobs:
+  lint:
+    name: Lint & Format Check
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Cache Cargo dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: "lint-cache"
+
+      - name: Check code formatting (cargo fmt)
+        run: cargo fmt --all -- --check
+
+      - name: Run Clippy linter
+        run: cargo clippy --workspace --all-targets -- -D warnings
+
+  test:
+    name: Workspace Tests (nextest)
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libsqlite3-dev libssl-dev pkg-config
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Cargo dependencies & build artifacts
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: "test-cache"
+
+      - name: Install cargo-nextest
+        uses: taiki-e/install-action@nextest
+
+      - name: Run tests with nextest
+        run: cargo nextest run --workspace --all-targets
+
+      - name: Run documentation tests
+        run: cargo test --workspace --doc
+
+  stylus:
+    name: Arbitrum Stylus & WASM Verification
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain with wasm32 target
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      - name: Cache Cargo dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: "stylus-cache"
+
+      - name: Compile Stylus WASM smart contract
+        run: cargo build -p nimbus_contracts --target wasm32-unknown-unknown --release
+
+      - name: Verify WASM size and binary existence
+        run: |
+          WASM_FILE="target/wasm32-unknown-unknown/release/nimbus_contracts.wasm"
+          if [ -f "$WASM_FILE" ]; then
+            SIZE_BYTES=$(stat -c%s "$WASM_FILE")
+            SIZE_KB=$((SIZE_BYTES / 1024))
+            echo "Compiled WASM binary found: $WASM_FILE ($SIZE_KB KB)"
+            echo "WASM_SIZE_KB=$SIZE_KB" >> $GITHUB_ENV
+          else
+            echo "Error: WASM binary not found at $WASM_FILE"
+            exit 1
+          fi
+
+      - name: Check ABI export feature
+        run: cargo check -p nimbus_contracts --features export-abi
+
+      - name: Verify nimbus-sdk wasm32 target
+        run: cargo check -p nimbus-sdk --target wasm32-unknown-unknown
+
+      - name: Run contract unit tests
+        run: cargo test -p nimbus_contracts
+
+  security:
+    name: Security & License Audit
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install security auditing tools
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-audit,cargo-deny
+
+      - name: Cache Cargo dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: "security-cache"
+
+      - name: Audit vulnerabilities (cargo audit)
+        run: cargo audit
+        continue-on-error: true
+
+      - name: Check licenses and dependencies (cargo deny)
+        run: cargo deny check
+        continue-on-error: true
+
+  docker:
+    name: Docker Container Build & Smoke Test
+    needs: [lint]
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libsqlite3-dev libssl-dev pkg-config
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Cargo dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: "docker-build-cache"
+
+      - name: Build nimbus-node release binary
+        run: |
+          cargo build --release -p nimbus-node
+          cp target/release/nimbus-node ./nimbus-node-bin
+          chmod +x ./nimbus-node-bin
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build Docker image with GitHub cache
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          load: true
+          tags: zeltra-protocol/nimbus-node:ci-test
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Smoke test Docker container
+        run: |
+          docker run --rm zeltra-protocol/nimbus-node:ci-test --help || true

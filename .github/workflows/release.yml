@@ -1,0 +1,118 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+
+permissions:
+  contents: write
+  packages: write
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build-binaries:
+    name: Build Linux Release Binaries
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libsqlite3-dev libssl-dev pkg-config
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Cargo dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: "release-binary-cache"
+
+      - name: Build release binaries
+        run: |
+          cargo build --release -p nimbus-node
+          cargo build --release -p nimbus-cli
+
+      - name: Package binaries with checksums
+        run: |
+          TAG_NAME="${{ github.ref_name }}"
+          PKG_NAME="zeltra-protocol-${TAG_NAME}-x86_64-unknown-linux-gnu"
+          mkdir -p "$PKG_NAME"
+          cp target/release/nimbus-node "$PKG_NAME/"
+          cp target/release/nimbus-cli "$PKG_NAME/"
+          cp README.md "$PKG_NAME/" 2>/dev/null || true
+          tar -czvf "${PKG_NAME}.tar.gz" "$PKG_NAME"
+          sha256sum "${PKG_NAME}.tar.gz" > "${PKG_NAME}.tar.gz.sha256"
+
+      - name: Create GitHub Release and upload assets
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            zeltra-protocol-*-x86_64-unknown-linux-gnu.tar.gz
+            zeltra-protocol-*-x86_64-unknown-linux-gnu.tar.gz.sha256
+          draft: false
+          prerelease: false
+          generate_release_notes: true
+
+  publish-docker:
+    name: Build & Push GHCR Docker Image
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libsqlite3-dev libssl-dev pkg-config
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Cargo dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: "release-docker-cache"
+
+      - name: Build nimbus-node binary
+        run: |
+          cargo build --release -p nimbus-node
+          cp target/release/nimbus-node ./nimbus-node-bin
+          chmod +x ./nimbus-node-bin
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract Docker metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository }}/nimbus-node
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=sha
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
