@@ -13,7 +13,7 @@ ark-bls12-381 = "0.6.0"
 ark-ec = "0.6.0"
 ark-ff = "0.6.0"
 ark-groth16 = "0.6.0"
-base64 = "0.22.1"
+base64 = "0.23.1"
 hex = "0.4.3"
 js-sys = "0.3"
 k256 = { version = "0.13", features = ["ecdsa", "arithmetic"] }
