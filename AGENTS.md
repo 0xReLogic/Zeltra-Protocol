@@ -139,37 +139,20 @@ Refund path: if quorum fails or k never released → 24h timelock → user claim
 
 Under DEC-028, holding-time fee discounts are abolished to eliminate root age gaming and maintain 100% predictable cash accounting ($10 - $3 = $7). Protocol spend fee is unified to a flat 45 bps across all spends.
 
-## Key Files to Read
+## Key Files & Docs
 
-- `todo.md` — master checklist, hard-test matrix, campaign status
-- `docs/bisnis.md` — business blueprint and fee policy
-- `docs/mainnet_readiness_todo.md` — mainnet readiness roadmap
-- `research/decisions/` — 26 design decisions with rationale (DEC-001 s/d DEC-026)
-- `SESSION_SUMMARY.md` — what was done in previous sessions (read this when starting fresh)
+- [`todo.md`](file:///workspaces/Zeltra-Protocol/todo.md) — Master active backlog & test status
+- [`VISION.md`](file:///workspaces/Zeltra-Protocol/VISION.md) & [`docs/bisnis.md`](file:///workspaces/Zeltra-Protocol/docs/bisnis.md) — Product vision, business model, & fee architecture
+- [`docs/`](file:///workspaces/Zeltra-Protocol/docs/) — Chapter-based modular docs (`core/`, `contract/`, `relayer/`, `sdk/`, `cli/`)
+- [`research/decisions/`](file:///workspaces/Zeltra-Protocol/research/decisions/) — Architecture ADRs (DEC-001 through DEC-029)
 
-## Environment & Deployment
+## Environment, Deployment & Cluster
 
-**`nimbus-node/.env.test`** is the single source of truth for all runtime config. It contains:
-- RPC URLs (Arbitrum Sepolia)
-- Relayer private key
-- BLS share key + threshold params
-- Issuer public key + guardian public keys
-- Contract address (deployed Stylus contract)
-- DB path + encryption key
-- Vault/KMS config
-
-To run the node or deploy with `cargo stylus`, source it first:
-```bash
-source nimbus-node/.env.test
-```
-
-
-## Guardian Cluster
-
-```bash
-bash scripts/start_cluster.sh start    # 1 leader + 4 guardians + Vault
-bash scripts/start_cluster.sh status   # check health
-bash scripts/start_cluster.sh stop     # teardown
-```
+- **Runtime Config:** `nimbus-node/.env.test` is the single source of truth (RPC URLs, keys, contract addresses, DB cipher keys, Vault/KMS settings). Always run `source nimbus-node/.env.test` before executing nodes or deployment tools.
+- **Stylus Contract Deployment:** `cargo stylus check` / `cargo stylus deploy` from `nimbus-contracts/`.
+- **Guardian Cluster Automation:**
+  ```bash
+  bash scripts/start_cluster.sh {start|status|stop}  # 1 leader + 4 guardians + Vault (3-of-5 threshold)
+  ```
 
 Threshold 3/5. Auto-loads `.env.test` for RPC/contract/key. Health check timeout ≥15s.
