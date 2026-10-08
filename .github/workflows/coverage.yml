@@ -41,7 +41,7 @@ jobs:
 
       - name: Generate Code Coverage Report
         run: |
-          cargo llvm-cov --package nimbus-core --package nimbus-sdk --package nimbus-node --package nimbus-cli --summary-only > coverage_summary.txt
+          cargo llvm-cov --locked --package nimbus-core --package nimbus-sdk --package nimbus-node --package nimbus-cli --summary-only > coverage_summary.txt
           cat coverage_summary.txt
 
       - name: Export summary to GitHub Step Summary

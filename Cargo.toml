@@ -9,6 +9,9 @@ members = [
 default-members = ["nimbus-contracts"]
 resolver = "2"
 
+[workspace.dependencies]
+getrandom = "=0.2.17"
+
 [profile.release]
 opt-level = "z"
 lto = true

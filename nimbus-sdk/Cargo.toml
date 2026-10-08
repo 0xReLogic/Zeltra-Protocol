@@ -29,4 +29,4 @@ argon2 = { version = "0.5.3", default-features = false, features = ["alloc"] }
 chacha20poly1305 = { version = "0.10.1", default-features = false, features = ["alloc"] }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
-getrandom = { version = "0.2.17", features = ["js"] }
+getrandom = { workspace = true, features = ["js"] }
