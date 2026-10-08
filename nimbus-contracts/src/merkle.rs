@@ -115,6 +115,15 @@ pub fn load_empty_subtree_hash(level: usize) -> Fr {
     from_evm_scalar(&EMPTY_SUBTREE_HASHES_BYTES[level]).expect("valid empty subtree hash")
 }
 
+/// Load all canonical empty subtree hashes for levels 0..=20 once into Fr elements
+pub fn load_all_empty_subtree_hashes() -> [Fr; 21] {
+    let mut arr = [Fr::from(0u64); 21];
+    for i in 0..21 {
+        arr[i] = from_evm_scalar(&EMPTY_SUBTREE_HASHES_BYTES[i]).expect("valid empty subtree hash");
+    }
+    arr
+}
+
 /// Load canonical domain separator for Merkle node hashing
 pub fn load_domain_merkle_node() -> Fr {
     from_evm_scalar(&DOMAIN_MERKLE_NODE_BYTES).expect("valid domain")
@@ -151,17 +160,21 @@ impl Nimbus {
         let rc = load_round_constants();
         let mds = load_mds();
         let domain = load_domain_merkle_node();
+        let empty_subtrees = load_all_empty_subtree_hashes();
 
         let mut current = leaf_fr;
         let mut index = next_idx.to::<u64>();
 
-        for level in 0..MERKLE_TREE_DEPTH {
+        for (level, &empty_sibling) in empty_subtrees
+            .iter()
+            .enumerate()
+            .take(MERKLE_TREE_DEPTH)
+        {
             let level_u256 = U256::from(level);
             if (index & 1) == 0 {
                 // Left child: record in frontier, sibling is canonical empty subtree hash
                 self.note_tree_filled_subtrees
                     .insert(level_u256, FixedBytes::from(to_evm_scalar(&current)));
-                let empty_sibling = load_empty_subtree_hash(level);
                 current = merkle_hash(current, empty_sibling, &rc, &mds, domain);
             } else {
                 // Right child: sibling is the stored frontier node
@@ -181,9 +194,9 @@ impl Nimbus {
         let timestamp = U256::from(self.block_timestamp());
         self.accepted_note_roots.insert(new_root_bytes, timestamp);
 
-        // Record in ring buffer history
+        // Record in ring buffer history (native u64 modulo)
         let hist_idx = self.root_history_index.get();
-        let slot = hist_idx % U256::from(ROOT_HISTORY_SIZE);
+        let slot = U256::from(hist_idx.to::<u64>() % (ROOT_HISTORY_SIZE as u64));
         self.root_history.insert(slot, new_root_bytes);
         self.root_history_index.set(hist_idx + U256::from(1));
 
