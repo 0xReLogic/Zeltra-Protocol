@@ -100,7 +100,9 @@ Mengacu pada master checklist [`todo.md`](file:///workspaces/Zeltra-Protocol/tod
 
 ## 5. Aturan Kerja Agen (Operating Principles)
 
-1. **Gunakan CodeGraph MCP Terlebih Dahulu (Mandatory):** Repository ini diindeks dengan CodeGraph (`.codegraph/`). Panggil MCP `codegraph_explore` (atau shell `codegraph explore "<query>"`) **SEBELUM** grep, find, atau manual read file. CodeGraph mengembalikan verbatim source ber-line number, call paths, dan blast radius lengkap dalam 1 kali round-trip hemat token.
+1. **Gunakan CodeGraph & Graphify Terlebih Dahulu (Mandatory):**
+   * **Struktur Makro & Relasi Sistem (Graphify):** Gunakan `graphify query "<pertanyaan>"`, `graphify path "<A>" "<B>"`, atau `graphify explain "<Node>"`. Dilarang keras membaca file mentah `graphify-out/graph.json` ke context window.
+   * **Verbatim Code & Call Path (CodeGraph):** Panggil MCP `codegraph_explore` (atau shell `codegraph explore "<query>"`) untuk melihat isi source file lengkap dengan nomor baris dan hierarchy pemanggilan sebelum melakukan edit.
 2. **Cek Source Code Riil Terlebih Dahulu:** Jangan berasumsi atau hanya membaca ringkasan. Buka dan baca kode Rust aslinya sebelum mengubah atau mendokumentasikan.
 3. **Hindari Birokrasi Berlebihan:** Jangan membuat puluhan file markdown baru atau checklist ribet yang mendistraksi developer. Jaga dokumentasi tetap terpusat pada bab modular yang sudah ada.
 4. **Prinsip ATMI (Amati, Tiru, Modifikasi, Inovasi):** Jangan menemukan roda baru dari nol jika sudah ada paper kriptografi teruji atau repo battle-tested (Zcash, Barretenberg, Railgun, zk-kit, zk-sunade, Wasabi). Amati polanya, tiru fondasinya, modifikasi sesuai arsitektur Stylus/BLS12-381/ZK-UTXO Zeltra, dan ciptakan inovasi baru yang membuat produk unggul.
@@ -114,7 +116,8 @@ Mengacu pada master checklist [`todo.md`](file:///workspaces/Zeltra-Protocol/tod
 
 ## 6. Tooling & MCP Capabilities
 
-* **CodeGraph MCP (`codegraph_explore`) [MANDATORY FIRST STEP]:** Tool utama pencarian dan pemetaan kode. Panggil untuk memahami flow antar fungsi, caller hierarchy, dan blast radius sebelum melakukan edit.
+* **CodeGraph MCP (`codegraph_explore`):** Tool utama penelusuran kode sumber nyata, dynamic-dispatch hops, dan verbatim symbol inspection.
+* **Graphify Knowledge Graph (`graphify-out/`):** Graph navigasi arsitektur, god nodes, dependencies cluster, dan shortest-path tracing antar komponen (`graphify query`, `graphify path`, `graphify explain`, `graphify update .`).
 * **Web Search & Fetching:** Tersedia MCP `parallel-search` (`web_search`, `web_fetch`) dan native `search_web`/`read_url_content` untuk mencari paper ZK, auditing report, atau referensi kriptografi terkini.
 * **Browser Agent:** Tersedia `browser_subagent` jika butuh navigasi interaktif atau visual inspection.
 * **Environment:** Codespace Linux dengan Git, Curl, dan tool eksekusi shell. Selalu verifikasi sintaks dan tipe secara ketat pada crate `nimbus-core` dan `nimbus-contracts`.

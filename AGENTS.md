@@ -98,7 +98,10 @@ Refund path: if quorum fails or k never released → 24h timelock → user claim
 
 1. **Read `todo.md`** — check item status before touching it
 2. **Check `research/decisions/`** — there might be a relevant decision
-3. **Reach for CodeGraph FIRST (Mandatory)** — Repository ini diindeks dengan CodeGraph (`.codegraph/`). SELALU gunakan MCP tool `codegraph_explore` (atau shell `codegraph explore "<query>"`) SEBELUM menggunakan grep, find, atau membaca file saat menelusuri simbol, call path, blast radius, atau arsitektur kode.
+3. **Navigasi Kode & Arsitektur (CodeGraph & Graphify):**
+   - **Arsitektur Makro & Hubungan Antar-Modul (Graphify):** Gunakan `graphify query "<pertanyaan>"`, `graphify path "<A>" "<B>"`, atau `graphify explain "<Simbol>"`. JANGAN membaca langsung file `graphify-out/graph.json` atau seluruh `GRAPH_REPORT.md` ke context window (sangat boros token).
+   - **Call Path & Verbatim Code (CodeGraph):** Gunakan MCP tool `codegraph_explore` (atau shell `codegraph explore "<query>"`) untuk melihat implementasi aktual, signature baris, dan dynamic hops antar fungsi.
+   - **Maintenance:** Setelah melakukan modifikasi file Rust, jalankan `graphify update .` untuk menjaga graf tetap sinkron tanpa memicu LLM cost.
 4. **Prinsip ATMI (Amati, Tiru, Modifikasi, Inovasi)** — Belajar dan serap pola unggul dari paper kriptografi teruji dan repo battle-tested (seperti Zcash, Aztec Barretenberg, Railgun, zk-kit, zk-sunade, Wasabi). Amati polanya, tiru fondasinya, modifikasi agar cocok dengan Stylus/BLS12-381/ZK-UTXO Zeltra, dan inovasikan keunggulan baru (privacy 9.5/10, produk 10/10).
 5. **Research gate for critical changes** (financial logic, crypto, CCIP, custody, storage layout):
    - Search Exa MCP for recent papers, audit reports, exploit post-mortems (2024-2026)

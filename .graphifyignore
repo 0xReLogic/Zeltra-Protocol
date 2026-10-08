@@ -1,0 +1,30 @@
+# Ignore all top-level non-Rust / non-crate folders & documents
+/.agents
+/.codegraph
+/.gitignore
+/AGENTS.md
+/GEMINI.md
+/Stylus.toml
+/VISION.md
+/archive
+/deployments
+/docs
+/graphify-out
+/jurnal
+/research
+/rust-toolchain.toml
+/scratch
+/scripts
+/stylus_check_help.txt
+/target
+/test-reports
+/todo.md
+
+# Inside allowed crates, ignore non-Rust/non-Cargo/non-Docker files
+nimbus-*/**/*.sol
+nimbus-*/**/*.md
+nimbus-*/**/*.json
+nimbus-*/**/*.sql
+nimbus-*/**/*.sh
+nimbus-*/**/*.txt
+nimbus-*/**/*.env*
