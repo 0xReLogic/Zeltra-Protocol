@@ -11,10 +11,9 @@ use stylus_sdk::abi::Bytes;
 use stylus_sdk::call::RawCall;
 use stylus_sdk::prelude::Call;
 
-use crate::constants::BLS12_PAIRING_CHECK;
+use crate::constants::{BLS12_G2_GENERATOR_EVM, BLS12_PAIRING_CHECK};
 use crate::interfaces::{IConditionalTokens, IErc20};
 use crate::storage::Nimbus;
-use crate::types::to_evm_g2;
 
 impl Nimbus {
     pub(crate) fn ccip_allowlist_key(
@@ -52,10 +51,9 @@ impl Nimbus {
             return Err(b"UNTRUSTED_ISSUER_KEY".to_vec());
         }
 
-        let generator = to_evm_g2(&G2Affine::generator());
         let mut input = Vec::with_capacity(768);
         input.extend_from_slice(alpha_neg_bytes);
-        input.extend_from_slice(&generator);
+        input.extend_from_slice(&BLS12_G2_GENERATOR_EVM);
         input.extend_from_slice(hm_bytes);
         input.extend_from_slice(pk_iss_bytes);
 
@@ -84,7 +82,6 @@ impl Nimbus {
             return Ok(true);
         }
 
-        let generator = to_evm_g2(&G2Affine::generator());
         let mut input = Vec::with_capacity(768 * len);
 
         for i in 0..len {
@@ -109,7 +106,7 @@ impl Nimbus {
             }
 
             input.extend_from_slice(alpha_neg_bytes);
-            input.extend_from_slice(&generator);
+            input.extend_from_slice(&BLS12_G2_GENERATOR_EVM);
             input.extend_from_slice(hm_bytes);
             input.extend_from_slice(pk_iss_bytes);
         }
@@ -719,14 +716,9 @@ impl Nimbus {
         // Mark nullifier spent
         self.note_nullifiers.insert(input_nullifier, true);
 
-        // If has_change == 1, insert output_commitment into LeanIMT Merkle tree
+        // If has_change == 1, insert output_commitment into LeanIMT Merkle tree (which emits ChangeCommitment)
         if has_change == U256::from(1) {
-            let (leaf_index, new_tree_root) = self._merkle_insert(output_commitment)?;
-            crate::events::emit_event(crate::events::ChangeCommitment {
-                leaf_index,
-                commitment: output_commitment,
-                new_root: new_tree_root,
-            });
+            self._merkle_insert(output_commitment)?;
         }
 
         // Multi-liability accounting (DEC-016 Gate B)
