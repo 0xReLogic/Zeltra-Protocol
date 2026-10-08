@@ -241,11 +241,11 @@ def main():
     dummy_sid = os.urandom(32)
     dummy_nullifier = os.urandom(32)
     
-    # A. Test Deposit (100 USDC)
+    # A. Test Deposit (5 USDC)
     print("  1. Simulating Deposit transaction...")
     dummy_com = os.urandom(256)
     try:
-        contract.functions.deposit(dummy_sid, dummy_com, 100 * 1_000_000).call({'from': address})
+        contract.functions.deposit(dummy_sid, dummy_com, 5 * 1_000_000).call({'from': address})
         print("    Deposit simulation succeeded!")
     except Exception as e:
         print(f"    Deposit simulation returned expected status/revert: {e}")

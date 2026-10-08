@@ -32,14 +32,15 @@ wallet publik milik user.
 
 ---
 
-## Gap Fatal yang Masih Pending
+## Gap Fatal yang Telah Dituntaskan (Sprint DEC-016 s/d DEC-031)
 
-- [ ] `ComplianceCircuit` hanya constrain Poseidon nullifier; `root`, `recipient`, dan `amount` masih unconstrained.
-- [ ] Execution fee dicatat tetapi tidak ikut mengurangi user principal.
-- [ ] Signed quote opsional pada endpoint spend.
-- [ ] Contract tidak memverifikasi EIP-712 quote signature/quote ID.
-- [ ] `batch_spend()` tidak membawa atau mengakumulasi execution fee per item.
-- [ ] Node menyimpan `max_execution_fee` sebagai batch revenue, bukan exact `execution_fee`.
+Seluruh 6 gap fatal legacy berikut telah **dituntaskan 100%**:
+- **Solusi Compliance:** `ComplianceCircuit` unconstrained telah di-deprecate dan digantikan oleh Receiver-Enforced ASP & Layer-1/HTTP OFAC screening ([`DEC-026`](file:///workspaces/Zeltra-Protocol/research/decisions/DEC-026-receiver-enforced-compliance-zero-cost-sanctions-filtering-relayer-protection.md)).
+- **Solusi Principal & Fees:** Execution fee mengurangi user principal secara tepat dan solven lewat multi-liability accounting ([`DEC-019`](file:///workspaces/Zeltra-Protocol/research/decisions/DEC-019-merkle-tree-sizing-and-solvency-invariants.md), Gate B & D).
+- **Solusi Quote Enforce:** Signed quote diwajibkan *fail-closed* di endpoint spend ([`DEC-025`](file:///workspaces/Zeltra-Protocol/research/decisions/DEC-025-relayer-zk-note-spend-settlement-atomic-batching-and-reconciliation.md)).
+- **Solusi Domain Binding:** Validasi domain EIP-712 terikat ketat ke contract address & chain ID ([`DEC-031`](file:///workspaces/Zeltra-Protocol/research/decisions/DEC-031-relayer-reconciliation-solvency-observability-quote-domain-binding.md)).
+- **Solusi Batch Execution Fee:** Akumulasi execution fee per item terintegrasi di `batch_spend()` & single settlement.
+- **Solusi Reconcile:** Relayer Three-Way Reconciliation mencatat exact `execution_fee` on-chain vs DB vs receipts ([`DEC-031`](file:///workspaces/Zeltra-Protocol/research/decisions/DEC-031-relayer-reconciliation-solvency-observability-quote-domain-binding.md)).
 
 ---
 
@@ -66,16 +67,12 @@ wallet publik milik user.
 
 ## Gate C - Implementasi Private Note Circuit
 
-### Core primitives
-- [ ] Implementasikan note range and canonicality validation.
-- [ ] Zeroize note secrets dan owner spending keys setelah penggunaan.
-
-### Keys and artifacts
+### Keys and artifacts (Pending)
 - [ ] Version circuit ID dan verifying key ID.
-- [ ] Jangan generate proving key saat runtime.
-- [ ] Tambahkan hash artifact ke manifest.
-- [ ] Rencanakan MPC ceremony setelah circuit freeze, bukan sebelumnya (MVP: single-party seed, lihat DEC-016B).
-- [ ] Independent circuit review sebelum trusted setup production.
+- [ ] Jangan generate proving key saat runtime (bundle static precompiled artifacts).
+- [ ] Tambahkan hash artifact ke manifest rilis.
+- [ ] Rencanakan MPC ceremony setelah circuit freeze (MVP: single-party seed per DEC-016B).
+- [ ] Independent circuit security review sebelum trusted setup production.
 
 ---
 
@@ -129,11 +126,11 @@ wallet publik milik user.
 
 ## Gate G - Hard Test Arbitrum Sepolia
 
-- [ ] Deposit 100 USDC menghasilkan net note exact 100 USDC (0 bps / 0.00% deposit fee).
-- [ ] Spend 5 USDC membayar merchant tepat 5 USDC.
+- [ ] Deposit 5 USDC menghasilkan net note exact 5 USDC (0 bps / 0.00% deposit fee).
+- [ ] Spend 1 USDC membayar merchant tepat 1 USDC.
 - [ ] Protocol fee dan execution fee cocok dengan signed quote.
-- [ ] Change note sama dengan input dikurangi seluruh debit.
-- [ ] Spend kedua memakai change note, bukan input lama.
+- [ ] Change note sama dengan input (5 USDC) dikurangi seluruh debit (1 USDC merchant + 45 bps protocol fee + execution fee).
+- [ ] Spend kedua memakai change note (~3.9 USDC), bukan input lama.
 - [ ] Replay input pertama gagal dan seluruh state/balance tidak berubah.
 - [ ] Withdraw-all via spend ke wallet owner mengembalikan seluruh sisa setelah fee.
 - [ ] Final user note liability nol.
