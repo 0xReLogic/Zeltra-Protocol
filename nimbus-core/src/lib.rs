@@ -57,7 +57,8 @@ pub use fees::{
     SPEND_FEE_30DAY_BPS, THIRTY_DAYS_SECS,
 };
 
-// Re-export compliance circuit
+// Re-export compliance circuit (deprecated prototype)
+#[allow(deprecated)]
 pub use compliance_circuit::{
     generate_compliance_keys, generate_compliance_proof, generate_evm_vk_constants,
     serialize_vk_bytes, verify_compliance_proof, ComplianceCircuit, ComplianceKeys,

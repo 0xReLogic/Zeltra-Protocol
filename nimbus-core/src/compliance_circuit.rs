@@ -1,14 +1,23 @@
-//! Compliance Circuit for ZK Proof Generation
+//! # Compliance Circuit (EXPERIMENTAL PROTOTYPE - NOT USED IN PRODUCTION SETTLEMENT)
 //!
-//! This module implements a compliance circuit that verifies:
-//! 1. The nullifier is derived from a valid commitment via Poseidon hash
-//! 2. The spend amount is within allowed limits
-//! 3. The recipient is a valid address
-//! 4. The root is a valid Merkle tree root
+//! > ⚠️ **ARCHITECTURAL & SECURITY NOTICE (DEC-028 Finding R1 / DEC-026)**:
+//! > This circuit is a standalone, early experimental proof-of-concept for testing
+//! > Poseidon nullifier preimage derivation.
+//! >
+//! > **DO NOT USE FOR FINANCIAL VALUE TRANSFERS OR SETTLEMENT IN PRODUCTION.**
+//! >
+//! > 1. **Unconstrained Public Inputs**: The variables `_root_var`, `_recipient_var`,
+//! >    and `_amount_var` in `generate_constraints` are intentionally unconstrained in this prototype.
+//! > 2. **Production Settlement Rails**: Production shielded value transfers in Zeltra Protocol
+//! >    use [`PrivateNoteCircuit`](crate::note_circuit::PrivateNoteCircuit) (12 public inputs)
+//! >    and [`JoinSplitCircuit`](crate::joinsplit_circuit::JoinSplitCircuit) (14 public inputs).
+//! >    Both circuits strictly enforce exact value conservation, 64-bit integer range constraints,
+//! >    Poseidon nullifier derivations, Merkle membership paths, and EVM target domain bindings.
+//! > 3. **Future ASP Roadmap (Phase 3)**: Formal Association Set Provider (ASP) membership proofs
+//! >    will be implemented as part of DEC-026 (Receiver-Enforced Compliance) with dedicated Merkle
+//! >    inclusion gadgets, separate from this legacy prototype.
 //!
-//! Based on 2026 implementations from orbinum/groth16-proofs and ark-groth16 v0.6.0
-//!
-//! This implementation uses real Groth16 with multithreading support via rayon.
+//! Based on 2026 implementations from orbinum/groth16-proofs and ark-groth16 v0.6.0.
 
 use ark_bls12_381::{Bls12_381, Fr};
 use ark_relations::gr1cs::{ConstraintSynthesizer, ConstraintSystemRef, SynthesisError};
@@ -16,14 +25,21 @@ use ark_snark::SNARK;
 
 use crate::poseidon::{compute_nullifier, poseidon_hash};
 
-/// Compliance circuit that verifies spend validity.
+/// Compliance circuit that verifies spend validity (EXPERIMENTAL PROTOTYPE).
+///
+/// > ⚠️ **WARNING**: This circuit is an early prototype and does NOT constrain
+/// > `root`, `recipient`, or `amount` in R1CS (see DEC-028 Finding R1).
+/// > Production settlement MUST use [`PrivateNoteCircuit`](crate::PrivateNoteCircuit)
+/// > or [`JoinSplitCircuit`](crate::joinsplit_circuit::JoinSplitCircuit).
 ///
 /// Public inputs: root, nullifier, recipient, amount
 /// Private witnesses: secret, randomness
 ///
 /// Core constraint: nullifier = Poseidon(secret, randomness)
-/// This ensures the nullifier is deterministically and collision-resistant
-/// derived from the credential secret, preventing double-spending.
+#[deprecated(
+    since = "0.2.0",
+    note = "ComplianceCircuit is an unconstrained experimental prototype. Production settlement uses PrivateNoteCircuit and JoinSplitCircuit (DEC-028 / DEC-030)."
+)]
 pub struct ComplianceCircuit {
     /// Public input: Merkle root
     pub root: Option<Fr>,
@@ -39,6 +55,7 @@ pub struct ComplianceCircuit {
     pub randomness: Option<Fr>,
 }
 
+#[allow(deprecated)]
 impl ConstraintSynthesizer<Fr> for ComplianceCircuit {
     fn generate_constraints(self, cs: ConstraintSystemRef<Fr>) -> Result<(), SynthesisError> {
         use ark_r1cs_std::eq::EqGadget;
@@ -46,7 +63,12 @@ impl ConstraintSynthesizer<Fr> for ComplianceCircuit {
 
         let (rc, mds) = &*crate::poseidon::CACHED_W3_PARAMS;
 
-        // Allocate public inputs via gr1cs API
+        // NOTE & WARNING (DEC-028 Finding R1):
+        // In this experimental prototype, only the nullifier derivation is mathematically constrained.
+        // `_root_var`, `_recipient_var`, and `_amount_var` are unconstrained placeholders.
+        // DO NOT use for production fund transfers. Production settlement runs through
+        // `PrivateNoteCircuit` (12 public inputs) or `JoinSplitCircuit` (14 public inputs)
+        // where all parameters are strictly bound and range-checked.
         let _root_var =
             cs.new_input_variable(|| self.root.ok_or(SynthesisError::AssignmentMissing))?;
         let nullifier_var =
@@ -101,6 +123,7 @@ pub const TRUSTED_SETUP_SEED: u64 = 0x4e696d6275735453; // "NimbusTS"
 /// contract — they are two halves of the same trusted setup artifact.
 ///
 /// Phase B: Replace with MPC ceremony output distributed as versioned artifacts.
+#[allow(deprecated)]
 pub fn generate_compliance_keys() -> Result<ComplianceKeys, SynthesisError> {
     use ark_groth16::Groth16;
     use ark_std::rand::rngs::StdRng;
@@ -135,6 +158,7 @@ pub fn generate_compliance_keys() -> Result<ComplianceKeys, SynthesisError> {
 ///
 /// The caller must provide `secret` and `randomness` such that
 /// `nullifier == Poseidon(secret, randomness)`.
+#[allow(deprecated)]
 pub fn generate_compliance_proof(
     root: Fr,
     nullifier: Fr,
@@ -235,6 +259,7 @@ pub fn generate_evm_vk_constants(
 }
 
 #[cfg(test)]
+#[allow(deprecated)]
 mod tests {
     use super::*;
 

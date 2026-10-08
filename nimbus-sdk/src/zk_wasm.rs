@@ -1,5 +1,7 @@
 //! WASM bindings for ZK compliance proof generation
 
+#![allow(deprecated)]
+
 use crate::wasm_types::ZkComplianceProof;
 use nimbus_core::*;
 use rand::rngs::OsRng;
