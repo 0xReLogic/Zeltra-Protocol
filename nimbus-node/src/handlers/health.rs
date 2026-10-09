@@ -220,6 +220,38 @@ pub async fn signing_health(
     })
 }
 
+/// Lightweight liveness probe (K8s/container liveness check)
+/// Simply verifies the process is responsive and event loop is healthy.
+pub async fn liveness_check() -> (axum::http::StatusCode, &'static str) {
+    (axum::http::StatusCode::OK, "LIVE")
+}
+
+/// Readiness probe (K8s/container readiness check)
+/// Verifies essential dependencies: Database connectivity and RPC responsiveness.
+pub async fn readiness_check(
+    axum::extract::State(state): axum::extract::State<AppState>,
+) -> Result<(axum::http::StatusCode, &'static str), (axum::http::StatusCode, String)> {
+    // 1. Verify DB is accessible
+    if let Err(e) = state.db.get_stats().await {
+        return Err((
+            axum::http::StatusCode::SERVICE_UNAVAILABLE,
+            format!("NOT_READY: Database error: {}", e),
+        ));
+    }
+
+    // 2. Verify EVM RPC is responsive if client is configured
+    if let Some(ref evm_client) = state.evm_client {
+        if let Err(e) = evm_client.get_gas_price().await {
+            return Err((
+                axum::http::StatusCode::SERVICE_UNAVAILABLE,
+                format!("NOT_READY: EVM RPC error: {}", e),
+            ));
+        }
+    }
+
+    Ok((axum::http::StatusCode::OK, "READY"))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -324,5 +356,32 @@ mod tests {
         assert_eq!(drift_3, 100_000);
         let is_matched_3 = drift_3 == 0;
         assert!(!is_matched_3);
+    }
+
+    #[tokio::test]
+    async fn test_liveness_and_readiness_endpoints() {
+        let (status, msg) = liveness_check().await;
+        assert_eq!(status, axum::http::StatusCode::OK);
+        assert_eq!(msg, "LIVE");
+
+        let tmp = TempDir::new().unwrap();
+        let db_path = tmp.path().join("readiness_test.db");
+        let db = Database::new(&db_path).await.unwrap();
+
+        let state = AppState::new(
+            db,
+            nimbus_core::Fr::from(1u64),
+            1,
+            nimbus_core::IssuerPublicKey(nimbus_core::G2Projective::default()),
+            HashMap::new(),
+            None,
+        )
+        .await;
+
+        let ready_res = readiness_check(axum::extract::State(state)).await;
+        assert!(ready_res.is_ok());
+        let (r_status, r_msg) = ready_res.unwrap();
+        assert_eq!(r_status, axum::http::StatusCode::OK);
+        assert_eq!(r_msg, "READY");
     }
 }

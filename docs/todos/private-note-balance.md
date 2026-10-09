@@ -34,13 +34,14 @@ wallet publik milik user.
 
 ## Gap Fatal yang Telah Dituntaskan (Sprint DEC-016 s/d DEC-031)
 
-Seluruh 6 gap fatal legacy berikut telah **dituntaskan 100%**:
+Seluruh 7 gap fatal legacy berikut telah **dituntaskan 100%**:
 - **Solusi Compliance:** `ComplianceCircuit` unconstrained telah di-deprecate dan digantikan oleh Receiver-Enforced ASP & Layer-1/HTTP OFAC screening ([`DEC-026`](file:///workspaces/Zeltra-Protocol/research/decisions/DEC-026-receiver-enforced-compliance-zero-cost-sanctions-filtering-relayer-protection.md)).
 - **Solusi Principal & Fees:** Execution fee mengurangi user principal secara tepat dan solven lewat multi-liability accounting ([`DEC-019`](file:///workspaces/Zeltra-Protocol/research/decisions/DEC-019-merkle-tree-sizing-and-solvency-invariants.md), Gate B & D).
 - **Solusi Quote Enforce:** Signed quote diwajibkan *fail-closed* di endpoint spend ([`DEC-025`](file:///workspaces/Zeltra-Protocol/research/decisions/DEC-025-relayer-zk-note-spend-settlement-atomic-batching-and-reconciliation.md)).
 - **Solusi Domain Binding:** Validasi domain EIP-712 terikat ketat ke contract address & chain ID ([`DEC-031`](file:///workspaces/Zeltra-Protocol/research/decisions/DEC-031-relayer-reconciliation-solvency-observability-quote-domain-binding.md)).
 - **Solusi Batch Execution Fee:** Akumulasi execution fee per item terintegrasi di `batch_spend()` & single settlement.
 - **Solusi Reconcile:** Relayer Three-Way Reconciliation mencatat exact `execution_fee` on-chain vs DB vs receipts ([`DEC-031`](file:///workspaces/Zeltra-Protocol/research/decisions/DEC-031-relayer-reconciliation-solvency-observability-quote-domain-binding.md)).
+- **Solusi UTXO Fragmentation & Consolidation:** Universal 2-in-2-out JoinSplit Groth16 circuit, Tiered Stochastic Knapsack coin selection, dan in-pool autonomous consolidation ([`DEC-030`](file:///workspaces/Zeltra-Protocol/research/decisions/DEC-030-multi-utxo-joinsplit-coin-selection-zeroize-and-aead-backup.md)).
 
 ---
 
@@ -120,7 +121,7 @@ Seluruh 6 gap fatal legacy berikut telah **dituntaskan 100%**:
 
 ## Gate F - Node, Quote, dan Batch
 
-> **Status Gate F:** **SELESAI (100% Full Pipeline & Solvency Observability)** — Sesuai [`DEC-025`](file:///workspaces/Zeltra-Protocol/research/decisions/DEC-025-relayer-zk-note-spend-settlement-atomic-batching-and-reconciliation.md) & [`DEC-031`](file:///workspaces/Zeltra-Protocol/research/decisions/DEC-031-relayer-reconciliation-solvency-observability-quote-domain-binding.md), relayer telah mengimplementasikan pipeline validasi fail-closed, endpoint ingress `/api/v1/spend-private-note`, pre-flight kanonikalitas 12 skalar, semantic public input binding, dual-layer double-spend guard (`is_nullifier_spent`), single-item & batch settlement dispatcher, three-way reconciliation engine (`reconcile_execution_fees`), pemusnahan total fallback quote berstatus OK tanpa signing domain, dan zero-leakage solvency observability di endpoint `/health` (68/68 node tests pass, clippy clean).
+> **Status Gate F:** **SELESAI (100% Full Pipeline & Solvency Observability)** — Sesuai [`DEC-025`](file:///workspaces/Zeltra-Protocol/research/decisions/DEC-025-relayer-zk-note-spend-settlement-atomic-batching-and-reconciliation.md) & [`DEC-031`](file:///workspaces/Zeltra-Protocol/research/decisions/DEC-031-relayer-reconciliation-solvency-observability-quote-domain-binding.md), relayer telah mengimplementasikan pipeline validasi fail-closed, endpoint ingress `/api/v1/spend-private-note`, pre-flight kanonikalitas 12 skalar, semantic public input binding, dual-layer double-spend guard (`is_nullifier_spent`), single-item & batch settlement dispatcher, three-way reconciliation engine (`reconcile_execution_fees`), pemusnahan total fallback quote berstatus OK tanpa signing domain, zero-leakage solvency observability di endpoint `/health`, pooling TLS client dengan strict timeouts (`http.rs`), periodic rate-limit pruner anti memory-leak, serta dedicated `/live` dan `/ready` health probes (147/147 node tests pass, clippy clean).
 
 ---
 

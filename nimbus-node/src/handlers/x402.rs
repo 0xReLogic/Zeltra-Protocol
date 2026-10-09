@@ -64,7 +64,7 @@ pub async fn handle_x402_verify(
         }
     }
 
-    // 4. Queue the anonymous spend internally
+    // 4. Validate configured facilitator recipient and spend request parameters
     let recipient = match std::env::var("NIMBUS_X402_RECIPIENT") {
         Ok(value) => value,
         Err(_) => {
@@ -75,6 +75,18 @@ pub async fn handle_x402_verify(
             });
         }
     };
+
+    let limits = crate::validation::SafetyLimits::default();
+    if let Err(val_err) =
+        crate::validation::validate_spend_request(&recipient, sig.payment.amount, None, &limits)
+    {
+        return Json(X402VerifyResponse {
+            success: false,
+            tx_hash: None,
+            message: format!("x402 recipient validation failed: {}", val_err),
+        });
+    }
+
     let spend_req = SpendRequest {
         nullifier: sig.payment.nullifier.clone(),
         sig_hex: sig.payment.alpha_neg_hex.clone(),

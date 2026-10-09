@@ -21,7 +21,8 @@ Komponen inti berikut **sudah selesai dan diverifikasi**:
 * **Inflow Compliance Gate & Mempool Anti-Limbo Lifecycle (DEC-027):** 2-layer sanctions screening pada deposit ingress (OFAC in-memory + Chainalysis on-chain Oracle), dynamic 15-minute lease, mempool lease watchdog background worker dengan strict on-chain simulation (`is_nullifier_spent`), dan restorasi self-custody di `PrivateNoteWallet` (`reclaim_expired_reservations`).
 * **Ingress Hardening, Flat Fee & Domain Binding (DEC-028):** Wajib 12 public inputs fail-closed (Fix R4), verifikasi domain target `chain_id` & `contract_address` (Fix R3), penyatuan fee spend flat 45 bps permanen tanpa diskon umur root (Fix R2), dan penegasan batas statement `ComplianceCircuit` (Fix R1).
 * **Multi-UTXO JoinSplit & Client Hardening (DEC-030):** Universal 2-in-2-out JoinSplit Groth16 circuit terdeploy di `nimbus-core` (14 public inputs, Option A constant topology, 448 range constraints). Client SDK `nimbus-sdk` ter-upgrade penuh: Tiered Stochastic Knapsack Coin Selection (1-note & 2-note JoinSplit, toleransi ±5%), in-pool autonomous consolidation (`consolidate_notes`), Argon2id + ChaCha20Poly1305 AEAD backup, `zeroize` memory security barrier, anti-ghost note `update_note_witness`, dan canonical hex parsers (29/29 sdk tests pass).
-* **Relayer Reconciliation, Solvency Observability & Quote Hardening (DEC-031):** Three-way reconciliation engine (`reconcile_execution_fees`) menyinkronkan akrual kontrak on-chain, database SQLite (`spend_batches`), dan confirmed receipts (`status == 1`); pemusnahan total fallback quote berstatus OK tanpa signing domain (fail-closed EIP-712 domain derivation); serta observabilitas solvensi makro pada `/health` (`solvency_metrics`) tanpa kebocoran data privat user (68/68 node tests pass, clippy clean).
+* **Relayer Reconciliation, Solvency Observability & Quote Hardening (DEC-031):** Three-way reconciliation engine (`reconcile_execution_fees`) menyinkronkan akrual kontrak on-chain, database SQLite (`spend_batches`), dan confirmed receipts (`status == 1`); pemusnahan total fallback quote berstatus OK tanpa signing domain (fail-closed EIP-712 domain derivation); serta observabilitas solvensi makro pada `/health` (`solvency_metrics`) tanpa kebocoran data privat user.
+* **Relayer Operational Hygiene & Health Probes:** Singleton pooling `reqwest::Client` dengan TLS dan timeout ketat (`http.rs`), periodic in-memory rate-limiter pruning anti-memory-leak, dedicated k8s `/live` & `/ready` health endpoints, dan validasi EVM address pada x402 facilitator (147/147 node tests pass, clippy clean).
 
 ---
 
@@ -82,21 +83,13 @@ Ref: [`docs/todos/private-note-balance.md`](file:///workspaces/Zeltra-Protocol/d
   - Hapus credential lama dari git history.
 - [ ] **KMS / Vault TLS Hardening**:
   - Ref: [`docs/todos/kms-tls.md`](file:///workspaces/Zeltra-Protocol/docs/todos/kms-tls.md)
-  - Ganti raw TCP HTTP client dengan HTTPS client tervalidasi untuk Vault dan guardian RPC.
-  - Verifikasi certificate TLS.
-- [ ] **Operasional API**:
-  - Terapkan timeout pada guardian, Vault, dan RPC requests.
-  - Bersihkan in-memory rate-limit map secara berkala agar tidak memory leak.
-  - Tambahkan readiness dan liveness endpoint terpisah.
+  - Implementasikan auto-renew token Vault (AppRole / short-lived token).
+  - Validasi key version dan expected guardian index sebelum penandatanganan.
 
 ---
 
 ## 7. Integrasi Eksternal (Opsional / Secondary)
 
-- [ ] **x402 Facilitator**:
-  - Ref: [`docs/todos/x402.md`](file:///workspaces/Zeltra-Protocol/docs/todos/x402.md)
-  - Ganti mock tx hash dengan status settlement nyata.
-  - Ganti recipient `"x402-facilitator-pool"` dengan konfigurasi address EVM nyata.
 - [ ] **Polymarket Intent Settlement**:
   - Uji alur intent settlement privat dan fallback refund di testnet.
 

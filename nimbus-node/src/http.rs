@@ -1,195 +1,118 @@
-//! HTTP client utilities for making raw TCP-based HTTP requests
+//! HTTP client utilities with TLS, connection pooling, and timeouts
 
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use std::sync::OnceLock;
+use std::time::Duration;
 
+/// Global shared HTTP client for outgoing requests (Guardian quorum, Vault KMS, etc.)
+static HTTP_CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
+
+fn get_client() -> &'static reqwest::Client {
+    HTTP_CLIENT.get_or_init(|| {
+        reqwest::Client::builder()
+            .timeout(Duration::from_secs(10))
+            .connect_timeout(Duration::from_secs(5))
+            .pool_idle_timeout(Duration::from_secs(90))
+            .tcp_keepalive(Duration::from_secs(60))
+            .build()
+            .expect("Failed to initialize global HTTP client")
+    })
+}
+
+/// Send a JSON POST request with timeout
 pub async fn post_http(url: &str, body: &str) -> Result<String, String> {
-    let clean_url = url
-        .trim_start_matches("http://")
-        .trim_start_matches("https://");
-    let parts: Vec<&str> = clean_url.splitn(2, '/').collect();
-    let host_port = parts[0];
-    let path = if parts.len() > 1 {
-        format!("/{}", parts[1])
-    } else {
-        "/".to_string()
-    };
+    let client = get_client();
+    let normalized_url = normalize_url(url);
 
-    let mut stream = tokio::net::TcpStream::connect(host_port)
+    let res = client
+        .post(&normalized_url)
+        .header("Content-Type", "application/json")
+        .body(body.to_string())
+        .send()
         .await
-        .map_err(|e| format!("Connect failed: {}", e))?;
+        .map_err(|e| format!("POST request failed to {}: {}", normalized_url, e))?;
 
-    let request_str = format!(
-        "POST {} HTTP/1.1\r\n\
-         Host: {}\r\n\
-         Content-Type: application/json\r\n\
-         Content-Length: {}\r\n\
-         Connection: close\r\n\r\n\
-         {}",
-        path,
-        host_port,
-        body.len(),
-        body
-    );
+    let status = res.status();
+    let text = res.text().await.map_err(|e| {
+        format!(
+            "Failed to read response body from {}: {}",
+            normalized_url, e
+        )
+    })?;
 
-    stream
-        .write_all(request_str.as_bytes())
-        .await
-        .map_err(|e| format!("Write failed: {}", e))?;
-
-    println!(
-        "HTTP CLIENT: Sent request to {}:\n{}",
-        host_port, request_str
-    );
-
-    let response = read_http_response(&mut stream).await?;
-
-    println!(
-        "HTTP CLIENT: Received raw response from {}:\n{}",
-        host_port, response
-    );
-
-    if let Some(pos) = response.find("\r\n\r\n") {
-        Ok(response[pos + 4..].to_string())
+    if status.is_success() {
+        Ok(text)
     } else {
-        Err("Invalid HTTP response format".to_string())
+        Err(format!(
+            "HTTP {} from {}: {}",
+            status.as_u16(),
+            normalized_url,
+            text
+        ))
     }
 }
 
+/// Send a GET request with custom headers and timeout
 pub async fn get_http_with_headers(url: &str, headers: &[(&str, &str)]) -> Result<String, String> {
-    let clean_url = url
-        .trim_start_matches("http://")
-        .trim_start_matches("https://");
-    let parts: Vec<&str> = clean_url.splitn(2, '/').collect();
-    let host_port = parts[0];
+    let client = get_client();
+    let normalized_url = normalize_url(url);
 
-    // Add port if not specified
-    let host_port_with_default = if host_port.contains(':') {
-        host_port.to_string()
-    } else {
-        format!("{}:80", host_port)
-    };
-
-    let path = if parts.len() > 1 {
-        format!("/{}", parts[1])
-    } else {
-        "/".to_string()
-    };
-
-    let mut stream = tokio::net::TcpStream::connect(&host_port_with_default)
-        .await
-        .map_err(|e| format!("Connect failed to {}: {}", host_port_with_default, e))?;
-
-    let mut headers_str = String::new();
+    let mut req = client.get(&normalized_url);
     for (k, v) in headers {
-        headers_str.push_str(&format!("{}: {}\r\n", k, v));
+        req = req.header(*k, *v);
     }
 
-    let request_str = format!(
-        "GET {} HTTP/1.1\r\n\
-         Host: {}\r\n\
-         Connection: close\r\n\
-         {}\r\n",
-        path, host_port, headers_str
-    );
-
-    stream
-        .write_all(request_str.as_bytes())
+    let res = req
+        .send()
         .await
-        .map_err(|e| format!("Write failed: {}", e))?;
+        .map_err(|e| format!("GET request failed to {}: {}", normalized_url, e))?;
 
-    let response = read_http_response(&mut stream).await?;
+    let status = res.status();
+    let text = res.text().await.map_err(|e| {
+        format!(
+            "Failed to read response body from {}: {}",
+            normalized_url, e
+        )
+    })?;
 
-    if let Some(pos) = response.find("\r\n\r\n") {
-        Ok(response[pos + 4..].to_string())
+    if status.is_success() {
+        Ok(text)
     } else {
-        Err("Invalid HTTP response format".to_string())
+        Err(format!(
+            "HTTP {} from {}: {}",
+            status.as_u16(),
+            normalized_url,
+            text
+        ))
     }
 }
 
-async fn read_http_response(stream: &mut tokio::net::TcpStream) -> Result<String, String> {
-    use std::time::Duration;
-    use tokio::time::timeout;
-
-    let read_fut = async {
-        let mut buf = Vec::new();
-        let mut temp = [0u8; 1024];
-        let mut header_end_pos = None;
-
-        // 1. Read until we find the end of the headers (\r\n\r\n)
-        loop {
-            let n = stream
-                .read(&mut temp)
-                .await
-                .map_err(|e| format!("Read error: {}", e))?;
-            if n == 0 {
-                break;
-            }
-            buf.extend_from_slice(&temp[..n]);
-
-            // Search for \r\n\r\n
-            if let Some(pos) = find_subsequence(&buf, b"\r\n\r\n") {
-                header_end_pos = Some(pos);
-                break;
-            }
-        }
-
-        let header_end = match header_end_pos {
-            Some(pos) => pos,
-            None => {
-                return Ok(String::from_utf8_lossy(&buf).into_owned());
-            }
-        };
-
-        // Parse headers to find Content-Length
-        let headers_part = String::from_utf8_lossy(&buf[..header_end]);
-        let mut content_length = None;
-        for line in headers_part.lines() {
-            let lower = line.to_lowercase();
-            if lower.starts_with("content-length:") {
-                if let Some(val_str) = line.split(':').nth(1) {
-                    if let Ok(len) = val_str.trim().parse::<usize>() {
-                        content_length = Some(len);
-                    }
-                }
-            }
-        }
-
-        let body_start = header_end + 4;
-        let mut response_str = String::from_utf8_lossy(&buf).into_owned();
-
-        if let Some(len) = content_length {
-            let current_body_len = buf.len() - body_start;
-            if current_body_len < len {
-                let remaining = len - current_body_len;
-                let mut remaining_buf = vec![0u8; remaining];
-                stream
-                    .read_exact(&mut remaining_buf)
-                    .await
-                    .map_err(|e| format!("Read remaining body error: {}", e))?;
-                let remaining_str = String::from_utf8_lossy(&remaining_buf);
-                response_str.push_str(&remaining_str);
-            }
-        } else {
-            // Read to end
-            let mut remaining_buf = Vec::new();
-            stream
-                .read_to_end(&mut remaining_buf)
-                .await
-                .map_err(|e| format!("Read to end error: {}", e))?;
-            let remaining_str = String::from_utf8_lossy(&remaining_buf);
-            response_str.push_str(&remaining_str);
-        }
-
-        Ok(response_str)
-    };
-
-    timeout(Duration::from_secs(5), read_fut)
-        .await
-        .map_err(|_| "HTTP read timed out".to_string())?
+/// Normalizes URL string to ensure it has http:// or https:// prefix
+fn normalize_url(url: &str) -> String {
+    let trimmed = url.trim();
+    if trimmed.starts_with("http://") || trimmed.starts_with("https://") {
+        trimmed.to_string()
+    } else {
+        format!("http://{}", trimmed)
+    }
 }
 
-fn find_subsequence(haystack: &[u8], needle: &[u8]) -> Option<usize> {
-    haystack
-        .windows(needle.len())
-        .position(|window| window == needle)
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_normalize_url() {
+        assert_eq!(
+            normalize_url("http://127.0.0.1:8080"),
+            "http://127.0.0.1:8080"
+        );
+        assert_eq!(
+            normalize_url("https://vault.internal:8200/v1/secret"),
+            "https://vault.internal:8200/v1/secret"
+        );
+        assert_eq!(
+            normalize_url("127.0.0.1:8080/path"),
+            "http://127.0.0.1:8080/path"
+        );
+    }
 }

@@ -313,6 +313,8 @@ async fn main() {
 
     let app = Router::new()
         .route("/health", get(health_check))
+        .route("/live", get(liveness_check))
+        .route("/ready", get(readiness_check))
         .route("/api/signing-health", get(signing_health))
         .route("/api/deposit", post(handle_deposit))
         .route("/api/reveal", post(handle_reveal))
@@ -414,13 +416,31 @@ async fn rate_limit_middleware(request: Request<Body>, next: Next) -> Result<Res
         .map(|s| s.split(',').next().unwrap_or(s).trim().to_string())
         .unwrap_or_else(|| "127.0.0.1".to_string());
 
-    static LIMITER: OnceLock<Mutex<HashMap<String, (u32, Instant)>>> = OnceLock::new();
-    let limiter = LIMITER.get_or_init(|| Mutex::new(HashMap::new()));
+    struct RateLimiterState {
+        counts: HashMap<String, (u32, Instant)>,
+        last_cleanup: Instant,
+    }
 
-    let mut map = limiter.lock().await;
+    static LIMITER: OnceLock<Mutex<RateLimiterState>> = OnceLock::new();
+    let limiter = LIMITER.get_or_init(|| {
+        Mutex::new(RateLimiterState {
+            counts: HashMap::new(),
+            last_cleanup: Instant::now(),
+        })
+    });
+
+    let mut state = limiter.lock().await;
     let now = Instant::now();
 
-    let (count, last_reset) = map.entry(ip).or_insert((0, now));
+    // Periodic cleanup of stale entries (> 60s inactivity) to prevent unbounded memory growth
+    if now.duration_since(state.last_cleanup) > Duration::from_secs(60) {
+        state
+            .counts
+            .retain(|_, (_, last_seen)| now.duration_since(*last_seen) < Duration::from_secs(60));
+        state.last_cleanup = now;
+    }
+
+    let (count, last_reset) = state.counts.entry(ip).or_insert((0, now));
 
     if now.duration_since(*last_reset) > Duration::from_secs(1) {
         *count = 1;
@@ -433,7 +453,7 @@ async fn rate_limit_middleware(request: Request<Body>, next: Next) -> Result<Res
         }
     }
 
-    drop(map); // drop lock before running handler
+    drop(state); // drop lock before running handler
     Ok(next.run(request).await)
 }
 

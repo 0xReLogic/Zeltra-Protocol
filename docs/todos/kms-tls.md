@@ -6,14 +6,13 @@
 ## Context
 HTTP client masih plain TCP (no TLS). Vault/guardian communication bisa kena MITM attack. Key lifecycle belum production-grade.
 
-## Current State
-- [ ] Ganti raw TCP HTTP client dengan client HTTPS yang tervalidasi
-- [ ] Verifikasi TLS certificate untuk Vault dan guardian RPC
-- [ ] Jangan menghapus awalan `https://` lalu mengirim plaintext TCP
-- [ ] Gunakan short-lived Vault token atau workload identity
+## Current State (Pending Tasks)
+- [ ] Gunakan short-lived Vault token atau workload identity (AppRole)
 - [ ] Validasi key version dan expected guardian index
 - [ ] Implementasikan threshold proactive refresh yang nyata; re-masking memory bukan penggantian share antar guardian
 - [ ] Gunakan crate zeroization yang diaudit untuk secret memory
+
+> **Catatan:** Item HTTPS client tervalidasi dengan `reqwest` (`rustls-tls`), connection pooling, timeout, dan TLS certificate verification telah selesai diimplementasikan di `nimbus-node/src/http.rs`.
 
 ## Requirements
 
