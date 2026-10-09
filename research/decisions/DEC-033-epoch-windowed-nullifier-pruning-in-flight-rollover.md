@@ -203,6 +203,10 @@ Jika pengguna hanya ingin merefresh saldo koinnya tanpa membelanjakannya ke merc
 └─────────────────────────────────────────────────────────────────────────┘
 ```
 
+> [!NOTE]
+> **Status Prototipe UI/UX (Non-Final Design Draft):**
+> Mockup dialog di atas merupakan referensi fungsional untuk memetakan transparansi informasi (biaya gas L2 reimbursement relayer vs zero protocol fee). Desain visual akhir, tata letak antarmuka (mobile/desktop/web), copywriting mikro, animasi, serta interaksi alur pengguna masih bersifat non-final dan akan terus diiterasi serta disempurnakan bersama tim desainer produk agar selaras dengan mantra *"Privacy 9.5/10, Product 10/10"*.
+
 ---
 
 ## 5. Model Ekonomi & Proteksi Anti-Rugi Bandar Relayer
