@@ -8,11 +8,12 @@ HTTP client masih plain TCP (no TLS). Vault/guardian communication bisa kena MIT
 
 ## Current State (Pending Tasks)
 - [ ] Gunakan short-lived Vault token atau workload identity (AppRole)
-- [ ] Validasi key version dan expected guardian index
 - [ ] Implementasikan threshold proactive refresh yang nyata; re-masking memory bukan penggantian share antar guardian
 - [ ] Gunakan crate zeroization yang diaudit untuk secret memory
 
-> **Catatan:** Item HTTPS client tervalidasi dengan `reqwest` (`rustls-tls`), connection pooling, timeout, dan TLS certificate verification telah selesai diimplementasikan di `nimbus-node/src/http.rs`.
+> **Catatan:**
+> - Item HTTPS client tervalidasi dengan `reqwest` (`rustls-tls`), connection pooling, timeout, dan TLS certificate verification telah selesai diimplementasikan di `nimbus-node/src/http.rs`.
+> - Validasi metadata KV v2 (`key_version`, `destroyed`) dan enforce expected guardian share index (`NIMBUS_SHARE_INDEX`) telah selesai diimplementasikan secara fail-closed di `nimbus-node/src/kms.rs`.
 
 ## Requirements
 

@@ -84,7 +84,6 @@ Ref: [`docs/todos/private-note-balance.md`](file:///workspaces/Zeltra-Protocol/d
 - [ ] **KMS / Vault TLS Hardening**:
   - Ref: [`docs/todos/kms-tls.md`](file:///workspaces/Zeltra-Protocol/docs/todos/kms-tls.md)
   - Implementasikan auto-renew token Vault (AppRole / short-lived token).
-  - Validasi key version dan expected guardian index sebelum penandatanganan.
 
 ---
 

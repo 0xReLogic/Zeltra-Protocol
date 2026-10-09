@@ -471,16 +471,18 @@ mod node_tests {
         assert_eq!(bytes[bytes.len() - 1], 1);
         assert_eq!(index, 1);
 
-        // Test 40-byte fallback (index + Fr)
+        // Test 40-byte fallback (index + Fr) with matching expected index
         let share_tuple = (5usize, nimbus_core::Fr::from(1u64));
         let share_bytes = nimbus_core::serialize_to_bytes(&share_tuple);
         let share_hex = hex::encode(share_bytes);
         std::env::set_var("NIMBUS_SHARE_KEY", share_hex);
+        std::env::set_var("NIMBUS_SHARE_INDEX", "5");
         let (fr2, index2) = crate::kms::load_share_key().await;
         assert_eq!(index2, 5);
         assert_eq!(fr2, nimbus_core::Fr::from(1u64));
 
         std::env::remove_var("NIMBUS_SHARE_KEY");
+        std::env::remove_var("NIMBUS_SHARE_INDEX");
     }
 
     #[tokio::test]

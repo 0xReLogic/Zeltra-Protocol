@@ -123,12 +123,25 @@ pub async fn load_share_key() -> (nimbus_core::Fr, u32) {
         match http::get_http_with_headers(&url, &[("X-Vault-Token", &vault_token)]).await {
             Ok(body) => {
                 #[derive(Deserialize)]
+                struct VaultSecretMetadata {
+                    #[serde(default)]
+                    version: Option<u64>,
+                    #[serde(default)]
+                    destroyed: Option<bool>,
+                }
+                #[derive(Deserialize)]
                 struct VaultSecretData {
                     share_key: String,
+                    #[serde(default)]
+                    share_index: Option<u32>,
+                    #[serde(default)]
+                    key_version: Option<u64>,
                 }
                 #[derive(Deserialize)]
                 struct VaultSecretInner {
                     data: VaultSecretData,
+                    #[serde(default)]
+                    metadata: Option<VaultSecretMetadata>,
                 }
                 #[derive(Deserialize)]
                 struct VaultSecretResponse {
@@ -137,6 +150,50 @@ pub async fn load_share_key() -> (nimbus_core::Fr, u32) {
 
                 match serde_json::from_str::<VaultSecretResponse>(&body) {
                     Ok(res) => {
+                        // Check if Vault KV v2 secret version is destroyed
+                        if let Some(meta) = &res.data.metadata {
+                            if meta.destroyed.unwrap_or(false) {
+                                eprintln!(
+                                    "CRITICAL: Vault secret version is destroyed! Failing startup."
+                                );
+                                std::process::exit(1);
+                            }
+                            if let Some(v) = meta.version {
+                                println!("KMS INTEGRATION: Vault secret metadata version: {}", v);
+                            }
+                        }
+
+                        // Validate expected key version if configured in environment
+                        if let Ok(expected_version_str) =
+                            std::env::var("NIMBUS_EXPECTED_KEY_VERSION")
+                        {
+                            if let Ok(expected_v) = expected_version_str.parse::<u64>() {
+                                let actual_v =
+                                    res.data.data.key_version.or_else(|| {
+                                        res.data.metadata.as_ref().and_then(|m| m.version)
+                                    });
+                                match actual_v {
+                                    Some(actual) if actual != expected_v => {
+                                        eprintln!(
+                                            "CRITICAL: Key version mismatch! Expected version {}, but Vault provided version {}.",
+                                            expected_v, actual
+                                        );
+                                        std::process::exit(1);
+                                    }
+                                    None => {
+                                        eprintln!(
+                                            "CRITICAL: NIMBUS_EXPECTED_KEY_VERSION is set to {}, but Vault secret has no version tag.",
+                                            expected_v
+                                        );
+                                        std::process::exit(1);
+                                    }
+                                    _ => {
+                                        println!("KMS INTEGRATION: Key version {} verified against expected version.", expected_v);
+                                    }
+                                }
+                            }
+                        }
+
                         let hex_str = res.data.data.share_key;
                         if let Ok(bytes) = hex::decode(&hex_str) {
                             if bytes.len() == 40 {
@@ -145,14 +202,39 @@ pub async fn load_share_key() -> (nimbus_core::Fr, u32) {
                                     nimbus_core::Fr,
                                 )>(&bytes)
                                 {
-                                    println!("KMS INTEGRATION: Successfully loaded BLS share key (index {}) from OpenBao/Vault.", idx);
-                                    return (fr, idx as u32);
+                                    let actual_idx = idx as u32;
+                                    // Fail-closed validation against configured expected index
+                                    if let Ok(exp_idx_str) = std::env::var("NIMBUS_SHARE_INDEX") {
+                                        if let Ok(exp_idx) = exp_idx_str.parse::<u32>() {
+                                            if actual_idx != exp_idx {
+                                                eprintln!(
+                                                    "CRITICAL: Guardian share index mismatch! Configured NIMBUS_SHARE_INDEX={}, but secret in Vault belongs to index {}.",
+                                                    exp_idx, actual_idx
+                                                );
+                                                std::process::exit(1);
+                                            }
+                                        }
+                                    }
+                                    println!("KMS INTEGRATION: Successfully loaded BLS share key (index {}) from OpenBao/Vault.", actual_idx);
+                                    return (fr, actual_idx);
                                 }
                             } else if let Some(fr) =
                                 nimbus_core::deserialize_from_bytes::<nimbus_core::Fr>(&bytes)
                             {
-                                println!("KMS INTEGRATION: Successfully loaded BLS share key from OpenBao/Vault.");
-                                return (fr, env_index);
+                                let actual_idx = res.data.data.share_index.unwrap_or(env_index);
+                                if let Ok(exp_idx_str) = std::env::var("NIMBUS_SHARE_INDEX") {
+                                    if let Ok(exp_idx) = exp_idx_str.parse::<u32>() {
+                                        if actual_idx != exp_idx {
+                                            eprintln!(
+                                                "CRITICAL: Guardian share index mismatch! Configured NIMBUS_SHARE_INDEX={}, but secret in Vault belongs to index {}.",
+                                                exp_idx, actual_idx
+                                            );
+                                            std::process::exit(1);
+                                        }
+                                    }
+                                }
+                                println!("KMS INTEGRATION: Successfully loaded BLS share key (index {}) from OpenBao/Vault.", actual_idx);
+                                return (fr, actual_idx);
                             }
                         }
                         println!("KMS INTEGRATION: Error parsing/deserializing share key bytes from Vault.");
@@ -201,7 +283,19 @@ pub async fn load_share_key() -> (nimbus_core::Fr, u32) {
                     if let Some((idx, fr)) =
                         nimbus_core::deserialize_from_bytes::<(usize, nimbus_core::Fr)>(&bytes)
                     {
-                        return (fr, idx as u32);
+                        let actual_idx = idx as u32;
+                        if let Ok(exp_idx_str) = std::env::var("NIMBUS_SHARE_INDEX") {
+                            if let Ok(exp_idx) = exp_idx_str.parse::<u32>() {
+                                if actual_idx != exp_idx {
+                                    eprintln!(
+                                        "CRITICAL: NIMBUS_SHARE_KEY index ({}) does not match configured NIMBUS_SHARE_INDEX ({})!",
+                                        actual_idx, exp_idx
+                                    );
+                                    std::process::exit(1);
+                                }
+                            }
+                        }
+                        return (fr, actual_idx);
                     }
                 } else if let Some(fr) =
                     nimbus_core::deserialize_from_bytes::<nimbus_core::Fr>(&bytes)
