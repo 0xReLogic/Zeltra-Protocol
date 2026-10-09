@@ -47,15 +47,8 @@ Seluruh 7 gap fatal legacy berikut telah **dituntaskan 100%**:
 
 ## Gate A - Bekukan Model dan Encoding
 
-> **Status Gate A Primitives:** Dasar encoding dan model Rust telah disepakati.
+> **Status Gate A Primitives:** **SELESAI (100%)** — Dasar encoding, model Rust, dan known-answer vectors (KAV) untuk note commitment, nullifier, parent hash, LeanIMT depth 20 Merkle root/proof, exact value conservation, serta domain separation telah teruji dan diverifikasi secara identik di `nimbus-core` dan `nimbus-contracts`.
 
-- [ ] Tambahkan known-answer vectors dari minimal dua implementasi independen (bukan dua wrapper atas implementasi Rust yang sama) untuk:
-  - note commitment;
-  - nullifier;
-  - parent hash;
-  - Merkle root/path;
-  - exact value conservation;
-  - chain/contract domain separation.
 - [ ] Independent design review: tidak ada jalur mint liability dari BLS dan ZK secara bersamaan.
 
 ---

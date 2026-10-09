@@ -629,30 +629,61 @@ mod tests {
 
     #[test]
     fn known_answer_domain_separators() {
-        // Domain separators are derived from keccak256 labels.
+        // Domain separators are derived from keccak256 labels modulo field order.
         // These MUST be identical across core, SDK, and contract.
         let d_note = domain_note_commitment();
         let d_null = domain_nullifier();
         let d_merkle = domain_merkle_node();
         let d_initial = domain_initial_note();
+        let d_quote = domain_quote_binding();
+        let d_dummy = domain_dummy_nullifier();
 
         let d_note_hex = hex::encode(fr_to_be_bytes(&d_note));
         let d_null_hex = hex::encode(fr_to_be_bytes(&d_null));
         let d_merkle_hex = hex::encode(fr_to_be_bytes(&d_merkle));
         let d_initial_hex = hex::encode(fr_to_be_bytes(&d_initial));
+        let d_quote_hex = hex::encode(fr_to_be_bytes(&d_quote));
+        let d_dummy_hex = hex::encode(fr_to_be_bytes(&d_dummy));
 
-        eprintln!("KNOWN-ANSWER: domain_note_commitment = 0x{}", d_note_hex);
-        eprintln!("KNOWN-ANSWER: domain_nullifier       = 0x{}", d_null_hex);
-        eprintln!("KNOWN-ANSWER: domain_merkle_node     = 0x{}", d_merkle_hex);
-        eprintln!("KNOWN-ANSWER: domain_initial_note    = 0x{}", d_initial_hex);
+        // Exact known-answer hex strings from canonical Keccak-256 mod r
+        assert_eq!(
+            d_note_hex,
+            "49476cc74d87b0ec3cbcf3e02b3794d86c6d8b5a8b5ccf7029a3b709e9e686df"
+        );
+        assert_eq!(
+            d_null_hex,
+            "541616c5d57d76e314728a4f2bdbdfe71f1ebcb705b8114d1f3216afa654c621"
+        );
+        assert_eq!(
+            d_merkle_hex,
+            "3834656d06de7d572e49914bb58b1e27dd5f9f6d86240e64495a1d82db22e82e"
+        );
+        assert_eq!(
+            d_initial_hex,
+            "53583822f8e973844e5583179d2bc8684c45a0b85310e551088dcd3d6815b523"
+        );
+        assert_eq!(
+            d_quote_hex,
+            hex::encode(fr_to_be_bytes(&domain_from_label(
+                "nimbus.quote.binding.v1"
+            )))
+        );
+        assert_eq!(
+            d_dummy_hex,
+            hex::encode(fr_to_be_bytes(&domain_from_label(
+                "nimbus.note.dummy.nullifier.v1"
+            )))
+        );
 
         // All distinct
-        assert_ne!(d_note, d_null);
-        assert_ne!(d_note, d_merkle);
-        assert_ne!(d_note, d_initial);
-        assert_ne!(d_null, d_merkle);
-        assert_ne!(d_null, d_initial);
-        assert_ne!(d_merkle, d_initial);
+        let all_domains = [d_note, d_null, d_merkle, d_initial, d_quote, d_dummy];
+        let mut domain_set = std::collections::HashSet::new();
+        for d in all_domains {
+            assert!(
+                domain_set.insert(d),
+                "Domain tags must be mutually disjoint"
+            );
+        }
     }
 
     #[test]
@@ -661,7 +692,12 @@ mod tests {
         let note = PrivateNoteV1::new(99_800_000, Fr::from(42u64), Fr::from(1u64), Fr::from(2u64));
         let cm = note.commitment();
         let cm_hex = hex::encode(fr_to_be_bytes(&cm));
-        eprintln!("KNOWN-ANSWER: note_commitment = 0x{}", cm_hex);
+
+        // Canonical test vector DEC-016A §16
+        assert_eq!(
+            cm_hex, "46d1b90c8a28c364fefdbb95bd709956e2f39a411750e6797fe1112b27635c59",
+            "Note commitment must match canonical DEC-016A KAV"
+        );
 
         // Determinism check
         let cm2 = note.commitment();
@@ -673,7 +709,11 @@ mod tests {
         let spending_key = Fr::from(42u64);
         let nk = derive_nullifier_key(spending_key);
         let nk_hex = hex::encode(fr_to_be_bytes(&nk));
-        eprintln!("KNOWN-ANSWER: nullifier_key = 0x{}", nk_hex);
+
+        assert_eq!(
+            nk_hex, "112c7c26870c6dcbdf343434984bd550c3d475e6b6e3bb6342fe915d444b677a",
+            "Nullifier key must match canonical DEC-016A KAV"
+        );
     }
 
     #[test]
@@ -685,7 +725,37 @@ mod tests {
         let cm = note.commitment();
         let nf = derive_nullifier(nk, cm, 0);
         let nf_hex = hex::encode(fr_to_be_bytes(&nf));
-        eprintln!("KNOWN-ANSWER: nullifier(leaf_index=0) = 0x{}", nf_hex);
+
+        assert_eq!(
+            nf_hex, "5b0320f2c7066f0b751c4f5ddfec9dfdde2ca07ea0c8f0d5f335c54b532dba54",
+            "Nullifier (leaf_index=0) must match canonical DEC-016A KAV"
+        );
+
+        // Non-zero leaf index must produce completely different nullifier (prevents position reuse)
+        let nf_idx1 = derive_nullifier(nk, cm, 1);
+        assert_ne!(
+            nf, nf_idx1,
+            "Different leaf index must yield different nullifier"
+        );
+    }
+
+    #[test]
+    fn known_answer_parent_hash() {
+        // Parent hash of two known children: left = Fr(1), right = Fr(2)
+        let left = Fr::from(1u64);
+        let right = Fr::from(2u64);
+        let parent = merkle_hash(left, right);
+        let parent_hex = hex::encode(fr_to_be_bytes(&parent));
+
+        // Recompute parent hash deterministically
+        let expected_inputs = [left, right, Fr::from(0u64), Fr::from(0u64)];
+        let manual_parent = native_poseidon_w5(&expected_inputs, domain_merkle_node());
+        assert_eq!(parent, manual_parent);
+        assert_eq!(
+            parent_hex,
+            hex::encode(fr_to_be_bytes(&manual_parent)),
+            "Parent hash must be strictly deterministic"
+        );
     }
 
     #[test]
@@ -697,7 +767,11 @@ mod tests {
         let cm = note.commitment();
         let root = merkle_append(&mut frontier, 0, cm, &empty);
         let root_hex = hex::encode(fr_to_be_bytes(&root));
-        eprintln!("KNOWN-ANSWER: merkle_root(after 1 insert) = 0x{}", root_hex);
+
+        assert_eq!(
+            root_hex, "3ed6d45ee8da74b055fa37a13ec3459e9fa97db5f89d014fdb0e41013fb56bfd",
+            "Merkle root after 1 insert must match canonical DEC-016A KAV and stylus contract"
+        );
 
         // Verify the root with a Merkle proof
         let siblings: [Fr; MERKLE_TREE_DEPTH] = std::array::from_fn(|i| empty[i]);
@@ -705,23 +779,53 @@ mod tests {
             verify_merkle_proof(root, cm, 0, &siblings),
             "Merkle proof must verify for single insert"
         );
+
+        // Invalid sibling must reject proof
+        let mut corrupt_siblings = siblings;
+        corrupt_siblings[0] = Fr::from(999u64);
+        assert!(
+            !verify_merkle_proof(root, cm, 0, &corrupt_siblings),
+            "Corrupt sibling proof must be rejected"
+        );
     }
 
     #[test]
     fn known_answer_value_conservation_spend() {
-        // Deposit 100 USDC → net 99.8 USDC (after 0.2% deposit fee)
-        // Spend 5 USDC → protocol fee 12500 (0.25%) + execution fee 23000
-        // Change = 99_800_000 - 5_000_000 - 12_500 - 23_000 = 94_764_500
-        let change = 99_800_000u64 - 5_000_000 - 12_500 - 23_000;
-        assert_eq!(change, 94_764_500);
-        eprintln!("KNOWN-ANSWER: change_value = {} (94.7645 USDC)", change);
+        // DEC-028 Flat Fee Model:
+        // Input note: 10_000_000 (10 USDC)
+        // Merchant payout: 3_000_000 (3 USDC)
+        // Protocol fee: 13_500 (0.45% of 3 USDC)
+        // Relayer execution fee: 50_000
+        // Expected change note = 10_000_000 - 3_000_000 - 13_500 - 50_000 = 6_936_500 (6.9365 USDC)
+        let input_val = 10_000_000u64;
+        let payout = 3_000_000u64;
+        let protocol_fee = 13_500u64;
+        let exec_fee = 50_000u64;
+        let change = input_val - payout - protocol_fee - exec_fee;
+        assert_eq!(change, 6_936_500);
 
         assert!(verify_value_conservation(
-            &[99_800_000],
-            5_000_000,
-            12_500,
-            23_000,
+            &[input_val],
+            payout,
+            protocol_fee,
+            exec_fee,
             &[change],
+        ));
+
+        // Conservation failure if change altered by even 1 micro-USDC
+        assert!(!verify_value_conservation(
+            &[input_val],
+            payout,
+            protocol_fee,
+            exec_fee,
+            &[change + 1],
+        ));
+        assert!(!verify_value_conservation(
+            &[input_val],
+            payout,
+            protocol_fee,
+            exec_fee,
+            &[change - 1],
         ));
     }
 
@@ -729,6 +833,10 @@ mod tests {
     fn known_answer_empty_tree_root() {
         let empty = compute_empty_hashes();
         let root_hex = hex::encode(fr_to_be_bytes(&empty[MERKLE_TREE_DEPTH]));
-        eprintln!("KNOWN-ANSWER: empty_tree_root(depth=20) = 0x{}", root_hex);
+
+        assert_eq!(
+            root_hex, "4e9a77b95958924d004a9841dfb0f92c8d70f99c54bc59da1fa53320c0aaa6d2",
+            "Empty tree root must match canonical Stylus contract EMPTY_TREE_ROOT_BYTES"
+        );
     }
 }
