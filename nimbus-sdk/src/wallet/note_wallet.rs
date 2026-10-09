@@ -100,6 +100,7 @@ pub struct WalletNote {
     pub rho_hex: String,
     pub randomness_hex: String,
     pub leaf_index: Option<u64>,
+    pub leaf_count: Option<u64>,
     pub merkle_path_hex: Option<Vec<String>>,
     pub status: NoteStatus,
     pub created_at_secs: u64,
@@ -141,13 +142,14 @@ impl SelectedSpend {
     }
 }
 
-/// Spend Proof Payload generated locally by client SDK (1-in 1-out PrivateNoteCircuit)
+/// Spend Proof Payload generated locally by client SDK (1-in 1-out PrivateNoteCircuit, DEC-032)
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct SpendProofPayload {
     pub session_id: String,
     pub input_commitment_hex: String,
     pub input_nullifier_hex: String,
     pub note_root_hex: String,
+    pub leaf_count: u64,
     pub output_commitment_hex: String,
     pub recipient_hex: String,
     pub merchant_amount: u64,
@@ -162,7 +164,7 @@ pub struct SpendProofPayload {
     pub proof_a_neg_hex: String,        // 128 bytes EVM format
     pub proof_b_hex: String,            // 256 bytes EVM format
     pub proof_c_hex: String,            // 128 bytes EVM format
-    pub public_inputs_hex: Vec<String>, // 12 x 32 bytes EVM scalars
+    pub public_inputs_hex: Vec<String>, // 13 x 32 bytes EVM scalars
 }
 
 /// Universal 2-in-2-out JoinSplit Spend Proof Payload generated locally by client SDK (DEC-030)
@@ -240,6 +242,8 @@ pub struct PrivateNoteWallet {
     nullifier_key_hex: String,
     pub notes: HashMap<String, WalletNote>,
     pub current_merkle_root_hex: Option<String>,
+    #[serde(skip)]
+    pub mmr: nimbus_core::MerkleMountainRange,
 }
 
 impl Drop for PrivateNoteWallet {
@@ -270,6 +274,7 @@ impl PrivateNoteWallet {
             nullifier_key_hex: nk_hex,
             notes: HashMap::new(),
             current_merkle_root_hex: None,
+            mmr: nimbus_core::MerkleMountainRange::new(),
         }
     }
 
@@ -338,6 +343,7 @@ impl PrivateNoteWallet {
             rho_hex,
             randomness_hex: rand_hex,
             leaf_index: None,
+            leaf_count: None,
             merkle_path_hex: None,
             status: NoteStatus::Unconfirmed,
             created_at_secs: current_time_secs,
@@ -356,11 +362,6 @@ impl PrivateNoteWallet {
         merkle_path: Vec<String>,
         root_hex: &str,
     ) -> Result<(), WalletError> {
-        let note = self
-            .notes
-            .get_mut(commitment_hex)
-            .ok_or_else(|| WalletError::NoteNotFound(commitment_hex.to_string()))?;
-
         if merkle_path.len() != MERKLE_TREE_DEPTH {
             return Err(WalletError::CryptoError(format!(
                 "Invalid Merkle path length: expected {}, got {}",
@@ -369,7 +370,22 @@ impl PrivateNoteWallet {
             )));
         }
 
+        let cm_fr = parse_fr_from_hex(commitment_hex)?;
+
+        let note = self
+            .notes
+            .get_mut(commitment_hex)
+            .ok_or_else(|| WalletError::NoteNotFound(commitment_hex.to_string()))?;
+
+        if self.mmr.leaf_count <= leaf_index as usize {
+            while self.mmr.leaf_count < leaf_index as usize {
+                self.mmr.append(Fr::from(0u64));
+            }
+            self.mmr.append(cm_fr);
+        }
+
         note.leaf_index = Some(leaf_index);
+        note.leaf_count = Some(self.mmr.leaf_count as u64);
         note.merkle_path_hex = Some(merkle_path);
         note.status = NoteStatus::Unspent;
         self.current_merkle_root_hex = Some(root_hex.to_string());
@@ -387,11 +403,6 @@ impl PrivateNoteWallet {
         merkle_path: Vec<String>,
         root_hex: &str,
     ) -> Result<(), WalletError> {
-        let note = self
-            .notes
-            .get_mut(commitment_hex)
-            .ok_or_else(|| WalletError::NoteNotFound(commitment_hex.to_string()))?;
-
         if merkle_path.len() != MERKLE_TREE_DEPTH {
             return Err(WalletError::CryptoError(format!(
                 "Invalid Merkle path length: expected {}, got {}",
@@ -400,7 +411,26 @@ impl PrivateNoteWallet {
             )));
         }
 
+        if !self.notes.contains_key(commitment_hex) {
+            return Err(WalletError::NoteNotFound(commitment_hex.to_string()));
+        }
+
+        let cm_fr = parse_fr_from_hex(commitment_hex)?;
+
+        if self.mmr.leaf_count <= leaf_index as usize {
+            while self.mmr.leaf_count < leaf_index as usize {
+                self.mmr.append(Fr::from(0u64));
+            }
+            self.mmr.append(cm_fr);
+        }
+
+        let note = self
+            .notes
+            .get_mut(commitment_hex)
+            .ok_or_else(|| WalletError::NoteNotFound(commitment_hex.to_string()))?;
+
         note.leaf_index = Some(leaf_index);
+        note.leaf_count = Some(self.mmr.leaf_count as u64);
         note.merkle_path_hex = Some(merkle_path);
         note.status = NoteStatus::Unspent;
         self.current_merkle_root_hex = Some(root_hex.to_string());
@@ -642,11 +672,6 @@ impl PrivateNoteWallet {
             return Err(WalletError::CryptoError("Invalid Merkle path depth".into()));
         }
 
-        let mut merkle_path = [Fr::from(0u64); MERKLE_TREE_DEPTH];
-        for (i, p_hex) in merkle_path_strings.iter().enumerate() {
-            merkle_path[i] = parse_fr_from_hex(p_hex)?;
-        }
-
         let sk = self.spending_key()?;
         let in_rho = parse_fr_from_hex(&input_note.rho_hex)?;
         let in_rand = parse_fr_from_hex(&input_note.randomness_hex)?;
@@ -655,8 +680,27 @@ impl PrivateNoteWallet {
         let nk = self.nullifier_key()?;
         let nullifier = derive_nullifier(nk, in_cm, leaf_index);
 
-        // Derive note root from leaf & path
-        let note_root = nimbus_core::compute_merkle_root(in_cm, leaf_index, &merkle_path);
+        // Synchronize local MMR if needed
+        if self.mmr.leaf_count <= leaf_index as usize {
+            while self.mmr.leaf_count < leaf_index as usize {
+                self.mmr.append(Fr::from(0u64));
+            }
+            self.mmr.append(in_cm);
+        }
+
+        let mmr_proof = self.mmr.generate_proof(leaf_index as usize);
+        let note_root = self.mmr.get_root();
+        let total_leaves = self.mmr.leaf_count as u64;
+
+        let mut mountain_siblings = [Fr::from(0u64); 32];
+        for (i, &s) in mmr_proof.mountain_siblings.iter().take(32).enumerate() {
+            mountain_siblings[i] = s;
+        }
+
+        let mut peak_bagging_siblings = [Fr::from(0u64); 32];
+        for (i, &s) in mmr_proof.peak_bagging_siblings.iter().take(32).enumerate() {
+            peak_bagging_siblings[i] = s;
+        }
 
         // Handle Change Note
         let (ch_val, ch_cm, ch_rho, ch_rand) = if selected.has_change {
@@ -678,6 +722,7 @@ impl PrivateNoteWallet {
                 rho_hex: c_rho_hex,
                 randomness_hex: c_rand_hex,
                 leaf_index: None,
+                leaf_count: None,
                 merkle_path_hex: None,
                 status: NoteStatus::Unconfirmed,
                 created_at_secs: current_time_secs,
@@ -712,9 +757,10 @@ impl PrivateNoteWallet {
             Fr::from(0u64)
         };
 
-        // Construct PrivateNoteCircuit
+        // Construct PrivateNoteCircuit (DEC-032 13 Public Inputs)
         let circuit = nimbus_core::PrivateNoteCircuit {
             note_root: Some(note_root),
+            leaf_count: Some(Fr::from(total_leaves)),
             input_nullifier: Some(nullifier),
             output_commitment: Some(ch_cm),
             recipient: Some(recipient_fr),
@@ -732,7 +778,10 @@ impl PrivateNoteWallet {
             input_rho: Some(in_rho),
             input_randomness: Some(in_rand),
             input_leaf_index: Some(Fr::from(leaf_index)),
-            input_merkle_path: Some(merkle_path),
+            mountain_height: Some(mmr_proof.mountain_height as u8),
+            mountain_siblings: Some(mountain_siblings),
+            peak_bagging_siblings: Some(peak_bagging_siblings),
+            peak_bagging_count: Some(mmr_proof.peak_bagging_siblings.len() as u8),
 
             change_value: Some(ch_val),
             change_owner_key: Some(sk),
@@ -749,9 +798,10 @@ impl PrivateNoteWallet {
         let proof_b = to_evm_g2(&proof.b);
         let proof_c = to_evm_g1(&proof.c);
 
-        // Format 12 Public Inputs
+        // Format 13 Public Inputs
         let public_inputs = vec![
             hex::encode(fr_to_be_bytes(&note_root)),
+            hex::encode(fr_to_be_bytes(&Fr::from(total_leaves))),
             hex::encode(fr_to_be_bytes(&nullifier)),
             hex::encode(fr_to_be_bytes(&ch_cm)),
             hex::encode(recipient_bytes),
@@ -770,6 +820,7 @@ impl PrivateNoteWallet {
             input_commitment_hex: selected.input_commitment_hex.clone(),
             input_nullifier_hex: hex::encode(fr_to_be_bytes(&nullifier)),
             note_root_hex: hex::encode(fr_to_be_bytes(&note_root)),
+            leaf_count: total_leaves,
             output_commitment_hex: hex::encode(fr_to_be_bytes(&ch_cm)),
             recipient_hex: recipient_evm_address.to_string(),
             merchant_amount: selected.merchant_amount,
@@ -1003,6 +1054,7 @@ impl PrivateNoteWallet {
                 rho_hex: c_rho_hex,
                 randomness_hex: c_rand_hex,
                 leaf_index: None,
+                leaf_count: None,
                 merkle_path_hex: None,
                 status: NoteStatus::Unconfirmed,
                 created_at_secs: current_time_secs,
@@ -1952,7 +2004,8 @@ mod tests {
         assert_eq!(payload.proof_a_neg_hex.len(), 256); // 128 bytes
         assert_eq!(payload.proof_b_hex.len(), 512); // 256 bytes
         assert_eq!(payload.proof_c_hex.len(), 256); // 128 bytes
-        assert_eq!(payload.public_inputs_hex.len(), 12);
+        assert_eq!(payload.public_inputs_hex.len(), 13);
+        assert_eq!(payload.leaf_count, 1);
         assert_eq!(payload.merchant_amount, 20_000_000);
         assert!(payload.has_change);
 

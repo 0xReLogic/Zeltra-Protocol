@@ -38,6 +38,14 @@ sol! {
         bytes32 new_root
     );
 
+    /// Emitted when a note commitment is appended to the Merkle Mountain Range (DEC-032).
+    event NoteCommitmentAppended(
+        uint256 indexed leaf_index,
+        bytes32 commitment,
+        bytes32 new_mmr_root,
+        uint256 leaf_count
+    );
+
     /// Emitted when accrued execution fees or protocol yields are claimed.
     event FeeClaim(
         address indexed recipient,

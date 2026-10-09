@@ -15,8 +15,9 @@ use alloy_primitives::{FixedBytes, U256};
 use ark_bls12_381::Fr;
 
 use crate::poseidon_w5_constants::{
-    DOMAIN_MERKLE_NODE_BYTES, EMPTY_SUBTREE_HASHES_BYTES, EMPTY_TREE_ROOT_BYTES, MERKLE_TREE_DEPTH,
-    POSEIDON_W5_MDS_BYTES, POSEIDON_W5_RC_BYTES, ROOT_HISTORY_SIZE,
+    DOMAIN_MERKLE_NODE_BYTES, DOMAIN_MMR_BAG_BYTES, EMPTY_SUBTREE_HASHES_BYTES,
+    EMPTY_TREE_ROOT_BYTES, MERKLE_TREE_DEPTH, POSEIDON_W5_MDS_BYTES, POSEIDON_W5_RC_BYTES,
+    ROOT_HISTORY_SIZE,
 };
 use crate::storage::Nimbus;
 use crate::types::{from_evm_scalar, to_evm_scalar};
@@ -129,62 +130,121 @@ pub fn load_domain_merkle_node() -> Fr {
     from_evm_scalar(&DOMAIN_MERKLE_NODE_BYTES).expect("valid domain")
 }
 
+/// Load canonical domain separator for MMR peak bagging (DEC-032)
+pub fn load_domain_mmr_bag() -> Fr {
+    from_evm_scalar(&DOMAIN_MMR_BAG_BYTES).expect("valid MMR bag domain")
+}
+
+/// Canonical peak bagging per DEC-032 Section 3.C:
+/// - If peaks is empty: returns Fr(0)
+/// - If m == 1: Root = Poseidon_W5([P_0, Fr(N), 0, 0], DOMAIN_MMR_BAG)
+/// - If m > 1:
+///   Acc_{m-1} = P_{m-1}
+///   Acc_i = Poseidon_W5([P_i, Acc_{i+1}, 0, 0], DOMAIN_MERKLE_NODE) for i = m-2 down to 0
+///   Root = Poseidon_W5([Acc_0, Fr(N), 0, 0], DOMAIN_MMR_BAG)
+pub fn bag_peaks(
+    peaks: &[Fr],
+    leaf_count: usize,
+    rc: &[Fr; 345],
+    mds: &[[Fr; 5]; 5],
+    domain_node: Fr,
+    domain_bag: Fr,
+) -> Fr {
+    if peaks.is_empty() {
+        return Fr::from(0u64);
+    }
+    let mut acc = peaks[peaks.len() - 1];
+    for i in (0..peaks.len() - 1).rev() {
+        acc = merkle_hash(peaks[i], acc, rc, mds, domain_node);
+    }
+    let mut state = [
+        acc,
+        Fr::from(leaf_count as u64),
+        Fr::from(0u64),
+        Fr::from(0u64),
+        domain_bag,
+    ];
+    poseidon_w5_permute(&mut state, rc, mds);
+    state[0]
+}
+
 impl Nimbus {
-    /// Inserts a 32-byte BE leaf (note commitment) into the incremental Merkle tree.
+    /// Inserts a 32-byte BE leaf (note commitment) into the Merkle Mountain Range (DEC-032).
     ///
     /// Algorithm:
     /// - Checks contract is not paused
-    /// - Validates leaf is within scalar field modulus Fr
-    /// - Incremental tree depth 20: next_index < 2^20 (1,048,576 leaves)
-    /// - Climbs 20 levels using `note_tree_filled_subtrees` frontier
-    /// - Updates `note_tree_root` with the new root
-    /// - Increments `note_tree_next_index`
+    /// - Validates leaf is within scalar field modulus Fr (< r)
+    /// - Uses binary carry-adder to merge existing peaks into new mountains
+    /// - Collects all active peaks (ordered from left to right: highest to lowest)
+    /// - Folds peaks right-to-left and binds total leaf_count via DOMAIN_MMR_BAG
+    /// - Updates `note_tree_root` with the canonical bagged root
+    /// - Increments `mmr_leaf_count`
     /// - Records new root into `accepted_note_roots` with current block timestamp
     /// - Records new root into bounded `root_history` ring buffer (size 100)
+    /// - Emits `NoteCommitmentAppended` and `ChangeCommitment` events
     /// - Returns (leaf_index, new_root)
-    pub fn _merkle_insert(
-        &mut self,
-        leaf: FixedBytes<32>,
-    ) -> Result<(U256, FixedBytes<32>), Vec<u8>> {
+    pub fn _mmr_insert(&mut self, leaf: FixedBytes<32>) -> Result<(U256, FixedBytes<32>), Vec<u8>> {
         self.check_not_paused()?;
 
         // Leaf must be a valid Fr scalar (anti-wrap-around security check)
         let leaf_fr = from_evm_scalar(&leaf.0).ok_or_else(|| b"INVALID_LEAF_SCALAR".to_vec())?;
 
-        let next_idx = self.note_tree_next_index.get();
-        let max_capacity = U256::from(1u64 << MERKLE_TREE_DEPTH);
-        if next_idx >= max_capacity {
-            return Err(b"MERKLE_TREE_FULL".to_vec());
+        let leaf_index = self.mmr_leaf_count.get();
+        if leaf_index >= U256::from(u64::MAX) {
+            return Err(b"MMR_CAPACITY_EXCEEDED".to_vec());
         }
 
         let rc = load_round_constants();
         let mds = load_mds();
-        let domain = load_domain_merkle_node();
-        let empty_subtrees = load_all_empty_subtree_hashes();
+        let domain_node = load_domain_merkle_node();
+        let domain_bag = load_domain_mmr_bag();
 
+        // 1. Binary carry-adder peak update
         let mut current = leaf_fr;
-        let mut index = next_idx.to::<u64>();
+        let mut height = 0u64;
+        let mut idx = leaf_index.to::<u64>();
 
-        for (level, &empty_sibling) in empty_subtrees.iter().enumerate().take(MERKLE_TREE_DEPTH) {
-            let level_u256 = U256::from(level);
-            if (index & 1) == 0 {
-                // Left child: record in frontier, sibling is canonical empty subtree hash
-                self.note_tree_filled_subtrees
-                    .insert(level_u256, FixedBytes::from(to_evm_scalar(&current)));
-                current = merkle_hash(current, empty_sibling, &rc, &mds, domain);
-            } else {
-                // Right child: sibling is the stored frontier node
-                let sibling_bytes = self.note_tree_filled_subtrees.get(level_u256);
-                let sibling_fr = from_evm_scalar(&sibling_bytes.0)
-                    .ok_or_else(|| b"CORRUPTED_FRONTIER".to_vec())?;
-                current = merkle_hash(sibling_fr, current, &rc, &mds, domain);
-            }
-            index >>= 1;
+        while (idx & 1) == 1 {
+            let height_u256 = U256::from(height);
+            let left_bytes = self.mmr_peaks.get(height_u256);
+            let left_fr =
+                from_evm_scalar(&left_bytes.0).ok_or_else(|| b"CORRUPTED_PEAK".to_vec())?;
+            current = merkle_hash(left_fr, current, &rc, &mds, domain_node);
+            self.mmr_peaks.insert(height_u256, FixedBytes::ZERO);
+            height += 1;
+            idx >>= 1;
         }
 
-        let new_root_bytes = FixedBytes::from(to_evm_scalar(&current));
+        let height_u256 = U256::from(height);
+        self.mmr_peaks
+            .insert(height_u256, FixedBytes::from(to_evm_scalar(&current)));
+
+        let new_leaf_count = leaf_index + U256::from(1);
+        self.mmr_leaf_count.set(new_leaf_count);
+
+        // 2. Collect active peaks in descending height order (left-to-right)
+        let new_count_u64 = new_leaf_count.to::<u64>();
+        let mut active_peaks = Vec::new();
+        for h in (0..64).rev() {
+            if (new_count_u64 >> h) & 1 == 1 {
+                let p_bytes = self.mmr_peaks.get(U256::from(h));
+                let p_fr = from_evm_scalar(&p_bytes.0).ok_or_else(|| b"CORRUPTED_PEAK".to_vec())?;
+                active_peaks.push(p_fr);
+            }
+        }
+
+        // 3. Canonical peak bagging
+        let new_root_fr = bag_peaks(
+            &active_peaks,
+            new_count_u64 as usize,
+            &rc,
+            &mds,
+            domain_node,
+            domain_bag,
+        );
+        let new_root_bytes = FixedBytes::from(to_evm_scalar(&new_root_fr));
+
         self.note_tree_root.set(new_root_bytes);
-        self.note_tree_next_index.set(next_idx + U256::from(1));
 
         // Record in accepted roots mapping with block timestamp
         let timestamp = U256::from(self.block_timestamp());
@@ -196,14 +256,31 @@ impl Nimbus {
         self.root_history.insert(slot, new_root_bytes);
         self.root_history_index.set(hist_idx + U256::from(1));
 
-        // Emit ChangeCommitment event
+        // Emit NoteCommitmentAppended event (DEC-032)
+        crate::events::emit_event(crate::events::NoteCommitmentAppended {
+            leaf_index,
+            commitment: leaf,
+            new_mmr_root: new_root_bytes,
+            leaf_count: new_leaf_count,
+        });
+
+        // Emit ChangeCommitment event for backward compatibility
         crate::events::emit_event(crate::events::ChangeCommitment {
-            leaf_index: next_idx,
+            leaf_index,
             commitment: leaf,
             new_root: new_root_bytes,
         });
 
-        Ok((next_idx, new_root_bytes))
+        Ok((leaf_index, new_root_bytes))
+    }
+
+    /// Alias for backwards compatibility with earlier gates.
+    #[inline]
+    pub fn _merkle_insert(
+        &mut self,
+        leaf: FixedBytes<32>,
+    ) -> Result<(U256, FixedBytes<32>), Vec<u8>> {
+        self._mmr_insert(leaf)
     }
 
     /// Checks if a root hash is currently accepted:

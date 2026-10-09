@@ -51,6 +51,7 @@ sol! {
 
     function spendPrivateNote(
         bytes32 note_root,
+        uint256 leaf_count,
         bytes32 input_nullifier,
         bytes32 output_commitment,
         address recipient,
@@ -842,6 +843,7 @@ impl EvmClient {
     pub async fn broadcast_spend_private_note_transaction(
         &self,
         note_root_hex: &str,
+        leaf_count: u64,
         input_nullifier_hex: &str,
         output_commitment_hex: &str,
         recipient: &str,
@@ -924,6 +926,7 @@ impl EvmClient {
 
         let call_data = spendPrivateNoteCall {
             note_root: note_root_fixed.into(),
+            leaf_count: U256::from(leaf_count),
             input_nullifier: nullifier_fixed.into(),
             output_commitment: output_cm_fixed.into(),
             recipient: recipient_addr,

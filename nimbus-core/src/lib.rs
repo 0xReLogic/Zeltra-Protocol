@@ -70,13 +70,13 @@ pub use poseidon::{
     compute_nullifier, generate_grain_round_constants, native_poseidon_w5, GrainLfsr,
 };
 
-// Re-export Private Note V1 (DEC-016A)
+// Re-export Private Note V1 (DEC-016A & DEC-032)
 pub use note::{
     compute_empty_hashes, compute_merkle_root, derive_nullifier, derive_nullifier_key,
-    domain_dummy_nullifier, domain_initial_note, domain_merkle_node, domain_note_commitment,
-    domain_nullifier, fr_from_be_bytes, fr_to_be_bytes, merkle_append, merkle_hash,
-    note_commitment, verify_merkle_proof, verify_value_conservation, PrivateNoteV1,
-    MERKLE_TREE_DEPTH,
+    domain_dummy_nullifier, domain_initial_note, domain_merkle_node, domain_mmr_bag,
+    domain_note_commitment, domain_nullifier, fr_from_be_bytes, fr_to_be_bytes, merkle_append,
+    merkle_hash, note_commitment, verify_merkle_proof, verify_value_conservation, MMRProof,
+    MerkleMountainRange, PrivateNoteV1, DOMAIN_MMR_BAG_BYTES, MERKLE_TREE_DEPTH,
 };
 
 // Re-export accounting state machine (DEC-016A Gate B)

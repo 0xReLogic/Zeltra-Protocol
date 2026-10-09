@@ -232,6 +232,7 @@ async fn test_private_note_spend_enqueue_and_queue_lifecycle() {
     let priv_req = nimbus_node::dto::PrivateNoteSpendRequest {
         session_id: Some("session_private_1".to_string()),
         note_root: note_root.to_string(),
+        leaf_count: Some(1),
         input_nullifier: input_nullifier.to_string(),
         output_commitment: Some(output_commitment.to_string()),
         recipient: recipient.to_string(),
@@ -252,6 +253,7 @@ async fn test_private_note_spend_enqueue_and_queue_lifecycle() {
         proof_c: format!("0x{}", "33".repeat(128)),
         public_inputs: vec![
             note_root.to_string(),
+            format!("0x{:064x}", 1u64),
             input_nullifier.to_string(),
             output_commitment.to_string(),
             format!("0x000000000000000000000000{}", &recipient[2..]),

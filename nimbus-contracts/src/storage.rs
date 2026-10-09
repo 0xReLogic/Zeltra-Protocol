@@ -73,13 +73,13 @@ sol_storage! {
         // Protocol fees realized and retained as protocol equity
         uint256 realized_protocol_fees;
 
-        // --- Append-Only Note Commitment Tree (Gate D: LeanIMT Depth 20) ---
-        // Next leaf index to be inserted into the Merkle tree (0 .. 2^20)
-        uint256 note_tree_next_index;
-        // Current Merkle tree root hash
+        // --- Note Commitment Merkle Mountain Range (DEC-032) ---
+        // Current total leaf count in the MMR (0 .. 2^64)
+        uint256 mmr_leaf_count;
+        // Current Merkle tree root hash (canonical bagged root)
         bytes32 note_tree_root;
-        // Frontier: right-most filled subtrees at each level 0..19 for O(depth) appends
-        mapping(uint256 => bytes32) note_tree_filled_subtrees;
+        // Active MMR peaks mapped by mountain height level (0 .. 63)
+        mapping(uint256 => bytes32) mmr_peaks;
         // Bounded accepted roots: mapping root hash to registration block timestamp
         mapping(bytes32 => uint256) accepted_note_roots;
         // Ring buffer history of recent roots (size 100)

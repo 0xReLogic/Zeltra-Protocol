@@ -10,20 +10,19 @@ use ark_snark::SNARK;
 use ark_std::rand::rngs::StdRng;
 use ark_std::rand::SeedableRng;
 
-use crate::note::MERKLE_TREE_DEPTH;
 use crate::poseidon::{poseidon_hash as poseidon_w3_hash, poseidon_w5_hash};
 
-/// Number of public inputs in the PrivateNoteCircuit.
-/// MVP: 12 inputs (no reserved nullifier/output slots).
-pub const NUM_PUBLIC_INPUTS: usize = 12;
+/// Number of public inputs in the PrivateNoteCircuit (DEC-032: 13 inputs).
+pub const NUM_PUBLIC_INPUTS: usize = 13;
 
 /// Private note spend circuit for Groth16 proof generation.
 ///
 /// This circuit is independent from `ComplianceCircuit` — it uses different
 /// Poseidon widths, different nullifier derivation, and different public inputs.
 pub struct PrivateNoteCircuit {
-    // ── Public inputs ──
+    // ── Public inputs (13 scalar field elements) ──
     pub note_root: Option<Fr>,
+    pub leaf_count: Option<Fr>,
     pub input_nullifier: Option<Fr>,
     pub output_commitment: Option<Fr>,
     pub recipient: Option<Fr>,
@@ -42,7 +41,14 @@ pub struct PrivateNoteCircuit {
     pub input_rho: Option<Fr>,
     pub input_randomness: Option<Fr>,
     pub input_leaf_index: Option<Fr>,
-    pub input_merkle_path: Option<[Fr; MERKLE_TREE_DEPTH]>,
+
+    // MMR Internal Mountain Path (maksimal tinggi 32)
+    pub mountain_height: Option<u8>,
+    pub mountain_siblings: Option<[Fr; 32]>,
+
+    // MMR Bagging Siblings (peak-peak lain yang membentuk root)
+    pub peak_bagging_siblings: Option<[Fr; 32]>,
+    pub peak_bagging_count: Option<u8>,
 
     // ── Private witnesses: change note ──
     pub change_value: Option<Fr>,
@@ -127,10 +133,11 @@ impl ConstraintSynthesizer<Fr> for PrivateNoteCircuit {
         let domain_merkle = crate::note::domain_merkle_node();
 
         // ═══════════════════════════════════════════════════════════════
-        // 1. Allocate all public inputs
+        // 1. Allocate all public inputs (13 scalar field elements)
         // ═══════════════════════════════════════════════════════════════
 
         let note_root_var = public_input(&cs, self.note_root)?;
+        let leaf_count_var = public_input(&cs, self.leaf_count)?;
         let nullifier_var = public_input(&cs, self.input_nullifier)?;
         let output_cm_var = public_input(&cs, self.output_commitment)?;
         let recipient_var = public_input(&cs, self.recipient)?;
@@ -152,16 +159,6 @@ impl ConstraintSynthesizer<Fr> for PrivateNoteCircuit {
         let in_rho = private_witness(&cs, self.input_rho)?;
         let in_rand = private_witness(&cs, self.input_randomness)?;
         let in_index = private_witness(&cs, self.input_leaf_index)?;
-
-        let merkle_path: Vec<FpVar<Fr>> = match &self.input_merkle_path {
-            Some(path) => path
-                .iter()
-                .map(|&v| private_witness(&cs, Some(v)))
-                .collect::<Result<Vec<_>, _>>()?,
-            None => (0..MERKLE_TREE_DEPTH)
-                .map(|_| private_witness(&cs, None::<Fr>))
-                .collect::<Result<Vec<_>, _>>()?,
-        };
 
         let ch_value = private_witness(&cs, self.change_value)?;
         let ch_owner = private_witness(&cs, self.change_owner_key)?;
@@ -186,57 +183,179 @@ impl ConstraintSynthesizer<Fr> for PrivateNoteCircuit {
         )?;
 
         // ═══════════════════════════════════════════════════════════════
-        // 4. Verify Merkle membership
-        //    Walk the path from leaf to root, hashing at each level.
-        //    Note: `index` is consumed in the loop; `in_index` is preserved.
+        // 4. Verify MMR membership, mountain path and peak bagging (DEC-032)
         // ═══════════════════════════════════════════════════════════════
 
-        let mut current = in_commitment.clone();
+        // Range constrain leaf_count and input_leaf_index to [0, 2^64)
+        enforce_u64_range(&cs, &in_index, self.input_leaf_index)?;
+        enforce_u64_range(&cs, &leaf_count_var, self.leaf_count)?;
+
+        // DEC-032 Section 4.1: Anti-Hyperbridge strictly upper bound check: input_leaf_index < leaf_count
+        // Enforces delta = leaf_count - 1 - input_leaf_index in [0, 2^64)
+        let delta_witness = match (self.leaf_count, self.input_leaf_index) {
+            (Some(lc), Some(li)) => {
+                let one = Fr::from(1u64);
+                Some(lc - one - li)
+            }
+            _ => None,
+        };
+        let delta_var = &leaf_count_var - FpVar::Constant(Fr::from(1u64)) - &in_index;
+        enforce_u64_range(&cs, &delta_var, delta_witness)?;
+
+        let domain_mmr_bag = crate::note::domain_mmr_bag();
         let zero = FpVar::Constant(Fr::from(0u64));
         let one = FpVar::Constant(Fr::from(1u64));
 
-        let mut reconstructed_index = zero.clone();
-        let mut two_power = Fr::from(1u64);
+        let m_height = self.mountain_height.unwrap_or(0) as usize;
+        let mountain_sibs = self.mountain_siblings.unwrap_or([Fr::from(0u64); 32]);
+        let mut current = in_commitment.clone();
 
-        for (level, sibling) in merkle_path.iter().enumerate().take(MERKLE_TREE_DEPTH) {
-            // Allocate index_bit as witness
-            let index_bit = private_witness(
+        // 4a. Walk internal mountain from leaf to computed peak
+        for level in 0..32 {
+            let is_active = level < m_height;
+            let sibling_var = private_witness(&cs, Some(mountain_sibs[level]))?;
+            let is_active_var = private_witness(
                 &cs,
-                self.input_leaf_index.map(|idx| {
-                    let level_shift = level as u64;
-                    Fr::from((idx.into_bigint().as_ref()[0] >> level_shift) & 1u64)
+                Some(if is_active {
+                    Fr::from(1u64)
+                } else {
+                    Fr::from(0u64)
                 }),
             )?;
+            let one_minus_active = &one - &is_active_var;
+            (&is_active_var * &one_minus_active).enforce_equal(&zero)?;
 
-            // Enforce boolean: index_bit * (1 - index_bit) == 0
+            let bit_val = self.input_leaf_index.map(|idx| {
+                let level_shift = level as u64;
+                Fr::from((idx.into_bigint().as_ref()[0] >> level_shift) & 1u64)
+            });
+            let index_bit = private_witness(&cs, bit_val)?;
             let one_minus_bit = &one - &index_bit;
-            let bit_check = &index_bit * &one_minus_bit;
-            bit_check.enforce_equal(&zero)?;
+            (&index_bit * &one_minus_bit).enforce_equal(&zero)?;
 
-            // Accumulate reconstructed index from the 20 direction bits
-            reconstructed_index += &index_bit * FpVar::Constant(two_power);
-            two_power = two_power + two_power;
-
-            // Conditional swap based on index bit
-            let diff_cs = sibling - &current;
-            let diff_sc = &current - sibling;
+            let diff_cs = &sibling_var - &current;
+            let diff_sc = &current - &sibling_var;
             let left = &current + &index_bit * &diff_cs;
-            let right = sibling + &index_bit * &diff_sc;
+            let right = &sibling_var + &index_bit * &diff_sc;
 
-            current = poseidon_w5_hash(
+            let hashed = poseidon_w5_hash(
                 &[left, right, zero.clone(), zero.clone()],
                 domain_merkle,
                 w5_rc,
                 w5_mds,
             )?;
+
+            // current = current + is_active * (hashed - current)
+            current = &current + &is_active_var * (&hashed - &current);
+        }
+        let computed_peak = current;
+
+        // 4b. Reconstruct active peaks and canonical backward bagging fold
+        let lc_opt = self
+            .leaf_count
+            .map(|lc| lc.into_bigint().as_ref()[0] as usize);
+        let li_opt = self
+            .input_leaf_index
+            .map(|li| li.into_bigint().as_ref()[0] as usize);
+
+        let (target_peak_idx, total_peaks) = match (lc_opt, li_opt) {
+            (Some(lc), Some(li)) => {
+                let mut peak_heights = Vec::new();
+                for h in (0..usize::BITS).rev() {
+                    if (lc >> h) & 1 == 1 {
+                        peak_heights.push(h as usize);
+                    }
+                }
+                let m = peak_heights.len();
+                let mut current_start = 0;
+                let mut target_k = 0;
+                for (p_idx, &h) in peak_heights.iter().enumerate() {
+                    let mountain_size = 1 << h;
+                    if li >= current_start && li < current_start + mountain_size {
+                        target_k = p_idx;
+                        break;
+                    }
+                    current_start += mountain_size;
+                }
+                (target_k, m)
+            }
+            _ => (0, 1),
+        };
+
+        let bagging_sibs = self.peak_bagging_siblings.unwrap_or([Fr::from(0u64); 32]);
+        let mut peak_vars = Vec::with_capacity(32);
+        for s in 0..32 {
+            let p_var = if s == target_peak_idx {
+                computed_peak.clone()
+            } else {
+                let sib_idx = if s < target_peak_idx { s } else { s - 1 };
+                let sib_val = if sib_idx < 32 {
+                    bagging_sibs[sib_idx]
+                } else {
+                    Fr::from(0u64)
+                };
+                private_witness(&cs, Some(sib_val))?
+            };
+            peak_vars.push(p_var);
         }
 
-        // Gate C0 Fix 1: Enforce reconstructed_index == in_index.
-        // Binds path direction strictly to leaf index, prevents index substitution & double spending.
-        reconstructed_index.enforce_equal(&in_index)?;
+        // Backward fold across 32 steps with constant R1CS topology
+        let mut acc = zero.clone();
+        for s in (0..32).rev() {
+            let is_start = s == total_peaks.saturating_sub(1);
+            let is_fold = s < total_peaks.saturating_sub(1);
 
-        // Constrain: computed root == public note_root
-        current.enforce_equal(&note_root_var)?;
+            let is_start_var = private_witness(
+                &cs,
+                Some(if is_start {
+                    Fr::from(1u64)
+                } else {
+                    Fr::from(0u64)
+                }),
+            )?;
+            let is_fold_var = private_witness(
+                &cs,
+                Some(if is_fold {
+                    Fr::from(1u64)
+                } else {
+                    Fr::from(0u64)
+                }),
+            )?;
+            let is_valid_var = &is_start_var + &is_fold_var;
+
+            let one_minus_start = &one - &is_start_var;
+            (&is_start_var * &one_minus_start).enforce_equal(&zero)?;
+            let one_minus_fold = &one - &is_fold_var;
+            (&is_fold_var * &one_minus_fold).enforce_equal(&zero)?;
+            let one_minus_valid = &one - &is_valid_var;
+            (&is_valid_var * &one_minus_valid).enforce_equal(&zero)?;
+
+            let hashed = poseidon_w5_hash(
+                &[
+                    peak_vars[s].clone(),
+                    acc.clone(),
+                    zero.clone(),
+                    zero.clone(),
+                ],
+                domain_merkle,
+                w5_rc,
+                w5_mds,
+            )?;
+
+            let inactive_acc = &one_minus_valid * &acc;
+            let start_acc = &is_start_var * &peak_vars[s];
+            let fold_acc = &is_fold_var * &hashed;
+            acc = &inactive_acc + &start_acc + &fold_acc;
+        }
+
+        // Final Bagging Poseidon hash: Poseidon_W5([acc, leaf_count, 0, 0], domain_mmr_bag)
+        let bagged_root = poseidon_w5_hash(
+            &[acc, leaf_count_var.clone(), zero.clone(), zero.clone()],
+            domain_mmr_bag,
+            w5_rc,
+            w5_mds,
+        )?;
+        bagged_root.enforce_equal(&note_root_var)?;
 
         // ═══════════════════════════════════════════════════════════════
         // 5. Derive nullifier key + compute nullifier
@@ -384,7 +503,7 @@ pub fn generate_note_circuit_keys() -> Result<NoteCircuitKeys, SynthesisError> {
 #[allow(clippy::type_complexity)]
 pub fn generate_note_circuit_evm_vk(
     vk: &ark_groth16::VerifyingKey<Bls12_381>,
-) -> ([u8; 128], [u8; 256], [u8; 256], [u8; 256], [[u8; 128]; 13]) {
+) -> ([u8; 128], [u8; 256], [u8; 256], [u8; 256], [[u8; 128]; 14]) {
     use crate::evm::{to_evm_g1, to_evm_g2};
 
     fn to_g1_array(v: &[u8]) -> [u8; 128] {
@@ -406,8 +525,8 @@ pub fn generate_note_circuit_evm_vk(
     let gamma_g2 = to_g2_array(&to_evm_g2(&vk.gamma_g2));
     let delta_g2 = to_g2_array(&to_evm_g2(&vk.delta_g2));
 
-    let mut ic = [[0u8; 128]; 13];
-    for (i, ic_point) in vk.gamma_abc_g1.iter().take(13).enumerate() {
+    let mut ic = [[0u8; 128]; 14];
+    for (i, ic_point) in vk.gamma_abc_g1.iter().take(14).enumerate() {
         ic[i] = to_g1_array(&to_evm_g1(ic_point));
     }
 
@@ -426,8 +545,8 @@ pub fn get_or_init_note_circuit_keys() -> &'static NoteCircuitKeys {
 /// Create a dummy circuit with valid values for setup and testing.
 pub fn create_dummy_circuit() -> PrivateNoteCircuit {
     use crate::note::{
-        compute_empty_hashes, derive_nullifier as dn, derive_nullifier_key as dnk,
-        note_commitment as nc,
+        derive_nullifier as dn, derive_nullifier_key as dnk, note_commitment as nc,
+        MerkleMountainRange,
     };
 
     let spending_key = Fr::from(42u64);
@@ -436,15 +555,23 @@ pub fn create_dummy_circuit() -> PrivateNoteCircuit {
     let in_value: u64 = 99_800_000;
     let in_rho = Fr::from(1u64);
     let in_rand = Fr::from(2u64);
-    let in_index: u64 = 0;
 
     let in_cm = nc(in_value, spending_key, in_rho, in_rand);
 
-    let empty = compute_empty_hashes();
-    let siblings: [Fr; MERKLE_TREE_DEPTH] = std::array::from_fn(|i| empty[i]);
-    let root = crate::note::compute_merkle_root(in_cm, in_index, &siblings);
+    let mut mmr = MerkleMountainRange::new();
+    let (leaf_idx, root) = mmr.append(in_cm);
+    let proof = mmr.generate_proof(leaf_idx);
 
-    let nf = dn(nk, in_cm, in_index);
+    let mut m_sibs = [Fr::from(0u64); 32];
+    for (i, s) in proof.mountain_siblings.iter().enumerate() {
+        m_sibs[i] = *s;
+    }
+    let mut p_sibs = [Fr::from(0u64); 32];
+    for (i, s) in proof.peak_bagging_siblings.iter().enumerate() {
+        p_sibs[i] = *s;
+    }
+
+    let nf = dn(nk, in_cm, leaf_idx as u64);
 
     let merchant: u64 = 5_000_000;
     let pfee: u64 = 12_500;
@@ -457,6 +584,7 @@ pub fn create_dummy_circuit() -> PrivateNoteCircuit {
 
     PrivateNoteCircuit {
         note_root: Some(root),
+        leaf_count: Some(Fr::from(mmr.leaf_count as u64)),
         input_nullifier: Some(nf),
         output_commitment: Some(ch_cm),
         recipient: Some(Fr::from(100u64)),
@@ -473,8 +601,11 @@ pub fn create_dummy_circuit() -> PrivateNoteCircuit {
         input_owner_key: Some(spending_key),
         input_rho: Some(in_rho),
         input_randomness: Some(in_rand),
-        input_leaf_index: Some(Fr::from(in_index)),
-        input_merkle_path: Some(siblings),
+        input_leaf_index: Some(Fr::from(leaf_idx as u64)),
+        mountain_height: Some(proof.mountain_height as u8),
+        mountain_siblings: Some(m_sibs),
+        peak_bagging_siblings: Some(p_sibs),
+        peak_bagging_count: Some(proof.peak_bagging_siblings.len() as u8),
 
         change_value: Some(Fr::from(change)),
         change_owner_key: Some(spending_key),
@@ -531,7 +662,7 @@ pub fn verify_evm_note_proof(
     proof_a_neg: &[u8; 128],
     proof_b: &[u8; 256],
     proof_c: &[u8; 128],
-    public_inputs: &[Fr; 12],
+    public_inputs: &[Fr; 13],
 ) -> bool {
     let Some(proof) = crate::evm::from_evm_proof(proof_a_neg, proof_b, proof_c) else {
         return false;
@@ -545,6 +676,7 @@ pub fn verify_evm_note_proof(
 pub fn extract_public_inputs(circuit: &PrivateNoteCircuit) -> Vec<Fr> {
     vec![
         circuit.note_root.unwrap(),
+        circuit.leaf_count.unwrap(),
         circuit.input_nullifier.unwrap(),
         circuit.output_commitment.unwrap(),
         circuit.recipient.unwrap(),
@@ -566,7 +698,6 @@ pub fn extract_public_inputs(circuit: &PrivateNoteCircuit) -> Vec<Fr> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::note::compute_merkle_root;
 
     fn setup_valid_circuit() -> PrivateNoteCircuit {
         create_dummy_circuit()
@@ -592,8 +723,8 @@ mod tests {
 
         let proof = generate_note_proof(circuit, &keys.proving_key).unwrap();
 
-        // Tamper with nullifier (public input index 1)
-        public_inputs[1] += Fr::from(1u64);
+        // Tamper with nullifier (public input index 2)
+        public_inputs[2] += Fr::from(1u64);
 
         let is_valid = verify_note_proof(&proof, &keys.verifying_key, &public_inputs);
         assert!(!is_valid, "Tampered nullifier must fail verification");
@@ -607,8 +738,8 @@ mod tests {
 
         let proof = generate_note_proof(circuit, &keys.proving_key).unwrap();
 
-        // Tamper with merchant amount (public input index 4)
-        public_inputs[4] += Fr::from(1u64);
+        // Tamper with merchant amount (public input index 5)
+        public_inputs[5] += Fr::from(1u64);
 
         let is_valid = verify_note_proof(&proof, &keys.verifying_key, &public_inputs);
         assert!(!is_valid, "Tampered merchant amount must fail verification");
@@ -622,8 +753,8 @@ mod tests {
 
         let proof = generate_note_proof(circuit, &keys.proving_key).unwrap();
 
-        // Tamper with recipient
-        public_inputs[3] += Fr::from(1u64);
+        // Tamper with recipient (public input index 4)
+        public_inputs[4] += Fr::from(1u64);
 
         let is_valid = verify_note_proof(&proof, &keys.verifying_key, &public_inputs);
         assert!(!is_valid, "Tampered recipient must fail verification");
@@ -637,11 +768,26 @@ mod tests {
 
         let proof = generate_note_proof(circuit, &keys.proving_key).unwrap();
 
-        // Tamper with root
+        // Tamper with root (public input index 0)
         public_inputs[0] += Fr::from(1u64);
 
         let is_valid = verify_note_proof(&proof, &keys.verifying_key, &public_inputs);
         assert!(!is_valid, "Tampered root must fail verification");
+    }
+
+    #[test]
+    fn test_note_circuit_tampered_leaf_count() {
+        let keys = get_or_init_note_circuit_keys();
+        let circuit = setup_valid_circuit();
+        let mut public_inputs = extract_public_inputs(&circuit);
+
+        let proof = generate_note_proof(circuit, &keys.proving_key).unwrap();
+
+        // Tamper with leaf_count (public input index 1)
+        public_inputs[1] += Fr::from(1u64);
+
+        let is_valid = verify_note_proof(&proof, &keys.verifying_key, &public_inputs);
+        assert!(!is_valid, "Tampered leaf_count must fail verification");
     }
 
     #[test]
@@ -663,21 +809,189 @@ mod tests {
     }
 
     #[test]
-    fn test_note_circuit_wrong_merkle_path_fails() {
-        let keys = get_or_init_note_circuit_keys();
-        let mut circuit = setup_valid_circuit();
+    fn test_note_circuit_wrong_mountain_path_fails() {
+        use crate::note::{
+            derive_nullifier as dn, derive_nullifier_key as dnk, note_commitment as nc,
+            MerkleMountainRange,
+        };
 
-        // Corrupt one sibling in the Merkle path
-        if let Some(ref mut path) = circuit.input_merkle_path {
-            path[5] += Fr::from(1u64);
+        let keys = get_or_init_note_circuit_keys();
+        let spending_key = Fr::from(42u64);
+        let nk = dnk(spending_key);
+
+        let in_value: u64 = 99_800_000;
+        let in_rho = Fr::from(1u64);
+        let in_rand = Fr::from(2u64);
+        let in_cm = nc(in_value, spending_key, in_rho, in_rand);
+
+        // Build MMR with 2 leaves so mountain_height = 1 and mountain_siblings has 1 active element
+        let mut mmr = MerkleMountainRange::new();
+        let (leaf_idx, _) = mmr.append(in_cm);
+        let other_cm = nc(
+            10_000_000,
+            Fr::from(99u64),
+            Fr::from(88u64),
+            Fr::from(77u64),
+        );
+        let (_, root) = mmr.append(other_cm);
+
+        let proof = mmr.generate_proof(leaf_idx);
+        assert_eq!(proof.mountain_height, 1);
+
+        let mut m_sibs = [Fr::from(0u64); 32];
+        for (i, s) in proof.mountain_siblings.iter().enumerate() {
+            m_sibs[i] = *s;
         }
+        let mut p_sibs = [Fr::from(0u64); 32];
+        for (i, s) in proof.peak_bagging_siblings.iter().enumerate() {
+            p_sibs[i] = *s;
+        }
+
+        let nf = dn(nk, in_cm, leaf_idx as u64);
+        let merchant: u64 = 5_000_000;
+        let pfee: u64 = 12_500;
+        let efee: u64 = 23_000;
+        let change: u64 = in_value - merchant - pfee - efee;
+        let ch_rho = Fr::from(3u64);
+        let ch_rand = Fr::from(4u64);
+        let ch_cm = nc(change, spending_key, ch_rho, ch_rand);
+
+        // Corrupt active mountain sibling!
+        m_sibs[0] += Fr::from(1u64);
+
+        let circuit = PrivateNoteCircuit {
+            note_root: Some(root),
+            leaf_count: Some(Fr::from(mmr.leaf_count as u64)),
+            input_nullifier: Some(nf),
+            output_commitment: Some(ch_cm),
+            recipient: Some(Fr::from(100u64)),
+            merchant_amount: Some(Fr::from(merchant)),
+            protocol_fee: Some(Fr::from(pfee)),
+            execution_fee: Some(Fr::from(efee)),
+            quote_hash: Some(Fr::from(200u64)),
+            chain_id: Some(Fr::from(421614u64)),
+            contract_address: Some(Fr::from(300u64)),
+            expiry: Some(Fr::from(0u64)),
+            has_change: Some(Fr::from(1u64)),
+
+            input_value: Some(Fr::from(in_value)),
+            input_owner_key: Some(spending_key),
+            input_rho: Some(in_rho),
+            input_randomness: Some(in_rand),
+            input_leaf_index: Some(Fr::from(leaf_idx as u64)),
+            mountain_height: Some(proof.mountain_height as u8),
+            mountain_siblings: Some(m_sibs),
+            peak_bagging_siblings: Some(p_sibs),
+            peak_bagging_count: Some(proof.peak_bagging_siblings.len() as u8),
+
+            change_value: Some(Fr::from(change)),
+            change_owner_key: Some(spending_key),
+            change_rho: Some(ch_rho),
+            change_randomness: Some(ch_rand),
+        };
 
         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             generate_note_proof(circuit, &keys.proving_key)
         }));
         assert!(
             result.is_err() || result.unwrap().is_err(),
-            "Wrong Merkle path must fail proof generation"
+            "Wrong mountain path must fail proof generation (unsatisfied constraint)"
+        );
+    }
+
+    #[test]
+    fn test_note_circuit_tampered_peak_siblings_fails() {
+        use crate::note::{
+            derive_nullifier as dn, derive_nullifier_key as dnk, note_commitment as nc,
+            MerkleMountainRange,
+        };
+
+        let keys = get_or_init_note_circuit_keys();
+        let spending_key = Fr::from(42u64);
+        let nk = dnk(spending_key);
+
+        let in_value: u64 = 99_800_000;
+        let in_rho = Fr::from(1u64);
+        let in_rand = Fr::from(2u64);
+        let in_cm = nc(in_value, spending_key, in_rho, in_rand);
+
+        // Build MMR with 3 leaves so peak count = 2 (peaks at height 1 and height 0)
+        let mut mmr = MerkleMountainRange::new();
+        let (leaf_idx, _) = mmr.append(in_cm);
+        mmr.append(nc(
+            10_000_000,
+            Fr::from(99u64),
+            Fr::from(88u64),
+            Fr::from(77u64),
+        ));
+        let (_, root) = mmr.append(nc(
+            20_000_000,
+            Fr::from(66u64),
+            Fr::from(55u64),
+            Fr::from(44u64),
+        ));
+
+        let proof = mmr.generate_proof(leaf_idx);
+        assert_eq!(proof.peak_bagging_siblings.len(), 1);
+
+        let mut m_sibs = [Fr::from(0u64); 32];
+        for (i, s) in proof.mountain_siblings.iter().enumerate() {
+            m_sibs[i] = *s;
+        }
+        let mut p_sibs = [Fr::from(0u64); 32];
+        for (i, s) in proof.peak_bagging_siblings.iter().enumerate() {
+            p_sibs[i] = *s;
+        }
+
+        let nf = dn(nk, in_cm, leaf_idx as u64);
+        let merchant: u64 = 5_000_000;
+        let pfee: u64 = 12_500;
+        let efee: u64 = 23_000;
+        let change: u64 = in_value - merchant - pfee - efee;
+        let ch_rho = Fr::from(3u64);
+        let ch_rand = Fr::from(4u64);
+        let ch_cm = nc(change, spending_key, ch_rho, ch_rand);
+
+        // Corrupt bagging peak sibling!
+        p_sibs[0] += Fr::from(1u64);
+
+        let circuit = PrivateNoteCircuit {
+            note_root: Some(root),
+            leaf_count: Some(Fr::from(mmr.leaf_count as u64)),
+            input_nullifier: Some(nf),
+            output_commitment: Some(ch_cm),
+            recipient: Some(Fr::from(100u64)),
+            merchant_amount: Some(Fr::from(merchant)),
+            protocol_fee: Some(Fr::from(pfee)),
+            execution_fee: Some(Fr::from(efee)),
+            quote_hash: Some(Fr::from(200u64)),
+            chain_id: Some(Fr::from(421614u64)),
+            contract_address: Some(Fr::from(300u64)),
+            expiry: Some(Fr::from(0u64)),
+            has_change: Some(Fr::from(1u64)),
+
+            input_value: Some(Fr::from(in_value)),
+            input_owner_key: Some(spending_key),
+            input_rho: Some(in_rho),
+            input_randomness: Some(in_rand),
+            input_leaf_index: Some(Fr::from(leaf_idx as u64)),
+            mountain_height: Some(proof.mountain_height as u8),
+            mountain_siblings: Some(m_sibs),
+            peak_bagging_siblings: Some(p_sibs),
+            peak_bagging_count: Some(proof.peak_bagging_siblings.len() as u8),
+
+            change_value: Some(Fr::from(change)),
+            change_owner_key: Some(spending_key),
+            change_rho: Some(ch_rho),
+            change_randomness: Some(ch_rand),
+        };
+
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            generate_note_proof(circuit, &keys.proving_key)
+        }));
+        assert!(
+            result.is_err() || result.unwrap().is_err(),
+            "Tampered peak bagging sibling must fail proof generation (unsatisfied constraint)"
         );
     }
 
@@ -701,8 +1015,8 @@ mod tests {
     #[test]
     fn test_note_circuit_full_spend_no_change() {
         use crate::note::{
-            compute_empty_hashes, derive_nullifier as dn, derive_nullifier_key as dnk,
-            note_commitment as nc,
+            derive_nullifier as dn, derive_nullifier_key as dnk, note_commitment as nc,
+            MerkleMountainRange,
         };
 
         let keys = get_or_init_note_circuit_keys();
@@ -712,13 +1026,22 @@ mod tests {
         let in_value: u64 = 5_035_500; // 5 USDC + fees
         let in_rho = Fr::from(10u64);
         let in_rand = Fr::from(20u64);
-        let in_index: u64 = 0;
         let in_cm = nc(in_value, spending_key, in_rho, in_rand);
 
-        let empty = compute_empty_hashes();
-        let siblings: [Fr; MERKLE_TREE_DEPTH] = std::array::from_fn(|i| empty[i]);
-        let root = compute_merkle_root(in_cm, in_index, &siblings);
-        let nf = dn(nk, in_cm, in_index);
+        let mut mmr = MerkleMountainRange::new();
+        let (leaf_idx, root) = mmr.append(in_cm);
+        let proof = mmr.generate_proof(leaf_idx);
+
+        let mut m_sibs = [Fr::from(0u64); 32];
+        for (i, s) in proof.mountain_siblings.iter().enumerate() {
+            m_sibs[i] = *s;
+        }
+        let mut p_sibs = [Fr::from(0u64); 32];
+        for (i, s) in proof.peak_bagging_siblings.iter().enumerate() {
+            p_sibs[i] = *s;
+        }
+
+        let nf = dn(nk, in_cm, leaf_idx as u64);
 
         let merchant: u64 = 5_000_000;
         let pfee: u64 = 12_500;
@@ -728,6 +1051,7 @@ mod tests {
 
         let circuit = PrivateNoteCircuit {
             note_root: Some(root),
+            leaf_count: Some(Fr::from(mmr.leaf_count as u64)),
             input_nullifier: Some(nf),
             output_commitment: Some(Fr::from(0u64)), // no change
             recipient: Some(Fr::from(100u64)),
@@ -744,8 +1068,11 @@ mod tests {
             input_owner_key: Some(spending_key),
             input_rho: Some(in_rho),
             input_randomness: Some(in_rand),
-            input_leaf_index: Some(Fr::from(in_index)),
-            input_merkle_path: Some(siblings),
+            input_leaf_index: Some(Fr::from(leaf_idx as u64)),
+            mountain_height: Some(proof.mountain_height as u8),
+            mountain_siblings: Some(m_sibs),
+            peak_bagging_siblings: Some(p_sibs),
+            peak_bagging_count: Some(proof.peak_bagging_siblings.len() as u8),
 
             change_value: Some(Fr::from(0u64)),
             change_owner_key: Some(Fr::from(0u64)),
@@ -764,7 +1091,8 @@ mod tests {
         let keys = get_or_init_note_circuit_keys();
         let mut circuit = setup_valid_circuit();
 
-        // Tamper leaf index from 0 to 1 while leaving Merkle path intact
+        // Tamper leaf index from 0 to 1 while leaving leaf_count = 1
+        // This violates delta = leaf_count - 1 - input_leaf_index = 1 - 1 - 1 = -1 (underflow)
         circuit.input_leaf_index = Some(Fr::from(1u64));
 
         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
@@ -772,7 +1100,24 @@ mod tests {
         }));
         assert!(
             result.is_err() || result.unwrap().is_err(),
-            "Tampered leaf index must fail proof generation (reconstructed_index != in_index)"
+            "Tampered leaf index >= leaf_count must fail proof generation (anti-hyperbridge)"
+        );
+    }
+
+    #[test]
+    fn test_note_circuit_hyperbridge_out_of_bounds_leaf_index_fails_proving() {
+        let keys = get_or_init_note_circuit_keys();
+        let mut circuit = setup_valid_circuit();
+
+        // Force leaf_index = 100 on leaf_count = 1
+        circuit.input_leaf_index = Some(Fr::from(100u64));
+
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            generate_note_proof(circuit, &keys.proving_key)
+        }));
+        assert!(
+            result.is_err() || result.unwrap().is_err(),
+            "Out of bounds leaf index must fail 64-bit range constraint on delta"
         );
     }
 
@@ -836,8 +1181,8 @@ mod tests {
 
         let proof = generate_note_proof(circuit, &keys.proving_key).unwrap();
 
-        // Swap chain_id (index 8) and contract_address (index 9)
-        public_inputs.swap(8, 9);
+        // Swap chain_id (index 9) and contract_address (index 10)
+        public_inputs.swap(9, 10);
 
         let is_valid = verify_note_proof(&proof, &keys.verifying_key, &public_inputs);
         assert!(
@@ -856,7 +1201,7 @@ mod tests {
 
         eprintln!("// --- PrivateNoteCircuit Phase A Trusted Setup VK Constants ---");
         eprintln!("// Seed: 0x{:016X} (NimbusNC)", NOTE_CIRCUIT_SETUP_SEED);
-        eprintln!("// Circuit: PrivateNoteCircuit (12 public inputs) over BLS12-381");
+        eprintln!("// Circuit: PrivateNoteCircuit (13 public inputs) over BLS12-381");
         eprintln!();
         eprintln!("// NOTE_VK_ALPHA_G1 (128 bytes)");
         eprintln!(
@@ -882,7 +1227,7 @@ mod tests {
             to_hex(&delta)
         );
         eprintln!();
-        eprintln!("pub const NOTE_VK_IC: [[u8; 128]; 13] = [");
+        eprintln!("pub const NOTE_VK_IC: [[u8; 128]; 14] = [");
         for (i, ic_point) in ic.iter().enumerate() {
             eprintln!("    // IC[{}]", i);
             eprintln!("    alloy_primitives::hex!(\"{}\"),", to_hex(ic_point));
@@ -897,8 +1242,8 @@ mod tests {
         let keys = get_or_init_note_circuit_keys();
         let circuit = setup_valid_circuit();
         let pis = extract_public_inputs(&circuit);
-        let mut public_inputs = [Fr::default(); 12];
-        public_inputs.copy_from_slice(&pis[..12]);
+        let mut public_inputs = [Fr::default(); 13];
+        public_inputs.copy_from_slice(&pis[..13]);
 
         let proof = generate_note_proof(circuit, &keys.proving_key).unwrap();
 
@@ -917,7 +1262,7 @@ mod tests {
 
         // 2. Tampered public input rejected
         let mut tampered_pis = public_inputs;
-        tampered_pis[4] += Fr::from(100u64);
+        tampered_pis[5] += Fr::from(100u64);
         assert!(!verify_evm_note_proof(&a_neg, &b, &c, &tampered_pis));
 
         // 3. Fake proof points rejected

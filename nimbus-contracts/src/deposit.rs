@@ -276,11 +276,11 @@ impl Nimbus {
                 self.user_note_liability.set(new_user_liab);
             }
 
-            // Gate D: If an initial note commitment was bound to this deposit session,
-            // atomically mint it into the on-chain Merkle tree
+            // Gate D / DEC-032: If an initial note commitment was bound to this deposit session,
+            // atomically mint it into the on-chain Merkle Mountain Range
             let bound_commitment = self.session_note_commitment.get(sid);
             if bound_commitment != FixedBytes::ZERO {
-                self._merkle_insert(bound_commitment)?;
+                self._mmr_insert(bound_commitment)?;
             }
 
             Ok(true)

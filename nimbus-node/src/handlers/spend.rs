@@ -589,14 +589,14 @@ pub async fn handle_private_note_spend(
         }
     }
 
-    // 8. Public inputs canonical scalar check, semantic binding & target domain verification (DEC-022, DEC-025, DEC-028)
-    // DEC-028 (Fix R4): public_inputs is strictly required to have exactly 12 scalars.
+    // 8. Public inputs canonical scalar check, semantic binding & target domain verification (DEC-022, DEC-025, DEC-032)
+    // DEC-032: public_inputs is strictly required to have exactly 13 scalars (leaf_count added at index 1).
     // Empty or omitted inputs are rejected fail-closed to prevent preflight bypass.
-    if payload.public_inputs.len() != 12 {
+    if payload.public_inputs.len() != 13 {
         return Json(PrivateNoteSpendResponse {
             status: "REJECTED".to_string(),
             message: format!(
-                "Expected 12 public inputs for PrivateNoteCircuit, got {}",
+                "Expected 13 public inputs for PrivateNoteCircuit, got {}",
                 payload.public_inputs.len()
             ),
             queue_position: 0,
@@ -604,7 +604,7 @@ pub async fn handle_private_note_spend(
         });
     }
 
-    let mut parsed_inputs = Vec::with_capacity(12);
+    let mut parsed_inputs = Vec::with_capacity(13);
     for (idx, pi_hex) in payload.public_inputs.iter().enumerate() {
         let bytes = match hex::decode(pi_hex.trim_start_matches("0x")) {
             Ok(b) if b.len() == 32 => b,
@@ -632,7 +632,8 @@ pub async fn handle_private_note_spend(
         parsed_inputs.push(fixed);
     }
 
-    // Semantic public input binding (DEC-022 boundary gap defense)
+    // Semantic public input binding (DEC-022 & DEC-032 boundary gap defense)
+    // Index 0: note_root
     if parsed_inputs[0] != note_root_bytes[..] {
         return Json(PrivateNoteSpendResponse {
             status: "REJECTED".to_string(),
@@ -641,15 +642,39 @@ pub async fn handle_private_note_spend(
             estimated_gas_usdc: None,
         });
     }
-    if parsed_inputs[1] != nullifier_bytes[..] {
+
+    // Index 1: leaf_count (DEC-032 strictly positive)
+    let leaf_count_u64 = U256::from_be_bytes(parsed_inputs[1]).to::<u64>();
+    if leaf_count_u64 == 0 {
         return Json(PrivateNoteSpendResponse {
             status: "REJECTED".to_string(),
-            message: "public_inputs[1] does not match input_nullifier".to_string(),
+            message: "leaf_count in public_inputs[1] must be greater than zero".to_string(),
+            queue_position: 0,
+            estimated_gas_usdc: None,
+        });
+    }
+    if let Some(expected_lc) = payload.leaf_count {
+        if leaf_count_u64 != expected_lc {
+            return Json(PrivateNoteSpendResponse {
+                status: "REJECTED".to_string(),
+                message: "public_inputs[1] does not match leaf_count".to_string(),
+                queue_position: 0,
+                estimated_gas_usdc: None,
+            });
+        }
+    }
+
+    // Index 2: input_nullifier
+    if parsed_inputs[2] != nullifier_bytes[..] {
+        return Json(PrivateNoteSpendResponse {
+            status: "REJECTED".to_string(),
+            message: "public_inputs[2] does not match input_nullifier".to_string(),
             queue_position: 0,
             estimated_gas_usdc: None,
         });
     }
 
+    // Index 3: output_commitment
     let mut expected_comm = [0u8; 32];
     if let Some(ref comm) = payload.output_commitment {
         if let Ok(b) = hex::decode(comm.trim_start_matches("0x")) {
@@ -658,56 +683,61 @@ pub async fn handle_private_note_spend(
             }
         }
     }
-    if parsed_inputs[2] != expected_comm {
+    if parsed_inputs[3] != expected_comm {
         return Json(PrivateNoteSpendResponse {
             status: "REJECTED".to_string(),
-            message: "public_inputs[2] does not match output_commitment".to_string(),
+            message: "public_inputs[3] does not match output_commitment".to_string(),
             queue_position: 0,
             estimated_gas_usdc: None,
         });
     }
 
+    // Index 4: recipient address
     let mut expected_recipient = [0u8; 32];
     expected_recipient[12..].copy_from_slice(recipient_addr.as_slice());
-    if parsed_inputs[3] != expected_recipient {
+    if parsed_inputs[4] != expected_recipient {
         return Json(PrivateNoteSpendResponse {
             status: "REJECTED".to_string(),
-            message: "public_inputs[3] does not match recipient address".to_string(),
+            message: "public_inputs[4] does not match recipient address".to_string(),
             queue_position: 0,
             estimated_gas_usdc: None,
         });
     }
 
+    // Index 5: merchant_amount
     let expected_merchant = U256::from(payload.merchant_amount).to_be_bytes::<32>();
-    if parsed_inputs[4] != expected_merchant {
+    if parsed_inputs[5] != expected_merchant {
         return Json(PrivateNoteSpendResponse {
             status: "REJECTED".to_string(),
-            message: "public_inputs[4] does not match merchant_amount".to_string(),
+            message: "public_inputs[5] does not match merchant_amount".to_string(),
             queue_position: 0,
             estimated_gas_usdc: None,
         });
     }
 
+    // Index 6: protocol_fee
     let expected_proto = U256::from(payload.protocol_fee).to_be_bytes::<32>();
-    if parsed_inputs[5] != expected_proto {
+    if parsed_inputs[6] != expected_proto {
         return Json(PrivateNoteSpendResponse {
             status: "REJECTED".to_string(),
-            message: "public_inputs[5] does not match protocol_fee".to_string(),
+            message: "public_inputs[6] does not match protocol_fee".to_string(),
             queue_position: 0,
             estimated_gas_usdc: None,
         });
     }
 
+    // Index 7: execution_fee
     let expected_exec = U256::from(payload.execution_fee).to_be_bytes::<32>();
-    if parsed_inputs[6] != expected_exec {
+    if parsed_inputs[7] != expected_exec {
         return Json(PrivateNoteSpendResponse {
             status: "REJECTED".to_string(),
-            message: "public_inputs[6] does not match execution_fee".to_string(),
+            message: "public_inputs[7] does not match execution_fee".to_string(),
             queue_position: 0,
             estimated_gas_usdc: None,
         });
     }
 
+    // Index 8: quote_hash
     let mut expected_qh = [0u8; 32];
     if let Some(ref qh) = payload.quote_hash {
         if let Ok(b) = hex::decode(qh.trim_start_matches("0x")) {
@@ -716,16 +746,16 @@ pub async fn handle_private_note_spend(
             }
         }
     }
-    if parsed_inputs[7] != expected_qh {
+    if parsed_inputs[8] != expected_qh {
         return Json(PrivateNoteSpendResponse {
             status: "REJECTED".to_string(),
-            message: "public_inputs[7] does not match quote_hash".to_string(),
+            message: "public_inputs[8] does not match quote_hash".to_string(),
             queue_position: 0,
             estimated_gas_usdc: None,
         });
     }
 
-    // DEC-028 (Fix R3): Strict target domain verification for chain_id (index 8) and contract_address (index 9)
+    // Strict target domain verification for chain_id (index 9) and contract_address (index 10)
     let (expected_chain_bytes, expected_contract_bytes_opt) =
         if let Some(client) = state.evm_client.as_ref() {
             let target_chain_id = match client.chain_id().await {
@@ -756,41 +786,45 @@ pub async fn handle_private_note_spend(
             (U256::from(chain_id).to_be_bytes::<32>(), contract_opt)
         };
 
-    if parsed_inputs[8] != expected_chain_bytes {
+    // Index 9: chain_id
+    if parsed_inputs[9] != expected_chain_bytes {
         return Json(PrivateNoteSpendResponse {
             status: "REJECTED".to_string(),
-            message: "public_inputs[8] does not match target chain_id".to_string(),
+            message: "public_inputs[9] does not match target chain_id".to_string(),
             queue_position: 0,
             estimated_gas_usdc: None,
         });
     }
 
+    // Index 10: contract_address
     if let Some(expected_contract) = expected_contract_bytes_opt {
-        if parsed_inputs[9] != expected_contract {
+        if parsed_inputs[10] != expected_contract {
             return Json(PrivateNoteSpendResponse {
                 status: "REJECTED".to_string(),
-                message: "public_inputs[9] does not match target contract_address".to_string(),
+                message: "public_inputs[10] does not match target contract_address".to_string(),
                 queue_position: 0,
                 estimated_gas_usdc: None,
             });
         }
     }
 
+    // Index 11: expiry
     let expected_exp = U256::from(payload.expiry.unwrap_or(0)).to_be_bytes::<32>();
-    if parsed_inputs[10] != expected_exp {
+    if parsed_inputs[11] != expected_exp {
         return Json(PrivateNoteSpendResponse {
             status: "REJECTED".to_string(),
-            message: "public_inputs[10] does not match expiry".to_string(),
+            message: "public_inputs[11] does not match expiry".to_string(),
             queue_position: 0,
             estimated_gas_usdc: None,
         });
     }
 
+    // Index 12: has_change flag
     let expected_hc = U256::from(has_change_u64).to_be_bytes::<32>();
-    if parsed_inputs[11] != expected_hc {
+    if parsed_inputs[12] != expected_hc {
         return Json(PrivateNoteSpendResponse {
             status: "REJECTED".to_string(),
-            message: "public_inputs[11] does not match has_change flag".to_string(),
+            message: "public_inputs[12] does not match has_change flag".to_string(),
             queue_position: 0,
             estimated_gas_usdc: None,
         });
@@ -818,8 +852,8 @@ pub async fn handle_private_note_spend(
         }
     }
 
-    let mut fr_public_inputs = [nimbus_core::Fr::default(); 12];
-    for (idx, pi) in parsed_inputs.iter().enumerate().take(12) {
+    let mut fr_public_inputs = [nimbus_core::Fr::default(); 13];
+    for (idx, pi) in parsed_inputs.iter().enumerate().take(13) {
         if let Some(fr) = nimbus_core::from_evm_scalar(pi) {
             fr_public_inputs[idx] = fr;
         }
@@ -1308,9 +1342,11 @@ async fn process_single_spend(state: &AppState, item: QueuedSpend) {
             return;
         };
 
+        let leaf_count = request.leaf_count.unwrap_or(1);
         evm_client
             .broadcast_spend_private_note_transaction(
                 note_root,
+                leaf_count,
                 &request.nullifier,
                 request
                     .output_commitment_hex
@@ -1624,8 +1660,9 @@ mod tests {
                 c.copy_from_slice(&to_evm_g1(&proof.c));
 
                 let note_root = format!("0x{}", hex::encode(fr_to_be_bytes(&pis[0])));
-                let input_nullifier = format!("0x{}", hex::encode(fr_to_be_bytes(&pis[1])));
-                let output_commitment = format!("0x{}", hex::encode(fr_to_be_bytes(&pis[2])));
+                let leaf_count = 1u64;
+                let input_nullifier = format!("0x{}", hex::encode(fr_to_be_bytes(&pis[2])));
+                let output_commitment = format!("0x{}", hex::encode(fr_to_be_bytes(&pis[3])));
                 let recipient = "0x0000000000000000000000000000000000000064".to_string();
 
                 let public_inputs: Vec<String> = pis
@@ -1636,6 +1673,7 @@ mod tests {
                 PrivateNoteSpendRequest {
                     session_id: Some("session_1".to_string()),
                     note_root,
+                    leaf_count: Some(leaf_count),
                     input_nullifier,
                     output_commitment: Some(output_commitment),
                     recipient,
@@ -1643,7 +1681,7 @@ mod tests {
                     protocol_fee: 12_500,
                     execution_fee: 23_000,
                     max_execution_fee: 25_000,
-                    quote_hash: Some(format!("0x{}", hex::encode(fr_to_be_bytes(&pis[7])))),
+                    quote_hash: Some(format!("0x{}", hex::encode(fr_to_be_bytes(&pis[8])))),
                     quote_signature: None,
                     quote_id: None,
                     user_address: None,
@@ -1775,55 +1813,81 @@ mod tests {
     async fn test_handle_private_note_spend_reject_empty_public_inputs() {
         let (state, _tmp) = setup_test_state().await;
         let mut req = sample_valid_private_note_request();
-        // DEC-028 (Fix R4): empty public inputs must be rejected immediately, not bypass preflight
+        // DEC-032: empty public inputs must be rejected immediately, not bypass preflight
         req.public_inputs = vec![];
 
         let resp = handle_private_note_spend(State(state), Json(req)).await;
         assert_eq!(resp.0.status, "REJECTED");
-        assert!(resp.0.message.contains("Expected 12 public inputs"));
+        assert!(resp.0.message.contains("Expected 13 public inputs"));
     }
 
     #[tokio::test]
     async fn test_handle_private_note_spend_reject_wrong_public_inputs_count() {
         let (state, _tmp) = setup_test_state().await;
         let mut req = sample_valid_private_note_request();
-        req.public_inputs.truncate(11);
+        req.public_inputs.truncate(12);
 
         let resp = handle_private_note_spend(State(state), Json(req)).await;
         assert_eq!(resp.0.status, "REJECTED");
         assert!(resp
             .0
             .message
-            .contains("Expected 12 public inputs for PrivateNoteCircuit, got 11"));
+            .contains("Expected 13 public inputs for PrivateNoteCircuit, got 12"));
+    }
+
+    #[tokio::test]
+    async fn test_handle_private_note_spend_reject_leaf_count_zero() {
+        let (state, _tmp) = setup_test_state().await;
+        let mut req = sample_valid_private_note_request();
+        req.public_inputs[1] = format!("0x{:064x}", 0);
+
+        let resp = handle_private_note_spend(State(state), Json(req)).await;
+        assert_eq!(resp.0.status, "REJECTED");
+        assert!(resp
+            .0
+            .message
+            .contains("leaf_count in public_inputs[1] must be greater than zero"));
+    }
+
+    #[tokio::test]
+    async fn test_handle_private_note_spend_reject_leaf_count_mismatch() {
+        let (state, _tmp) = setup_test_state().await;
+        let mut req = sample_valid_private_note_request();
+        req.leaf_count = Some(999);
+
+        let resp = handle_private_note_spend(State(state), Json(req)).await;
+        assert_eq!(resp.0.status, "REJECTED");
+        assert!(resp
+            .0
+            .message
+            .contains("public_inputs[1] does not match leaf_count"));
     }
 
     #[tokio::test]
     async fn test_handle_private_note_spend_reject_domain_mismatch_chain_id() {
         let (state, _tmp) = setup_test_state().await;
         let mut req = sample_valid_private_note_request();
-        // DEC-028 (Fix R3): Cross-domain chain_id mismatch (e.g. proof generated for L1 chain_id = 1)
-        req.public_inputs[8] = format!("0x{:064x}", 1);
+        // DEC-032: chain_id is at index 9
+        req.public_inputs[9] = format!("0x{:064x}", 1);
 
         let resp = handle_private_note_spend(State(state), Json(req)).await;
         assert_eq!(resp.0.status, "REJECTED");
         assert!(resp
             .0
             .message
-            .contains("public_inputs[8] does not match target chain_id"));
+            .contains("public_inputs[9] does not match target chain_id"));
     }
 
     #[tokio::test]
     async fn test_handle_private_note_spend_reject_domain_mismatch_contract_address() {
         let (state, _tmp) = setup_test_state().await;
         let mut req = sample_valid_private_note_request();
-        // DEC-028 (Fix R3): Target contract address mismatch
-        // Set expected contract address to 0x00...012c (300)
+        // DEC-032: contract_address is at index 10
         std::env::set_var(
             "NIMBUS_CONTRACT_ADDRESS",
             "0x000000000000000000000000000000000000012c",
         );
-        // Tamper with public_inputs[9]
-        req.public_inputs[9] = format!("0x{:064x}", 999);
+        req.public_inputs[10] = format!("0x{:064x}", 999);
 
         let resp = handle_private_note_spend(State(state), Json(req)).await;
         std::env::remove_var("NIMBUS_CONTRACT_ADDRESS");
@@ -1831,6 +1895,6 @@ mod tests {
         assert!(resp
             .0
             .message
-            .contains("public_inputs[9] does not match target contract_address"));
+            .contains("public_inputs[10] does not match target contract_address"));
     }
 }

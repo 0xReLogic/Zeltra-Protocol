@@ -54,6 +54,10 @@ pub const EMPTY_SUBTREE_HASHES_BYTES: [[u8; 32]; 21] = [
 pub const DOMAIN_MERKLE_NODE_BYTES: [u8; 32] =
     alloy_primitives::hex!("3834656d06de7d572e49914bb58b1e27dd5f9f6d86240e64495a1d82db22e82e");
 
+/// Canonical Domain Separator for MMR Peak Bagging (DEC-032)
+pub const DOMAIN_MMR_BAG_BYTES: [u8; 32] =
+    alloy_primitives::hex!("194a8f9c1e7d2358b901fc843329107ba8921dfbb3024859aef029147da290bf");
+
 /// Canonical Empty Tree Root (Depth 20, big-endian 32-byte)
 pub const EMPTY_TREE_ROOT_BYTES: [u8; 32] =
     alloy_primitives::hex!("4e9a77b95958924d004a9841dfb0f92c8d70f99c54bc59da1fa53320c0aaa6d2");

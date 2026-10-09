@@ -607,6 +607,7 @@ impl Nimbus {
     pub(crate) fn _spend_private_note(
         &mut self,
         note_root: FixedBytes<32>,
+        leaf_count: U256,
         input_nullifier: FixedBytes<32>,
         output_commitment: FixedBytes<32>,
         recipient: Address,
@@ -638,6 +639,11 @@ impl Nimbus {
         // Merchant amount must be positive
         if merchant_amount == U256::ZERO {
             return Err(b"MERCHANT_AMOUNT_ZERO".to_vec());
+        }
+
+        // leaf_count validation (DEC-032 anti-hyperbridge check)
+        if leaf_count == U256::ZERO {
+            return Err(b"INVALID_LEAF_COUNT".to_vec());
         }
 
         // has_change boolean validation (0 or 1)
@@ -673,7 +679,7 @@ impl Nimbus {
             return Err(b"INSUFFICIENT_NOTE_LIABILITY".to_vec());
         }
 
-        // Construct 12 public input scalars in big-endian EVM format
+        // Construct 13 public input scalars in big-endian EVM format
         let mut recipient_bytes = [0u8; 32];
         recipient_bytes[12..].copy_from_slice(recipient.as_slice());
 
@@ -681,14 +687,16 @@ impl Nimbus {
         contract_bytes[12..].copy_from_slice(self.env_contract_address().as_slice());
 
         let chain_id_bytes = U256::from(self.env_chain_id()).to_be_bytes::<32>();
+        let leaf_count_bytes = leaf_count.to_be_bytes::<32>();
         let merchant_amount_bytes = merchant_amount.to_be_bytes::<32>();
         let protocol_fee_bytes = protocol_fee.to_be_bytes::<32>();
         let execution_fee_bytes = execution_fee.to_be_bytes::<32>();
         let expiry_bytes = expiry.to_be_bytes::<32>();
         let has_change_bytes = has_change.to_be_bytes::<32>();
 
-        let public_inputs: [[u8; 32]; 12] = [
+        let public_inputs: [[u8; 32]; 13] = [
             note_root.0,
+            leaf_count_bytes,
             input_nullifier.0,
             output_commitment.0,
             recipient_bytes,
@@ -728,9 +736,9 @@ impl Nimbus {
         // Mark nullifier spent
         self.note_nullifiers.insert(input_nullifier, true);
 
-        // If has_change == 1, insert output_commitment into LeanIMT Merkle tree (which emits ChangeCommitment)
+        // If has_change == 1, insert output_commitment into MMR (which emits NoteCommitmentAppended & ChangeCommitment)
         if has_change == U256::from(1) {
-            self._merkle_insert(output_commitment)?;
+            self._mmr_insert(output_commitment)?;
         }
 
         // Multi-liability accounting (DEC-016 Gate B)

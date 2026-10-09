@@ -278,10 +278,10 @@ impl Nimbus {
         Ok(self.total_deposited_principal.get())
     }
 
-    /// Returns the current Merkle tree root hash. If next_index == 0, returns the canonical empty root (DEC-016 Gate D).
+    /// Returns the current Merkle tree root hash. If mmr_leaf_count == 0, returns the canonical empty root (DEC-032).
     pub fn note_tree_root(&self) -> Result<FixedBytes<32>, Vec<u8>> {
-        let next_idx = self.note_tree_next_index.get();
-        if next_idx == U256::ZERO && self.note_tree_root.get() == FixedBytes::ZERO {
+        let count = self.mmr_leaf_count.get();
+        if count == U256::ZERO && self.note_tree_root.get() == FixedBytes::ZERO {
             Ok(FixedBytes::from(
                 poseidon_w5_constants::EMPTY_TREE_ROOT_BYTES,
             ))
@@ -290,9 +290,19 @@ impl Nimbus {
         }
     }
 
-    /// Returns the next leaf index in the incremental Merkle tree (0 .. 2^20).
+    /// Returns the current total leaf count in the Merkle Mountain Range (0 .. 2^64).
+    pub fn mmr_leaf_count(&self) -> Result<U256, Vec<u8>> {
+        Ok(self.mmr_leaf_count.get())
+    }
+
+    /// Returns the active MMR peak at a given mountain height level.
+    pub fn mmr_peak(&self, height: U256) -> Result<FixedBytes<32>, Vec<u8>> {
+        Ok(self.mmr_peaks.get(height))
+    }
+
+    /// Backwards compatibility alias for next index (returns mmr_leaf_count).
     pub fn note_tree_next_index(&self) -> Result<U256, Vec<u8>> {
-        Ok(self.note_tree_next_index.get())
+        Ok(self.mmr_leaf_count.get())
     }
 
     /// Checks if a root hash is currently accepted: either in accepted_note_roots, current root, or canonical empty root.
@@ -543,10 +553,11 @@ impl Nimbus {
         )
     }
 
-    /// Executes a private spend using a Groth16 zero-knowledge proof for PrivateNoteCircuit (Gate D).
+    /// Executes a private spend using a Groth16 zero-knowledge proof for PrivateNoteCircuit (Gate D & DEC-032).
     pub fn spend_private_note(
         &mut self,
         note_root: FixedBytes<32>,
+        leaf_count: U256,
         input_nullifier: FixedBytes<32>,
         output_commitment: FixedBytes<32>,
         recipient: Address,
@@ -563,6 +574,7 @@ impl Nimbus {
     ) -> Result<bool, Vec<u8>> {
         self._spend_private_note(
             note_root,
+            leaf_count,
             input_nullifier,
             output_commitment,
             recipient,
@@ -2906,8 +2918,9 @@ mod tests {
         let leaf = FixedBytes::from(alloy_primitives::hex!(
             "46d1b90c8a28c364fefdbb95bd709956e2f39a411750e6797fe1112b27635c59"
         ));
+        // Canonical DEC-032 MMR bagged root after 1 insert: PoseidonW5([leaf, Fr(1), 0, 0], DOMAIN_MMR_BAG)
         let expected_root_after_1 = FixedBytes::from(alloy_primitives::hex!(
-            "3ed6d45ee8da74b055fa37a13ec3459e9fa97db5f89d014fdb0e41013fb56bfd"
+            "00cb33439376a56bb3e3cc73ef00b8cf8c14d6e69d27ecf2bd69e62ef2656844"
         ));
 
         set_block_timestamp(500);
@@ -2916,7 +2929,7 @@ mod tests {
         assert_eq!(leaf_idx, U256::ZERO);
         assert_eq!(
             new_root, expected_root_after_1,
-            "Root after 1 insert must exactly match DEC-016A KAV"
+            "Root after 1 insert must exactly match DEC-032 canonical MMR root"
         );
         assert_eq!(contract.note_tree_root().unwrap(), expected_root_after_1);
         assert_eq!(contract.note_tree_next_index().unwrap(), U256::from(1));
@@ -2947,8 +2960,9 @@ mod tests {
         let note_commitment = FixedBytes::from(alloy_primitives::hex!(
             "46d1b90c8a28c364fefdbb95bd709956e2f39a411750e6797fe1112b27635c59"
         ));
+        // Canonical DEC-032 MMR bagged root after 1 insert
         let expected_root_after_1 = FixedBytes::from(alloy_primitives::hex!(
-            "3ed6d45ee8da74b055fa37a13ec3459e9fa97db5f89d014fdb0e41013fb56bfd"
+            "00cb33439376a56bb3e3cc73ef00b8cf8c14d6e69d27ecf2bd69e62ef2656844"
         ));
 
         // 1. User deposits with bound note commitment
@@ -3212,6 +3226,7 @@ mod tests {
 
         let result = contract.spend_private_note(
             initial_root,
+            U256::from(1),
             nullifier,
             change_cm,
             merchant,
@@ -3240,7 +3255,7 @@ mod tests {
             U256::from(23_000)
         );
         assert_eq!(contract.realized_protocol_fees.get(), U256::from(22_500));
-        assert_eq!(contract.note_tree_next_index.get(), U256::from(1));
+        assert_eq!(contract.mmr_leaf_count.get(), U256::from(1));
     }
 
     #[test]
@@ -3268,6 +3283,7 @@ mod tests {
         contract
             .spend_private_note(
                 initial_root,
+                U256::from(1),
                 nullifier,
                 change_cm,
                 merchant,
@@ -3287,6 +3303,7 @@ mod tests {
         // Second spend with identical nullifier MUST revert
         let result = contract.spend_private_note(
             initial_root,
+            U256::from(1),
             nullifier,
             change_cm,
             merchant,
@@ -3317,6 +3334,7 @@ mod tests {
 
         let result = contract.spend_private_note(
             fake_root,
+            U256::from(1),
             nullifier,
             FixedBytes::ZERO,
             Address::ZERO,
@@ -3349,6 +3367,7 @@ mod tests {
 
         let result = contract.spend_private_note(
             root,
+            U256::from(1),
             FixedBytes::ZERO,
             FixedBytes::ZERO,
             Address::ZERO,
@@ -3380,6 +3399,7 @@ mod tests {
 
         let result = contract.spend_private_note(
             root,
+            U256::from(1),
             FixedBytes::ZERO,
             FixedBytes::ZERO,
             Address::ZERO,
@@ -3413,6 +3433,7 @@ mod tests {
 
         let result = contract.spend_private_note(
             root,
+            U256::from(1),
             FixedBytes::ZERO,
             non_zero_commitment,
             Address::ZERO,
@@ -3445,6 +3466,7 @@ mod tests {
 
         let result = contract.spend_private_note(
             root,
+            U256::from(1),
             FixedBytes::ZERO,
             FixedBytes::ZERO,
             Address::ZERO,
@@ -3480,6 +3502,7 @@ mod tests {
 
         let result = contract.spend_private_note(
             root,
+            U256::from(1),
             FixedBytes::ZERO,
             FixedBytes::ZERO,
             Address::ZERO,
@@ -3496,5 +3519,89 @@ mod tests {
         );
 
         assert_eq!(result, Err(b"INVALID_GROTH16_NOTE_PROOF".to_vec()));
+    }
+
+    #[test]
+    fn test_mmr_hyperbridge_out_of_bounds_leaf_rejected() {
+        reset_test_state();
+        let owner = address!("1111111111111111111111111111111111111111");
+        let mut contract = Nimbus::default();
+        contract.init(owner, Address::ZERO, Address::ZERO).unwrap();
+
+        let root =
+            FixedBytes::<32>::from_slice(&crate::poseidon_w5_constants::EMPTY_TREE_ROOT_BYTES);
+        contract.accepted_note_roots.insert(root, U256::from(1000));
+        contract.user_note_liability.set(U256::from(100_000_000));
+
+        // Attempting spend with leaf_count == 0 must fail closed
+        let result = contract.spend_private_note(
+            root,
+            U256::ZERO, // leaf_count == 0 (illegal in DEC-032)
+            FixedBytes::ZERO,
+            FixedBytes::ZERO,
+            Address::ZERO,
+            U256::from(1_000_000),
+            U256::ZERO,
+            U256::ZERO,
+            U256::ZERO,
+            FixedBytes::ZERO,
+            U256::ZERO,
+            U256::ZERO,
+            vec![0x11; 128].into(),
+            vec![0x22; 256].into(),
+            vec![0x33; 128].into(),
+        );
+
+        assert_eq!(result, Err(b"INVALID_LEAF_COUNT".to_vec()));
+    }
+
+    #[test]
+    fn test_mmr_tampered_leaf_count_rejected() {
+        reset_test_state();
+        let owner = address!("1111111111111111111111111111111111111111");
+        let mut contract = Nimbus::default();
+        contract.init(owner, Address::ZERO, Address::ZERO).unwrap();
+
+        // Valid leaf insert
+        let leaf = FixedBytes::from(alloy_primitives::hex!(
+            "46d1b90c8a28c364fefdbb95bd709956e2f39a411750e6797fe1112b27635c59"
+        ));
+        let (_, _canonical_root) = contract._mmr_insert(leaf).unwrap();
+
+        // Tampering with leaf_count produces a different root that is not accepted
+        let fake_root = FixedBytes::repeat_byte(0x99);
+        assert!(!contract.is_accepted_note_root(fake_root).unwrap());
+
+        let result = contract.spend_private_note(
+            fake_root,
+            U256::from(999), // tampered leaf count
+            FixedBytes::ZERO,
+            FixedBytes::ZERO,
+            Address::ZERO,
+            U256::from(1_000_000),
+            U256::ZERO,
+            U256::ZERO,
+            U256::ZERO,
+            FixedBytes::ZERO,
+            U256::ZERO,
+            U256::ZERO,
+            vec![0x11; 128].into(),
+            vec![0x22; 256].into(),
+            vec![0x33; 128].into(),
+        );
+
+        assert_eq!(result, Err(b"UNACCEPTED_NOTE_ROOT".to_vec()));
+    }
+
+    #[test]
+    fn test_mmr_wrap_around_scalar_rejected() {
+        reset_test_state();
+        let mut contract = Nimbus::default();
+
+        // 0xff...ff is >= r (modulus of BLS12-381 Fr)
+        let non_canonical_leaf = FixedBytes::repeat_byte(0xff);
+        let result = contract._mmr_insert(non_canonical_leaf);
+
+        assert_eq!(result, Err(b"INVALID_LEAF_SCALAR".to_vec()));
     }
 }

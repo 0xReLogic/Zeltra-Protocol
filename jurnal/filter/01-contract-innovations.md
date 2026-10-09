@@ -4,19 +4,7 @@ Dokumen ini memetakan paper terpilih untuk arsitektur smart contract Nimbus ([`n
 
 ---
 
-## 1. Bonsai: Scalable Private Payments (IACR ePrint 2026/1987)
-* **File Jurnal:** [`jurnal/Bonsai-Scalable-Private-Payments.md`](file:///workspaces/Zeltra-Protocol/jurnal/Bonsai-Scalable-Private-Payments.md)
-* **Problem di Sistem Klasik:**
-  Di Tornado Cash & Zcash, mapping nullifier bertambah secara monotonik selamanya ($O(N)$ state bloat). Kontrak tidak pernah bisa menghapus nullifier lama karena takut diserang double-spend. Pada EVM/Stylus, biaya penyimpanan gas meledak seiring berjalannya tahun.
-* **Inovasi Paper:**
-  Bonsai mengeliminasi kebutuhan validator menyimpan seluruh riwayat nullifier historis dengan menyusun komitmen akun berbasis *algebraic witness* dan *hierarchical state pruning*. State yang disimpan validator terikat secara ringkas, sementara beban bukti eksistensi/non-keanggotaan dipindahkan ke prover client.
-* **Implementasi di Nimbus Stylus:**
-  * Komponen: [`nimbus-contracts/src/storage.rs`](file:///workspaces/Zeltra-Protocol/nimbus-contracts/src/storage.rs) dan [`nimbus-contracts/src/spend.rs`](file:///workspaces/Zeltra-Protocol/nimbus-contracts/src/spend.rs).
-  * Mekanisme: Integrasi dengan circular buffer `accepted_note_roots` yang sudah ada di Nimbus. State nullifier dapat dipartisi per epoch rolling (misal 30 hari). Nullifier di luar batas aktif dapat dibersihkan tanpa mengorbankan insolvensi berkat verifikasi range epoch on-chain.
-
----
-
-## 2. A Note on Notes: Evolving Nullifiers (IACR ePrint 2025/2031)
+## 1. A Note on Notes: Evolving Nullifiers (IACR ePrint 2025/2031)
 * **File Jurnal:** [`jurnal/Note-on-Notes-Scalable-Anonymous-Payments.md`](file:///workspaces/Zeltra-Protocol/jurnal/Note-on-Notes-Scalable-Anonymous-Payments.md)
 * **Penulis:** Sean Bowe, Ian Miers (Arsitek Utama Zerocash & Zcash)
 * **Problem di Sistem Klasik:**
@@ -29,7 +17,7 @@ Dokumen ini memetakan paper terpilih untuk arsitektur smart contract Nimbus ([`n
 
 ---
 
-## 3. Rate-Limiting Nullifiers for Gasless Sequencer Admission (IACR ePrint 2025)
+## 2. Rate-Limiting Nullifiers for Gasless Sequencer Admission (IACR ePrint 2025)
 * **File Jurnal:** [`jurnal/Rate-Limiting-Nullifiers-Gasless-Sequencer.md`](file:///workspaces/Zeltra-Protocol/jurnal/Rate-Limiting-Nullifiers-Gasless-Sequencer.md)
 * **Problem di Sistem Klasik:**
   Endpoint relayer gasless/meta-transaction rentan terhadap serangan spam DoS dan drained gas reserves karena siapa pun bisa mengirim request spend palsu tanpa modal.
@@ -41,7 +29,7 @@ Dokumen ini memetakan paper terpilih untuk arsitektur smart contract Nimbus ([`n
 
 ---
 
-## 4. zk-Rollup Verification on BLS12-381 (IACR ePrint 2025/1390)
+## 3. zk-Rollup Verification on BLS12-381 (IACR ePrint 2025/1390)
 * **File Jurnal:** [`jurnal/zk-Rollup-Verification-BLS12-381.md`](file:///workspaces/Zeltra-Protocol/jurnal/zk-Rollup-Verification-BLS12-381.md)
 * **Problem di Sistem Klasik:**
   Verifikasi pairing BLS12-381 via EIP-2537 (`0x0f`) dan Groth16 membutuhkan parsing byte yang presisi. Salah endianness atau titik tak termalformasi (subgroup check) menyebabkan revert mahal atau celah silent falsification.
@@ -52,7 +40,7 @@ Dokumen ini memetakan paper terpilih untuk arsitektur smart contract Nimbus ([`n
 
 ---
 
-## 5. Blind Spots in Blind Signatures: Chaumian Ecash System-Level Security (IACR ePrint 2026/2174)
+## 4. Blind Spots in Blind Signatures: Chaumian Ecash System-Level Security (IACR ePrint 2026/2174)
 * **File Jurnal:** [`jurnal/Blind-Spots-Chaumian-Ecash.md`](file:///workspaces/Zeltra-Protocol/jurnal/Blind-Spots-Chaumian-Ecash.md)
 * **Penulis:** Huaifeng Chen, Yuchang Zhang, Yu Cheng
 * **Problem di Sistem Klasik:**
@@ -67,7 +55,7 @@ Dokumen ini memetakan paper terpilih untuk arsitektur smart contract Nimbus ([`n
 
 ---
 
-## 6. ammBoost: State Growth Control for AMMs (IACR ePrint 2024/1021)
+## 5. ammBoost: State Growth Control for AMMs (IACR ePrint 2024/1021)
 * **File Jurnal / PDF:** [`jurnal/pdf/2024-1021.pdf`](file:///workspaces/Zeltra-Protocol/jurnal/pdf/2024-1021.pdf)
 * **Penulis:** Nicolas Michel, Mohamed E. Najd, Ghada Almashaqbeh (2024/2025)
 * **Problem di Sistem Klasik:**
@@ -80,7 +68,7 @@ Dokumen ini memetakan paper terpilih untuk arsitektur smart contract Nimbus ([`n
 
 ---
 
-## 7. ZK Email (NFA-based Regex): Identity & Recovery Engine (IACR ePrint 2026)
+## 6. ZK Email (NFA-based Regex): Identity & Recovery Engine (IACR ePrint 2026)
 * **File Jurnal:** [`jurnal/ZK-Proofs-Regex-Email-Verification.md`](file:///workspaces/Zeltra-Protocol/jurnal/ZK-Proofs-Regex-Email-Verification.md)
 * **Problem di Sistem Klasik:**
   Verifikasi bukti kepemilikan email DKIM secara on-chain di EVM/Stylus konvensional membutuhkan evaluasi string regex yang memakan jutaan gas dan puluhan ribu constraint sirkuit jika menggunakan automata DFA naif.
@@ -93,7 +81,7 @@ Dokumen ini memetakan paper terpilih untuk arsitektur smart contract Nimbus ([`n
 
 ---
 
-## 8. NI-DKG on Blockchain: Zero-Complaint Guardian Setup (IACR ePrint 2026/552)
+## 7. NI-DKG on Blockchain: Zero-Complaint Guardian Setup (IACR ePrint 2026/552)
 * **File Jurnal:** [`jurnal/NI-DKG-Non-Interactive-Distributed-Key-Generation-Blockchain-Zero-Knowledge-Proofs.md`](file:///workspaces/Zeltra-Protocol/jurnal/NI-DKG-Non-Interactive-Distributed-Key-Generation-Blockchain-Zero-Knowledge-Proofs.md)
 * **Problem di Sistem Klasik:**
   Protokol Distributed Key Generation (DKG) interaktif tradisional membutuhkan fase sanggahan (*complaint phase*) multi-ronde. Jika terjadi network partition atau serangan sensor transaksi di L2, fase sanggahan bisa macet (*griefing delay*), menyebabkan kegagalan rotasi kunci kuorum Guardian.
@@ -102,4 +90,5 @@ Dokumen ini memetakan paper terpilih untuk arsitektur smart contract Nimbus ([`n
 * **Implementasi di Nimbus Stylus:**
   * Komponen: Kontrak pendaftaran dan rotasi kuorum Guardian di [`nimbus-contracts/src/storage.rs`](file:///workspaces/Zeltra-Protocol/nimbus-contracts/src/storage.rs).
   * Mengotomatisasi rotasi kuorum threshold Guardian (misal ekspansi dari 3-of-5 ke 5-of-7) secara langsung on-chain di Stylus tanpa risiko macet atau sensor gas.
+
 

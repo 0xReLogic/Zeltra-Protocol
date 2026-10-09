@@ -87,6 +87,8 @@ pub struct SpendRequest {
     #[serde(default)]
     pub quote_hash_hex: Option<String>,
     #[serde(default)]
+    pub leaf_count: Option<u64>,
+    #[serde(default)]
     pub has_change: Option<u64>,
     #[serde(default)]
     pub proof_a_neg_hex: Option<String>,
@@ -164,6 +166,8 @@ pub struct PrivateNoteSpendRequest {
     pub session_id: Option<String>,
     #[serde(alias = "note_root_hex")]
     pub note_root: String,
+    #[serde(alias = "leaf_count_hex", default)]
+    pub leaf_count: Option<u64>,
     #[serde(alias = "input_nullifier_hex", alias = "nullifier")]
     pub input_nullifier: String,
     #[serde(alias = "output_commitment_hex", default)]
@@ -225,6 +229,21 @@ impl From<PrivateNoteSpendRequest> for SpendRequest {
             Some(serde_json::Value::Number(n)) => n.as_u64().unwrap_or(0),
             _ => 0,
         };
+        let leaf_count_opt = req.leaf_count.or_else(|| {
+            if req.public_inputs.len() >= 2 {
+                hex::decode(req.public_inputs[1].trim_start_matches("0x"))
+                    .ok()
+                    .and_then(|b| {
+                        if b.len() == 32 {
+                            Some(alloy_primitives::U256::from_be_slice(&b).to::<u64>())
+                        } else {
+                            None
+                        }
+                    })
+            } else {
+                None
+            }
+        });
         SpendRequest {
             nullifier: req.input_nullifier,
             sig_hex: String::new(),
@@ -255,6 +274,7 @@ impl From<PrivateNoteSpendRequest> for SpendRequest {
             merchant_amount: Some(req.merchant_amount),
             protocol_fee: Some(req.protocol_fee),
             quote_hash_hex: req.quote_hash,
+            leaf_count: leaf_count_opt,
             has_change: Some(has_change_u64),
             proof_a_neg_hex: Some(req.proof_a_neg),
             proof_b_hex: Some(req.proof_b),
