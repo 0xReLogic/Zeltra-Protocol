@@ -98,9 +98,13 @@ Refund path: if quorum fails or k never released → 24h timelock → user claim
 
 1. **Read `todo.md`** — check item status before touching it
 2. **Check `research/decisions/`** — there might be a relevant decision
-3. **Navigasi Kode & Arsitektur (CodeGraph & Graphify):**
-   - **Arsitektur Makro & Hubungan Antar-Modul (Graphify):** Gunakan `graphify query "<pertanyaan>"`, `graphify path "<A>" "<B>"`, atau `graphify explain "<Simbol>"`. JANGAN membaca langsung file `graphify-out/graph.json` atau seluruh `GRAPH_REPORT.md` ke context window (sangat boros token).
-   - **Call Path & Verbatim Code (CodeGraph):** Gunakan MCP tool `codegraph_explore` (atau shell `codegraph explore "<query>"`) untuk melihat implementasi aktual, signature baris, dan dynamic hops antar fungsi.
+3. **Navigasi Kode & Arsitektur Wajib Graphify-First:**
+   - **Refleks Pertama (Graphify):** Sebelum melakukan grep atau membaca file mentah, SELALU jalankan:
+     * `graphify query "<pertanyaan arsitektur atau integrasi>"` untuk melihat subgraph relasi antar file/fungsi.
+     * `graphify explain "<Simbol / Struct / Fungsi>"` untuk melihat posisi node, degree, dan relasi langsungnya.
+     * `graphify path "<A>" "<B>"` untuk melacak rantai pemanggilan antar dua komponen.
+     * *Pantangan:* JANGAN membaca langsung file `graphify-out/graph.json` atau seluruh `GRAPH_REPORT.md` ke context window (sangat boros token).
+   - **Call Path & Verbatim Code (CodeGraph):** Panggil MCP tool `codegraph_explore` (atau shell `codegraph explore "<query>"`) untuk melihat isi baris implementasi dan dynamic hops setelah lokasinya dipetakan oleh Graphify.
    - **Maintenance:** Setelah melakukan modifikasi file Rust, jalankan `graphify update .` untuk menjaga graf tetap sinkron tanpa memicu LLM cost.
 4. **Prinsip ATMI (Amati, Tiru, Modifikasi, Inovasi)** — Belajar dan serap pola unggul dari paper kriptografi teruji dan repo battle-tested (seperti Zcash, Aztec Barretenberg, Railgun, zk-kit, zk-sunade, Wasabi). Amati polanya, tiru fondasinya, modifikasi agar cocok dengan Stylus/BLS12-381/ZK-UTXO Zeltra, dan inovasikan keunggulan baru (privacy 9.5/10, produk 10/10).
 5. **Research gate for critical changes** (financial logic, crypto, CCIP, custody, storage layout):

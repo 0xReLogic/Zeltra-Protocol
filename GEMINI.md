@@ -97,9 +97,14 @@ Mengacu pada master checklist [`todo.md`](file:///workspaces/Zeltra-Protocol/tod
 
 ## 5. Aturan Kerja Agen (Operating Principles)
 
-1. **Gunakan CodeGraph & Graphify Terlebih Dahulu (Mandatory):**
-   * **Struktur Makro & Relasi Sistem (Graphify):** Gunakan `graphify query "<pertanyaan>"`, `graphify path "<A>" "<B>"`, atau `graphify explain "<Node>"`. Dilarang keras membaca file mentah `graphify-out/graph.json` ke context window.
-   * **Verbatim Code & Call Path (CodeGraph):** Panggil MCP `codegraph_explore` (atau shell `codegraph explore "<query>"`) untuk melihat isi source file lengkap dengan nomor baris dan hierarchy pemanggilan sebelum melakukan edit.
+1. **Wajib Graphify-First Sebagai Refleks Utama (Mandatory):**
+   * **Struktur Makro & Relasi Sistem (Graphify):** Sebelum melakukan grep atau membaca file mentah, SELALU jalankan perintah graphify:
+     - `graphify query "<pertanyaan>"`: Mengambil subgraph terfokus dari pertanyaan arsitektur/aliran data.
+     - `graphify explain "<Simbol / Node>"`: Mengurai satu node, posisinya di komunitas, serta relasi langsungnya.
+     - `graphify path "<A>" "<B>"`: Melacak rantai ketergantungan antar dua komponen/fungsi.
+     - *Dilarang keras* membaca file mentah `graphify-out/graph.json` atau seluruh `GRAPH_REPORT.md` ke context window.
+   * **Verbatim Code & Call Path (CodeGraph):** Panggil MCP `codegraph_explore` (atau shell `codegraph explore "<query>"`) untuk melihat isi source file lengkap dengan nomor baris dan hierarchy pemanggilan setelah topologinya dipetakan oleh Graphify.
+   * **Sinkronisasi Graf:** Setelah selesai mengedit file `.rs`, jalankan `graphify update .` agar graf selalu akurat.
 2. **Cek Source Code Riil Terlebih Dahulu:** Jangan berasumsi atau hanya membaca ringkasan. Buka dan baca kode Rust aslinya sebelum mengubah atau mendokumentasikan.
 3. **Hindari Birokrasi Berlebihan:** Jangan membuat puluhan file markdown baru atau checklist ribet yang mendistraksi developer. Jaga dokumentasi tetap terpusat pada bab modular yang sudah ada.
 4. **Prinsip ATMI (Amati, Tiru, Modifikasi, Inovasi):** Jangan menemukan roda baru dari nol jika sudah ada paper kriptografi teruji atau repo battle-tested (Zcash, Barretenberg, Railgun, zk-kit, zk-sunade, Wasabi). Amati polanya, tiru fondasinya, modifikasi sesuai arsitektur Stylus/BLS12-381/ZK-UTXO Zeltra, dan ciptakan inovasi baru yang membuat produk unggul.
