@@ -63,6 +63,9 @@ impl Nimbus {
         self.paused.set(false);
         self.stablecoin.set(stablecoin_addr);
         self.fee_recipient.set(fee_recipient_addr);
+        self.epoch_start_timestamp
+            .set(U256::from(self.block_timestamp()));
+        self.generation_epoch_id.setter(U256::ZERO).set(U256::ZERO);
         Ok(())
     }
 
@@ -364,14 +367,36 @@ impl Nimbus {
         Ok(self.clean_association_roots.get(root))
     }
 
-    /// Returns whether a nullifier has already been spent on-chain (DEC-019 & DEC-025).
+    /// Returns whether a nullifier has already been spent on-chain (DEC-019, DEC-025, DEC-033).
     pub fn is_nullifier_spent(&self, nullifier: FixedBytes<32>) -> Result<bool, Vec<u8>> {
-        Ok(self.nullifiers.get(nullifier) || self.note_nullifiers.get(nullifier))
+        let is_note_spent = self.is_note_nullifier_spent(nullifier)?;
+        Ok(self.nullifiers.get(nullifier) || self.note_nullifiers.get(nullifier) || is_note_spent)
     }
 
-    /// Returns whether a private note nullifier has already been spent on-chain (DEC-025).
+    /// Returns whether a private note nullifier has already been spent on-chain (DEC-025 & DEC-033).
     pub fn is_note_nullifier_spent(&self, nullifier: FixedBytes<32>) -> Result<bool, Vec<u8>> {
-        Ok(self.note_nullifiers.get(nullifier))
+        let current_epoch = self.current_epoch.get().to::<u32>();
+        let slot_current = (current_epoch % 2) as u8;
+        let gen_key_current = crate::storage::generational_nullifier_key(slot_current, nullifier);
+        let slot_prev = (current_epoch.saturating_sub(1) % 2) as u8;
+        let gen_key_prev = crate::storage::generational_nullifier_key(slot_prev, nullifier);
+        Ok(self.generation_nullifiers.get(gen_key_current)
+            || self.generation_nullifiers.get(gen_key_prev)
+            || self.note_nullifiers.get(nullifier))
+    }
+
+    /// Returns whether a generational note nullifier has already been spent on-chain (DEC-033).
+    pub fn is_generational_nullifier_spent(
+        &self,
+        epoch_id: u32,
+        nullifier: FixedBytes<32>,
+    ) -> Result<bool, Vec<u8>> {
+        let slot = (epoch_id % 2) as u64;
+        if self.generation_epoch_id.get(U256::from(slot)) != U256::from(epoch_id) {
+            return Ok(false);
+        }
+        let gen_key = crate::storage::generational_nullifier_key(slot as u8, nullifier);
+        Ok(self.generation_nullifiers.get(gen_key) || self.note_nullifiers.get(nullifier))
     }
 
     pub fn register_issuer_key(&mut self, pk_iss_bytes: Bytes) -> Result<(), Vec<u8>> {
@@ -553,12 +578,13 @@ impl Nimbus {
         )
     }
 
-    /// Executes a private spend using a Groth16 zero-knowledge proof for PrivateNoteCircuit (Gate D & DEC-032).
+    /// Executes a private spend or rollover using a Groth16 zero-knowledge proof for PrivateNoteCircuit (Gate D, DEC-032, DEC-033).
     pub fn spend_private_note(
         &mut self,
         note_root: FixedBytes<32>,
         leaf_count: U256,
         input_nullifier: FixedBytes<32>,
+        note_epoch_id: U256,
         output_commitment: FixedBytes<32>,
         recipient: Address,
         merchant_amount: U256,
@@ -568,6 +594,7 @@ impl Nimbus {
         quote_hash: FixedBytes<32>,
         expiry: U256,
         has_change: U256,
+        is_rollover: U256,
         proof_a_neg: Bytes,
         proof_b: Bytes,
         proof_c: Bytes,
@@ -576,6 +603,7 @@ impl Nimbus {
             note_root,
             leaf_count,
             input_nullifier,
+            note_epoch_id,
             output_commitment,
             recipient,
             merchant_amount,
@@ -585,10 +613,49 @@ impl Nimbus {
             quote_hash,
             expiry,
             has_change,
+            is_rollover,
             proof_a_neg,
             proof_b,
             proof_c,
         )
+    }
+
+    /// Returns the current active epoch ID (DEC-033).
+    pub fn get_current_epoch(&self) -> Result<u32, Vec<u8>> {
+        Ok(self.current_epoch.get().to::<u32>())
+    }
+
+    /// Returns the timestamp when the current epoch started (DEC-033).
+    pub fn epoch_start_timestamp(&self) -> Result<u64, Vec<u8>> {
+        Ok(self.epoch_start_timestamp.get().to::<u64>())
+    }
+
+    /// Rotates the generational epoch window (DEC-033).
+    /// Advances current_epoch by 1, updates recycle_slot = (current_epoch + 1) % 2,
+    /// and logs EpochRotated.
+    pub fn rotate_epoch(&mut self) -> Result<u32, Vec<u8>> {
+        self.check_not_paused()?;
+        self.check_owner()?;
+
+        let old_epoch = self.current_epoch.get().to::<u32>();
+        let new_epoch = old_epoch
+            .checked_add(1)
+            .ok_or_else(|| b"EPOCH_OVERFLOW".to_vec())?;
+        let recycle_slot = (new_epoch % 2) as u64;
+
+        self.current_epoch.set(U256::from(new_epoch));
+        let now = self.block_timestamp();
+        self.epoch_start_timestamp.set(U256::from(now));
+        self.generation_epoch_id
+            .setter(U256::from(recycle_slot))
+            .set(U256::from(new_epoch));
+
+        crate::events::emit_event(crate::events::EpochRotated {
+            new_epoch,
+            timestamp: now,
+        });
+
+        Ok(new_epoch)
     }
 
     pub fn batch_spend(
@@ -3228,6 +3295,7 @@ mod tests {
             initial_root,
             U256::from(1),
             nullifier,
+            U256::ZERO,
             change_cm,
             merchant,
             U256::from(5_000_000), // 5 USDC
@@ -3237,6 +3305,7 @@ mod tests {
             quote_hash,
             U256::from(2000), // expiry
             U256::from(1),    // has_change = 1
+            U256::ZERO,       // is_rollover = 0
             proof_a,
             proof_b,
             proof_c,
@@ -3285,6 +3354,7 @@ mod tests {
                 initial_root,
                 U256::from(1),
                 nullifier,
+                U256::ZERO,
                 change_cm,
                 merchant,
                 U256::from(5_000_000),
@@ -3294,6 +3364,7 @@ mod tests {
                 FixedBytes::ZERO,
                 U256::from(2000),
                 U256::from(1),
+                U256::ZERO,
                 vec![0x11; 128].into(),
                 vec![0x22; 256].into(),
                 vec![0x33; 128].into(),
@@ -3305,6 +3376,7 @@ mod tests {
             initial_root,
             U256::from(1),
             nullifier,
+            U256::ZERO,
             change_cm,
             merchant,
             U256::from(5_000_000),
@@ -3314,6 +3386,7 @@ mod tests {
             FixedBytes::ZERO,
             U256::from(2000),
             U256::from(1),
+            U256::ZERO,
             vec![0x11; 128].into(),
             vec![0x22; 256].into(),
             vec![0x33; 128].into(),
@@ -3336,6 +3409,7 @@ mod tests {
             fake_root,
             U256::from(1),
             nullifier,
+            U256::ZERO,
             FixedBytes::ZERO,
             Address::ZERO,
             U256::from(1_000_000),
@@ -3343,6 +3417,7 @@ mod tests {
             U256::ZERO,
             U256::ZERO,
             FixedBytes::ZERO,
+            U256::ZERO,
             U256::ZERO,
             U256::ZERO,
             vec![0x11; 128].into(),
@@ -3369,6 +3444,7 @@ mod tests {
             root,
             U256::from(1),
             FixedBytes::ZERO,
+            U256::ZERO,
             FixedBytes::ZERO,
             Address::ZERO,
             U256::from(1_000_000),
@@ -3377,6 +3453,7 @@ mod tests {
             U256::ZERO,
             FixedBytes::ZERO,
             U256::from(4999), // expired
+            U256::ZERO,
             U256::ZERO,
             vec![0x11; 128].into(),
             vec![0x22; 256].into(),
@@ -3401,6 +3478,7 @@ mod tests {
             root,
             U256::from(1),
             FixedBytes::ZERO,
+            U256::ZERO,
             FixedBytes::ZERO,
             Address::ZERO,
             U256::from(1_000_000),
@@ -3408,6 +3486,7 @@ mod tests {
             U256::from(30_000), // actual fee
             U256::from(25_000), // max fee
             FixedBytes::ZERO,
+            U256::ZERO,
             U256::ZERO,
             U256::ZERO,
             vec![0x11; 128].into(),
@@ -3435,6 +3514,7 @@ mod tests {
             root,
             U256::from(1),
             FixedBytes::ZERO,
+            U256::ZERO,
             non_zero_commitment,
             Address::ZERO,
             U256::from(1_000_000),
@@ -3444,6 +3524,7 @@ mod tests {
             FixedBytes::ZERO,
             U256::ZERO,
             U256::ZERO, // has_change = 0 but non_zero_commitment
+            U256::ZERO,
             vec![0x11; 128].into(),
             vec![0x22; 256].into(),
             vec![0x33; 128].into(),
@@ -3468,6 +3549,7 @@ mod tests {
             root,
             U256::from(1),
             FixedBytes::ZERO,
+            U256::ZERO,
             FixedBytes::ZERO,
             Address::ZERO,
             U256::from(5_000_000), // requires 5 USDC
@@ -3475,6 +3557,7 @@ mod tests {
             U256::ZERO,
             U256::ZERO,
             FixedBytes::ZERO,
+            U256::ZERO,
             U256::ZERO,
             U256::ZERO,
             vec![0x11; 128].into(),
@@ -3504,6 +3587,7 @@ mod tests {
             root,
             U256::from(1),
             FixedBytes::ZERO,
+            U256::ZERO,
             FixedBytes::ZERO,
             Address::ZERO,
             U256::from(1_000_000),
@@ -3511,6 +3595,7 @@ mod tests {
             U256::ZERO,
             U256::ZERO,
             FixedBytes::ZERO,
+            U256::ZERO,
             U256::ZERO,
             U256::ZERO,
             vec![0x11; 128].into(),
@@ -3538,6 +3623,7 @@ mod tests {
             root,
             U256::ZERO, // leaf_count == 0 (illegal in DEC-032)
             FixedBytes::ZERO,
+            U256::ZERO,
             FixedBytes::ZERO,
             Address::ZERO,
             U256::from(1_000_000),
@@ -3545,6 +3631,7 @@ mod tests {
             U256::ZERO,
             U256::ZERO,
             FixedBytes::ZERO,
+            U256::ZERO,
             U256::ZERO,
             U256::ZERO,
             vec![0x11; 128].into(),
@@ -3576,6 +3663,7 @@ mod tests {
             fake_root,
             U256::from(999), // tampered leaf count
             FixedBytes::ZERO,
+            U256::ZERO,
             FixedBytes::ZERO,
             Address::ZERO,
             U256::from(1_000_000),
@@ -3583,6 +3671,7 @@ mod tests {
             U256::ZERO,
             U256::ZERO,
             FixedBytes::ZERO,
+            U256::ZERO,
             U256::ZERO,
             U256::ZERO,
             vec![0x11; 128].into(),
@@ -3603,5 +3692,487 @@ mod tests {
         let result = contract._mmr_insert(non_canonical_leaf);
 
         assert_eq!(result, Err(b"INVALID_LEAF_SCALAR".to_vec()));
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // DEC-033: Generational Epoch Window & Rollover Tests (Positive & Negative)
+    // ═══════════════════════════════════════════════════════════════════════
+
+    #[test]
+    fn test_epoch_normal_spend_in_same_epoch() {
+        reset_test_state();
+        let owner = address!("1111111111111111111111111111111111111111");
+        let merchant = address!("2222222222222222222222222222222222222222");
+        set_msg_sender(owner);
+        set_block_timestamp(1000);
+
+        let mut contract = Nimbus::default();
+        contract.init(owner, Address::ZERO, Address::ZERO).unwrap();
+
+        assert_eq!(contract.get_current_epoch().unwrap(), 0);
+
+        let root =
+            FixedBytes::<32>::from_slice(&crate::poseidon_w5_constants::EMPTY_TREE_ROOT_BYTES);
+        contract.accepted_note_roots.insert(root, U256::from(1000));
+        contract.user_note_liability.set(U256::from(50_000_000));
+
+        let nullifier = FixedBytes::<32>::from_slice(&[0x1a; 32]);
+        let change_cm = FixedBytes::<32>::from_slice(&[0x1b; 32]);
+
+        // Spend in epoch 0 with note_epoch_id = 0
+        let res = contract.spend_private_note(
+            root,
+            U256::from(1),
+            nullifier,
+            U256::ZERO, // note_epoch_id = 0
+            change_cm,
+            merchant,
+            U256::from(5_000_000),
+            U256::from(22_500),
+            U256::from(23_000),
+            U256::from(25_000),
+            FixedBytes::ZERO,
+            U256::from(2000),
+            U256::from(1),
+            U256::ZERO, // is_rollover = 0
+            vec![0x11; 128].into(),
+            vec![0x22; 256].into(),
+            vec![0x33; 128].into(),
+        );
+
+        assert_eq!(res, Ok(true));
+        assert!(contract
+            .is_generational_nullifier_spent(0, nullifier)
+            .unwrap());
+    }
+
+    #[test]
+    fn test_epoch_grace_window_spend_epoch_minus_one() {
+        reset_test_state();
+        let owner = address!("1111111111111111111111111111111111111111");
+        let merchant = address!("2222222222222222222222222222222222222222");
+        set_msg_sender(owner);
+        set_block_timestamp(1000);
+
+        let mut contract = Nimbus::default();
+        contract.init(owner, Address::ZERO, Address::ZERO).unwrap();
+
+        // Advance to epoch 1
+        set_block_timestamp(2000);
+        let new_epoch = contract.rotate_epoch().unwrap();
+        assert_eq!(new_epoch, 1);
+        assert_eq!(contract.get_current_epoch().unwrap(), 1);
+
+        let root =
+            FixedBytes::<32>::from_slice(&crate::poseidon_w5_constants::EMPTY_TREE_ROOT_BYTES);
+        contract.accepted_note_roots.insert(root, U256::from(1000));
+        contract.user_note_liability.set(U256::from(50_000_000));
+
+        let nullifier = FixedBytes::<32>::from_slice(&[0x2a; 32]);
+        let change_cm = FixedBytes::<32>::from_slice(&[0x2b; 32]);
+
+        // Spend in epoch 1 with note from epoch 0 (E - 1 grace window)
+        let res = contract.spend_private_note(
+            root,
+            U256::from(1),
+            nullifier,
+            U256::ZERO, // note_epoch_id = 0 (E-1)
+            change_cm,
+            merchant,
+            U256::from(5_000_000),
+            U256::from(22_500),
+            U256::from(23_000),
+            U256::from(25_000),
+            FixedBytes::ZERO,
+            U256::from(5000),
+            U256::from(1),
+            U256::ZERO,
+            vec![0x11; 128].into(),
+            vec![0x22; 256].into(),
+            vec![0x33; 128].into(),
+        );
+
+        assert_eq!(res, Ok(true));
+        assert!(contract
+            .is_generational_nullifier_spent(0, nullifier)
+            .unwrap());
+        assert_eq!(contract.mmr_leaf_count.get(), U256::from(1));
+    }
+
+    #[test]
+    fn test_epoch_standalone_refresh_execution() {
+        reset_test_state();
+        let owner = address!("1111111111111111111111111111111111111111");
+        set_msg_sender(owner);
+        set_block_timestamp(1000);
+
+        let mut contract = Nimbus::default();
+        contract.init(owner, Address::ZERO, Address::ZERO).unwrap();
+
+        let root =
+            FixedBytes::<32>::from_slice(&crate::poseidon_w5_constants::EMPTY_TREE_ROOT_BYTES);
+        contract.accepted_note_roots.insert(root, U256::from(1000));
+        contract.user_note_liability.set(U256::from(50_000_000));
+
+        let nullifier = FixedBytes::<32>::from_slice(&[0x3a; 32]);
+        let renewed_cm = FixedBytes::<32>::from_slice(&[0x3b; 32]);
+
+        // Standalone refresh: is_rollover = 1, merchant = 0, pfee = 0, has_change = 1
+        let res = contract.spend_private_note(
+            root,
+            U256::from(1),
+            nullifier,
+            U256::ZERO, // note_epoch_id = 0
+            renewed_cm,
+            Address::ZERO,
+            U256::ZERO,         // merchant_amount = 0
+            U256::ZERO,         // protocol_fee = 0
+            U256::from(21_275), // execution fee with 15% markup
+            U256::from(25_000),
+            FixedBytes::ZERO,
+            U256::from(2000),
+            U256::from(1), // has_change = 1
+            U256::from(1), // is_rollover = 1
+            vec![0x11; 128].into(),
+            vec![0x22; 256].into(),
+            vec![0x33; 128].into(),
+        );
+
+        assert_eq!(res, Ok(true));
+        assert!(contract
+            .is_generational_nullifier_spent(0, nullifier)
+            .unwrap());
+        assert_eq!(
+            contract.accumulated_execution_fees.get(),
+            U256::from(21_275)
+        );
+    }
+
+    #[test]
+    fn test_epoch_expired_note_direct_spend_rejected() {
+        reset_test_state();
+        let owner = address!("1111111111111111111111111111111111111111");
+        set_msg_sender(owner);
+        set_block_timestamp(1000);
+
+        let mut contract = Nimbus::default();
+        contract.init(owner, Address::ZERO, Address::ZERO).unwrap();
+
+        // Advance epoch twice: 0 -> 1 -> 2 (active window is 2 and 1, epoch 0 is expired)
+        contract.rotate_epoch().unwrap();
+        contract.rotate_epoch().unwrap();
+        assert_eq!(contract.get_current_epoch().unwrap(), 2);
+
+        let root =
+            FixedBytes::<32>::from_slice(&crate::poseidon_w5_constants::EMPTY_TREE_ROOT_BYTES);
+        contract.accepted_note_roots.insert(root, U256::from(1000));
+        contract.user_note_liability.set(U256::from(50_000_000));
+
+        let nullifier = FixedBytes::<32>::from_slice(&[0xe1; 32]);
+
+        // Attempting to spend note from epoch 0 (E - 2) MUST revert EPOCH_EXPIRED_REQUIRE_ROLLOVER
+        let res = contract.spend_private_note(
+            root,
+            U256::from(1),
+            nullifier,
+            U256::ZERO, // note_epoch_id = 0 (< current_epoch - 1)
+            FixedBytes::ZERO,
+            Address::ZERO,
+            U256::from(1_000_000),
+            U256::ZERO,
+            U256::from(10_000),
+            U256::from(20_000),
+            FixedBytes::ZERO,
+            U256::ZERO,
+            U256::ZERO,
+            U256::ZERO,
+            vec![0x11; 128].into(),
+            vec![0x22; 256].into(),
+            vec![0x33; 128].into(),
+        );
+
+        assert_eq!(res, Err(b"EPOCH_EXPIRED_REQUIRE_ROLLOVER".to_vec()));
+    }
+
+    #[test]
+    fn test_epoch_in_future_rejected() {
+        reset_test_state();
+        let owner = address!("1111111111111111111111111111111111111111");
+        set_msg_sender(owner);
+        set_block_timestamp(1000);
+
+        let mut contract = Nimbus::default();
+        contract.init(owner, Address::ZERO, Address::ZERO).unwrap();
+
+        let root =
+            FixedBytes::<32>::from_slice(&crate::poseidon_w5_constants::EMPTY_TREE_ROOT_BYTES);
+        contract.accepted_note_roots.insert(root, U256::from(1000));
+        contract.user_note_liability.set(U256::from(50_000_000));
+
+        // Note epoch 5 when current_epoch is 0
+        let res = contract.spend_private_note(
+            root,
+            U256::from(1),
+            FixedBytes::<32>::repeat_byte(0x12),
+            U256::from(5), // Future epoch
+            FixedBytes::ZERO,
+            Address::ZERO,
+            U256::from(1_000_000),
+            U256::ZERO,
+            U256::from(10_000),
+            U256::from(20_000),
+            FixedBytes::ZERO,
+            U256::ZERO,
+            U256::ZERO,
+            U256::ZERO,
+            vec![0x11; 128].into(),
+            vec![0x22; 256].into(),
+            vec![0x33; 128].into(),
+        );
+
+        assert_eq!(res, Err(b"EPOCH_IN_FUTURE".to_vec()));
+    }
+
+    #[test]
+    fn test_epoch_slot_desynchronized_rejected() {
+        reset_test_state();
+        let owner = address!("1111111111111111111111111111111111111111");
+        set_msg_sender(owner);
+        set_block_timestamp(1000);
+
+        let mut contract = Nimbus::default();
+        contract.init(owner, Address::ZERO, Address::ZERO).unwrap();
+
+        let root =
+            FixedBytes::<32>::from_slice(&crate::poseidon_w5_constants::EMPTY_TREE_ROOT_BYTES);
+        contract.accepted_note_roots.insert(root, U256::from(1000));
+        contract.user_note_liability.set(U256::from(50_000_000));
+
+        // Corrupt slot 0 epoch id to 999
+        contract
+            .generation_epoch_id
+            .setter(U256::ZERO)
+            .set(U256::from(999));
+
+        let res = contract.spend_private_note(
+            root,
+            U256::from(1),
+            FixedBytes::<32>::repeat_byte(0x12),
+            U256::ZERO,
+            FixedBytes::ZERO,
+            Address::ZERO,
+            U256::from(1_000_000),
+            U256::ZERO,
+            U256::from(10_000),
+            U256::from(20_000),
+            FixedBytes::ZERO,
+            U256::ZERO,
+            U256::ZERO,
+            U256::ZERO,
+            vec![0x11; 128].into(),
+            vec![0x22; 256].into(),
+            vec![0x33; 128].into(),
+        );
+
+        assert_eq!(res, Err(b"EPOCH_SLOT_DESYNCHRONIZED".to_vec()));
+    }
+
+    #[test]
+    fn test_epoch_rollover_with_nonzero_merchant_rejected() {
+        reset_test_state();
+        let owner = address!("1111111111111111111111111111111111111111");
+        let merchant = address!("2222222222222222222222222222222222222222");
+        set_msg_sender(owner);
+        set_block_timestamp(1000);
+
+        let mut contract = Nimbus::default();
+        contract.init(owner, Address::ZERO, Address::ZERO).unwrap();
+
+        let root =
+            FixedBytes::<32>::from_slice(&crate::poseidon_w5_constants::EMPTY_TREE_ROOT_BYTES);
+        contract.accepted_note_roots.insert(root, U256::from(1000));
+
+        // is_rollover = 1 with merchant > 0 MUST fail
+        let res = contract.spend_private_note(
+            root,
+            U256::from(1),
+            FixedBytes::<32>::repeat_byte(0x33),
+            U256::ZERO,
+            FixedBytes::<32>::repeat_byte(0x44),
+            merchant,
+            U256::from(5_000_000), // Non-zero merchant
+            U256::ZERO,
+            U256::from(10_000),
+            U256::from(20_000),
+            FixedBytes::ZERO,
+            U256::ZERO,
+            U256::from(1),
+            U256::from(1), // is_rollover = 1
+            vec![0x11; 128].into(),
+            vec![0x22; 256].into(),
+            vec![0x33; 128].into(),
+        );
+
+        assert_eq!(
+            res,
+            Err(b"MERCHANT_AMOUNT_MUST_BE_ZERO_IN_ROLLOVER".to_vec())
+        );
+    }
+
+    #[test]
+    fn test_epoch_rollover_with_nonzero_protocol_fee_rejected() {
+        reset_test_state();
+        let owner = address!("1111111111111111111111111111111111111111");
+        set_msg_sender(owner);
+        set_block_timestamp(1000);
+
+        let mut contract = Nimbus::default();
+        contract.init(owner, Address::ZERO, Address::ZERO).unwrap();
+
+        let root =
+            FixedBytes::<32>::from_slice(&crate::poseidon_w5_constants::EMPTY_TREE_ROOT_BYTES);
+        contract.accepted_note_roots.insert(root, U256::from(1000));
+
+        // is_rollover = 1 with protocol_fee > 0 MUST fail
+        let res = contract.spend_private_note(
+            root,
+            U256::from(1),
+            FixedBytes::<32>::repeat_byte(0x33),
+            U256::ZERO,
+            FixedBytes::<32>::repeat_byte(0x44),
+            Address::ZERO,
+            U256::ZERO,
+            U256::from(22_500), // Non-zero protocol fee
+            U256::from(10_000),
+            U256::from(20_000),
+            FixedBytes::ZERO,
+            U256::ZERO,
+            U256::from(1),
+            U256::from(1), // is_rollover = 1
+            vec![0x11; 128].into(),
+            vec![0x22; 256].into(),
+            vec![0x33; 128].into(),
+        );
+
+        assert_eq!(res, Err(b"PROTOCOL_FEE_MUST_BE_ZERO_IN_ROLLOVER".to_vec()));
+    }
+
+    #[test]
+    fn test_epoch_rollover_without_change_note_rejected() {
+        reset_test_state();
+        let owner = address!("1111111111111111111111111111111111111111");
+        set_msg_sender(owner);
+        set_block_timestamp(1000);
+
+        let mut contract = Nimbus::default();
+        contract.init(owner, Address::ZERO, Address::ZERO).unwrap();
+
+        let root =
+            FixedBytes::<32>::from_slice(&crate::poseidon_w5_constants::EMPTY_TREE_ROOT_BYTES);
+        contract.accepted_note_roots.insert(root, U256::from(1000));
+
+        // is_rollover = 1 with has_change = 0 MUST fail
+        let res = contract.spend_private_note(
+            root,
+            U256::from(1),
+            FixedBytes::<32>::repeat_byte(0x33),
+            U256::ZERO,
+            FixedBytes::ZERO,
+            Address::ZERO,
+            U256::ZERO,
+            U256::ZERO,
+            U256::from(10_000),
+            U256::from(20_000),
+            FixedBytes::ZERO,
+            U256::ZERO,
+            U256::ZERO,    // has_change = 0
+            U256::from(1), // is_rollover = 1
+            vec![0x11; 128].into(),
+            vec![0x22; 256].into(),
+            vec![0x33; 128].into(),
+        );
+
+        assert_eq!(res, Err(b"ROLLOVER_MUST_HAVE_CHANGE".to_vec()));
+    }
+
+    #[test]
+    fn test_epoch_rotation_non_owner_rejected() {
+        reset_test_state();
+        let owner = address!("1111111111111111111111111111111111111111");
+        let non_owner = address!("9999999999999999999999999999999999999999");
+        set_msg_sender(owner);
+
+        let mut contract = Nimbus::default();
+        contract.init(owner, Address::ZERO, Address::ZERO).unwrap();
+
+        set_msg_sender(non_owner);
+        let res = contract.rotate_epoch();
+        assert_eq!(res, Err(b"NOT_OWNER".to_vec()));
+    }
+
+    #[test]
+    fn test_epoch_generational_nullifier_double_spend_rejected() {
+        reset_test_state();
+        let owner = address!("1111111111111111111111111111111111111111");
+        let merchant = address!("2222222222222222222222222222222222222222");
+        set_msg_sender(owner);
+        set_block_timestamp(1000);
+
+        let mut contract = Nimbus::default();
+        contract.init(owner, Address::ZERO, Address::ZERO).unwrap();
+
+        let root =
+            FixedBytes::<32>::from_slice(&crate::poseidon_w5_constants::EMPTY_TREE_ROOT_BYTES);
+        contract.accepted_note_roots.insert(root, U256::from(1000));
+        contract.user_note_liability.set(U256::from(100_000_000));
+
+        let nullifier = FixedBytes::<32>::from_slice(&[0x4a; 32]);
+        let change_cm = FixedBytes::<32>::from_slice(&[0x4b; 32]);
+
+        // Spend succeeds
+        contract
+            .spend_private_note(
+                root,
+                U256::from(1),
+                nullifier,
+                U256::ZERO,
+                change_cm,
+                merchant,
+                U256::from(5_000_000),
+                U256::from(22_500),
+                U256::from(23_000),
+                U256::from(25_000),
+                FixedBytes::ZERO,
+                U256::from(2000),
+                U256::from(1),
+                U256::ZERO,
+                vec![0x11; 128].into(),
+                vec![0x22; 256].into(),
+                vec![0x33; 128].into(),
+            )
+            .unwrap();
+
+        // Attempt second spend in the same epoch with same nullifier
+        let res = contract.spend_private_note(
+            root,
+            U256::from(1),
+            nullifier,
+            U256::ZERO,
+            change_cm,
+            merchant,
+            U256::from(5_000_000),
+            U256::from(22_500),
+            U256::from(23_000),
+            U256::from(25_000),
+            FixedBytes::ZERO,
+            U256::from(2000),
+            U256::from(1),
+            U256::ZERO,
+            vec![0x11; 128].into(),
+            vec![0x22; 256].into(),
+            vec![0x33; 128].into(),
+        );
+
+        assert_eq!(res, Err(b"NOTE_ALREADY_SPENT".to_vec()));
     }
 }

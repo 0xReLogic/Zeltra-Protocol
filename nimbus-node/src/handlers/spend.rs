@@ -419,7 +419,8 @@ pub async fn handle_private_note_spend(
     }
 
     // 3. Amount and fee invariant checks
-    if payload.merchant_amount == 0 {
+    let is_rollover_req = payload.is_rollover == Some(1);
+    if payload.merchant_amount == 0 && !is_rollover_req {
         return Json(PrivateNoteSpendResponse {
             status: "REJECTED".to_string(),
             message: "merchant_amount must be greater than zero".to_string(),
@@ -589,14 +590,14 @@ pub async fn handle_private_note_spend(
         }
     }
 
-    // 8. Public inputs canonical scalar check, semantic binding & target domain verification (DEC-022, DEC-025, DEC-032)
-    // DEC-032: public_inputs is strictly required to have exactly 13 scalars (leaf_count added at index 1).
+    // 8. Public inputs canonical scalar check, semantic binding & target domain verification (DEC-022, DEC-025, DEC-032, DEC-033)
+    // DEC-033: public_inputs is strictly required to have exactly 15 scalars (note_epoch_id at index 3, is_rollover at index 14).
     // Empty or omitted inputs are rejected fail-closed to prevent preflight bypass.
-    if payload.public_inputs.len() != 13 {
+    if payload.public_inputs.len() != 15 {
         return Json(PrivateNoteSpendResponse {
             status: "REJECTED".to_string(),
             message: format!(
-                "Expected 13 public inputs for PrivateNoteCircuit, got {}",
+                "Expected 15 public inputs for PrivateNoteCircuit, got {}",
                 payload.public_inputs.len()
             ),
             queue_position: 0,
@@ -604,7 +605,7 @@ pub async fn handle_private_note_spend(
         });
     }
 
-    let mut parsed_inputs = Vec::with_capacity(13);
+    let mut parsed_inputs = Vec::with_capacity(15);
     for (idx, pi_hex) in payload.public_inputs.iter().enumerate() {
         let bytes = match hex::decode(pi_hex.trim_start_matches("0x")) {
             Ok(b) if b.len() == 32 => b,
@@ -632,7 +633,7 @@ pub async fn handle_private_note_spend(
         parsed_inputs.push(fixed);
     }
 
-    // Semantic public input binding (DEC-022 & DEC-032 boundary gap defense)
+    // Semantic public input binding (DEC-022, DEC-032, DEC-033)
     // Index 0: note_root
     if parsed_inputs[0] != note_root_bytes[..] {
         return Json(PrivateNoteSpendResponse {
@@ -674,7 +675,20 @@ pub async fn handle_private_note_spend(
         });
     }
 
-    // Index 3: output_commitment
+    // Index 3: note_epoch_id (DEC-033)
+    let note_epoch_id = U256::from_be_bytes(parsed_inputs[3]).to::<u32>();
+    if let Some(expected_epoch) = payload.note_epoch_id {
+        if note_epoch_id != expected_epoch {
+            return Json(PrivateNoteSpendResponse {
+                status: "REJECTED".to_string(),
+                message: "public_inputs[3] does not match note_epoch_id".to_string(),
+                queue_position: 0,
+                estimated_gas_usdc: None,
+            });
+        }
+    }
+
+    // Index 4: output_commitment
     let mut expected_comm = [0u8; 32];
     if let Some(ref comm) = payload.output_commitment {
         if let Ok(b) = hex::decode(comm.trim_start_matches("0x")) {
@@ -683,61 +697,61 @@ pub async fn handle_private_note_spend(
             }
         }
     }
-    if parsed_inputs[3] != expected_comm {
+    if parsed_inputs[4] != expected_comm {
         return Json(PrivateNoteSpendResponse {
             status: "REJECTED".to_string(),
-            message: "public_inputs[3] does not match output_commitment".to_string(),
+            message: "public_inputs[4] does not match output_commitment".to_string(),
             queue_position: 0,
             estimated_gas_usdc: None,
         });
     }
 
-    // Index 4: recipient address
+    // Index 5: recipient address
     let mut expected_recipient = [0u8; 32];
     expected_recipient[12..].copy_from_slice(recipient_addr.as_slice());
-    if parsed_inputs[4] != expected_recipient {
+    if parsed_inputs[5] != expected_recipient {
         return Json(PrivateNoteSpendResponse {
             status: "REJECTED".to_string(),
-            message: "public_inputs[4] does not match recipient address".to_string(),
+            message: "public_inputs[5] does not match recipient address".to_string(),
             queue_position: 0,
             estimated_gas_usdc: None,
         });
     }
 
-    // Index 5: merchant_amount
+    // Index 6: merchant_amount
     let expected_merchant = U256::from(payload.merchant_amount).to_be_bytes::<32>();
-    if parsed_inputs[5] != expected_merchant {
+    if parsed_inputs[6] != expected_merchant {
         return Json(PrivateNoteSpendResponse {
             status: "REJECTED".to_string(),
-            message: "public_inputs[5] does not match merchant_amount".to_string(),
+            message: "public_inputs[6] does not match merchant_amount".to_string(),
             queue_position: 0,
             estimated_gas_usdc: None,
         });
     }
 
-    // Index 6: protocol_fee
+    // Index 7: protocol_fee
     let expected_proto = U256::from(payload.protocol_fee).to_be_bytes::<32>();
-    if parsed_inputs[6] != expected_proto {
+    if parsed_inputs[7] != expected_proto {
         return Json(PrivateNoteSpendResponse {
             status: "REJECTED".to_string(),
-            message: "public_inputs[6] does not match protocol_fee".to_string(),
+            message: "public_inputs[7] does not match protocol_fee".to_string(),
             queue_position: 0,
             estimated_gas_usdc: None,
         });
     }
 
-    // Index 7: execution_fee
+    // Index 8: execution_fee
     let expected_exec = U256::from(payload.execution_fee).to_be_bytes::<32>();
-    if parsed_inputs[7] != expected_exec {
+    if parsed_inputs[8] != expected_exec {
         return Json(PrivateNoteSpendResponse {
             status: "REJECTED".to_string(),
-            message: "public_inputs[7] does not match execution_fee".to_string(),
+            message: "public_inputs[8] does not match execution_fee".to_string(),
             queue_position: 0,
             estimated_gas_usdc: None,
         });
     }
 
-    // Index 8: quote_hash
+    // Index 9: quote_hash
     let mut expected_qh = [0u8; 32];
     if let Some(ref qh) = payload.quote_hash {
         if let Ok(b) = hex::decode(qh.trim_start_matches("0x")) {
@@ -746,16 +760,16 @@ pub async fn handle_private_note_spend(
             }
         }
     }
-    if parsed_inputs[8] != expected_qh {
+    if parsed_inputs[9] != expected_qh {
         return Json(PrivateNoteSpendResponse {
             status: "REJECTED".to_string(),
-            message: "public_inputs[8] does not match quote_hash".to_string(),
+            message: "public_inputs[9] does not match quote_hash".to_string(),
             queue_position: 0,
             estimated_gas_usdc: None,
         });
     }
 
-    // Strict target domain verification for chain_id (index 9) and contract_address (index 10)
+    // Strict target domain verification for chain_id (index 10) and contract_address (index 11)
     let (expected_chain_bytes, expected_contract_bytes_opt) =
         if let Some(client) = state.evm_client.as_ref() {
             let target_chain_id = match client.chain_id().await {
@@ -786,48 +800,146 @@ pub async fn handle_private_note_spend(
             (U256::from(chain_id).to_be_bytes::<32>(), contract_opt)
         };
 
-    // Index 9: chain_id
-    if parsed_inputs[9] != expected_chain_bytes {
+    // Index 10: chain_id
+    if parsed_inputs[10] != expected_chain_bytes {
         return Json(PrivateNoteSpendResponse {
             status: "REJECTED".to_string(),
-            message: "public_inputs[9] does not match target chain_id".to_string(),
+            message: "public_inputs[10] does not match target chain_id".to_string(),
             queue_position: 0,
             estimated_gas_usdc: None,
         });
     }
 
-    // Index 10: contract_address
+    // Index 11: contract_address
     if let Some(expected_contract) = expected_contract_bytes_opt {
-        if parsed_inputs[10] != expected_contract {
+        if parsed_inputs[11] != expected_contract {
             return Json(PrivateNoteSpendResponse {
                 status: "REJECTED".to_string(),
-                message: "public_inputs[10] does not match target contract_address".to_string(),
+                message: "public_inputs[11] does not match target contract_address".to_string(),
                 queue_position: 0,
                 estimated_gas_usdc: None,
             });
         }
     }
 
-    // Index 11: expiry
+    // Index 12: expiry
     let expected_exp = U256::from(payload.expiry.unwrap_or(0)).to_be_bytes::<32>();
-    if parsed_inputs[11] != expected_exp {
+    if parsed_inputs[12] != expected_exp {
         return Json(PrivateNoteSpendResponse {
             status: "REJECTED".to_string(),
-            message: "public_inputs[11] does not match expiry".to_string(),
+            message: "public_inputs[12] does not match expiry".to_string(),
             queue_position: 0,
             estimated_gas_usdc: None,
         });
     }
 
-    // Index 12: has_change flag
+    // Index 13: has_change flag
     let expected_hc = U256::from(has_change_u64).to_be_bytes::<32>();
-    if parsed_inputs[12] != expected_hc {
+    if parsed_inputs[13] != expected_hc {
         return Json(PrivateNoteSpendResponse {
             status: "REJECTED".to_string(),
-            message: "public_inputs[12] does not match has_change flag".to_string(),
+            message: "public_inputs[13] does not match has_change flag".to_string(),
             queue_position: 0,
             estimated_gas_usdc: None,
         });
+    }
+
+    // Index 14: is_rollover flag (DEC-033)
+    let is_rollover_u64 = U256::from_be_bytes(parsed_inputs[14]).to::<u64>();
+    if is_rollover_u64 != 0 && is_rollover_u64 != 1 {
+        return Json(PrivateNoteSpendResponse {
+            status: "REJECTED".to_string(),
+            message: "public_inputs[14] (is_rollover) must be 0 or 1".to_string(),
+            queue_position: 0,
+            estimated_gas_usdc: None,
+        });
+    }
+    if let Some(expected_ro) = payload.is_rollover {
+        if is_rollover_u64 != expected_ro {
+            return Json(PrivateNoteSpendResponse {
+                status: "REJECTED".to_string(),
+                message: "public_inputs[14] does not match is_rollover flag".to_string(),
+                queue_position: 0,
+                estimated_gas_usdc: None,
+            });
+        }
+    }
+
+    // Pre-flight check: On-chain Epoch Active Window validation (DEC-033)
+    let current_epoch = if let Some(client) = state.evm_client.as_ref() {
+        client.get_current_epoch().await.unwrap_or(0)
+    } else {
+        std::env::var("NIMBUS_CURRENT_EPOCH")
+            .ok()
+            .and_then(|s| s.parse::<u32>().ok())
+            .unwrap_or(0)
+    };
+
+    if note_epoch_id > current_epoch {
+        return Json(PrivateNoteSpendResponse {
+            status: "REJECTED".to_string(),
+            message: "EPOCH_IN_FUTURE: note_epoch_id is in the future".to_string(),
+            queue_position: 0,
+            estimated_gas_usdc: None,
+        });
+    }
+
+    if note_epoch_id < current_epoch.saturating_sub(1) {
+        return Json(PrivateNoteSpendResponse {
+            status: "REJECTED".to_string(),
+            message:
+                "EPOCH_EXPIRED_REQUIRE_ROLLOVER: note_epoch_id is older than active window (E-1)"
+                    .to_string(),
+            queue_position: 0,
+            estimated_gas_usdc: None,
+        });
+    }
+
+    // Pre-flight check: Rollover constraints & Dust Elimination (DEC-033)
+    if is_rollover_u64 == 1 {
+        if payload.merchant_amount != 0 {
+            return Json(PrivateNoteSpendResponse {
+                status: "REJECTED".to_string(),
+                message: "merchant_amount must be 0 for standalone rollover".to_string(),
+                queue_position: 0,
+                estimated_gas_usdc: None,
+            });
+        }
+        if payload.protocol_fee != 0 {
+            return Json(PrivateNoteSpendResponse {
+                status: "REJECTED".to_string(),
+                message: "protocol_fee must be 0 for standalone rollover".to_string(),
+                queue_position: 0,
+                estimated_gas_usdc: None,
+            });
+        }
+        if has_change_u64 != 1 {
+            return Json(PrivateNoteSpendResponse {
+                status: "REJECTED".to_string(),
+                message: "has_change must be 1 for standalone rollover (refreshed note)"
+                    .to_string(),
+                queue_position: 0,
+                estimated_gas_usdc: None,
+            });
+        }
+        if let Some(input_val) = payload.input_value {
+            if input_val < nimbus_core::fees::MIN_STANDALONE_ROLLOVER_THRESHOLD_USDC {
+                return Json(PrivateNoteSpendResponse {
+                    status: "REJECTED".to_string(),
+                    message: "DUST_NOTE_ROLLOVER_REJECTED: Note value is below $2.00 USDC minimum threshold".to_string(),
+                    queue_position: 0,
+                    estimated_gas_usdc: None,
+                });
+            }
+            if input_val < payload.execution_fee {
+                return Json(PrivateNoteSpendResponse {
+                    status: "REJECTED".to_string(),
+                    message: "Note value insufficient to pay relayer execution fee".to_string(),
+                    queue_position: 0,
+                    estimated_gas_usdc: None,
+                });
+            }
+        }
     }
 
     // 8.5. Local Groth16 Proof Preflight Verification (DEC-026 Mitigasi C-01)
@@ -852,8 +964,8 @@ pub async fn handle_private_note_spend(
         }
     }
 
-    let mut fr_public_inputs = [nimbus_core::Fr::default(); 13];
-    for (idx, pi) in parsed_inputs.iter().enumerate().take(13) {
+    let mut fr_public_inputs = [nimbus_core::Fr::default(); 15];
+    for (idx, pi) in parsed_inputs.iter().enumerate().take(15) {
         if let Some(fr) = nimbus_core::from_evm_scalar(pi) {
             fr_public_inputs[idx] = fr;
         }
@@ -1343,11 +1455,14 @@ async fn process_single_spend(state: &AppState, item: QueuedSpend) {
         };
 
         let leaf_count = request.leaf_count.unwrap_or(1);
+        let note_epoch_id = request.note_epoch_id.unwrap_or(0);
+        let is_rollover = request.is_rollover.unwrap_or(0);
         evm_client
             .broadcast_spend_private_note_transaction(
                 note_root,
                 leaf_count,
                 &request.nullifier,
+                note_epoch_id,
                 request
                     .output_commitment_hex
                     .as_deref()
@@ -1360,6 +1475,7 @@ async fn process_single_spend(state: &AppState, item: QueuedSpend) {
                 request.quote_hash_hex.as_deref().unwrap_or(ZERO_WORD),
                 request.expiry.unwrap_or(0),
                 request.has_change.unwrap_or(0),
+                is_rollover,
                 proof_a,
                 proof_b,
                 proof_c,
@@ -1662,7 +1778,7 @@ mod tests {
                 let note_root = format!("0x{}", hex::encode(fr_to_be_bytes(&pis[0])));
                 let leaf_count = 1u64;
                 let input_nullifier = format!("0x{}", hex::encode(fr_to_be_bytes(&pis[2])));
-                let output_commitment = format!("0x{}", hex::encode(fr_to_be_bytes(&pis[3])));
+                let output_commitment = format!("0x{}", hex::encode(fr_to_be_bytes(&pis[4])));
                 let recipient = "0x0000000000000000000000000000000000000064".to_string();
 
                 let public_inputs: Vec<String> = pis
@@ -1674,6 +1790,9 @@ mod tests {
                     session_id: Some("session_1".to_string()),
                     note_root,
                     leaf_count: Some(leaf_count),
+                    note_epoch_id: Some(0),
+                    is_rollover: Some(0),
+                    input_value: Some(10_000_000),
                     input_nullifier,
                     output_commitment: Some(output_commitment),
                     recipient,
@@ -1681,7 +1800,7 @@ mod tests {
                     protocol_fee: 12_500,
                     execution_fee: 23_000,
                     max_execution_fee: 25_000,
-                    quote_hash: Some(format!("0x{}", hex::encode(fr_to_be_bytes(&pis[8])))),
+                    quote_hash: Some(format!("0x{}", hex::encode(fr_to_be_bytes(&pis[9])))),
                     quote_signature: None,
                     quote_id: None,
                     user_address: None,
@@ -1813,26 +1932,26 @@ mod tests {
     async fn test_handle_private_note_spend_reject_empty_public_inputs() {
         let (state, _tmp) = setup_test_state().await;
         let mut req = sample_valid_private_note_request();
-        // DEC-032: empty public inputs must be rejected immediately, not bypass preflight
+        // DEC-033: empty public inputs must be rejected immediately, not bypass preflight
         req.public_inputs = vec![];
 
         let resp = handle_private_note_spend(State(state), Json(req)).await;
         assert_eq!(resp.0.status, "REJECTED");
-        assert!(resp.0.message.contains("Expected 13 public inputs"));
+        assert!(resp.0.message.contains("Expected 15 public inputs"));
     }
 
     #[tokio::test]
     async fn test_handle_private_note_spend_reject_wrong_public_inputs_count() {
         let (state, _tmp) = setup_test_state().await;
         let mut req = sample_valid_private_note_request();
-        req.public_inputs.truncate(12);
+        req.public_inputs.truncate(14);
 
         let resp = handle_private_note_spend(State(state), Json(req)).await;
         assert_eq!(resp.0.status, "REJECTED");
         assert!(resp
             .0
             .message
-            .contains("Expected 13 public inputs for PrivateNoteCircuit, got 12"));
+            .contains("Expected 15 public inputs for PrivateNoteCircuit, got 14"));
     }
 
     #[tokio::test]
@@ -1867,27 +1986,27 @@ mod tests {
     async fn test_handle_private_note_spend_reject_domain_mismatch_chain_id() {
         let (state, _tmp) = setup_test_state().await;
         let mut req = sample_valid_private_note_request();
-        // DEC-032: chain_id is at index 9
-        req.public_inputs[9] = format!("0x{:064x}", 1);
+        // DEC-033: chain_id is at index 10
+        req.public_inputs[10] = format!("0x{:064x}", 1);
 
         let resp = handle_private_note_spend(State(state), Json(req)).await;
         assert_eq!(resp.0.status, "REJECTED");
         assert!(resp
             .0
             .message
-            .contains("public_inputs[9] does not match target chain_id"));
+            .contains("public_inputs[10] does not match target chain_id"));
     }
 
     #[tokio::test]
     async fn test_handle_private_note_spend_reject_domain_mismatch_contract_address() {
         let (state, _tmp) = setup_test_state().await;
         let mut req = sample_valid_private_note_request();
-        // DEC-032: contract_address is at index 10
+        // DEC-033: contract_address is at index 11
         std::env::set_var(
             "NIMBUS_CONTRACT_ADDRESS",
             "0x000000000000000000000000000000000000012c",
         );
-        req.public_inputs[10] = format!("0x{:064x}", 999);
+        req.public_inputs[11] = format!("0x{:064x}", 999);
 
         let resp = handle_private_note_spend(State(state), Json(req)).await;
         std::env::remove_var("NIMBUS_CONTRACT_ADDRESS");
@@ -1895,6 +2014,83 @@ mod tests {
         assert!(resp
             .0
             .message
-            .contains("public_inputs[10] does not match target contract_address"));
+            .contains("public_inputs[11] does not match target contract_address"));
+    }
+
+    #[tokio::test]
+    async fn test_handle_private_note_spend_reject_dust_rollover() {
+        let (state, _tmp) = setup_test_state().await;
+        let mut req = sample_valid_private_note_request();
+        req.idempotency_key = Some("idem_dust_rollover".to_string());
+        // DEC-033: Standalone rollover with dust input value (< $2.00 USDC)
+        req.is_rollover = Some(1);
+        req.public_inputs[14] = format!("0x{:064x}", 1);
+        req.merchant_amount = 0;
+        req.public_inputs[6] = format!("0x{:064x}", 0);
+        req.protocol_fee = 0;
+        req.public_inputs[7] = format!("0x{:064x}", 0);
+        req.input_value = Some(1_500_000); // 1.50 USDC < 2.00 USDC
+
+        let resp = handle_private_note_spend(State(state), Json(req)).await;
+        assert_eq!(resp.0.status, "REJECTED");
+        assert!(resp.0.message.contains("DUST_NOTE_ROLLOVER_REJECTED"));
+    }
+
+    #[tokio::test]
+    async fn test_handle_private_note_spend_reject_rollover_with_merchant_amount() {
+        let (state, _tmp) = setup_test_state().await;
+        let mut req = sample_valid_private_note_request();
+        req.idempotency_key = Some("idem_rollover_merchant".to_string());
+        // DEC-033: Standalone rollover must have merchant_amount == 0
+        req.is_rollover = Some(1);
+        req.public_inputs[14] = format!("0x{:064x}", 1);
+        req.merchant_amount = 5_000_000;
+        req.public_inputs[6] = format!("0x{:064x}", 5_000_000);
+
+        let resp = handle_private_note_spend(State(state), Json(req)).await;
+        assert_eq!(resp.0.status, "REJECTED");
+        assert!(resp
+            .0
+            .message
+            .contains("merchant_amount must be 0 for standalone rollover"));
+    }
+
+    #[tokio::test]
+    async fn test_handle_private_note_spend_reject_future_epoch() {
+        let (state, _tmp) = setup_test_state().await;
+        let mut req = sample_valid_private_note_request();
+        req.idempotency_key = Some("idem_future_epoch".to_string());
+        // DEC-033: Note epoch in the future
+        req.note_epoch_id = Some(10);
+        req.public_inputs[3] = format!("0x{:064x}", 10);
+
+        let resp = handle_private_note_spend(State(state), Json(req)).await;
+        assert_eq!(resp.0.status, "REJECTED");
+        assert!(resp.0.message.contains("EPOCH_IN_FUTURE"));
+    }
+
+    #[tokio::test]
+    async fn test_handle_private_note_spend_reject_insufficient_balance_for_gas() {
+        let (state, _tmp) = setup_test_state().await;
+        let mut req = sample_valid_private_note_request();
+        req.idempotency_key = Some("idem_insufficient_gas".to_string());
+        // DEC-033: Standalone rollover where input_value < execution_fee
+        req.is_rollover = Some(1);
+        req.public_inputs[14] = format!("0x{:064x}", 1);
+        req.merchant_amount = 0;
+        req.public_inputs[6] = format!("0x{:064x}", 0);
+        req.protocol_fee = 0;
+        req.public_inputs[7] = format!("0x{:064x}", 0);
+        req.execution_fee = 2_500_000;
+        req.max_execution_fee = 3_000_000;
+        req.public_inputs[8] = format!("0x{:064x}", 2_500_000);
+        req.input_value = Some(2_000_000); // 2.00 USDC < 2.50 USDC fee
+
+        let resp = handle_private_note_spend(State(state), Json(req)).await;
+        assert_eq!(resp.0.status, "REJECTED");
+        assert!(resp
+            .0
+            .message
+            .contains("insufficient to pay relayer execution fee"));
     }
 }

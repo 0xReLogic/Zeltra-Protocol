@@ -101,10 +101,40 @@ pub struct WalletNote {
     pub randomness_hex: String,
     pub leaf_index: Option<u64>,
     pub leaf_count: Option<u64>,
+    #[serde(default)]
+    pub epoch_id: Option<u32>,
     pub merkle_path_hex: Option<Vec<String>>,
     pub status: NoteStatus,
     pub created_at_secs: u64,
     pub session_id: Option<String>,
+}
+
+/// Classification of a note's generation epoch relative to current on-chain epoch (DEC-033)
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum NoteEpochStatus {
+    /// Fresh note minted in the current active epoch E. Can be spent directly.
+    Fresh,
+    /// Mature note in grace window E-1 (valid up to 180 days). Direct spendable or auto in-flight rollover.
+    MatureGrace,
+    /// Expired note older than active window (<= E-2, > 180 days). Requires rollover before spend.
+    ExpiredRequiresRollover,
+}
+
+impl WalletNote {
+    pub fn epoch(&self) -> u32 {
+        self.epoch_id.unwrap_or(0)
+    }
+
+    pub fn check_epoch_status(&self, current_epoch: u32) -> NoteEpochStatus {
+        let note_epoch = self.epoch();
+        if note_epoch == current_epoch {
+            NoteEpochStatus::Fresh
+        } else if note_epoch == current_epoch.saturating_sub(1) {
+            NoteEpochStatus::MatureGrace
+        } else {
+            NoteEpochStatus::ExpiredRequiresRollover
+        }
+    }
 }
 
 impl Drop for WalletNote {
@@ -142,7 +172,7 @@ impl SelectedSpend {
     }
 }
 
-/// Spend Proof Payload generated locally by client SDK (1-in 1-out PrivateNoteCircuit, DEC-032)
+/// Spend Proof Payload generated locally by client SDK (1-in 1-out PrivateNoteCircuit, DEC-032, DEC-033)
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct SpendProofPayload {
     pub session_id: String,
@@ -150,6 +180,8 @@ pub struct SpendProofPayload {
     pub input_nullifier_hex: String,
     pub note_root_hex: String,
     pub leaf_count: u64,
+    #[serde(default)]
+    pub note_epoch_id: u32,
     pub output_commitment_hex: String,
     pub recipient_hex: String,
     pub merchant_amount: u64,
@@ -161,10 +193,12 @@ pub struct SpendProofPayload {
     pub contract_address_hex: String,
     pub expiry: u64,
     pub has_change: bool,
+    #[serde(default)]
+    pub is_rollover: bool,
     pub proof_a_neg_hex: String,        // 128 bytes EVM format
     pub proof_b_hex: String,            // 256 bytes EVM format
     pub proof_c_hex: String,            // 128 bytes EVM format
-    pub public_inputs_hex: Vec<String>, // 13 x 32 bytes EVM scalars
+    pub public_inputs_hex: Vec<String>, // 15 x 32 bytes EVM scalars
 }
 
 /// Universal 2-in-2-out JoinSplit Spend Proof Payload generated locally by client SDK (DEC-030)
@@ -344,6 +378,7 @@ impl PrivateNoteWallet {
             randomness_hex: rand_hex,
             leaf_index: None,
             leaf_count: None,
+            epoch_id: Some(0),
             merkle_path_hex: None,
             status: NoteStatus::Unconfirmed,
             created_at_secs: current_time_secs,
@@ -352,6 +387,52 @@ impl PrivateNoteWallet {
 
         self.notes.insert(cm_hex.clone(), note.clone());
         Ok((note, cm_hex))
+    }
+
+    /// Creates an unconfirmed note for a deposit transaction with a specific epoch (DEC-033).
+    pub fn create_deposit_note_with_epoch(
+        &mut self,
+        amount: u64,
+        epoch_id: u32,
+        current_time_secs: u64,
+    ) -> Result<(WalletNote, String), WalletError> {
+        let mut rng = OsRng;
+        let sk = self.spending_key()?;
+        let rho = Fr::rand(&mut rng);
+        let rand_val = Fr::rand(&mut rng);
+
+        let cm = note_commitment(amount, sk, rho, rand_val);
+        let cm_hex = hex::encode(fr_to_be_bytes(&cm));
+        let sk_hex = hex::encode(fr_to_be_bytes(&sk));
+        let rho_hex = hex::encode(fr_to_be_bytes(&rho));
+        let rand_hex = hex::encode(fr_to_be_bytes(&rand_val));
+
+        let note = WalletNote {
+            commitment_hex: cm_hex.clone(),
+            value: amount,
+            owner_key_hex: sk_hex,
+            rho_hex,
+            randomness_hex: rand_hex,
+            leaf_index: None,
+            leaf_count: None,
+            epoch_id: Some(epoch_id),
+            merkle_path_hex: None,
+            status: NoteStatus::Unconfirmed,
+            created_at_secs: current_time_secs,
+            session_id: None,
+        };
+
+        self.notes.insert(cm_hex.clone(), note.clone());
+        Ok((note, cm_hex))
+    }
+
+    /// Checks the epoch status of a note relative to current on-chain epoch (DEC-033).
+    pub fn check_note_epoch_status(
+        &self,
+        note: &WalletNote,
+        current_epoch: u32,
+    ) -> NoteEpochStatus {
+        note.check_epoch_status(current_epoch)
     }
 
     /// Confirms a deposit once mined on-chain, associating its Merkle leaf index and path.
@@ -625,6 +706,8 @@ impl PrivateNoteWallet {
 
     /// Prepares a Groth16 spend proof locally using `nimbus-core` PrivateNoteCircuit.
     ///
+    /// Prepares a Groth16 spend proof locally using `nimbus-core` PrivateNoteCircuit.
+    ///
     /// NEVER transmits the private spending key or note witnesses to any relayer.
     #[allow(clippy::too_many_arguments)]
     pub fn prepare_spend_proof(
@@ -637,6 +720,39 @@ impl PrivateNoteWallet {
         chain_id: u64,
         contract_address_hex: &str,
         expiry: u64,
+        current_time_secs: u64,
+        pk: &ark_groth16::ProvingKey<Bls12_381>,
+    ) -> Result<SpendProofPayload, WalletError> {
+        self.prepare_spend_proof_with_epoch(
+            selected,
+            session_id,
+            recipient_evm_address,
+            max_execution_fee,
+            quote_hash_hex,
+            chain_id,
+            contract_address_hex,
+            expiry,
+            None,
+            false,
+            current_time_secs,
+            pk,
+        )
+    }
+
+    /// Prepares a Groth16 spend proof locally with optional target change epoch and rollover mode (DEC-033).
+    #[allow(clippy::too_many_arguments)]
+    pub fn prepare_spend_proof_with_epoch(
+        &mut self,
+        selected: &SelectedSpend,
+        session_id: &str,
+        recipient_evm_address: &str,
+        max_execution_fee: u64,
+        quote_hash_hex: &str,
+        chain_id: u64,
+        contract_address_hex: &str,
+        expiry: u64,
+        target_change_epoch: Option<u32>,
+        is_rollover: bool,
         current_time_secs: u64,
         pk: &ark_groth16::ProvingKey<Bls12_381>,
     ) -> Result<SpendProofPayload, WalletError> {
@@ -678,7 +794,8 @@ impl PrivateNoteWallet {
 
         let in_cm = note_commitment(input_note.value, sk, in_rho, in_rand);
         let nk = self.nullifier_key()?;
-        let nullifier = derive_nullifier(nk, in_cm, leaf_index);
+        let note_epoch_id = input_note.epoch_id.unwrap_or(0);
+        let nullifier = derive_nullifier(nk, in_cm, leaf_index, note_epoch_id);
 
         // Synchronize local MMR if needed
         if self.mmr.leaf_count <= leaf_index as usize {
@@ -714,6 +831,8 @@ impl PrivateNoteWallet {
             let c_rand_hex = hex::encode(fr_to_be_bytes(&c_rand));
             let sk_hex = hex::encode(fr_to_be_bytes(&sk));
 
+            let change_epoch = target_change_epoch.or(input_note.epoch_id).or(Some(0));
+
             // Persist unconfirmed change note (2PC Phase 1)
             let change_note = WalletNote {
                 commitment_hex: c_cm_hex,
@@ -723,6 +842,7 @@ impl PrivateNoteWallet {
                 randomness_hex: c_rand_hex,
                 leaf_index: None,
                 leaf_count: None,
+                epoch_id: change_epoch,
                 merkle_path_hex: None,
                 status: NoteStatus::Unconfirmed,
                 created_at_secs: current_time_secs,
@@ -757,11 +877,19 @@ impl PrivateNoteWallet {
             Fr::from(0u64)
         };
 
-        // Construct PrivateNoteCircuit (DEC-032 13 Public Inputs)
+        let is_rollover_fr = if is_rollover {
+            Fr::from(1u64)
+        } else {
+            Fr::from(0u64)
+        };
+        let note_epoch_id_fr = Fr::from(note_epoch_id as u64);
+
+        // Construct PrivateNoteCircuit (DEC-032, DEC-033 15 Public Inputs)
         let circuit = nimbus_core::PrivateNoteCircuit {
             note_root: Some(note_root),
             leaf_count: Some(Fr::from(total_leaves)),
             input_nullifier: Some(nullifier),
+            note_epoch_id: Some(note_epoch_id_fr),
             output_commitment: Some(ch_cm),
             recipient: Some(recipient_fr),
             merchant_amount: Some(Fr::from(selected.merchant_amount)),
@@ -772,6 +900,7 @@ impl PrivateNoteWallet {
             contract_address: Some(contract_fr),
             expiry: Some(Fr::from(expiry)),
             has_change: Some(has_change_fr),
+            is_rollover: Some(is_rollover_fr),
 
             input_value: Some(Fr::from(input_note.value)),
             input_owner_key: Some(sk),
@@ -798,11 +927,12 @@ impl PrivateNoteWallet {
         let proof_b = to_evm_g2(&proof.b);
         let proof_c = to_evm_g1(&proof.c);
 
-        // Format 13 Public Inputs
+        // Format 15 Public Inputs (DEC-033)
         let public_inputs = vec![
             hex::encode(fr_to_be_bytes(&note_root)),
             hex::encode(fr_to_be_bytes(&Fr::from(total_leaves))),
             hex::encode(fr_to_be_bytes(&nullifier)),
+            hex::encode(fr_to_be_bytes(&note_epoch_id_fr)),
             hex::encode(fr_to_be_bytes(&ch_cm)),
             hex::encode(recipient_bytes),
             hex::encode(fr_to_be_bytes(&Fr::from(selected.merchant_amount))),
@@ -813,6 +943,7 @@ impl PrivateNoteWallet {
             hex::encode(contract_bytes),
             hex::encode(fr_to_be_bytes(&Fr::from(expiry))),
             hex::encode(fr_to_be_bytes(&has_change_fr)),
+            hex::encode(fr_to_be_bytes(&is_rollover_fr)),
         ];
 
         Ok(SpendProofPayload {
@@ -821,6 +952,7 @@ impl PrivateNoteWallet {
             input_nullifier_hex: hex::encode(fr_to_be_bytes(&nullifier)),
             note_root_hex: hex::encode(fr_to_be_bytes(&note_root)),
             leaf_count: total_leaves,
+            note_epoch_id,
             output_commitment_hex: hex::encode(fr_to_be_bytes(&ch_cm)),
             recipient_hex: recipient_evm_address.to_string(),
             merchant_amount: selected.merchant_amount,
@@ -832,11 +964,137 @@ impl PrivateNoteWallet {
             contract_address_hex: contract_address_hex.to_string(),
             expiry,
             has_change: selected.has_change,
+            is_rollover,
             proof_a_neg_hex: hex::encode(proof_a_neg),
             proof_b_hex: hex::encode(proof_b),
             proof_c_hex: hex::encode(proof_c),
             public_inputs_hex: public_inputs,
         })
+    }
+
+    /// Builds an in-flight spend rollover proof (DEC-033).
+    /// Spends a note from an older epoch (E-1 or earlier) while refreshing the change note into `target_epoch` (E).
+    #[allow(clippy::too_many_arguments)]
+    pub fn build_in_flight_spend_rollover(
+        &mut self,
+        recipient_evm_address: &str,
+        merchant_amount: u64,
+        protocol_fee: u64,
+        execution_fee: u64,
+        max_execution_fee: u64,
+        quote_hash_hex: &str,
+        chain_id: u64,
+        contract_address_hex: &str,
+        expiry: u64,
+        target_epoch: u32,
+        current_time_secs: u64,
+        pk: &ark_groth16::ProvingKey<Bls12_381>,
+    ) -> Result<SpendProofPayload, WalletError> {
+        let selected = self.select_note_for_spend(
+            merchant_amount,
+            protocol_fee,
+            execution_fee,
+            current_time_secs,
+        )?;
+
+        let session_id = format!(
+            "rollover_spend_{}_{}",
+            current_time_secs,
+            hex::encode(rand::random::<[u8; 8]>())
+        );
+
+        self.prepare_spend_proof_with_epoch(
+            &selected,
+            &session_id,
+            recipient_evm_address,
+            max_execution_fee,
+            quote_hash_hex,
+            chain_id,
+            contract_address_hex,
+            expiry,
+            Some(target_epoch),
+            false,
+            current_time_secs,
+            pk,
+        )
+    }
+
+    /// Builds a standalone note refresh proof (DEC-033).
+    /// Refreshes a note into `target_epoch` without paying a merchant (merchant_amount = 0, protocol_fee = 0).
+    /// The note must satisfy `input_value >= MIN_STANDALONE_ROLLOVER_THRESHOLD_USDC` ($2.00 USDC).
+    /// Execution fee (gas reimbursement + 15% relayer markup) is deducted from the note value.
+    #[allow(clippy::too_many_arguments)]
+    pub fn build_standalone_refresh(
+        &mut self,
+        input_commitment_hex: &str,
+        execution_fee: u64,
+        max_execution_fee: u64,
+        quote_hash_hex: &str,
+        chain_id: u64,
+        contract_address_hex: &str,
+        expiry: u64,
+        target_epoch: u32,
+        current_time_secs: u64,
+        pk: &ark_groth16::ProvingKey<Bls12_381>,
+    ) -> Result<SpendProofPayload, WalletError> {
+        let input_note = self
+            .notes
+            .get(input_commitment_hex)
+            .ok_or_else(|| WalletError::NoteNotFound(input_commitment_hex.to_string()))?
+            .clone();
+
+        // Check dust threshold (DEC-033: MIN_STANDALONE_ROLLOVER_THRESHOLD_USDC = 2_000_000)
+        if input_note.value < nimbus_core::fees::MIN_STANDALONE_ROLLOVER_THRESHOLD_USDC {
+            return Err(WalletError::CryptoError(
+                "DUST_NOTE_ROLLOVER_REJECTED: Note value is below $2.00 USDC minimum threshold"
+                    .into(),
+            ));
+        }
+
+        // Check sufficient balance for gas
+        if input_note.value < execution_fee {
+            return Err(WalletError::InsufficientBalance {
+                requested: execution_fee,
+                available: input_note.value,
+            });
+        }
+
+        let change_amount = input_note.value - execution_fee;
+        let selected = SelectedSpend {
+            input_commitment_hex: input_commitment_hex.to_string(),
+            input_value: input_note.value,
+            second_input_commitment_hex: None,
+            second_input_value: 0,
+            merchant_amount: 0,
+            protocol_fee: 0,
+            execution_fee,
+            total_required: execution_fee,
+            change_amount,
+            has_change: true,
+        };
+
+        let session_id = format!(
+            "refresh_{}_{}",
+            current_time_secs,
+            hex::encode(rand::random::<[u8; 8]>())
+        );
+
+        let zero_address = "0x0000000000000000000000000000000000000000";
+
+        self.prepare_spend_proof_with_epoch(
+            &selected,
+            &session_id,
+            zero_address,
+            max_execution_fee,
+            quote_hash_hex,
+            chain_id,
+            contract_address_hex,
+            expiry,
+            Some(target_epoch),
+            true, // is_rollover: true
+            current_time_secs,
+            pk,
+        )
     }
 
     /// High-level client API: executes coin selection and generates spend proof payload.
@@ -954,7 +1212,8 @@ impl PrivateNoteWallet {
 
         let in1_cm = note_commitment(input_note_1.value, sk, in1_rho, in1_rand);
         let nk = self.nullifier_key()?;
-        let nullifier_1 = derive_nullifier(nk, in1_cm, leaf_index_1);
+        let nullifier_1 =
+            derive_nullifier(nk, in1_cm, leaf_index_1, input_note_1.epoch_id.unwrap_or(0));
         let note_root = nimbus_core::compute_merkle_root(in1_cm, leaf_index_1, &merkle_path_1);
 
         // 4. Load witnesses or generate dummy for Input Note 2
@@ -988,7 +1247,8 @@ impl PrivateNoteWallet {
                 let rho_2 = parse_fr_from_hex(&input_note_2.rho_hex)?;
                 let rand_2 = parse_fr_from_hex(&input_note_2.randomness_hex)?;
                 let cm_2 = note_commitment(input_note_2.value, sk, rho_2, rand_2);
-                let nf_2 = derive_nullifier(nk, cm_2, leaf_index_2);
+                let nf_2 =
+                    derive_nullifier(nk, cm_2, leaf_index_2, input_note_2.epoch_id.unwrap_or(0));
 
                 let root_2 = nimbus_core::compute_merkle_root(cm_2, leaf_index_2, &merkle_path_2);
                 if root_2 != note_root {
@@ -1055,6 +1315,7 @@ impl PrivateNoteWallet {
                 randomness_hex: c_rand_hex,
                 leaf_index: None,
                 leaf_count: None,
+                epoch_id: input_note_1.epoch_id.or(Some(0)),
                 merkle_path_hex: None,
                 status: NoteStatus::Unconfirmed,
                 created_at_secs: current_time_secs,
@@ -2004,8 +2265,10 @@ mod tests {
         assert_eq!(payload.proof_a_neg_hex.len(), 256); // 128 bytes
         assert_eq!(payload.proof_b_hex.len(), 512); // 256 bytes
         assert_eq!(payload.proof_c_hex.len(), 256); // 128 bytes
-        assert_eq!(payload.public_inputs_hex.len(), 13);
+        assert_eq!(payload.public_inputs_hex.len(), 15);
         assert_eq!(payload.leaf_count, 1);
+        assert_eq!(payload.note_epoch_id, 0);
+        assert!(!payload.is_rollover);
         assert_eq!(payload.merchant_amount, 20_000_000);
         assert!(payload.has_change);
 
@@ -2024,6 +2287,126 @@ mod tests {
 
         // Balance should now equal the change note value
         assert_eq!(wallet.balance(), 29_850_000);
+    }
+
+    #[test]
+    fn test_note_epoch_status_lifecycle() {
+        let seed = [25u8; 32];
+        let mut wallet = PrivateNoteWallet::new(&seed);
+        let (mut note, _) = wallet.create_deposit_note(5_000_000, 1000).unwrap();
+
+        // When epoch_id is 2
+        note.epoch_id = Some(2);
+
+        // At epoch 2: Fresh
+        assert_eq!(note.check_epoch_status(2), NoteEpochStatus::Fresh);
+        assert_eq!(
+            wallet.check_note_epoch_status(&note, 2),
+            NoteEpochStatus::Fresh
+        );
+
+        // At epoch 3: MatureGrace (E-1 = 2)
+        assert_eq!(note.check_epoch_status(3), NoteEpochStatus::MatureGrace);
+        assert_eq!(
+            wallet.check_note_epoch_status(&note, 3),
+            NoteEpochStatus::MatureGrace
+        );
+
+        // At epoch 4: ExpiredRequiresRollover (<= E-2)
+        assert_eq!(
+            note.check_epoch_status(4),
+            NoteEpochStatus::ExpiredRequiresRollover
+        );
+        assert_eq!(
+            wallet.check_note_epoch_status(&note, 4),
+            NoteEpochStatus::ExpiredRequiresRollover
+        );
+
+        // At epoch 1: Fresh or future
+        assert_eq!(
+            note.check_epoch_status(1),
+            NoteEpochStatus::ExpiredRequiresRollover
+        );
+    }
+
+    #[test]
+    fn test_standalone_refresh_dust_rejected() {
+        let seed = [26u8; 32];
+        let mut wallet = PrivateNoteWallet::new(&seed);
+        let path = dummy_merkle_path();
+        let keys = nimbus_core::get_or_init_note_circuit_keys();
+
+        // Note with 1.50 USDC (< 2.00 USDC minimum)
+        let (_, cm) = wallet.create_deposit_note(1_500_000, 1000).unwrap();
+        wallet.confirm_deposit(&cm, 0, path, "0xroot").unwrap();
+
+        let res = wallet.build_standalone_refresh(
+            &cm,
+            20_000,
+            25_000,
+            "0x1111111111111111111111111111111111111111111111111111111111111111",
+            421614,
+            "0x3333333333333333333333333333333333333333",
+            2000,
+            1,
+            1000,
+            &keys.proving_key,
+        );
+
+        assert!(res.is_err());
+        match res {
+            Err(WalletError::CryptoError(msg)) => {
+                assert!(msg.contains("DUST_NOTE_ROLLOVER_REJECTED"));
+            }
+            _ => panic!("Expected DUST_NOTE_ROLLOVER_REJECTED error"),
+        }
+    }
+
+    #[test]
+    fn test_build_in_flight_spend_rollover_and_refresh() {
+        let seed = [27u8; 32];
+        let mut wallet = PrivateNoteWallet::new(&seed);
+        let path = dummy_merkle_path();
+        let keys = nimbus_core::get_or_init_note_circuit_keys();
+
+        // Create deposit note with epoch 0, amount 10.00 USDC
+        let (_, cm) = wallet
+            .create_deposit_note_with_epoch(10_000_000, 0, 1000)
+            .unwrap();
+        wallet.confirm_deposit(&cm, 0, path, "0xroot").unwrap();
+
+        // In-flight rollover spend refreshing change note into epoch 1
+        let payload = wallet
+            .build_in_flight_spend_rollover(
+                "0x2222222222222222222222222222222222222222",
+                3_000_000,
+                13_500, // 45 bps flat protocol fee
+                20_000, // execution fee
+                25_000,
+                "0x1111111111111111111111111111111111111111111111111111111111111111",
+                421614,
+                "0x3333333333333333333333333333333333333333",
+                2000,
+                1, // target epoch 1
+                1000,
+                &keys.proving_key,
+            )
+            .unwrap();
+
+        assert_eq!(payload.public_inputs_hex.len(), 15);
+        assert_eq!(payload.note_epoch_id, 0); // Input note was epoch 0
+        assert!(!payload.is_rollover);
+        assert_eq!(payload.merchant_amount, 3_000_000);
+        assert!(payload.has_change);
+
+        // Find the newly created change note and verify its epoch is 1
+        let change_note = wallet
+            .notes
+            .values()
+            .find(|n| n.status == NoteStatus::Unconfirmed)
+            .expect("change note should exist");
+        assert_eq!(change_note.epoch_id, Some(1));
+        assert_eq!(change_note.value, 10_000_000 - 3_000_000 - 13_500 - 20_000);
     }
 
     #[test]

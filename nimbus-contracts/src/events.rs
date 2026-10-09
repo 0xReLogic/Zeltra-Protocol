@@ -75,6 +75,19 @@ sol! {
         bytes32 output_commitment,
         bool has_change
     );
+
+    /// Emitted when generational epoch is rotated (DEC-033).
+    event EpochRotated(
+        uint32 indexed new_epoch,
+        uint64 timestamp
+    );
+
+    /// Emitted when a note rollover is executed (DEC-033).
+    event NoteRolloverExecuted(
+        bytes32 indexed old_nullifier,
+        bytes32 new_commitment,
+        uint64 fee
+    );
 }
 
 /// Safe event emission helper that logs to EVM in production and operates safely in unit tests.

@@ -91,6 +91,12 @@ pub struct SpendRequest {
     #[serde(default)]
     pub has_change: Option<u64>,
     #[serde(default)]
+    pub note_epoch_id: Option<u32>,
+    #[serde(default)]
+    pub is_rollover: Option<u64>,
+    #[serde(default)]
+    pub input_value: Option<u64>,
+    #[serde(default)]
     pub proof_a_neg_hex: Option<String>,
     #[serde(default)]
     pub proof_b_hex: Option<String>,
@@ -168,6 +174,12 @@ pub struct PrivateNoteSpendRequest {
     pub note_root: String,
     #[serde(alias = "leaf_count_hex", default)]
     pub leaf_count: Option<u64>,
+    #[serde(alias = "note_epoch_id", default)]
+    pub note_epoch_id: Option<u32>,
+    #[serde(alias = "is_rollover", default)]
+    pub is_rollover: Option<u64>,
+    #[serde(alias = "input_value", default)]
+    pub input_value: Option<u64>,
     #[serde(alias = "input_nullifier_hex", alias = "nullifier")]
     pub input_nullifier: String,
     #[serde(alias = "output_commitment_hex", default)]
@@ -244,6 +256,36 @@ impl From<PrivateNoteSpendRequest> for SpendRequest {
                 None
             }
         });
+        let note_epoch_id_opt = req.note_epoch_id.or_else(|| {
+            if req.public_inputs.len() >= 4 {
+                hex::decode(req.public_inputs[3].trim_start_matches("0x"))
+                    .ok()
+                    .and_then(|b| {
+                        if b.len() == 32 {
+                            Some(alloy_primitives::U256::from_be_slice(&b).to::<u32>())
+                        } else {
+                            None
+                        }
+                    })
+            } else {
+                None
+            }
+        });
+        let is_rollover_opt = req.is_rollover.or_else(|| {
+            if req.public_inputs.len() >= 15 {
+                hex::decode(req.public_inputs[14].trim_start_matches("0x"))
+                    .ok()
+                    .and_then(|b| {
+                        if b.len() == 32 {
+                            Some(alloy_primitives::U256::from_be_slice(&b).to::<u64>())
+                        } else {
+                            None
+                        }
+                    })
+            } else {
+                None
+            }
+        });
         SpendRequest {
             nullifier: req.input_nullifier,
             sig_hex: String::new(),
@@ -276,6 +318,9 @@ impl From<PrivateNoteSpendRequest> for SpendRequest {
             quote_hash_hex: req.quote_hash,
             leaf_count: leaf_count_opt,
             has_change: Some(has_change_u64),
+            note_epoch_id: note_epoch_id_opt,
+            is_rollover: is_rollover_opt,
+            input_value: req.input_value,
             proof_a_neg_hex: Some(req.proof_a_neg),
             proof_b_hex: Some(req.proof_b),
             proof_c_hex: Some(req.proof_c),

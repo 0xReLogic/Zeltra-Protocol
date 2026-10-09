@@ -14,7 +14,7 @@
 //! - Domain separation prevents cross-usage attacks
 
 use ark_bls12_381::Fr;
-use ark_ff::{BigInteger, Field, PrimeField};
+use ark_ff::{BigInteger, PrimeField};
 use sha3::{Digest, Keccak256};
 
 use crate::poseidon::native_poseidon_w5;
@@ -152,26 +152,42 @@ pub fn derive_nullifier_key(spending_key: Fr) -> Fr {
 // Nullifier Derivation
 // ═══════════════════════════════════════════════════════════════════════════
 
-/// Derive a nullifier for a note at a given Merkle tree position.
+/// Derive an evolving nullifier for a note at a given Merkle tree position and epoch (DEC-033).
 ///
-/// nullifier = Poseidon_W5(nullifier_key, commitment, Fr(leaf_index), 0; DOMAIN_NULLIFIER_V1)
+/// nullifier = Poseidon_W5(nullifier_key, commitment, Fr(leaf_index), Fr(epoch_id); DOMAIN_NULLIFIER_V1)
 ///
 /// The nullifier binds to:
 /// - The owner's nullifier key (proves ownership)
 /// - The note commitment (identifies which note)
 /// - The leaf index (prevents commitment reuse at different positions)
+/// - The epoch ID (evolves nullifiers across generational windows, preventing cross-epoch replay)
 /// - Domain tag (prevents cross-usage)
 ///
 /// Privacy: Without knowledge of the nullifier key, it is infeasible to
 /// link a nullifier to its corresponding commitment.
-pub fn derive_nullifier(nullifier_key: Fr, commitment: Fr, leaf_index: u64) -> Fr {
+pub fn derive_nullifier(nullifier_key: Fr, commitment: Fr, leaf_index: u64, epoch_id: u32) -> Fr {
     let inputs = [
         nullifier_key,
         commitment,
         Fr::from(leaf_index),
-        Fr::from(0u64), // padding (rate=4, we only have 3 meaningful inputs)
+        Fr::from(epoch_id as u64),
     ];
     native_poseidon_w5(&inputs, domain_nullifier())
+}
+
+/// Legacy 3-argument nullifier derivation defaulting to epoch_id = 0.
+pub fn derive_nullifier_v1(nullifier_key: Fr, commitment: Fr, leaf_index: u64) -> Fr {
+    derive_nullifier(nullifier_key, commitment, leaf_index, 0)
+}
+
+/// Alias for derive_nullifier with epoch_id.
+pub fn derive_nullifier_epoch(
+    nullifier_key: Fr,
+    commitment: Fr,
+    leaf_index: u64,
+    epoch_id: u32,
+) -> Fr {
+    derive_nullifier(nullifier_key, commitment, leaf_index, epoch_id)
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -353,9 +369,9 @@ impl MerkleMountainRange {
     ///
     /// - If m == 1: Root = Poseidon_W5([P_0, Fr(N), 0, 0], DOMAIN_MMR_BAG)
     /// - If m > 1:
-    ///     Acc_{m-1} = P_{m-1}
-    ///     Acc_i = Poseidon_W5([P_i, Acc_{i+1}, 0, 0], DOMAIN_MERKLE_NODE) for i = m-2 down to 0
-    ///     Root = Poseidon_W5([Acc_0, Fr(N), 0, 0], DOMAIN_MMR_BAG)
+    ///   Acc_{m-1} = P_{m-1}
+    ///   Acc_i = Poseidon_W5([P_i, Acc_{i+1}, 0, 0], DOMAIN_MERKLE_NODE) for i = m-2 down to 0
+    ///   Root = Poseidon_W5([Acc_0, Fr(N), 0, 0], DOMAIN_MMR_BAG)
     pub fn bag_peaks(peaks: &[Fr], leaf_count: usize) -> Fr {
         if peaks.is_empty() {
             return Fr::from(0u64);
@@ -420,7 +436,7 @@ impl MerkleMountainRange {
         let mut mountain_siblings = Vec::with_capacity(target_height);
 
         for _ in 0..target_height {
-            let sibling_offset = if offset % 2 == 0 {
+            let sibling_offset = if offset.is_multiple_of(2) {
                 offset + 1
             } else {
                 offset - 1
@@ -428,7 +444,7 @@ impl MerkleMountainRange {
             mountain_siblings.push(mountain_nodes[sibling_offset]);
 
             let mut next_layer = Vec::with_capacity(mountain_nodes.len() / 2);
-            for chunk in mountain_nodes.chunks_exact(2) {
+            for chunk in mountain_nodes.as_chunks::<2>().0 {
                 next_layer.push(merkle_hash(chunk[0], chunk[1]));
             }
             mountain_nodes = next_layer;
@@ -505,7 +521,7 @@ impl MerkleMountainRange {
         let mut current = leaf;
         let mut idx = leaf_index;
         for sibling in &proof.mountain_siblings {
-            current = if idx % 2 == 0 {
+            current = if idx.is_multiple_of(2) {
                 merkle_hash(current, *sibling)
             } else {
                 merkle_hash(*sibling, current)
@@ -587,13 +603,14 @@ pub fn fr_to_be_bytes(f: &Fr) -> [u8; 32] {
 }
 
 /// Deserialize a field element from 32-byte big-endian representation.
+/// Validates that the scalar element is strictly within the field modulus (< r).
 pub fn fr_from_be_bytes(bytes: &[u8; 32]) -> Option<Fr> {
-    // Reverse to little-endian for Arkworks
+    use ark_serialize::CanonicalDeserialize;
     let mut le_bytes = [0u8; 32];
     for (i, b) in bytes.iter().rev().enumerate() {
         le_bytes[i] = *b;
     }
-    Fr::from_random_bytes(&le_bytes)
+    Fr::deserialize_uncompressed(&le_bytes[..]).ok()
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -705,8 +722,8 @@ mod tests {
     fn test_nullifier_derivation_deterministic() {
         let nk = Fr::from(42u64);
         let cm = Fr::from(999u64);
-        let n1 = derive_nullifier(nk, cm, 0);
-        let n2 = derive_nullifier(nk, cm, 0);
+        let n1 = derive_nullifier(nk, cm, 0, 0);
+        let n2 = derive_nullifier(nk, cm, 0, 0);
         assert_eq!(n1, n2, "Nullifier must be deterministic");
     }
 
@@ -716,8 +733,8 @@ mod tests {
         let nk1 = Fr::from(1u64);
         let nk2 = Fr::from(2u64);
         let cm = Fr::from(999u64);
-        let n1 = derive_nullifier(nk1, cm, 0);
-        let n2 = derive_nullifier(nk2, cm, 0);
+        let n1 = derive_nullifier(nk1, cm, 0, 0);
+        let n2 = derive_nullifier(nk2, cm, 0, 0);
         assert_ne!(n1, n2, "Different keys must produce different nullifiers");
     }
 
@@ -725,11 +742,28 @@ mod tests {
     fn test_nullifier_position_binding() {
         let nk = Fr::from(42u64);
         let cm = Fr::from(999u64);
-        let n0 = derive_nullifier(nk, cm, 0);
-        let n1 = derive_nullifier(nk, cm, 1);
+        let n0 = derive_nullifier(nk, cm, 0, 0);
+        let n1 = derive_nullifier(nk, cm, 1, 0);
         assert_ne!(
             n0, n1,
             "Same note at different positions must produce different nullifiers"
+        );
+    }
+
+    #[test]
+    fn test_nullifier_epoch_binding() {
+        let nk = Fr::from(42u64);
+        let cm = Fr::from(999u64);
+        let n_epoch0 = derive_nullifier_epoch(nk, cm, 0, 0);
+        let n_epoch1 = derive_nullifier_epoch(nk, cm, 0, 1);
+        let n_epoch2 = derive_nullifier_epoch(nk, cm, 0, 2);
+        assert_ne!(
+            n_epoch0, n_epoch1,
+            "Same note at different epochs must produce distinct evolving nullifiers (DEC-033)"
+        );
+        assert_ne!(
+            n_epoch1, n_epoch2,
+            "Evolving nullifier must prevent cross-epoch replay"
         );
     }
 
@@ -889,6 +923,45 @@ mod tests {
         );
     }
 
+    #[test]
+    fn test_fr_from_be_bytes_rejects_out_of_modulus() {
+        // BLS12-381 scalar field modulus r in big-endian:
+        // 0x73eda753299d7d483339d80809a1d80553bda402fffe5bfeffffffff00000001
+        let r_bytes =
+            hex::decode("73eda753299d7d483339d80809a1d80553bda402fffe5bfeffffffff00000001")
+                .unwrap();
+        let mut r_be = [0u8; 32];
+        r_be.copy_from_slice(&r_bytes);
+
+        assert!(
+            fr_from_be_bytes(&r_be).is_none(),
+            "fr_from_be_bytes must reject modulus r itself"
+        );
+
+        // r + 1:
+        let mut r_plus_one = r_be;
+        r_plus_one[31] += 1;
+        assert!(
+            fr_from_be_bytes(&r_plus_one).is_none(),
+            "fr_from_be_bytes must reject r + 1"
+        );
+
+        // 2^256 - 1 (all 0xFF):
+        let max_u256 = [0xffu8; 32];
+        assert!(
+            fr_from_be_bytes(&max_u256).is_none(),
+            "fr_from_be_bytes must reject 2^256 - 1"
+        );
+
+        // r - 1 should succeed:
+        let mut r_minus_one = r_be;
+        r_minus_one[31] -= 1;
+        assert!(
+            fr_from_be_bytes(&r_minus_one).is_some(),
+            "fr_from_be_bytes must accept valid field element r - 1"
+        );
+    }
+
     // ═══════════════════════════════════════════════════════════════════
     // Known-Answer Vectors (DEC-016A §16)
     // ═══════════════════════════════════════════════════════════════════
@@ -1002,19 +1075,26 @@ mod tests {
 
         let note = PrivateNoteV1::new(99_800_000, spending_key, Fr::from(1u64), Fr::from(2u64));
         let cm = note.commitment();
-        let nf = derive_nullifier(nk, cm, 0);
+        let nf = derive_nullifier(nk, cm, 0, 0);
         let nf_hex = hex::encode(fr_to_be_bytes(&nf));
 
         assert_eq!(
             nf_hex, "5b0320f2c7066f0b751c4f5ddfec9dfdde2ca07ea0c8f0d5f335c54b532dba54",
-            "Nullifier (leaf_index=0) must match canonical DEC-016A KAV"
+            "Nullifier (leaf_index=0, epoch_id=0) must match canonical DEC-016A KAV"
         );
 
         // Non-zero leaf index must produce completely different nullifier (prevents position reuse)
-        let nf_idx1 = derive_nullifier(nk, cm, 1);
+        let nf_idx1 = derive_nullifier(nk, cm, 1, 0);
         assert_ne!(
             nf, nf_idx1,
             "Different leaf index must yield different nullifier"
+        );
+
+        // Non-zero epoch_id must produce completely different nullifier (prevents cross-epoch replay DEC-033)
+        let nf_epoch1 = derive_nullifier_epoch(nk, cm, 0, 1);
+        assert_ne!(
+            nf, nf_epoch1,
+            "Different epoch_id must yield different nullifier (evolving nullifier PRF)"
         );
     }
 

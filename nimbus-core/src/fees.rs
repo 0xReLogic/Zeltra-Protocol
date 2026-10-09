@@ -111,6 +111,26 @@ pub fn quote_private_spend(
     })
 }
 
+/// Minimum note value eligible for standalone rollover (DEC-033: $2.00 USDC).
+/// Prevents spam bot DoS that drains relayer mempool and CPU quota.
+pub const MIN_STANDALONE_ROLLOVER_THRESHOLD_USDC: u64 = 2_000_000; // 2.00 USDC
+
+/// Quotes a standalone rollover / refresh transaction (DEC-033).
+/// In standalone rollover, merchant_amount = 0 and protocol_fee = 0 (0 bps).
+/// Relayer receives gas reimbursement + 15% markup directly from the note being rolled over.
+pub fn quote_standalone_rollover(gas_cost: u64, relayer_markup_bps: u64) -> Option<SpendQuote> {
+    let (relayer_markup, execution_fee) = quote_execution_fee(gas_cost, relayer_markup_bps)?;
+    Some(SpendQuote {
+        merchant_amount: 0,
+        contract_amount: 0,
+        protocol_fee: 0,
+        gas_cost,
+        relayer_markup,
+        execution_fee,
+        user_total_debit: execution_fee,
+    })
+}
+
 pub fn quote_private_spend_with_fee(
     merchant_amount: u64,
     gas_cost: u64,
@@ -259,5 +279,25 @@ mod tests {
             quote.user_total_debit,
             100_000_000 + 450_000 + 20_000 + 3_000 + 800_000
         );
+    }
+
+    #[test]
+    fn standalone_rollover_quote_zero_protocol_fee_and_exact_relayer_reimbursement() {
+        let gas_cost = 18_500; // ~$0.0185
+        let markup_bps = DEFAULT_RELAYER_MARKUP_BPS; // 15% (1500 bps)
+        let quote = quote_standalone_rollover(gas_cost, markup_bps).unwrap();
+
+        assert_eq!(quote.merchant_amount, 0);
+        assert_eq!(quote.contract_amount, 0);
+        assert_eq!(quote.protocol_fee, 0);
+        // 15% of 18_500 = ceil(18500 * 1500 / 10000) = 2775
+        assert_eq!(quote.relayer_markup, 2_775);
+        assert_eq!(quote.execution_fee, 18_500 + 2_775);
+        assert_eq!(quote.user_total_debit, quote.execution_fee);
+    }
+
+    #[test]
+    fn dust_rollover_threshold_matches_dec033() {
+        assert_eq!(MIN_STANDALONE_ROLLOVER_THRESHOLD_USDC, 2_000_000); // Exactly $2.00 USDC
     }
 }

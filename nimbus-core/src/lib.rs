@@ -3,7 +3,7 @@ mod blind_sign;
 mod compliance_circuit;
 mod crypto;
 mod evm;
-mod fees;
+pub mod fees;
 pub mod joinsplit_circuit;
 mod note;
 mod note_circuit;
@@ -52,9 +52,10 @@ pub use fees::{
     ceil_div, deposit_fee, fee_round_up, gross_up_for_exact_net, gross_up_private_spend_amount,
     net_after_fee, private_spend_fee, quote_cross_chain_private_spend_with_fee,
     quote_execution_fee, quote_execution_fee_with_pass_through, quote_private_spend,
-    quote_private_spend_with_fee, spend_fee_bps_for_holding, SpendQuote,
-    DEFAULT_RELAYER_MARKUP_BPS, DEPOSIT_FEE_BPS, FEE_DENOMINATOR_BPS, PRIVATE_SPEND_FEE_BPS,
-    SPEND_FEE_30DAY_BPS, THIRTY_DAYS_SECS,
+    quote_private_spend_with_fee, quote_standalone_rollover, spend_fee_bps_for_holding, SpendQuote,
+    DEFAULT_RELAYER_MARKUP_BPS, DEPOSIT_FEE_BPS, FEE_DENOMINATOR_BPS,
+    MIN_STANDALONE_ROLLOVER_THRESHOLD_USDC, PRIVATE_SPEND_FEE_BPS, SPEND_FEE_30DAY_BPS,
+    THIRTY_DAYS_SECS,
 };
 
 // Re-export compliance circuit (deprecated prototype)
@@ -72,11 +73,12 @@ pub use poseidon::{
 
 // Re-export Private Note V1 (DEC-016A & DEC-032)
 pub use note::{
-    compute_empty_hashes, compute_merkle_root, derive_nullifier, derive_nullifier_key,
-    domain_dummy_nullifier, domain_initial_note, domain_merkle_node, domain_mmr_bag,
-    domain_note_commitment, domain_nullifier, fr_from_be_bytes, fr_to_be_bytes, merkle_append,
-    merkle_hash, note_commitment, verify_merkle_proof, verify_value_conservation, MMRProof,
-    MerkleMountainRange, PrivateNoteV1, DOMAIN_MMR_BAG_BYTES, MERKLE_TREE_DEPTH,
+    compute_empty_hashes, compute_merkle_root, derive_nullifier, derive_nullifier_epoch,
+    derive_nullifier_key, derive_nullifier_v1, domain_dummy_nullifier, domain_initial_note,
+    domain_merkle_node, domain_mmr_bag, domain_note_commitment, domain_nullifier, fr_from_be_bytes,
+    fr_to_be_bytes, merkle_append, merkle_hash, note_commitment, verify_merkle_proof,
+    verify_value_conservation, MMRProof, MerkleMountainRange, PrivateNoteV1, DOMAIN_MMR_BAG_BYTES,
+    MERKLE_TREE_DEPTH,
 };
 
 // Re-export accounting state machine (DEC-016A Gate B)

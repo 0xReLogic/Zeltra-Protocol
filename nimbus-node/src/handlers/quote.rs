@@ -243,6 +243,8 @@ mod tests {
     use crate::database::Database;
     use std::collections::HashMap;
 
+    static ENV_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
     async fn test_state() -> AppState {
         // Set environment variables for test deterministic signing domain
         std::env::set_var("NIMBUS_CHAIN_ID", "421614");
@@ -266,6 +268,7 @@ mod tests {
 
     #[tokio::test]
     async fn private_spend_quote_preserves_merchant_amount() {
+        let _guard = ENV_LOCK.lock().await;
         let state = test_state().await;
         let response = handle_private_spend_quote(
             State(state),
@@ -297,6 +300,7 @@ mod tests {
 
     #[tokio::test]
     async fn private_spend_quote_cross_chain_fee_separation() {
+        let _guard = ENV_LOCK.lock().await;
         let state = test_state().await;
         let base_sepolia_selector = 10344971235874465080u64;
         let response = handle_private_spend_quote(
@@ -336,6 +340,7 @@ mod tests {
 
     #[tokio::test]
     async fn private_spend_quote_rejects_zero_merchant_amount() {
+        let _guard = ENV_LOCK.lock().await;
         let state = test_state().await;
         let response = handle_private_spend_quote(
             State(state),
@@ -354,6 +359,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_quote_fails_closed_when_signing_domain_missing() {
+        let _guard = ENV_LOCK.lock().await;
         // Explicitly remove domain environment variables
         std::env::remove_var("NIMBUS_CHAIN_ID");
         std::env::remove_var("NIMBUS_CONTRACT_ADDRESS");
@@ -383,6 +389,13 @@ mod tests {
         )
         .await;
 
+        // Restore environment variables
+        std::env::set_var("NIMBUS_CHAIN_ID", "421614");
+        std::env::set_var(
+            "NIMBUS_CONTRACT_ADDRESS",
+            "0x1111111111111111111111111111111111111111",
+        );
+
         // DEC-031: Must fail-closed with status ERROR, never return status OK without signing domain!
         assert_eq!(response.0.status, "ERROR");
         assert!(response.0.domain_separator.is_none());
@@ -392,6 +405,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_quote_fails_closed_when_contract_address_invalid() {
+        let _guard = ENV_LOCK.lock().await;
         std::env::set_var("NIMBUS_CHAIN_ID", "421614");
         std::env::set_var(
             "NIMBUS_CONTRACT_ADDRESS",
@@ -422,6 +436,13 @@ mod tests {
             }),
         )
         .await;
+
+        // Restore environment variables
+        std::env::set_var("NIMBUS_CHAIN_ID", "421614");
+        std::env::set_var(
+            "NIMBUS_CONTRACT_ADDRESS",
+            "0x1111111111111111111111111111111111111111",
+        );
 
         assert_eq!(response.0.status, "ERROR");
         assert!(response.0.domain_separator.is_none());

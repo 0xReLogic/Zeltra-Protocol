@@ -53,6 +53,7 @@ sol! {
         bytes32 note_root,
         uint256 leaf_count,
         bytes32 input_nullifier,
+        uint256 note_epoch_id,
         bytes32 output_commitment,
         address recipient,
         uint256 merchant_amount,
@@ -62,10 +63,13 @@ sol! {
         bytes32 quote_hash,
         uint256 expiry,
         uint256 has_change,
+        uint256 is_rollover,
         bytes calldata proof_a_neg,
         bytes calldata proof_b,
         bytes calldata proof_c
     ) external returns (bool);
+
+    function getCurrentEpoch() external view returns (uint32);
 
     function claimExecutionFees(uint256 amount) external;
 
@@ -845,6 +849,7 @@ impl EvmClient {
         note_root_hex: &str,
         leaf_count: u64,
         input_nullifier_hex: &str,
+        note_epoch_id: u32,
         output_commitment_hex: &str,
         recipient: &str,
         merchant_amount: u64,
@@ -854,15 +859,18 @@ impl EvmClient {
         quote_hash_hex: &str,
         expiry: u64,
         has_change: u64,
+        is_rollover: u64,
         proof_a_neg_hex: &str,
         proof_b_hex: &str,
         proof_c_hex: &str,
     ) -> Result<TransactionOutcome> {
-        println!("RELAYER: Broadcasting private note spend transaction (DEC-025)");
+        println!("RELAYER: Broadcasting private note spend transaction (DEC-025, DEC-033)");
         println!(
             "  Nullifier       : {}...",
             &input_nullifier_hex[..core::cmp::min(10, input_nullifier_hex.len())]
         );
+        println!("  Epoch ID        : {}", note_epoch_id);
+        println!("  Is Rollover     : {}", is_rollover == 1);
         println!("  Recipient       : {}", recipient);
         println!(
             "  Merchant Amount : {} USDC",
@@ -928,6 +936,7 @@ impl EvmClient {
             note_root: note_root_fixed.into(),
             leaf_count: U256::from(leaf_count),
             input_nullifier: nullifier_fixed.into(),
+            note_epoch_id: U256::from(note_epoch_id),
             output_commitment: output_cm_fixed.into(),
             recipient: recipient_addr,
             merchant_amount: U256::from(merchant_amount),
@@ -937,6 +946,7 @@ impl EvmClient {
             quote_hash: quote_hash_fixed.into(),
             expiry: U256::from(expiry),
             has_change: U256::from(has_change),
+            is_rollover: U256::from(is_rollover),
             proof_a_neg: proof_a_neg.into(),
             proof_b: proof_b.into(),
             proof_c: proof_c.into(),
@@ -1367,6 +1377,27 @@ impl EvmClient {
             Ok(result.last().copied().unwrap_or(0) != 0)
         } else {
             Ok(false)
+        }
+    }
+
+    /// Query current epoch ID on-chain (DEC-033)
+    pub async fn get_current_epoch(&self) -> Result<u32> {
+        let call_data = getCurrentEpochCall {}.abi_encode();
+        let tx = TransactionRequest::default()
+            .with_to(self.contract_address)
+            .with_input(Bytes::from(call_data));
+
+        let result = self
+            .provider
+            .call(tx)
+            .await
+            .context("Failed to call getCurrentEpoch on-chain")?;
+
+        if result.len() >= 32 {
+            let epoch = U256::from_be_slice(&result[result.len() - 32..]).to::<u32>();
+            Ok(epoch)
+        } else {
+            Ok(0)
         }
     }
 

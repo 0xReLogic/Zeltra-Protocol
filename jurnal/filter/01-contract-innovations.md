@@ -4,20 +4,7 @@ Dokumen ini memetakan paper terpilih untuk arsitektur smart contract Nimbus ([`n
 
 ---
 
-## 1. A Note on Notes: Evolving Nullifiers (IACR ePrint 2025/2031)
-* **File Jurnal:** [`jurnal/Note-on-Notes-Scalable-Anonymous-Payments.md`](file:///workspaces/Zeltra-Protocol/jurnal/Note-on-Notes-Scalable-Anonymous-Payments.md)
-* **Penulis:** Sean Bowe, Ian Miers (Arsitek Utama Zerocash & Zcash)
-* **Problem di Sistem Klasik:**
-  Mengecek keanggotaan nullifier di dataset raksasa membutuhkan akses storage acak (SSTORE / SLOAD) berulang kali yang sangat mahal di smart contract layer.
-* **Inovasi Paper:**
-  *Evolving Nullifiers*: Nullifier ditransformasikan secara homomorfik menggunakan pseudo-random ratchet seiring bertambahnya epoch, memungkinkan *Oblivious Synchronization* dan verifikasi state ringkas.
-* **Implementasi di Nimbus Stylus:**
-  * Kontrak Stylus hanya perlu menyimpan hash accumulator aktif dari epoch saat ini.
-  * User yang membelanjakan note lama wajib menyertakan bukti migrasi epoch (rollover). Storage on-chain tetap konstan $O(1)$ selamanya.
-
----
-
-## 2. Rate-Limiting Nullifiers for Gasless Sequencer Admission (IACR ePrint 2025)
+## 1. Rate-Limiting Nullifiers for Gasless Sequencer Admission (IACR ePrint 2025)
 * **File Jurnal:** [`jurnal/Rate-Limiting-Nullifiers-Gasless-Sequencer.md`](file:///workspaces/Zeltra-Protocol/jurnal/Rate-Limiting-Nullifiers-Gasless-Sequencer.md)
 * **Problem di Sistem Klasik:**
   Endpoint relayer gasless/meta-transaction rentan terhadap serangan spam DoS dan drained gas reserves karena siapa pun bisa mengirim request spend palsu tanpa modal.

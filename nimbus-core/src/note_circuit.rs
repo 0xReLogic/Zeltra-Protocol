@@ -12,18 +12,19 @@ use ark_std::rand::SeedableRng;
 
 use crate::poseidon::{poseidon_hash as poseidon_w3_hash, poseidon_w5_hash};
 
-/// Number of public inputs in the PrivateNoteCircuit (DEC-032: 13 inputs).
-pub const NUM_PUBLIC_INPUTS: usize = 13;
+/// Number of public inputs in the PrivateNoteCircuit (DEC-033: 15 inputs).
+pub const NUM_PUBLIC_INPUTS: usize = 15;
 
 /// Private note spend circuit for Groth16 proof generation.
 ///
 /// This circuit is independent from `ComplianceCircuit` — it uses different
 /// Poseidon widths, different nullifier derivation, and different public inputs.
 pub struct PrivateNoteCircuit {
-    // ── Public inputs (13 scalar field elements) ──
+    // ── Public inputs (15 scalar field elements) ──
     pub note_root: Option<Fr>,
     pub leaf_count: Option<Fr>,
     pub input_nullifier: Option<Fr>,
+    pub note_epoch_id: Option<Fr>,
     pub output_commitment: Option<Fr>,
     pub recipient: Option<Fr>,
     pub merchant_amount: Option<Fr>,
@@ -34,6 +35,7 @@ pub struct PrivateNoteCircuit {
     pub contract_address: Option<Fr>,
     pub expiry: Option<Fr>,
     pub has_change: Option<Fr>,
+    pub is_rollover: Option<Fr>,
 
     // ── Private witnesses: input note ──
     pub input_value: Option<Fr>,
@@ -133,12 +135,13 @@ impl ConstraintSynthesizer<Fr> for PrivateNoteCircuit {
         let domain_merkle = crate::note::domain_merkle_node();
 
         // ═══════════════════════════════════════════════════════════════
-        // 1. Allocate all public inputs (13 scalar field elements)
+        // 1. Allocate all public inputs (15 scalar field elements)
         // ═══════════════════════════════════════════════════════════════
 
         let note_root_var = public_input(&cs, self.note_root)?;
         let leaf_count_var = public_input(&cs, self.leaf_count)?;
         let nullifier_var = public_input(&cs, self.input_nullifier)?;
+        let note_epoch_id_var = public_input(&cs, self.note_epoch_id)?;
         let output_cm_var = public_input(&cs, self.output_commitment)?;
         let recipient_var = public_input(&cs, self.recipient)?;
         let merchant_var = public_input(&cs, self.merchant_amount)?;
@@ -149,6 +152,7 @@ impl ConstraintSynthesizer<Fr> for PrivateNoteCircuit {
         let contract_addr_var = public_input(&cs, self.contract_address)?;
         let expiry_var = public_input(&cs, self.expiry)?;
         let has_change_var = public_input(&cs, self.has_change)?;
+        let is_rollover_var = public_input(&cs, self.is_rollover)?;
 
         // ═══════════════════════════════════════════════════════════════
         // 2. Allocate all private witnesses
@@ -186,9 +190,10 @@ impl ConstraintSynthesizer<Fr> for PrivateNoteCircuit {
         // 4. Verify MMR membership, mountain path and peak bagging (DEC-032)
         // ═══════════════════════════════════════════════════════════════
 
-        // Range constrain leaf_count and input_leaf_index to [0, 2^64)
+        // Range constrain leaf_count, input_leaf_index, and note_epoch_id to [0, 2^64)
         enforce_u64_range(&cs, &in_index, self.input_leaf_index)?;
         enforce_u64_range(&cs, &leaf_count_var, self.leaf_count)?;
+        enforce_u64_range(&cs, &note_epoch_id_var, self.note_epoch_id)?;
 
         // DEC-032 Section 4.1: Anti-Hyperbridge strictly upper bound check: input_leaf_index < leaf_count
         // Enforces delta = leaf_count - 1 - input_leaf_index in [0, 2^64)
@@ -211,9 +216,9 @@ impl ConstraintSynthesizer<Fr> for PrivateNoteCircuit {
         let mut current = in_commitment.clone();
 
         // 4a. Walk internal mountain from leaf to computed peak
-        for level in 0..32 {
+        for (level, sibling) in mountain_sibs.iter().enumerate() {
             let is_active = level < m_height;
-            let sibling_var = private_witness(&cs, Some(mountain_sibs[level]))?;
+            let sibling_var = private_witness(&cs, Some(*sibling))?;
             let is_active_var = private_witness(
                 &cs,
                 Some(if is_active {
@@ -358,16 +363,16 @@ impl ConstraintSynthesizer<Fr> for PrivateNoteCircuit {
         bagged_root.enforce_equal(&note_root_var)?;
 
         // ═══════════════════════════════════════════════════════════════
-        // 5. Derive nullifier key + compute nullifier
+        // 5. Derive nullifier key + compute evolving nullifier (DEC-033)
         //    nk = Poseidon_W3(owner_key, domain_nullifier)
-        //    nf = Poseidon_W5(nk, commitment, leaf_index, 0; domain_nullifier)
+        //    nf = Poseidon_W5(nk, commitment, leaf_index, note_epoch_id; domain_nullifier)
         // ═══════════════════════════════════════════════════════════════
 
         let nullifier_key =
             poseidon_w3_hash(&in_owner, &FpVar::Constant(domain_nullifier), w3_rc, w3_mds)?;
 
         let computed_nf = poseidon_w5_hash(
-            &[nullifier_key, in_commitment, in_index, zero.clone()],
+            &[nullifier_key, in_commitment, in_index, note_epoch_id_var],
             domain_nullifier,
             w5_rc,
             w5_mds,
@@ -411,6 +416,19 @@ impl ConstraintSynthesizer<Fr> for PrivateNoteCircuit {
         enforce_u64_range(&cs, &protocol_fee_var, self.protocol_fee)?;
         enforce_u64_range(&cs, &exec_fee_var, self.execution_fee)?;
         enforce_u64_range(&cs, &ch_value, self.change_value)?;
+
+        // DEC-033 Rollover rules:
+        // a. Boolean constrain is_rollover: is_rollover * (1 - is_rollover) == 0
+        let one_minus_is_rollover = &one - &is_rollover_var;
+        let is_rollover_bool = &is_rollover_var * &one_minus_is_rollover;
+        is_rollover_bool.enforce_equal(&zero)?;
+
+        // b. Mode rollover (is_rollover == 1): enforce merchant_amount == 0 and protocol_fee == 0
+        let rollover_merchant_check = &is_rollover_var * &merchant_var;
+        rollover_merchant_check.enforce_equal(&zero)?;
+
+        let rollover_protocol_fee_check = &is_rollover_var * &protocol_fee_var;
+        rollover_protocol_fee_check.enforce_equal(&zero)?;
 
         // Value conservation: input_value == merchant + protocol_fee + execution_fee + change_value
         let total_debits = &merchant_var + &protocol_fee_var + &exec_fee_var + &ch_value;
@@ -499,11 +517,11 @@ pub fn generate_note_circuit_keys() -> Result<NoteCircuitKeys, SynthesisError> {
 /// - beta_g2:  [u8; 256]
 /// - gamma_g2: [u8; 256]
 /// - delta_g2: [u8; 256]
-/// - ic[13]:   [[u8; 128]; 13]
+/// - ic[16]:   [[u8; 128]; 16]
 #[allow(clippy::type_complexity)]
 pub fn generate_note_circuit_evm_vk(
     vk: &ark_groth16::VerifyingKey<Bls12_381>,
-) -> ([u8; 128], [u8; 256], [u8; 256], [u8; 256], [[u8; 128]; 14]) {
+) -> ([u8; 128], [u8; 256], [u8; 256], [u8; 256], [[u8; 128]; 16]) {
     use crate::evm::{to_evm_g1, to_evm_g2};
 
     fn to_g1_array(v: &[u8]) -> [u8; 128] {
@@ -525,8 +543,8 @@ pub fn generate_note_circuit_evm_vk(
     let gamma_g2 = to_g2_array(&to_evm_g2(&vk.gamma_g2));
     let delta_g2 = to_g2_array(&to_evm_g2(&vk.delta_g2));
 
-    let mut ic = [[0u8; 128]; 14];
-    for (i, ic_point) in vk.gamma_abc_g1.iter().take(14).enumerate() {
+    let mut ic = [[0u8; 128]; 16];
+    for (i, ic_point) in vk.gamma_abc_g1.iter().take(16).enumerate() {
         ic[i] = to_g1_array(&to_evm_g1(ic_point));
     }
 
@@ -571,7 +589,7 @@ pub fn create_dummy_circuit() -> PrivateNoteCircuit {
         p_sibs[i] = *s;
     }
 
-    let nf = dn(nk, in_cm, leaf_idx as u64);
+    let nf = dn(nk, in_cm, leaf_idx as u64, 0);
 
     let merchant: u64 = 5_000_000;
     let pfee: u64 = 12_500;
@@ -586,6 +604,7 @@ pub fn create_dummy_circuit() -> PrivateNoteCircuit {
         note_root: Some(root),
         leaf_count: Some(Fr::from(mmr.leaf_count as u64)),
         input_nullifier: Some(nf),
+        note_epoch_id: Some(Fr::from(0u64)),
         output_commitment: Some(ch_cm),
         recipient: Some(Fr::from(100u64)),
         merchant_amount: Some(Fr::from(merchant)),
@@ -596,6 +615,7 @@ pub fn create_dummy_circuit() -> PrivateNoteCircuit {
         contract_address: Some(Fr::from(300u64)),
         expiry: Some(Fr::from(0u64)),
         has_change: Some(Fr::from(1u64)),
+        is_rollover: Some(Fr::from(0u64)),
 
         input_value: Some(Fr::from(in_value)),
         input_owner_key: Some(spending_key),
@@ -662,7 +682,7 @@ pub fn verify_evm_note_proof(
     proof_a_neg: &[u8; 128],
     proof_b: &[u8; 256],
     proof_c: &[u8; 128],
-    public_inputs: &[Fr; 13],
+    public_inputs: &[Fr; 15],
 ) -> bool {
     let Some(proof) = crate::evm::from_evm_proof(proof_a_neg, proof_b, proof_c) else {
         return false;
@@ -678,6 +698,7 @@ pub fn extract_public_inputs(circuit: &PrivateNoteCircuit) -> Vec<Fr> {
         circuit.note_root.unwrap(),
         circuit.leaf_count.unwrap(),
         circuit.input_nullifier.unwrap(),
+        circuit.note_epoch_id.unwrap(),
         circuit.output_commitment.unwrap(),
         circuit.recipient.unwrap(),
         circuit.merchant_amount.unwrap(),
@@ -688,6 +709,7 @@ pub fn extract_public_inputs(circuit: &PrivateNoteCircuit) -> Vec<Fr> {
         circuit.contract_address.unwrap(),
         circuit.expiry.unwrap(),
         circuit.has_change.unwrap(),
+        circuit.is_rollover.unwrap(),
     ]
 }
 
@@ -738,8 +760,8 @@ mod tests {
 
         let proof = generate_note_proof(circuit, &keys.proving_key).unwrap();
 
-        // Tamper with merchant amount (public input index 5)
-        public_inputs[5] += Fr::from(1u64);
+        // Tamper with merchant amount (public input index 6)
+        public_inputs[6] += Fr::from(1u64);
 
         let is_valid = verify_note_proof(&proof, &keys.verifying_key, &public_inputs);
         assert!(!is_valid, "Tampered merchant amount must fail verification");
@@ -753,8 +775,8 @@ mod tests {
 
         let proof = generate_note_proof(circuit, &keys.proving_key).unwrap();
 
-        // Tamper with recipient (public input index 4)
-        public_inputs[4] += Fr::from(1u64);
+        // Tamper with recipient (public input index 5)
+        public_inputs[5] += Fr::from(1u64);
 
         let is_valid = verify_note_proof(&proof, &keys.verifying_key, &public_inputs);
         assert!(!is_valid, "Tampered recipient must fail verification");
@@ -847,7 +869,7 @@ mod tests {
             p_sibs[i] = *s;
         }
 
-        let nf = dn(nk, in_cm, leaf_idx as u64);
+        let nf = dn(nk, in_cm, leaf_idx as u64, 0);
         let merchant: u64 = 5_000_000;
         let pfee: u64 = 12_500;
         let efee: u64 = 23_000;
@@ -863,6 +885,7 @@ mod tests {
             note_root: Some(root),
             leaf_count: Some(Fr::from(mmr.leaf_count as u64)),
             input_nullifier: Some(nf),
+            note_epoch_id: Some(Fr::from(0u64)),
             output_commitment: Some(ch_cm),
             recipient: Some(Fr::from(100u64)),
             merchant_amount: Some(Fr::from(merchant)),
@@ -873,6 +896,7 @@ mod tests {
             contract_address: Some(Fr::from(300u64)),
             expiry: Some(Fr::from(0u64)),
             has_change: Some(Fr::from(1u64)),
+            is_rollover: Some(Fr::from(0u64)),
 
             input_value: Some(Fr::from(in_value)),
             input_owner_key: Some(spending_key),
@@ -943,7 +967,7 @@ mod tests {
             p_sibs[i] = *s;
         }
 
-        let nf = dn(nk, in_cm, leaf_idx as u64);
+        let nf = dn(nk, in_cm, leaf_idx as u64, 0);
         let merchant: u64 = 5_000_000;
         let pfee: u64 = 12_500;
         let efee: u64 = 23_000;
@@ -959,6 +983,7 @@ mod tests {
             note_root: Some(root),
             leaf_count: Some(Fr::from(mmr.leaf_count as u64)),
             input_nullifier: Some(nf),
+            note_epoch_id: Some(Fr::from(0u64)),
             output_commitment: Some(ch_cm),
             recipient: Some(Fr::from(100u64)),
             merchant_amount: Some(Fr::from(merchant)),
@@ -969,6 +994,7 @@ mod tests {
             contract_address: Some(Fr::from(300u64)),
             expiry: Some(Fr::from(0u64)),
             has_change: Some(Fr::from(1u64)),
+            is_rollover: Some(Fr::from(0u64)),
 
             input_value: Some(Fr::from(in_value)),
             input_owner_key: Some(spending_key),
@@ -1041,7 +1067,7 @@ mod tests {
             p_sibs[i] = *s;
         }
 
-        let nf = dn(nk, in_cm, leaf_idx as u64);
+        let nf = dn(nk, in_cm, leaf_idx as u64, 0);
 
         let merchant: u64 = 5_000_000;
         let pfee: u64 = 12_500;
@@ -1053,6 +1079,7 @@ mod tests {
             note_root: Some(root),
             leaf_count: Some(Fr::from(mmr.leaf_count as u64)),
             input_nullifier: Some(nf),
+            note_epoch_id: Some(Fr::from(0u64)),
             output_commitment: Some(Fr::from(0u64)), // no change
             recipient: Some(Fr::from(100u64)),
             merchant_amount: Some(Fr::from(merchant)),
@@ -1063,6 +1090,7 @@ mod tests {
             contract_address: Some(Fr::from(300u64)),
             expiry: Some(Fr::from(0u64)),
             has_change: Some(Fr::from(0u64)), // no change
+            is_rollover: Some(Fr::from(0u64)),
 
             input_value: Some(Fr::from(in_value)),
             input_owner_key: Some(spending_key),
@@ -1201,7 +1229,7 @@ mod tests {
 
         eprintln!("// --- PrivateNoteCircuit Phase A Trusted Setup VK Constants ---");
         eprintln!("// Seed: 0x{:016X} (NimbusNC)", NOTE_CIRCUIT_SETUP_SEED);
-        eprintln!("// Circuit: PrivateNoteCircuit (13 public inputs) over BLS12-381");
+        eprintln!("// Circuit: PrivateNoteCircuit (15 public inputs) over BLS12-381");
         eprintln!();
         eprintln!("// NOTE_VK_ALPHA_G1 (128 bytes)");
         eprintln!(
@@ -1227,7 +1255,7 @@ mod tests {
             to_hex(&delta)
         );
         eprintln!();
-        eprintln!("pub const NOTE_VK_IC: [[u8; 128]; 14] = [");
+        eprintln!("pub const NOTE_VK_IC: [[u8; 128]; 16] = [");
         for (i, ic_point) in ic.iter().enumerate() {
             eprintln!("    // IC[{}]", i);
             eprintln!("    alloy_primitives::hex!(\"{}\"),", to_hex(ic_point));
@@ -1242,8 +1270,8 @@ mod tests {
         let keys = get_or_init_note_circuit_keys();
         let circuit = setup_valid_circuit();
         let pis = extract_public_inputs(&circuit);
-        let mut public_inputs = [Fr::default(); 13];
-        public_inputs.copy_from_slice(&pis[..13]);
+        let mut public_inputs = [Fr::default(); 15];
+        public_inputs.copy_from_slice(&pis[..15]);
 
         let proof = generate_note_proof(circuit, &keys.proving_key).unwrap();
 
@@ -1260,13 +1288,161 @@ mod tests {
         // 1. Valid EVM proof verifies
         assert!(verify_evm_note_proof(&a_neg, &b, &c, &public_inputs));
 
-        // 2. Tampered public input rejected
+        // 2. Tampered public input rejected (tamper merchant amount at index 6)
         let mut tampered_pis = public_inputs;
-        tampered_pis[5] += Fr::from(100u64);
+        tampered_pis[6] += Fr::from(100u64);
         assert!(!verify_evm_note_proof(&a_neg, &b, &c, &tampered_pis));
 
         // 3. Fake proof points rejected
         let fake_a = [0x11u8; 128];
         assert!(!verify_evm_note_proof(&fake_a, &b, &c, &public_inputs));
+    }
+
+    #[test]
+    fn test_note_circuit_rollover_valid() {
+        use crate::note::{
+            derive_nullifier as dn, derive_nullifier_key as dnk, note_commitment as nc,
+            MerkleMountainRange,
+        };
+
+        let keys = get_or_init_note_circuit_keys();
+        let spending_key = Fr::from(42u64);
+        let nk = dnk(spending_key);
+
+        let in_value: u64 = 10_000_000; // 10 USDC
+        let in_rho = Fr::from(101u64);
+        let in_rand = Fr::from(202u64);
+        let in_cm = nc(in_value, spending_key, in_rho, in_rand);
+
+        let mut mmr = MerkleMountainRange::new();
+        let (leaf_idx, root) = mmr.append(in_cm);
+        let proof = mmr.generate_proof(leaf_idx);
+
+        let mut m_sibs = [Fr::from(0u64); 32];
+        for (i, s) in proof.mountain_siblings.iter().enumerate() {
+            m_sibs[i] = *s;
+        }
+        let mut p_sibs = [Fr::from(0u64); 32];
+        for (i, s) in proof.peak_bagging_siblings.iter().enumerate() {
+            p_sibs[i] = *s;
+        }
+
+        let epoch_id: u32 = 1;
+        let nf = dn(nk, in_cm, leaf_idx as u64, epoch_id);
+
+        let efee: u64 = 23_000;
+        let change: u64 = in_value - efee; // in_value == execution_fee + change (merchant=0, fee=0)
+        let ch_rho = Fr::from(303u64);
+        let ch_rand = Fr::from(404u64);
+        let ch_cm = nc(change, spending_key, ch_rho, ch_rand);
+
+        let circuit = PrivateNoteCircuit {
+            note_root: Some(root),
+            leaf_count: Some(Fr::from(mmr.leaf_count as u64)),
+            input_nullifier: Some(nf),
+            note_epoch_id: Some(Fr::from(epoch_id as u64)),
+            output_commitment: Some(ch_cm),
+            recipient: Some(Fr::from(0u64)),
+            merchant_amount: Some(Fr::from(0u64)), // MUST be 0 in rollover mode
+            protocol_fee: Some(Fr::from(0u64)),    // MUST be 0 in rollover mode
+            execution_fee: Some(Fr::from(efee)),
+            quote_hash: Some(Fr::from(555u64)),
+            chain_id: Some(Fr::from(421614u64)),
+            contract_address: Some(Fr::from(300u64)),
+            expiry: Some(Fr::from(0u64)),
+            has_change: Some(Fr::from(1u64)),
+            is_rollover: Some(Fr::from(1u64)), // Rollover mode = 1
+
+            input_value: Some(Fr::from(in_value)),
+            input_owner_key: Some(spending_key),
+            input_rho: Some(in_rho),
+            input_randomness: Some(in_rand),
+            input_leaf_index: Some(Fr::from(leaf_idx as u64)),
+            mountain_height: Some(proof.mountain_height as u8),
+            mountain_siblings: Some(m_sibs),
+            peak_bagging_siblings: Some(p_sibs),
+            peak_bagging_count: Some(proof.peak_bagging_siblings.len() as u8),
+
+            change_value: Some(Fr::from(change)),
+            change_owner_key: Some(spending_key),
+            change_rho: Some(ch_rho),
+            change_randomness: Some(ch_rand),
+        };
+
+        let public_inputs = extract_public_inputs(&circuit);
+        let proof = generate_note_proof(circuit, &keys.proving_key).unwrap();
+        let is_valid = verify_note_proof(&proof, &keys.verifying_key, &public_inputs);
+        assert!(is_valid, "Valid rollover proof must verify (DEC-033)");
+    }
+
+    #[test]
+    fn test_note_circuit_rollover_nonzero_merchant_fails_proving() {
+        let keys = get_or_init_note_circuit_keys();
+        let mut circuit = setup_valid_circuit();
+
+        // Turn on rollover mode (is_rollover = 1) but leave merchant_amount > 0
+        circuit.is_rollover = Some(Fr::from(1u64));
+        circuit.merchant_amount = Some(Fr::from(5_000_000u64));
+
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            generate_note_proof(circuit, &keys.proving_key)
+        }));
+        assert!(
+            result.is_err() || result.unwrap().is_err(),
+            "Nonzero merchant_amount in rollover mode must fail proof generation"
+        );
+    }
+
+    #[test]
+    fn test_note_circuit_rollover_nonzero_protocol_fee_fails_proving() {
+        let keys = get_or_init_note_circuit_keys();
+        let mut circuit = setup_valid_circuit();
+
+        // Turn on rollover mode (is_rollover = 1) but leave protocol_fee > 0
+        circuit.is_rollover = Some(Fr::from(1u64));
+        circuit.merchant_amount = Some(Fr::from(0u64));
+        circuit.protocol_fee = Some(Fr::from(12_500u64));
+
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            generate_note_proof(circuit, &keys.proving_key)
+        }));
+        assert!(
+            result.is_err() || result.unwrap().is_err(),
+            "Nonzero protocol_fee in rollover mode must fail proof generation"
+        );
+    }
+
+    #[test]
+    fn test_note_circuit_non_boolean_is_rollover_fails_proving() {
+        let keys = get_or_init_note_circuit_keys();
+        let mut circuit = setup_valid_circuit();
+
+        // Non-boolean is_rollover = 2 must violate is_rollover * (1 - is_rollover) == 0
+        circuit.is_rollover = Some(Fr::from(2u64));
+
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            generate_note_proof(circuit, &keys.proving_key)
+        }));
+        assert!(
+            result.is_err() || result.unwrap().is_err(),
+            "Non-boolean is_rollover must fail proof generation"
+        );
+    }
+
+    #[test]
+    fn test_note_circuit_tampered_epoch_fails_proving() {
+        let keys = get_or_init_note_circuit_keys();
+        let mut circuit = setup_valid_circuit();
+
+        // Tamper note_epoch_id to 5 while nullifier was computed with 0
+        circuit.note_epoch_id = Some(Fr::from(5u64));
+
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            generate_note_proof(circuit, &keys.proving_key)
+        }));
+        assert!(
+            result.is_err() || result.unwrap().is_err(),
+            "Tampered note_epoch_id must fail nullifier derivation constraint check"
+        );
     }
 }

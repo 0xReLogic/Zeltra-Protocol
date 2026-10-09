@@ -100,7 +100,30 @@ sol_storage! {
         // Two-step governance for deposit fee change
         uint256 proposed_deposit_fee_bps;
         uint256 deposit_fee_eta;
+
+        // --- Generational Epoch Window & Nullifier Pruning (DEC-033) ---
+        // Current active epoch ID (starts at 0)
+        uint256 current_epoch;
+        // Timestamp when the current epoch started
+        uint256 epoch_start_timestamp;
+        // Generational nullifiers: mapping composite key keccak256(slot, nullifier) => bool
+        // where slot = epoch_id % 2
+        mapping(bytes32 => bool) generation_nullifiers;
+        // Generation epoch ID: mapping slot (0 or 1) => epoch_id
+        mapping(uint256 => uint256) generation_epoch_id;
     }
+}
+
+/// Compute composite storage key for generational nullifier: keccak256(slot || nullifier)
+pub fn generational_nullifier_key(
+    slot: u8,
+    nullifier: alloy_primitives::FixedBytes<32>,
+) -> alloy_primitives::FixedBytes<32> {
+    use alloy_primitives::keccak256;
+    let mut buf = [0u8; 33];
+    buf[0] = slot;
+    buf[1..33].copy_from_slice(nullifier.as_slice());
+    keccak256(buf)
 }
 
 impl Default for Nimbus {

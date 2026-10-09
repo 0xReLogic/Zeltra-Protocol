@@ -609,6 +609,7 @@ impl Nimbus {
         note_root: FixedBytes<32>,
         leaf_count: U256,
         input_nullifier: FixedBytes<32>,
+        note_epoch_id: U256,
         output_commitment: FixedBytes<32>,
         recipient: Address,
         merchant_amount: U256,
@@ -618,6 +619,7 @@ impl Nimbus {
         quote_hash: FixedBytes<32>,
         expiry: U256,
         has_change: U256,
+        is_rollover: U256,
         proof_a_neg: Bytes,
         proof_b: Bytes,
         proof_c: Bytes,
@@ -636,9 +638,28 @@ impl Nimbus {
             return Err(b"TRANSACTION_EXPIRED".to_vec());
         }
 
-        // Merchant amount must be positive
-        if merchant_amount == U256::ZERO {
-            return Err(b"MERCHANT_AMOUNT_ZERO".to_vec());
+        // Rollover mode validation (DEC-033)
+        if is_rollover != U256::ZERO && is_rollover != U256::from(1) {
+            return Err(b"INVALID_IS_ROLLOVER_FLAG".to_vec());
+        }
+
+        if is_rollover == U256::ZERO {
+            // Normal spend: merchant amount must be positive
+            if merchant_amount == U256::ZERO {
+                return Err(b"MERCHANT_AMOUNT_ZERO".to_vec());
+            }
+        } else {
+            // Rollover mode: merchant_amount must be 0, protocol_fee must be 0
+            if merchant_amount != U256::ZERO {
+                return Err(b"MERCHANT_AMOUNT_MUST_BE_ZERO_IN_ROLLOVER".to_vec());
+            }
+            if protocol_fee != U256::ZERO {
+                return Err(b"PROTOCOL_FEE_MUST_BE_ZERO_IN_ROLLOVER".to_vec());
+            }
+            // Rollover MUST produce a change note (the renewed note)
+            if has_change != U256::from(1) {
+                return Err(b"ROLLOVER_MUST_HAVE_CHANGE".to_vec());
+            }
         }
 
         // leaf_count validation (DEC-032 anti-hyperbridge check)
@@ -662,8 +683,27 @@ impl Nimbus {
             return Err(b"UNACCEPTED_NOTE_ROOT".to_vec());
         }
 
-        // Nullifier must not have been spent
-        if self.note_nullifiers.get(input_nullifier) {
+        // Epoch window validation (DEC-033)
+        let current_epoch_u256 = self.current_epoch.get();
+        if note_epoch_id > current_epoch_u256 {
+            return Err(b"EPOCH_IN_FUTURE".to_vec());
+        }
+        let current_epoch = current_epoch_u256.to::<u32>();
+        let min_active_epoch = current_epoch.saturating_sub(1);
+        if note_epoch_id < U256::from(min_active_epoch) {
+            return Err(b"EPOCH_EXPIRED_REQUIRE_ROLLOVER".to_vec());
+        }
+        let note_epoch = note_epoch_id.to::<u32>();
+        let slot = (note_epoch % 2) as u8;
+
+        // Generational nullifier check (DEC-033)
+        // Verify slot is actively mapped to note_epoch
+        if self.generation_epoch_id.get(U256::from(slot)) != note_epoch_id {
+            return Err(b"EPOCH_SLOT_DESYNCHRONIZED".to_vec());
+        }
+
+        let gen_key = crate::storage::generational_nullifier_key(slot, input_nullifier);
+        if self.generation_nullifiers.get(gen_key) || self.note_nullifiers.get(input_nullifier) {
             return Err(b"NOTE_ALREADY_SPENT".to_vec());
         }
 
@@ -679,7 +719,7 @@ impl Nimbus {
             return Err(b"INSUFFICIENT_NOTE_LIABILITY".to_vec());
         }
 
-        // Construct 13 public input scalars in big-endian EVM format
+        // Construct 15 public input scalars in big-endian EVM format
         let mut recipient_bytes = [0u8; 32];
         recipient_bytes[12..].copy_from_slice(recipient.as_slice());
 
@@ -688,16 +728,19 @@ impl Nimbus {
 
         let chain_id_bytes = U256::from(self.env_chain_id()).to_be_bytes::<32>();
         let leaf_count_bytes = leaf_count.to_be_bytes::<32>();
+        let note_epoch_id_bytes = note_epoch_id.to_be_bytes::<32>();
         let merchant_amount_bytes = merchant_amount.to_be_bytes::<32>();
         let protocol_fee_bytes = protocol_fee.to_be_bytes::<32>();
         let execution_fee_bytes = execution_fee.to_be_bytes::<32>();
         let expiry_bytes = expiry.to_be_bytes::<32>();
         let has_change_bytes = has_change.to_be_bytes::<32>();
+        let is_rollover_bytes = is_rollover.to_be_bytes::<32>();
 
-        let public_inputs: [[u8; 32]; 13] = [
+        let public_inputs: [[u8; 32]; 15] = [
             note_root.0,
             leaf_count_bytes,
             input_nullifier.0,
+            note_epoch_id_bytes,
             output_commitment.0,
             recipient_bytes,
             merchant_amount_bytes,
@@ -708,6 +751,7 @@ impl Nimbus {
             contract_bytes,
             expiry_bytes,
             has_change_bytes,
+            is_rollover_bytes,
         ];
 
         // Validate canonicality for each public input scalar
@@ -733,7 +777,8 @@ impl Nimbus {
         }
 
         // 2. EFFECTS
-        // Mark nullifier spent
+        // Mark nullifier spent in both generational map and persistent fallback
+        self.generation_nullifiers.insert(gen_key, true);
         self.note_nullifiers.insert(input_nullifier, true);
 
         // If has_change == 1, insert output_commitment into MMR (which emits NoteCommitmentAppended & ChangeCommitment)
@@ -783,21 +828,29 @@ impl Nimbus {
         }
 
         // 4. EVENTS
-        crate::events::emit_event(crate::events::PrivateNoteSpend {
-            nullifier: input_nullifier,
-            note_root,
-            recipient,
-            merchant_amount,
-            output_commitment,
-            has_change: has_change == U256::from(1),
-        });
-        crate::events::emit_event(crate::events::ProtocolFee {
-            nullifier: input_nullifier,
-            recipient,
-            amount: merchant_amount,
-            fee_bps: U256::ZERO,
-            protocol_fee,
-        });
+        if is_rollover == U256::from(1) {
+            crate::events::emit_event(crate::events::NoteRolloverExecuted {
+                old_nullifier: input_nullifier,
+                new_commitment: output_commitment,
+                fee: execution_fee.to::<u64>(),
+            });
+        } else {
+            crate::events::emit_event(crate::events::PrivateNoteSpend {
+                nullifier: input_nullifier,
+                note_root,
+                recipient,
+                merchant_amount,
+                output_commitment,
+                has_change: has_change == U256::from(1),
+            });
+            crate::events::emit_event(crate::events::ProtocolFee {
+                nullifier: input_nullifier,
+                recipient,
+                amount: merchant_amount,
+                fee_bps: U256::ZERO,
+                protocol_fee,
+            });
+        }
         crate::events::emit_event(crate::events::ExecutionFee {
             nullifier: input_nullifier,
             execution_fee,

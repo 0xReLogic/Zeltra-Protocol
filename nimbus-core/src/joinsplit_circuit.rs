@@ -466,7 +466,7 @@ pub fn create_dummy_joinsplit_circuit() -> JoinSplitCircuit {
 
     let cm1 = note_commitment(10_000_000, sk, rho, rand);
     let root = crate::note::compute_merkle_root(cm1, 0, &path);
-    let nf1 = derive_nullifier(nk, cm1, 0);
+    let nf1 = derive_nullifier(nk, cm1, 0, 0);
 
     // Dummy second input
     let nonce = Fr::from(999u64);
@@ -617,13 +617,13 @@ mod tests {
         let rho1 = Fr::from(111u64);
         let rand1 = Fr::from(222u64);
         let cm1 = note_commitment(10_000_000, sk, rho1, rand1);
-        let nf1 = derive_nullifier(nk, cm1, 0);
+        let nf1 = derive_nullifier(nk, cm1, 0, 0);
 
         // Input 2: Value 10 USDC (10_000_000) at index 1
         let rho2 = Fr::from(333u64);
         let rand2 = Fr::from(444u64);
         let cm2 = note_commitment(10_000_000, sk, rho2, rand2);
-        let nf2 = derive_nullifier(nk, cm2, 1);
+        let nf2 = derive_nullifier(nk, cm2, 1, 0);
 
         // Path for leaf 0: sibling at level 0 is cm2
         let mut path1: [Fr; MERKLE_TREE_DEPTH] = empty[..MERKLE_TREE_DEPTH].try_into().unwrap();

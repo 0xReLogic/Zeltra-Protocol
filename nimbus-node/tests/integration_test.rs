@@ -248,6 +248,9 @@ async fn test_private_note_spend_enqueue_and_queue_lifecycle() {
         user_address: None,
         expiry: Some(9999999999),
         has_change: Some(serde_json::Value::Number(1.into())),
+        note_epoch_id: Some(1),
+        is_rollover: Some(0),
+        input_value: Some(10_000_000),
         proof_a_neg: format!("0x{}", "11".repeat(128)),
         proof_b: format!("0x{}", "22".repeat(256)),
         proof_c: format!("0x{}", "33".repeat(128)),
@@ -255,6 +258,7 @@ async fn test_private_note_spend_enqueue_and_queue_lifecycle() {
             note_root.to_string(),
             format!("0x{:064x}", 1u64),
             input_nullifier.to_string(),
+            format!("0x{:064x}", 1u64),
             output_commitment.to_string(),
             format!("0x000000000000000000000000{}", &recipient[2..]),
             format!("0x{:064x}", 5_000_000u64),
@@ -268,11 +272,14 @@ async fn test_private_note_spend_enqueue_and_queue_lifecycle() {
             ),
             format!("0x{:064x}", 9999999999u64),
             format!("0x{:064x}", 1u64),
+            format!("0x{:064x}", 0u64),
         ],
         idempotency_key: Some("idem_private_1".to_string()),
     };
 
     let spend_req = nimbus_node::dto::SpendRequest::from(priv_req.clone());
+    assert_eq!(spend_req.note_epoch_id, Some(1));
+    assert_eq!(spend_req.is_rollover, Some(0));
     assert!(spend_req.is_private_note());
     assert_eq!(spend_req.nullifier, input_nullifier);
     assert_eq!(spend_req.amount, 5_000_000);
