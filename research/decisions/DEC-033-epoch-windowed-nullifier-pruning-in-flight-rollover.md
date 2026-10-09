@@ -74,7 +74,7 @@ Sebelum mengadopsi mekanisme *Epoch-based State Pruning*, tim arsitektur Zeltra 
 - **Vulnerabilitas:** Eksploitasi ekonomi pada relayer meta-transaksi di mana relayer menyediakan eksekusi bebas gas (*gasless subsidy*) untuk pembaruan status pengguna.
 - **Akar Masalah:** Penyerang mencetak ratusan ribu koin bernilai sangat kecil (*dust notes*, misal \$0.0001 USDC), membiarkannya melewati batas epoch, lalu membanjiri relayer dengan permintaan *refresh/rollover* massal. Relayer yang menalangi gas mengalami kebangkrutan operasional (*gas exhaustion / drained ETH reserves*).
 - **Pelajaran untuk Zeltra:** Relayer **DILARANG KERAS mensubsidi gas dari kas pribadi tanpa jaminan**. Setiap transaksi pembaruan status (*rollover*) wajib mematuhi:
-  1. *Dust Elimination Boundary:* Koin di bawah batas minimum (\$0.50 USDC) dilarang melakukan rollover mandiri.
+  1. *Dust Elimination Boundary:* Koin di bawah batas minimum ($2.00 USDC) dilarang melakukan rollover mandiri.
   2. *Self-Paying Note Conservation:* Biaya gas L2 dipotong langsung secara transparan dari saldo koin yang di-rollover via persamaan konservasi sirkuit ZK.
 
 #### 4. Paper Bowe & Miers (IACR ePrint 2025/2031): Evolving Nullifiers [7]
@@ -219,7 +219,7 @@ Untuk menjamin relayer tidak mengalami kebangkrutan operasional dan kas pengguna
 ├────────────────────────────────┬───────────────────────────────────────────────────────┤
 │ 1. Self-Paying Conservation    │ Input Note = Output Note + Execution Fee (in-circuit) │
 │ 2. Guaranteed 15% Markup       │ Relayer selalu dibayar gas + 15% profit on-chain      │
-│ 3. Dust Elimination ($0.50)    │ Koin receh dilarang rollover mandiri (anti-spam DoS)  │
+│ 3. Dust Elimination ($2.00)    │ Koin receh dilarang rollover mandiri (anti-spam DoS)  │
 └────────────────────────────────┴───────────────────────────────────────────────────────┘
 ```
 
@@ -240,10 +240,15 @@ $$\text{execution\_fee} = \text{gas\_cost} + \text{relayer\_markup}$$
 Untuk mencegah serangan DoS di mana penyerang membuat ribuan koin \$0.001 dan memicu rollover massal untuk menghabiskan kuota mempool relayer:
 ```rust
 // nimbus-core/src/fees.rs
-pub const MIN_STANDALONE_ROLLOVER_THRESHOLD_USDC: u64 = 500_000; // 0.50 USDC
+pub const MIN_STANDALONE_ROLLOVER_THRESHOLD_USDC: u64 = 2_000_000; // 2.00 USDC
 ```
-- Transaksi standalone rollover dengan `input_value < 500_000` (kurang dari \$0.50 USDC) **akan ditolak secara otomatis oleh relayer pre-flight sanitizer** dengan kode error `DUST_NOTE_ROLLOVER_REJECTED`.
-- Koin debu hanya dapat diremajakan jika digabungkan (*joinsplit*) bersama koin utama saat belanja normal.
+- Transaksi standalone rollover dengan `input_value < 2_000_000` (kurang dari $2.00 USDC) **akan ditolak secara otomatis oleh relayer pre-flight sanitizer** dengan kode error `DUST_NOTE_ROLLOVER_REJECTED`.
+- **Rasional Ekonomi & Perilaku Pengguna (Behavioral Incentive):**
+  Ambang batas $2.00 USDC (dinaikkan secara terarah dari $0.50) menciptakan insentif ekonomi yang sangat sehat:
+  1. **Disinsentif Refresh Koin Receh:** Pengguna akan berpikir dua kali untuk merefresh koin tidur receh secara mandiri (*"Ngapain bayar gas refresh L2 kalau saldo cuma sisa $0.80, mending gue depo baru atau sekalian belanja aja"*).
+  2. **Mendorong Inflow & Velocity:** Pengguna lebih terdorong melakukan deposit segar (0% deposit fee tanpa biaya) atau langsung membelanjakan sisa receh tersebut ke merchant—di mana rollover terjadi secara *in-flight* gratis tanpa biaya terpisah!
+  3. **Proteksi Anti-Spam Relayer:** Menjamin antrean relayer bersih dari jutaan transaksi rollover mikro yang membebani komputasi node.
+- Koin debu di bawah $2.00 tetap aman dan tidak pernah hangus; koin tersebut hanya dapat diremajakan jika digabungkan (*joinsplit*) bersama koin utama saat belanja normal atau di-redeem.
 
 ---
 
@@ -292,7 +297,7 @@ Sesuai aturan baku Zeltra, implementasi wajib menyertakan minimal 2x tes negatif
 ### B. Negative Tests (Pertahanan Batas & Anti-Eksploit)
 1. `test_epoch_expired_note_direct_spend_rejected`: Mencoba belanja koin $E-2$ tanpa mencetak change note epoch baru wajib revert `EPOCH_EXPIRED_REQUIRE_ROLLOVER`.
 2. `test_epoch_cross_epoch_nullifier_replay_fails`: Mencoba menyiarkan nullifier epoch $E$ pada epoch $E+1$ gagal karena derivasi PRF mengikat `epoch_id`.
-3. `test_epoch_dust_rollover_rejection`: Percobaan rollover pada koin < \$0.50 USDC ditolak oleh relayer (`DUST_NOTE_ROLLOVER_REJECTED`).
+3. `test_epoch_dust_rollover_rejection`: Percobaan rollover pada koin < $2.00 USDC ditolak oleh relayer (`DUST_NOTE_ROLLOVER_REJECTED`).
 4. `test_epoch_insufficient_balance_for_gas_revert`: Mencoba rollover koin yang saldonya lebih kecil dari biaya gas L2 ditolak oleh sirkuit karena melanggar konservasi nilai.
 5. `test_epoch_double_rollover_same_epoch_blocked`: Koin yang sudah di-rollover tidak dapat di-rollover untuk kedua kalinya di epoch yang sama (`NULLIFIER_ALREADY_SPENT`).
 
