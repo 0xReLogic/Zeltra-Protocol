@@ -590,14 +590,14 @@ pub async fn handle_private_note_spend(
         }
     }
 
-    // 8. Public inputs canonical scalar check, semantic binding & target domain verification (DEC-022, DEC-025, DEC-032, DEC-033)
-    // DEC-033: public_inputs is strictly required to have exactly 15 scalars (note_epoch_id at index 3, is_rollover at index 14).
+    // 8. Public inputs canonical scalar check, semantic binding & target domain verification (DEC-022, DEC-025, DEC-032, DEC-033, DEC-035A)
+    // DEC-035A: public_inputs is strictly required to have exactly 16 scalars (quote_hash_hi at index 9, quote_hash_lo at index 10, is_rollover at index 15).
     // Empty or omitted inputs are rejected fail-closed to prevent preflight bypass.
-    if payload.public_inputs.len() != 15 {
+    if payload.public_inputs.len() != 16 {
         return Json(PrivateNoteSpendResponse {
             status: "REJECTED".to_string(),
             message: format!(
-                "Expected 15 public inputs for PrivateNoteCircuit, got {}",
+                "Expected 16 public inputs for PrivateNoteCircuit, got {}",
                 payload.public_inputs.len()
             ),
             queue_position: 0,
@@ -605,7 +605,7 @@ pub async fn handle_private_note_spend(
         });
     }
 
-    let mut parsed_inputs = Vec::with_capacity(15);
+    let mut parsed_inputs = Vec::with_capacity(16);
     for (idx, pi_hex) in payload.public_inputs.iter().enumerate() {
         let bytes = match hex::decode(pi_hex.trim_start_matches("0x")) {
             Ok(b) if b.len() == 32 => b,
@@ -751,7 +751,28 @@ pub async fn handle_private_note_spend(
         });
     }
 
-    // Index 9: quote_hash
+    // Index 9 & 10: quote_hash_hi & quote_hash_lo (DEC-035A Two-Limb Representation)
+    // Preflight check: both limbs must strictly satisfy < 2^128 (upper 16 bytes must be 0)
+    if parsed_inputs[9][0..16] != [0u8; 16] {
+        return Json(PrivateNoteSpendResponse {
+            status: "REJECTED".to_string(),
+            message: "public_inputs[9] (quote_hash_hi) exceeds 128-bit range (>= 2^128)"
+                .to_string(),
+            queue_position: 0,
+            estimated_gas_usdc: None,
+        });
+    }
+    if parsed_inputs[10][0..16] != [0u8; 16] {
+        return Json(PrivateNoteSpendResponse {
+            status: "REJECTED".to_string(),
+            message: "public_inputs[10] (quote_hash_lo) exceeds 128-bit range (>= 2^128)"
+                .to_string(),
+            queue_position: 0,
+            estimated_gas_usdc: None,
+        });
+    }
+
+    // Semantic match against payload.quote_hash if provided
     let mut expected_qh = [0u8; 32];
     if let Some(ref qh) = payload.quote_hash {
         if let Ok(b) = hex::decode(qh.trim_start_matches("0x")) {
@@ -760,16 +781,29 @@ pub async fn handle_private_note_spend(
             }
         }
     }
-    if parsed_inputs[9] != expected_qh {
+    let mut expected_hi = [0u8; 32];
+    expected_hi[16..32].copy_from_slice(&expected_qh[0..16]);
+    let mut expected_lo = [0u8; 32];
+    expected_lo[16..32].copy_from_slice(&expected_qh[16..32]);
+
+    if parsed_inputs[9] != expected_hi {
         return Json(PrivateNoteSpendResponse {
             status: "REJECTED".to_string(),
-            message: "public_inputs[9] does not match quote_hash".to_string(),
+            message: "public_inputs[9] does not match quote_hash_hi".to_string(),
+            queue_position: 0,
+            estimated_gas_usdc: None,
+        });
+    }
+    if parsed_inputs[10] != expected_lo {
+        return Json(PrivateNoteSpendResponse {
+            status: "REJECTED".to_string(),
+            message: "public_inputs[10] does not match quote_hash_lo".to_string(),
             queue_position: 0,
             estimated_gas_usdc: None,
         });
     }
 
-    // Strict target domain verification for chain_id (index 10) and contract_address (index 11)
+    // Strict target domain verification for chain_id (index 11) and contract_address (index 12)
     let (expected_chain_bytes, expected_contract_bytes_opt) =
         if let Some(client) = state.evm_client.as_ref() {
             let target_chain_id = match client.chain_id().await {
@@ -800,56 +834,56 @@ pub async fn handle_private_note_spend(
             (U256::from(chain_id).to_be_bytes::<32>(), contract_opt)
         };
 
-    // Index 10: chain_id
-    if parsed_inputs[10] != expected_chain_bytes {
+    // Index 11: chain_id
+    if parsed_inputs[11] != expected_chain_bytes {
         return Json(PrivateNoteSpendResponse {
             status: "REJECTED".to_string(),
-            message: "public_inputs[10] does not match target chain_id".to_string(),
+            message: "public_inputs[11] does not match target chain_id".to_string(),
             queue_position: 0,
             estimated_gas_usdc: None,
         });
     }
 
-    // Index 11: contract_address
+    // Index 12: contract_address
     if let Some(expected_contract) = expected_contract_bytes_opt {
-        if parsed_inputs[11] != expected_contract {
+        if parsed_inputs[12] != expected_contract {
             return Json(PrivateNoteSpendResponse {
                 status: "REJECTED".to_string(),
-                message: "public_inputs[11] does not match target contract_address".to_string(),
+                message: "public_inputs[12] does not match target contract_address".to_string(),
                 queue_position: 0,
                 estimated_gas_usdc: None,
             });
         }
     }
 
-    // Index 12: expiry
+    // Index 13: expiry
     let expected_exp = U256::from(payload.expiry.unwrap_or(0)).to_be_bytes::<32>();
-    if parsed_inputs[12] != expected_exp {
+    if parsed_inputs[13] != expected_exp {
         return Json(PrivateNoteSpendResponse {
             status: "REJECTED".to_string(),
-            message: "public_inputs[12] does not match expiry".to_string(),
+            message: "public_inputs[13] does not match expiry".to_string(),
             queue_position: 0,
             estimated_gas_usdc: None,
         });
     }
 
-    // Index 13: has_change flag
+    // Index 14: has_change flag
     let expected_hc = U256::from(has_change_u64).to_be_bytes::<32>();
-    if parsed_inputs[13] != expected_hc {
+    if parsed_inputs[14] != expected_hc {
         return Json(PrivateNoteSpendResponse {
             status: "REJECTED".to_string(),
-            message: "public_inputs[13] does not match has_change flag".to_string(),
+            message: "public_inputs[14] does not match has_change flag".to_string(),
             queue_position: 0,
             estimated_gas_usdc: None,
         });
     }
 
-    // Index 14: is_rollover flag (DEC-033)
-    let is_rollover_u64 = U256::from_be_bytes(parsed_inputs[14]).to::<u64>();
+    // Index 15: is_rollover flag (DEC-033)
+    let is_rollover_u64 = U256::from_be_bytes(parsed_inputs[15]).to::<u64>();
     if is_rollover_u64 != 0 && is_rollover_u64 != 1 {
         return Json(PrivateNoteSpendResponse {
             status: "REJECTED".to_string(),
-            message: "public_inputs[14] (is_rollover) must be 0 or 1".to_string(),
+            message: "public_inputs[15] (is_rollover) must be 0 or 1".to_string(),
             queue_position: 0,
             estimated_gas_usdc: None,
         });
@@ -858,7 +892,7 @@ pub async fn handle_private_note_spend(
         if is_rollover_u64 != expected_ro {
             return Json(PrivateNoteSpendResponse {
                 status: "REJECTED".to_string(),
-                message: "public_inputs[14] does not match is_rollover flag".to_string(),
+                message: "public_inputs[15] does not match is_rollover flag".to_string(),
                 queue_position: 0,
                 estimated_gas_usdc: None,
             });
@@ -964,8 +998,8 @@ pub async fn handle_private_note_spend(
         }
     }
 
-    let mut fr_public_inputs = [nimbus_core::Fr::default(); 15];
-    for (idx, pi) in parsed_inputs.iter().enumerate().take(15) {
+    let mut fr_public_inputs = [nimbus_core::Fr::default(); 16];
+    for (idx, pi) in parsed_inputs.iter().enumerate().take(16) {
         if let Some(fr) = nimbus_core::from_evm_scalar(pi) {
             fr_public_inputs[idx] = fr;
         }
@@ -1457,6 +1491,31 @@ async fn process_single_spend(state: &AppState, item: QueuedSpend) {
         let leaf_count = request.leaf_count.unwrap_or(1);
         let note_epoch_id = request.note_epoch_id.unwrap_or(0);
         let is_rollover = request.is_rollover.unwrap_or(0);
+        let quote_hash_repacked = if let Some(ref qh) = request.quote_hash_hex {
+            qh.clone()
+        } else if let Some(ref pis) = request.public_inputs_hex {
+            if pis.len() >= 16 {
+                let hi_res = hex::decode(pis[9].trim_start_matches("0x"));
+                let lo_res = hex::decode(pis[10].trim_start_matches("0x"));
+                if let (Ok(hi), Ok(lo)) = (hi_res, lo_res) {
+                    if hi.len() == 32 && lo.len() == 32 {
+                        let mut full = [0u8; 32];
+                        full[0..16].copy_from_slice(&hi[16..32]);
+                        full[16..32].copy_from_slice(&lo[16..32]);
+                        format!("0x{}", hex::encode(full))
+                    } else {
+                        ZERO_WORD.to_string()
+                    }
+                } else {
+                    ZERO_WORD.to_string()
+                }
+            } else {
+                ZERO_WORD.to_string()
+            }
+        } else {
+            ZERO_WORD.to_string()
+        };
+
         evm_client
             .broadcast_spend_private_note_transaction(
                 note_root,
@@ -1472,7 +1531,7 @@ async fn process_single_spend(state: &AppState, item: QueuedSpend) {
                 request.protocol_fee.unwrap_or(0),
                 request.execution_fee.unwrap_or(0),
                 request.max_execution_fee.unwrap_or(0),
-                request.quote_hash_hex.as_deref().unwrap_or(ZERO_WORD),
+                &quote_hash_repacked,
                 request.expiry.unwrap_or(0),
                 request.has_change.unwrap_or(0),
                 is_rollover,
@@ -1800,7 +1859,10 @@ mod tests {
                     protocol_fee: 12_500,
                     execution_fee: 23_000,
                     max_execution_fee: 25_000,
-                    quote_hash: Some(format!("0x{}", hex::encode(fr_to_be_bytes(&pis[9])))),
+                    quote_hash: Some(format!(
+                        "0x{}",
+                        hex::encode(nimbus_core::combine_limbs_to_quote_hash(&pis[9], &pis[10]))
+                    )),
                     quote_signature: None,
                     quote_id: None,
                     user_address: None,
@@ -1932,26 +1994,26 @@ mod tests {
     async fn test_handle_private_note_spend_reject_empty_public_inputs() {
         let (state, _tmp) = setup_test_state().await;
         let mut req = sample_valid_private_note_request();
-        // DEC-033: empty public inputs must be rejected immediately, not bypass preflight
+        // DEC-035A: empty public inputs must be rejected immediately, not bypass preflight
         req.public_inputs = vec![];
 
         let resp = handle_private_note_spend(State(state), Json(req)).await;
         assert_eq!(resp.0.status, "REJECTED");
-        assert!(resp.0.message.contains("Expected 15 public inputs"));
+        assert!(resp.0.message.contains("Expected 16 public inputs"));
     }
 
     #[tokio::test]
     async fn test_handle_private_note_spend_reject_wrong_public_inputs_count() {
         let (state, _tmp) = setup_test_state().await;
         let mut req = sample_valid_private_note_request();
-        req.public_inputs.truncate(14);
+        req.public_inputs.truncate(15);
 
         let resp = handle_private_note_spend(State(state), Json(req)).await;
         assert_eq!(resp.0.status, "REJECTED");
         assert!(resp
             .0
             .message
-            .contains("Expected 15 public inputs for PrivateNoteCircuit, got 14"));
+            .contains("Expected 16 public inputs for PrivateNoteCircuit, got 15"));
     }
 
     #[tokio::test]
@@ -1986,27 +2048,27 @@ mod tests {
     async fn test_handle_private_note_spend_reject_domain_mismatch_chain_id() {
         let (state, _tmp) = setup_test_state().await;
         let mut req = sample_valid_private_note_request();
-        // DEC-033: chain_id is at index 10
-        req.public_inputs[10] = format!("0x{:064x}", 1);
+        // DEC-035A: chain_id is at index 11
+        req.public_inputs[11] = format!("0x{:064x}", 1);
 
         let resp = handle_private_note_spend(State(state), Json(req)).await;
         assert_eq!(resp.0.status, "REJECTED");
         assert!(resp
             .0
             .message
-            .contains("public_inputs[10] does not match target chain_id"));
+            .contains("public_inputs[11] does not match target chain_id"));
     }
 
     #[tokio::test]
     async fn test_handle_private_note_spend_reject_domain_mismatch_contract_address() {
         let (state, _tmp) = setup_test_state().await;
         let mut req = sample_valid_private_note_request();
-        // DEC-033: contract_address is at index 11
+        // DEC-035A: contract_address is at index 12
         std::env::set_var(
             "NIMBUS_CONTRACT_ADDRESS",
             "0x000000000000000000000000000000000000012c",
         );
-        req.public_inputs[11] = format!("0x{:064x}", 999);
+        req.public_inputs[12] = format!("0x{:064x}", 999);
 
         let resp = handle_private_note_spend(State(state), Json(req)).await;
         std::env::remove_var("NIMBUS_CONTRACT_ADDRESS");
@@ -2014,7 +2076,67 @@ mod tests {
         assert!(resp
             .0
             .message
-            .contains("public_inputs[11] does not match target contract_address"));
+            .contains("public_inputs[12] does not match target contract_address"));
+    }
+
+    #[tokio::test]
+    async fn test_handle_private_note_spend_reject_quote_hash_hi_out_of_range() {
+        let (state, _tmp) = setup_test_state().await;
+        let mut req = sample_valid_private_note_request();
+        // DEC-035A: quote_hash_hi at index 9 >= 2^128 (high 16 bytes nonzero)
+        req.public_inputs[9] = format!("0x{:032x}{:032x}", 1u64, 0u64);
+
+        let resp = handle_private_note_spend(State(state), Json(req)).await;
+        assert_eq!(resp.0.status, "REJECTED");
+        assert!(resp
+            .0
+            .message
+            .contains("public_inputs[9] (quote_hash_hi) exceeds 128-bit range"));
+    }
+
+    #[tokio::test]
+    async fn test_handle_private_note_spend_reject_quote_hash_lo_out_of_range() {
+        let (state, _tmp) = setup_test_state().await;
+        let mut req = sample_valid_private_note_request();
+        // DEC-035A: quote_hash_lo at index 10 >= 2^128 (high 16 bytes nonzero)
+        req.public_inputs[10] = format!("0x{:032x}{:032x}", 1u64, 0u64);
+
+        let resp = handle_private_note_spend(State(state), Json(req)).await;
+        assert_eq!(resp.0.status, "REJECTED");
+        assert!(resp
+            .0
+            .message
+            .contains("public_inputs[10] (quote_hash_lo) exceeds 128-bit range"));
+    }
+
+    #[tokio::test]
+    async fn test_handle_private_note_spend_reject_quote_hash_hi_mismatch() {
+        let (state, _tmp) = setup_test_state().await;
+        let mut req = sample_valid_private_note_request();
+        // Tamper with quote_hash_hi at index 9
+        req.public_inputs[9] = format!("0x{:064x}", 99999u64);
+
+        let resp = handle_private_note_spend(State(state), Json(req)).await;
+        assert_eq!(resp.0.status, "REJECTED");
+        assert!(resp
+            .0
+            .message
+            .contains("public_inputs[9] does not match quote_hash_hi"));
+    }
+
+    #[tokio::test]
+    async fn test_handle_private_note_spend_reject_quote_hash_lo_mismatch() {
+        let (state, _tmp) = setup_test_state().await;
+        let mut req = sample_valid_private_note_request();
+        // Tamper with quote_hash_lo at index 10
+        req.public_inputs[10] = format!("0x{:064x}", 99999u64);
+
+        let resp = handle_private_note_spend(State(state), Json(req)).await;
+        assert_eq!(resp.0.status, "REJECTED");
+        assert!(resp
+            .0
+            .message
+            .contains("public_inputs[10] does not match quote_hash_lo"));
     }
 
     #[tokio::test]
@@ -2024,7 +2146,7 @@ mod tests {
         req.idempotency_key = Some("idem_dust_rollover".to_string());
         // DEC-033: Standalone rollover with dust input value (< $2.00 USDC)
         req.is_rollover = Some(1);
-        req.public_inputs[14] = format!("0x{:064x}", 1);
+        req.public_inputs[15] = format!("0x{:064x}", 1);
         req.merchant_amount = 0;
         req.public_inputs[6] = format!("0x{:064x}", 0);
         req.protocol_fee = 0;
@@ -2043,7 +2165,7 @@ mod tests {
         req.idempotency_key = Some("idem_rollover_merchant".to_string());
         // DEC-033: Standalone rollover must have merchant_amount == 0
         req.is_rollover = Some(1);
-        req.public_inputs[14] = format!("0x{:064x}", 1);
+        req.public_inputs[15] = format!("0x{:064x}", 1);
         req.merchant_amount = 5_000_000;
         req.public_inputs[6] = format!("0x{:064x}", 5_000_000);
 
@@ -2076,7 +2198,7 @@ mod tests {
         req.idempotency_key = Some("idem_insufficient_gas".to_string());
         // DEC-033: Standalone rollover where input_value < execution_fee
         req.is_rollover = Some(1);
-        req.public_inputs[14] = format!("0x{:064x}", 1);
+        req.public_inputs[15] = format!("0x{:064x}", 1);
         req.merchant_amount = 0;
         req.public_inputs[6] = format!("0x{:064x}", 0);
         req.protocol_fee = 0;

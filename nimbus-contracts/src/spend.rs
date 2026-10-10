@@ -736,7 +736,14 @@ impl Nimbus {
         let has_change_bytes = has_change.to_be_bytes::<32>();
         let is_rollover_bytes = is_rollover.to_be_bytes::<32>();
 
-        let public_inputs: [[u8; 32]; 15] = [
+        // Unpack 32-byte quote_hash into two 128-bit EVM words in memory (DEC-035A)
+        let mut quote_hi = [0u8; 32];
+        quote_hi[16..32].copy_from_slice(&quote_hash.as_slice()[0..16]);
+
+        let mut quote_lo = [0u8; 32];
+        quote_lo[16..32].copy_from_slice(&quote_hash.as_slice()[16..32]);
+
+        let public_inputs: [[u8; 32]; 16] = [
             note_root.0,
             leaf_count_bytes,
             input_nullifier.0,
@@ -746,7 +753,8 @@ impl Nimbus {
             merchant_amount_bytes,
             protocol_fee_bytes,
             execution_fee_bytes,
-            quote_hash.0,
+            quote_hi,
+            quote_lo,
             chain_id_bytes,
             contract_bytes,
             expiry_bytes,

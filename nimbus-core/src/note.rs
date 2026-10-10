@@ -613,6 +613,41 @@ pub fn fr_from_be_bytes(bytes: &[u8; 32]) -> Option<Fr> {
     Fr::deserialize_uncompressed(&le_bytes[..]).ok()
 }
 
+/// Decompose a 32-byte Big-Endian Keccak-256 quote hash into two canonical 128-bit field elements (DEC-035A).
+///
+/// Returns (quote_hash_hi, quote_hash_lo) where:
+/// - quote_hash_hi = bytes[0..16] left-padded with 16 zeros
+/// - quote_hash_lo = bytes[16..32] left-padded with 16 zeros
+///
+/// Because each 128-bit limb is strictly in [0, 2^128 - 1] and 2^128 - 1 < r_BLS12-381,
+/// both limbs are guaranteed to be canonical field elements in Fr.
+pub fn split_quote_hash_to_limbs(digest: &[u8; 32]) -> (Fr, Fr) {
+    let mut hi_padded = [0u8; 32];
+    hi_padded[16..32].copy_from_slice(&digest[0..16]);
+    let mut lo_padded = [0u8; 32];
+    lo_padded[16..32].copy_from_slice(&digest[16..32]);
+
+    let hi = fr_from_be_bytes(&hi_padded)
+        .expect("128-bit value left-padded with 16 zero bytes is strictly < r");
+    let lo = fr_from_be_bytes(&lo_padded)
+        .expect("128-bit value left-padded with 16 zero bytes is strictly < r");
+    (hi, lo)
+}
+
+/// Recombine two 128-bit field elements back into a 32-byte Big-Endian quote hash (DEC-035A).
+///
+/// Extracts the lower 16 bytes of both hi and lo field elements:
+/// - digest[0..16] = hi_bytes[16..32]
+/// - digest[16..32] = lo_bytes[16..32]
+pub fn combine_limbs_to_quote_hash(hi: &Fr, lo: &Fr) -> [u8; 32] {
+    let hi_bytes = fr_to_be_bytes(hi);
+    let lo_bytes = fr_to_be_bytes(lo);
+    let mut digest = [0u8; 32];
+    digest[0..16].copy_from_slice(&hi_bytes[16..32]);
+    digest[16..32].copy_from_slice(&lo_bytes[16..32]);
+    digest
+}
+
 // ═══════════════════════════════════════════════════════════════════════════
 // Tests
 // ═══════════════════════════════════════════════════════════════════════════
@@ -1400,6 +1435,70 @@ mod tests {
         assert!(
             crate::from_evm_scalar(&r_arr).is_none(),
             "Scalar equal to modulus r must be rejected (not in Fr)"
+        );
+    }
+
+    #[test]
+    fn test_quote_hash_limb_decomposition_boundary_vectors() {
+        // Vector 1: 0
+        let zero_hash = [0u8; 32];
+        let (hi, lo) = split_quote_hash_to_limbs(&zero_hash);
+        assert_eq!(hi, Fr::from(0u64));
+        assert_eq!(lo, Fr::from(0u64));
+        assert_eq!(combine_limbs_to_quote_hash(&hi, &lo), zero_hash);
+
+        // Vector 2: 1
+        let mut one_hash = [0u8; 32];
+        one_hash[31] = 1;
+        let (hi, lo) = split_quote_hash_to_limbs(&one_hash);
+        assert_eq!(hi, Fr::from(0u64));
+        assert_eq!(lo, Fr::from(1u64));
+        assert_eq!(combine_limbs_to_quote_hash(&hi, &lo), one_hash);
+
+        // Vector 3: 2^128 - 1 (low limb max, high limb 0)
+        let mut max_u128_hash = [0u8; 32];
+        max_u128_hash[16..32].fill(0xff);
+        let (hi, lo) = split_quote_hash_to_limbs(&max_u128_hash);
+        assert_eq!(hi, Fr::from(0u64));
+        assert_eq!(combine_limbs_to_quote_hash(&hi, &lo), max_u128_hash);
+
+        // Vector 4: 2^128 (high limb 1, low limb 0)
+        let mut two_power_128_hash = [0u8; 32];
+        two_power_128_hash[15] = 1;
+        let (hi, lo) = split_quote_hash_to_limbs(&two_power_128_hash);
+        assert_eq!(hi, Fr::from(1u64));
+        assert_eq!(lo, Fr::from(0u64));
+        assert_eq!(combine_limbs_to_quote_hash(&hi, &lo), two_power_128_hash);
+
+        // Vector 5: 2^256 - 1 (both limbs 2^128 - 1, strictly < r)
+        // This is in the "Danger Zone" (> r), proving DEC-035A works where naive scalar fails!
+        let max_u256_hash = [0xffu8; 32];
+        assert!(
+            crate::from_evm_scalar(&max_u256_hash).is_none(),
+            "Max u256 exceeds r"
+        );
+        let (hi, lo) = split_quote_hash_to_limbs(&max_u256_hash);
+        assert_eq!(combine_limbs_to_quote_hash(&hi, &lo), max_u256_hash);
+
+        // Vector 6: Arbitrary Keccak digest
+        let keccak_sample: [u8; 32] = [
+            0x12, 0x34, 0x56, 0x78, 0x9a, 0xbc, 0xde, 0xf0, 0xfe, 0xdc, 0xba, 0x98, 0x76, 0x54,
+            0x32, 0x10, 0xaa, 0xbb, 0xcc, 0xdd, 0xee, 0xff, 0x00, 0x11, 0x22, 0x33, 0x44, 0x55,
+            0x66, 0x77, 0x88, 0x99,
+        ];
+        let (hi, lo) = split_quote_hash_to_limbs(&keccak_sample);
+        assert_eq!(combine_limbs_to_quote_hash(&hi, &lo), keccak_sample);
+
+        // Negative test: Tampering hi or lo alters combined hash
+        let hi_tampered = hi + Fr::from(1u64);
+        assert_ne!(
+            combine_limbs_to_quote_hash(&hi_tampered, &lo),
+            keccak_sample
+        );
+        let lo_tampered = lo + Fr::from(1u64);
+        assert_ne!(
+            combine_limbs_to_quote_hash(&hi, &lo_tampered),
+            keccak_sample
         );
     }
 }

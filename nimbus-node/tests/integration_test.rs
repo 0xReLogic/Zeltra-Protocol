@@ -264,7 +264,8 @@ async fn test_private_note_spend_enqueue_and_queue_lifecycle() {
             format!("0x{:064x}", 5_000_000u64),
             format!("0x{:064x}", 22_500u64),
             format!("0x{:064x}", 20_000u64),
-            "0x0000000000000000000000000000000000000000000000000000000000000004".to_string(),
+            format!("0x{:064x}", 0u64),
+            format!("0x{:064x}", 4u64),
             format!("0x{:064x}", 421614u64),
             format!(
                 "0x000000000000000000000000{}",

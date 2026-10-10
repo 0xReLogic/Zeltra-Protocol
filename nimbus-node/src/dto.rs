@@ -271,9 +271,25 @@ impl From<PrivateNoteSpendRequest> for SpendRequest {
                 None
             }
         });
+        let quote_hash_opt = req.quote_hash.or_else(|| {
+            if req.public_inputs.len() >= 16 {
+                let hi_bytes = hex::decode(req.public_inputs[9].trim_start_matches("0x")).ok()?;
+                let lo_bytes = hex::decode(req.public_inputs[10].trim_start_matches("0x")).ok()?;
+                if hi_bytes.len() == 32 && lo_bytes.len() == 32 {
+                    let mut full = [0u8; 32];
+                    full[0..16].copy_from_slice(&hi_bytes[16..32]);
+                    full[16..32].copy_from_slice(&lo_bytes[16..32]);
+                    Some(format!("0x{}", hex::encode(full)))
+                } else {
+                    None
+                }
+            } else {
+                None
+            }
+        });
         let is_rollover_opt = req.is_rollover.or_else(|| {
-            if req.public_inputs.len() >= 15 {
-                hex::decode(req.public_inputs[14].trim_start_matches("0x"))
+            if req.public_inputs.len() >= 16 {
+                hex::decode(req.public_inputs[15].trim_start_matches("0x"))
                     .ok()
                     .and_then(|b| {
                         if b.len() == 32 {
@@ -315,7 +331,7 @@ impl From<PrivateNoteSpendRequest> for SpendRequest {
             output_commitment_hex: req.output_commitment,
             merchant_amount: Some(req.merchant_amount),
             protocol_fee: Some(req.protocol_fee),
-            quote_hash_hex: req.quote_hash,
+            quote_hash_hex: quote_hash_opt,
             leaf_count: leaf_count_opt,
             has_change: Some(has_change_u64),
             note_epoch_id: note_epoch_id_opt,

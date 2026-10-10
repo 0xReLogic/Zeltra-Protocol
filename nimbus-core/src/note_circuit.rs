@@ -12,15 +12,15 @@ use ark_std::rand::SeedableRng;
 
 use crate::poseidon::{poseidon_hash as poseidon_w3_hash, poseidon_w5_hash};
 
-/// Number of public inputs in the PrivateNoteCircuit (DEC-033: 15 inputs).
-pub const NUM_PUBLIC_INPUTS: usize = 15;
+/// Number of public inputs in the PrivateNoteCircuit (DEC-035A: 16 inputs).
+pub const NUM_PUBLIC_INPUTS: usize = 16;
 
 /// Private note spend circuit for Groth16 proof generation.
 ///
 /// This circuit is independent from `ComplianceCircuit` — it uses different
 /// Poseidon widths, different nullifier derivation, and different public inputs.
 pub struct PrivateNoteCircuit {
-    // ── Public inputs (15 scalar field elements) ──
+    // ── Public inputs (16 scalar field elements, DEC-035A) ──
     pub note_root: Option<Fr>,
     pub leaf_count: Option<Fr>,
     pub input_nullifier: Option<Fr>,
@@ -30,7 +30,8 @@ pub struct PrivateNoteCircuit {
     pub merchant_amount: Option<Fr>,
     pub protocol_fee: Option<Fr>,
     pub execution_fee: Option<Fr>,
-    pub quote_hash: Option<Fr>,
+    pub quote_hash_hi: Option<Fr>,
+    pub quote_hash_lo: Option<Fr>,
     pub chain_id: Option<Fr>,
     pub contract_address: Option<Fr>,
     pub expiry: Option<Fr>,
@@ -121,6 +122,46 @@ fn enforce_u64_range(
     Ok(())
 }
 
+/// Enforce that `val` is in [0, 2^128) by decomposing into 128 boolean bits (DEC-035A).
+///
+/// Implements 128 boolean constraints: b_i * (1 - b_i) == 0
+/// and 1 linear combination constraint: sum(2^i * b_i) == val.
+fn enforce_u128_range(
+    cs: &ConstraintSystemRef<Fr>,
+    val: &FpVar<Fr>,
+    val_witness: Option<Fr>,
+) -> Result<(), SynthesisError> {
+    use ark_r1cs_std::eq::EqGadget;
+
+    let zero = FpVar::Constant(Fr::from(0u64));
+    let one = FpVar::Constant(Fr::from(1u64));
+    let mut reconstructed = zero.clone();
+    let mut two_power = Fr::from(1u64);
+
+    let bigint_opt = val_witness.map(|w| w.into_bigint());
+
+    for bit_idx in 0..128 {
+        let bit_val = bigint_opt.as_ref().map(|bi| {
+            let limb_idx = bit_idx / 64;
+            let bit_in_limb = bit_idx % 64;
+            let word = bi.as_ref()[limb_idx];
+            Fr::from((word >> bit_in_limb) & 1u64)
+        });
+        let bit_var = private_witness(cs, bit_val)?;
+
+        // bit * (1 - bit) == 0
+        let one_minus_bit = &one - &bit_var;
+        let bit_check = &bit_var * &one_minus_bit;
+        bit_check.enforce_equal(&zero)?;
+
+        reconstructed += &bit_var * FpVar::Constant(two_power);
+        two_power = two_power + two_power;
+    }
+
+    reconstructed.enforce_equal(val)?;
+    Ok(())
+}
+
 impl ConstraintSynthesizer<Fr> for PrivateNoteCircuit {
     fn generate_constraints(self, cs: ConstraintSystemRef<Fr>) -> Result<(), SynthesisError> {
         use ark_r1cs_std::eq::EqGadget;
@@ -135,7 +176,7 @@ impl ConstraintSynthesizer<Fr> for PrivateNoteCircuit {
         let domain_merkle = crate::note::domain_merkle_node();
 
         // ═══════════════════════════════════════════════════════════════
-        // 1. Allocate all public inputs (15 scalar field elements)
+        // 1. Allocate all public inputs (16 scalar field elements, DEC-035A)
         // ═══════════════════════════════════════════════════════════════
 
         let note_root_var = public_input(&cs, self.note_root)?;
@@ -147,7 +188,8 @@ impl ConstraintSynthesizer<Fr> for PrivateNoteCircuit {
         let merchant_var = public_input(&cs, self.merchant_amount)?;
         let protocol_fee_var = public_input(&cs, self.protocol_fee)?;
         let exec_fee_var = public_input(&cs, self.execution_fee)?;
-        let quote_hash_var = public_input(&cs, self.quote_hash)?;
+        let quote_hash_hi_var = public_input(&cs, self.quote_hash_hi)?;
+        let quote_hash_lo_var = public_input(&cs, self.quote_hash_lo)?;
         let chain_id_var = public_input(&cs, self.chain_id)?;
         let contract_addr_var = public_input(&cs, self.contract_address)?;
         let expiry_var = public_input(&cs, self.expiry)?;
@@ -458,8 +500,13 @@ impl ConstraintSynthesizer<Fr> for PrivateNoteCircuit {
             w5_mds,
         )?;
 
-        // Non-linearly combine quote_hash and scope_hash
-        let _binding = poseidon_w3_hash(&quote_hash_var, &scope_hash, w3_rc, w3_mds)?;
+        // Enforce 128-bit range constraints on quote_hash limbs (DEC-035A)
+        enforce_u128_range(&cs, &quote_hash_hi_var, self.quote_hash_hi)?;
+        enforce_u128_range(&cs, &quote_hash_lo_var, self.quote_hash_lo)?;
+
+        // Non-linearly combine quote_hash limbs and scope_hash (DEC-035A)
+        let qh_combined = poseidon_w3_hash(&quote_hash_hi_var, &quote_hash_lo_var, w3_rc, w3_mds)?;
+        let _binding = poseidon_w3_hash(&qh_combined, &scope_hash, w3_rc, w3_mds)?;
 
         // ═══════════════════════════════════════════════════════════════
         // 10. Input value > 0 (non-zero)
@@ -517,11 +564,11 @@ pub fn generate_note_circuit_keys() -> Result<NoteCircuitKeys, SynthesisError> {
 /// - beta_g2:  [u8; 256]
 /// - gamma_g2: [u8; 256]
 /// - delta_g2: [u8; 256]
-/// - ic[16]:   [[u8; 128]; 16]
+/// - ic[17]:   [[u8; 128]; 17]
 #[allow(clippy::type_complexity)]
 pub fn generate_note_circuit_evm_vk(
     vk: &ark_groth16::VerifyingKey<Bls12_381>,
-) -> ([u8; 128], [u8; 256], [u8; 256], [u8; 256], [[u8; 128]; 16]) {
+) -> ([u8; 128], [u8; 256], [u8; 256], [u8; 256], [[u8; 128]; 17]) {
     use crate::evm::{to_evm_g1, to_evm_g2};
 
     fn to_g1_array(v: &[u8]) -> [u8; 128] {
@@ -543,8 +590,8 @@ pub fn generate_note_circuit_evm_vk(
     let gamma_g2 = to_g2_array(&to_evm_g2(&vk.gamma_g2));
     let delta_g2 = to_g2_array(&to_evm_g2(&vk.delta_g2));
 
-    let mut ic = [[0u8; 128]; 16];
-    for (i, ic_point) in vk.gamma_abc_g1.iter().take(16).enumerate() {
+    let mut ic = [[0u8; 128]; 17];
+    for (i, ic_point) in vk.gamma_abc_g1.iter().take(17).enumerate() {
         ic[i] = to_g1_array(&to_evm_g1(ic_point));
     }
 
@@ -610,7 +657,8 @@ pub fn create_dummy_circuit() -> PrivateNoteCircuit {
         merchant_amount: Some(Fr::from(merchant)),
         protocol_fee: Some(Fr::from(pfee)),
         execution_fee: Some(Fr::from(efee)),
-        quote_hash: Some(Fr::from(200u64)),
+        quote_hash_hi: Some(Fr::from(100u64)),
+        quote_hash_lo: Some(Fr::from(200u64)),
         chain_id: Some(Fr::from(421614u64)),
         contract_address: Some(Fr::from(300u64)),
         expiry: Some(Fr::from(0u64)),
@@ -682,7 +730,7 @@ pub fn verify_evm_note_proof(
     proof_a_neg: &[u8; 128],
     proof_b: &[u8; 256],
     proof_c: &[u8; 128],
-    public_inputs: &[Fr; 15],
+    public_inputs: &[Fr; 16],
 ) -> bool {
     let Some(proof) = crate::evm::from_evm_proof(proof_a_neg, proof_b, proof_c) else {
         return false;
@@ -704,7 +752,8 @@ pub fn extract_public_inputs(circuit: &PrivateNoteCircuit) -> Vec<Fr> {
         circuit.merchant_amount.unwrap(),
         circuit.protocol_fee.unwrap(),
         circuit.execution_fee.unwrap(),
-        circuit.quote_hash.unwrap(),
+        circuit.quote_hash_hi.unwrap(),
+        circuit.quote_hash_lo.unwrap(),
         circuit.chain_id.unwrap(),
         circuit.contract_address.unwrap(),
         circuit.expiry.unwrap(),
@@ -720,6 +769,7 @@ pub fn extract_public_inputs(circuit: &PrivateNoteCircuit) -> Vec<Fr> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use ark_relations::gr1cs::ConstraintSystem;
 
     fn setup_valid_circuit() -> PrivateNoteCircuit {
         create_dummy_circuit()
@@ -891,7 +941,8 @@ mod tests {
             merchant_amount: Some(Fr::from(merchant)),
             protocol_fee: Some(Fr::from(pfee)),
             execution_fee: Some(Fr::from(efee)),
-            quote_hash: Some(Fr::from(200u64)),
+            quote_hash_hi: Some(Fr::from(100u64)),
+            quote_hash_lo: Some(Fr::from(200u64)),
             chain_id: Some(Fr::from(421614u64)),
             contract_address: Some(Fr::from(300u64)),
             expiry: Some(Fr::from(0u64)),
@@ -989,7 +1040,8 @@ mod tests {
             merchant_amount: Some(Fr::from(merchant)),
             protocol_fee: Some(Fr::from(pfee)),
             execution_fee: Some(Fr::from(efee)),
-            quote_hash: Some(Fr::from(200u64)),
+            quote_hash_hi: Some(Fr::from(100u64)),
+            quote_hash_lo: Some(Fr::from(200u64)),
             chain_id: Some(Fr::from(421614u64)),
             contract_address: Some(Fr::from(300u64)),
             expiry: Some(Fr::from(0u64)),
@@ -1085,7 +1137,8 @@ mod tests {
             merchant_amount: Some(Fr::from(merchant)),
             protocol_fee: Some(Fr::from(pfee)),
             execution_fee: Some(Fr::from(efee)),
-            quote_hash: Some(Fr::from(200u64)),
+            quote_hash_hi: Some(Fr::from(100u64)),
+            quote_hash_lo: Some(Fr::from(200u64)),
             chain_id: Some(Fr::from(421614u64)),
             contract_address: Some(Fr::from(300u64)),
             expiry: Some(Fr::from(0u64)),
@@ -1209,13 +1262,96 @@ mod tests {
 
         let proof = generate_note_proof(circuit, &keys.proving_key).unwrap();
 
-        // Swap chain_id (index 9) and contract_address (index 10)
-        public_inputs.swap(9, 10);
+        // Swap chain_id (index 11) and contract_address (index 12)
+        public_inputs.swap(11, 12);
 
         let is_valid = verify_note_proof(&proof, &keys.verifying_key, &public_inputs);
         assert!(
             !is_valid,
             "Swapped chain_id and contract_address must fail verification"
+        );
+    }
+
+    #[test]
+    fn test_note_circuit_tampered_quote_hash_hi_fails_verification() {
+        let keys = get_or_init_note_circuit_keys();
+        let circuit = setup_valid_circuit();
+        let mut public_inputs = extract_public_inputs(&circuit);
+
+        let proof = generate_note_proof(circuit, &keys.proving_key).unwrap();
+
+        // Tamper quote_hash_hi (index 9)
+        public_inputs[9] += Fr::from(1u64);
+
+        let is_valid = verify_note_proof(&proof, &keys.verifying_key, &public_inputs);
+        assert!(!is_valid, "Tampered quote_hash_hi must fail verification");
+    }
+
+    #[test]
+    fn test_note_circuit_tampered_quote_hash_lo_fails_verification() {
+        let keys = get_or_init_note_circuit_keys();
+        let circuit = setup_valid_circuit();
+        let mut public_inputs = extract_public_inputs(&circuit);
+
+        let proof = generate_note_proof(circuit, &keys.proving_key).unwrap();
+
+        // Tamper quote_hash_lo (index 10)
+        public_inputs[10] += Fr::from(1u64);
+
+        let is_valid = verify_note_proof(&proof, &keys.verifying_key, &public_inputs);
+        assert!(!is_valid, "Tampered quote_hash_lo must fail verification");
+    }
+
+    #[test]
+    fn test_note_circuit_swapped_quote_hash_limbs_fails_verification() {
+        let keys = get_or_init_note_circuit_keys();
+        let circuit = setup_valid_circuit();
+        let mut public_inputs = extract_public_inputs(&circuit);
+
+        let proof = generate_note_proof(circuit, &keys.proving_key).unwrap();
+
+        // Swap quote_hash_hi (index 9) and quote_hash_lo (index 10)
+        public_inputs.swap(9, 10);
+
+        let is_valid = verify_note_proof(&proof, &keys.verifying_key, &public_inputs);
+        assert!(!is_valid, "Swapped quote_hash limbs must fail verification");
+    }
+
+    #[test]
+    fn test_note_circuit_quote_hash_hi_out_of_range_rejected() {
+        let mut circuit = setup_valid_circuit();
+        // 2^128 = bit 128 is set to 1, exceeding 128-bit range
+        let mut two_power_128 = Fr::from(1u64);
+        for _ in 0..128 {
+            two_power_128 = two_power_128 + two_power_128;
+        }
+        circuit.quote_hash_hi = Some(two_power_128);
+
+        let cs = ConstraintSystem::<Fr>::new_ref();
+        let res = circuit.generate_constraints(cs.clone());
+        assert!(res.is_ok(), "Synthesis function runs without error");
+        assert!(
+            !cs.is_satisfied().unwrap(),
+            "Quote hash hi >= 2^128 must NOT satisfy R1CS constraints"
+        );
+    }
+
+    #[test]
+    fn test_note_circuit_quote_hash_lo_out_of_range_rejected() {
+        let mut circuit = setup_valid_circuit();
+        // 2^128 = bit 128 is set to 1, exceeding 128-bit range
+        let mut two_power_128 = Fr::from(1u64);
+        for _ in 0..128 {
+            two_power_128 = two_power_128 + two_power_128;
+        }
+        circuit.quote_hash_lo = Some(two_power_128);
+
+        let cs = ConstraintSystem::<Fr>::new_ref();
+        let res = circuit.generate_constraints(cs.clone());
+        assert!(res.is_ok(), "Synthesis function runs without error");
+        assert!(
+            !cs.is_satisfied().unwrap(),
+            "Quote hash lo >= 2^128 must NOT satisfy R1CS constraints"
         );
     }
 
@@ -1229,7 +1365,7 @@ mod tests {
 
         eprintln!("// --- PrivateNoteCircuit Phase A Trusted Setup VK Constants ---");
         eprintln!("// Seed: 0x{:016X} (NimbusNC)", NOTE_CIRCUIT_SETUP_SEED);
-        eprintln!("// Circuit: PrivateNoteCircuit (15 public inputs) over BLS12-381");
+        eprintln!("// Circuit: PrivateNoteCircuit (16 public inputs) over BLS12-381");
         eprintln!();
         eprintln!("// NOTE_VK_ALPHA_G1 (128 bytes)");
         eprintln!(
@@ -1255,7 +1391,7 @@ mod tests {
             to_hex(&delta)
         );
         eprintln!();
-        eprintln!("pub const NOTE_VK_IC: [[u8; 128]; 16] = [");
+        eprintln!("pub const NOTE_VK_IC: [[u8; 128]; 17] = [");
         for (i, ic_point) in ic.iter().enumerate() {
             eprintln!("    // IC[{}]", i);
             eprintln!("    alloy_primitives::hex!(\"{}\"),", to_hex(ic_point));
@@ -1270,8 +1406,8 @@ mod tests {
         let keys = get_or_init_note_circuit_keys();
         let circuit = setup_valid_circuit();
         let pis = extract_public_inputs(&circuit);
-        let mut public_inputs = [Fr::default(); 15];
-        public_inputs.copy_from_slice(&pis[..15]);
+        let mut public_inputs = [Fr::default(); 16];
+        public_inputs.copy_from_slice(&pis[..16]);
 
         let proof = generate_note_proof(circuit, &keys.proving_key).unwrap();
 
@@ -1346,7 +1482,8 @@ mod tests {
             merchant_amount: Some(Fr::from(0u64)), // MUST be 0 in rollover mode
             protocol_fee: Some(Fr::from(0u64)),    // MUST be 0 in rollover mode
             execution_fee: Some(Fr::from(efee)),
-            quote_hash: Some(Fr::from(555u64)),
+            quote_hash_hi: Some(Fr::from(100u64)),
+            quote_hash_lo: Some(Fr::from(555u64)),
             chain_id: Some(Fr::from(421614u64)),
             contract_address: Some(Fr::from(300u64)),
             expiry: Some(Fr::from(0u64)),

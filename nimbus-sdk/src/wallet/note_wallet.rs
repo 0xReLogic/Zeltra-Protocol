@@ -198,7 +198,7 @@ pub struct SpendProofPayload {
     pub proof_a_neg_hex: String,        // 128 bytes EVM format
     pub proof_b_hex: String,            // 256 bytes EVM format
     pub proof_c_hex: String,            // 128 bytes EVM format
-    pub public_inputs_hex: Vec<String>, // 15 x 32 bytes EVM scalars
+    pub public_inputs_hex: Vec<String>, // 16 x 32 bytes EVM scalars (DEC-035A)
 }
 
 /// Universal 2-in-2-out JoinSplit Spend Proof Payload generated locally by client SDK (DEC-030)
@@ -866,7 +866,7 @@ impl PrivateNoteWallet {
         let recipient_fr = Fr::from_be_bytes_mod_order(&recipient_bytes);
 
         let quote_bytes = parse_bytes32_from_hex(quote_hash_hex, false)?;
-        let quote_fr = Fr::from_be_bytes_mod_order(&quote_bytes);
+        let (quote_hi_fr, quote_lo_fr) = nimbus_core::split_quote_hash_to_limbs(&quote_bytes);
 
         let contract_bytes = parse_bytes32_from_hex(contract_address_hex, true)?;
         let contract_fr = Fr::from_be_bytes_mod_order(&contract_bytes);
@@ -884,7 +884,7 @@ impl PrivateNoteWallet {
         };
         let note_epoch_id_fr = Fr::from(note_epoch_id as u64);
 
-        // Construct PrivateNoteCircuit (DEC-032, DEC-033 15 Public Inputs)
+        // Construct PrivateNoteCircuit (DEC-032, DEC-033, DEC-035A 16 Public Inputs)
         let circuit = nimbus_core::PrivateNoteCircuit {
             note_root: Some(note_root),
             leaf_count: Some(Fr::from(total_leaves)),
@@ -895,7 +895,8 @@ impl PrivateNoteWallet {
             merchant_amount: Some(Fr::from(selected.merchant_amount)),
             protocol_fee: Some(Fr::from(selected.protocol_fee)),
             execution_fee: Some(Fr::from(selected.execution_fee)),
-            quote_hash: Some(quote_fr),
+            quote_hash_hi: Some(quote_hi_fr),
+            quote_hash_lo: Some(quote_lo_fr),
             chain_id: Some(Fr::from(chain_id)),
             contract_address: Some(contract_fr),
             expiry: Some(Fr::from(expiry)),
@@ -927,7 +928,7 @@ impl PrivateNoteWallet {
         let proof_b = to_evm_g2(&proof.b);
         let proof_c = to_evm_g1(&proof.c);
 
-        // Format 15 Public Inputs (DEC-033)
+        // Format 16 Public Inputs (DEC-035A)
         let public_inputs = vec![
             hex::encode(fr_to_be_bytes(&note_root)),
             hex::encode(fr_to_be_bytes(&Fr::from(total_leaves))),
@@ -938,7 +939,8 @@ impl PrivateNoteWallet {
             hex::encode(fr_to_be_bytes(&Fr::from(selected.merchant_amount))),
             hex::encode(fr_to_be_bytes(&Fr::from(selected.protocol_fee))),
             hex::encode(fr_to_be_bytes(&Fr::from(selected.execution_fee))),
-            hex::encode(quote_bytes),
+            hex::encode(fr_to_be_bytes(&quote_hi_fr)),
+            hex::encode(fr_to_be_bytes(&quote_lo_fr)),
             hex::encode(fr_to_be_bytes(&Fr::from(chain_id))),
             hex::encode(contract_bytes),
             hex::encode(fr_to_be_bytes(&Fr::from(expiry))),
@@ -2265,7 +2267,7 @@ mod tests {
         assert_eq!(payload.proof_a_neg_hex.len(), 256); // 128 bytes
         assert_eq!(payload.proof_b_hex.len(), 512); // 256 bytes
         assert_eq!(payload.proof_c_hex.len(), 256); // 128 bytes
-        assert_eq!(payload.public_inputs_hex.len(), 15);
+        assert_eq!(payload.public_inputs_hex.len(), 16);
         assert_eq!(payload.leaf_count, 1);
         assert_eq!(payload.note_epoch_id, 0);
         assert!(!payload.is_rollover);
@@ -2393,7 +2395,7 @@ mod tests {
             )
             .unwrap();
 
-        assert_eq!(payload.public_inputs_hex.len(), 15);
+        assert_eq!(payload.public_inputs_hex.len(), 16);
         assert_eq!(payload.note_epoch_id, 0); // Input note was epoch 0
         assert!(!payload.is_rollover);
         assert_eq!(payload.merchant_amount, 3_000_000);
