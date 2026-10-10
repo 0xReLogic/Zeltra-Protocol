@@ -1,7 +1,10 @@
 mod blind_wasm;
+pub mod client;
+pub mod coin_selection;
 pub mod eip712;
 mod evm_wasm;
 mod fee_wasm;
+pub mod storage;
 mod threshold_wasm;
 pub mod wallet;
 mod wasm_types;
@@ -9,9 +12,12 @@ pub mod x402;
 mod zk_wasm;
 
 pub use blind_wasm::*;
+pub use client::*;
+pub use coin_selection::*;
 pub use eip712::*;
 pub use evm_wasm::*;
 pub use fee_wasm::*;
+pub use storage::*;
 pub use threshold_wasm::*;
 pub use wallet::*;
 pub use wasm_types::*;

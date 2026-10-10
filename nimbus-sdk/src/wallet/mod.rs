@@ -6,6 +6,7 @@
 pub mod note_wallet;
 
 pub use note_wallet::{
-    JoinSplitSpendProofPayload, NoteEpochStatus, NoteStatus, PrivateNoteWallet, SelectedSpend,
-    SpendProofPayload, WalletError, WalletNote,
+    ConsolidationEstimate, ConsolidationRoundResult, ConsolidationSummary,
+    JoinSplitSpendProofPayload, NoteEpochStatus, NoteStatus, PrivateNoteWallet, PrivateNoteWitness,
+    SelectedSpend, SpendProofPayload, WalletError, WalletNote,
 };
