@@ -26,6 +26,7 @@ Komponen inti berikut **sudah selesai dan diverifikasi**:
 * **Epoch-Windowed Nullifier Pruning & In-Flight Rollover Economics (DEC-033):** Mengadopsi prinsip Sean Bowe & Ian Miers (IACR ePrint 2025/2031) untuk membasmi memory bloat nullifier pada Stylus WASM: 2-Epoch Generational Window ($E$ dan $E-1$, $O(1)$ gas per rotasi slot gen), Evolving Nullifier PRF terikat `epoch_id`, 15 public inputs di `PrivateNoteCircuit` (`note_epoch_id` di index 3 & `is_rollover` di index 14), In-Flight Auto-Rollover & Standalone Refresh dengan dust elimination threshold ($2.00 USDC / `MIN_STANDALONE_ROLLOVER_THRESHOLD_USDC`), self-paying relayer reimbursement (0% protocol fee, gas reimbursement + 15% relayer markup), dan preflight fail-closed validation di `nimbus-node` serta epoch status lifecycle di `nimbus-sdk`.
 * **Dual-Asset Architecture (USDC & WETH) (DEC-034):** Konvergensi dua aset terlikuid di Arbitrum One (USDC 63.57% pangsa pasar dolar & WETH sebagai kedaulatan anti-sensor tanpa admin key). Solvensi terisolasi per asset ID (`asset_id: 0` WETH, `asset_id: 1` USDC), zero-oracle reimbursement (reimbursement intra-aset kebal manipulasi harga), normalisasi skala WETH ke basis Gwei (9 desimal) untuk menjaga kapasitas sirkuit `u64`, auto-wrap native ETH payable pada deposit Stylus, dan sinergi proteksi sanksi DEC-026.
 * **Relayer Operational Hygiene & Health Probes:** Singleton pooling `reqwest::Client` dengan TLS dan timeout ketat (`http.rs`), periodic in-memory rate-limiter pruning anti-memory-leak, dedicated k8s `/live` & `/ready` health endpoints, dan validasi EVM address pada x402 facilitator (147/147 node tests pass, clippy clean).
+* **Cryptographic Canonicality, Circuit Binding Soundness & MMR Architecture (DEC-035):** Ratifikasi arsitektur Zero Tech Debt untuk pra-testnet: Representasi quote hash Two-Limb (128-bit) permanen ($H_{\text{hi}}, H_{\text{lo}} < 2^{128} \ll r$) tanpa shortcut pemotongan modulo / rejection sampling, penggantian dangling `_binding` dengan formal scope binding commitment gadget di R1CS, sinkronisasi end-to-end MMR indexer (`NoteCommitmentAppended`) dan dynamic sync endpoint di relayer, serta pengetatan equality quote hash pada relayer spend handler.
 
 ---
 
@@ -46,6 +47,28 @@ Ref: [`docs/todos/private-note-balance.md`](file:///workspaces/Zeltra-Protocol/d
 
 - [ ] Simpan proving/verifying key sebagai artifact versioned; cache development key pada test runner.
 - [ ] Jalankan MPC ceremony hanya setelah seluruh constraint dan public-input ABI dibekukan serta direview.
+
+### Gate C1 / DEC-035 — Zero Tech Debt Pre-Testnet Hardening
+Ref: [`DEC-035`](file:///workspaces/Zeltra-Protocol/research/decisions/DEC-035-cryptographic-canonicality-public-input-binding-and-mmr.md) *(Founder Approved Blueprint — Zero Tech Debt)*
+
+- [ ] **Step 1 (Core):** Implementasi Two-Limb 128-bit quote decomposition & 128-bit range checks (`enforce_u128_range`) di `note_circuit.rs`.
+- [ ] **Step 1 (Core):** Implementasi Formal Scope Binding Gadget menggantikan dead code `_binding` di `note_circuit.rs`.
+- [ ] **Step 1 (Core):** Update `extract_public_inputs` (16 public inputs) & generate dev keys baru (`0x4e696d6275734e43`).
+- [ ] **Step 2 (Contract):** Update `_spend_private_note` di `spend.rs` (unpack `quote_hash: FixedBytes<32>` jadi `quote_hi` & `quote_lo`, calldata eksternal tetap `bytes32`).
+- [ ] **Step 2 (Contract):** Update `groth16_note_verifier.rs` dengan 17-point $IC$ verifying key baru.
+- [ ] **Step 3 (Node):** Build worker indexer event `NoteCommitmentAppended` di `nimbus-node`.
+- [ ] **Step 3 (Node):** Endpoint `GET /api/v1/mmr/proof/:leaf_index` di relayer untuk dynamic sync proof client.
+- [ ] **Step 3 (Node):** Tambah missing equality check `payload.quote_hash == compute_quote_hash(&execution_quote)` di `spend.rs`.
+- [ ] **Step 4 (SDK):** Update `PrivateNoteWallet` untuk susun 16 public inputs dan fetch live MMR proof dari relayer.
+- [ ] **Step 5 (Sepolia):** Full E2E verification di Arbitrum Sepolia (Gate G) tanpa utang teknis / celah arsitektur.
+
+### Gate C2 / DEC-036 — Universal 2-in-2-out JoinSplit End-to-End Pipeline
+Ref: [`DEC-036`](file:///workspaces/Zeltra-Protocol/research/decisions/DEC-036-universal-2-in-2-out-joinsplit-full-stack-architecture.md) *(Universal Multi-UTXO Pre-MPC Protocol Standard)*
+
+- [ ] **Sirkuit (`nimbus-core`):** Upgrade `JoinSplitCircuit` dengan MMR bagging, 19 public inputs, dual-epoch nullifier PRF (DEC-033), Two-Limb quote hash & scope binding (DEC-035).
+- [ ] **SDK (`nimbus-sdk`):** Hubungkan dual MMR proof sync, dual-epoch handling, dan method submit `pay_joinsplit` ke relayer.
+- [ ] **Relayer (`nimbus-node`):** Tambah endpoint `POST /api/v1/spend-joinsplit`, dual-nullifier double-spend check di DB & on-chain, preflight Groth16, dan transaction dispatcher.
+- [ ] **Contract (`nimbus-contracts`):** Tambah entrypoint `spend_joinsplit`, Groth16 MSM/Pairing verifier untuk JoinSplit, dual-nullifier burning, dan dual change MMR insertion.
 
 ---
 
