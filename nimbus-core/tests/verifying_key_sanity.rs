@@ -8,7 +8,10 @@ use ark_bls12_381::Fr;
 use ark_ec::AffineRepr;
 use ark_ff::Zero;
 use ark_relations::gr1cs::{ConstraintSynthesizer, ConstraintSystem};
-use nimbus_core::{create_dummy_circuit, get_or_init_note_circuit_keys, NUM_PUBLIC_INPUTS};
+use nimbus_core::{
+    create_dummy_circuit, get_or_init_joinsplit_circuit_keys, get_or_init_note_circuit_keys,
+    NUM_JOINSPLIT_PUBLIC_INPUTS, NUM_PUBLIC_INPUTS,
+};
 
 #[test]
 fn test_verifying_key_non_identity() {
@@ -197,4 +200,25 @@ fn test_tampered_expected_binding_witness_fails_proving() {
         !cs.is_satisfied().unwrap(),
         "Tampered expected_binding witness MUST fail R1CS constraint satisfaction!"
     );
+}
+
+#[test]
+fn test_joinsplit_verifying_key_non_identity_all_elements() {
+    let keys = get_or_init_joinsplit_circuit_keys();
+    let vk = &keys.verifying_key;
+
+    assert_eq!(
+        vk.gamma_abc_g1.len(),
+        NUM_JOINSPLIT_PUBLIC_INPUTS + 1,
+        "gamma_abc_g1 must contain exactly NUM_JOINSPLIT_PUBLIC_INPUTS + 1 elements (IC[0..=19])"
+    );
+
+    // Assert that NO element in IC is the point at infinity (identity point)
+    for (i, ic_point) in vk.gamma_abc_g1.iter().enumerate() {
+        assert!(
+            !ic_point.is_zero(),
+            "JoinSplit verifying key element IC[{}] MUST NOT be the point at infinity (identity point)!",
+            i
+        );
+    }
 }

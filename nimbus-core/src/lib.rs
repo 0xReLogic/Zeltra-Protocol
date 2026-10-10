@@ -74,11 +74,12 @@ pub use poseidon::{
 // Re-export Private Note V1 (DEC-016A & DEC-032 & DEC-035A & DEC-035B)
 pub use note::{
     combine_limbs_to_quote_hash, compute_binding_commitment, compute_empty_hashes,
-    compute_merkle_root, compute_scope_hash, derive_nullifier, derive_nullifier_epoch,
-    derive_nullifier_key, derive_nullifier_v1, domain_binding_v1, domain_dummy_nullifier,
-    domain_initial_note, domain_merkle_node, domain_mmr_bag, domain_note_commitment,
-    domain_nullifier, domain_quote_binding, domain_scope_v1, fr_from_be_bytes, fr_to_be_bytes,
-    merkle_append, merkle_hash, note_commitment, split_quote_hash_to_limbs, verify_merkle_proof,
+    compute_merkle_root, compute_scope_hash, derive_joinsplit_dummy_nullifier,
+    derive_joinsplit_nullifier, derive_nullifier, derive_nullifier_epoch, derive_nullifier_key,
+    derive_nullifier_v1, domain_binding_v1, domain_dummy_nullifier, domain_initial_note,
+    domain_merkle_node, domain_mmr_bag, domain_note_commitment, domain_nullifier,
+    domain_quote_binding, domain_scope_v1, fr_from_be_bytes, fr_to_be_bytes, merkle_append,
+    merkle_hash, note_commitment, split_quote_hash_to_limbs, verify_merkle_proof,
     verify_value_conservation, MMRProof, MerkleMountainRange, PrivateNoteV1, DOMAIN_BINDING_V1_HEX,
     DOMAIN_MMR_BAG_BYTES, DOMAIN_SCOPE_V1_HEX, MERKLE_TREE_DEPTH,
 };
@@ -95,11 +96,11 @@ pub use note_circuit::{
     NUM_PUBLIC_INPUTS,
 };
 
-// Re-export Universal 2-in-2-out JoinSplit Circuit (DEC-030 Gate C0)
+// Re-export Universal 2-in-2-out JoinSplit Circuit (DEC-036A Gate C0)
 pub use joinsplit_circuit::{
     create_dummy_joinsplit_circuit, extract_joinsplit_public_inputs,
-    generate_joinsplit_circuit_keys, generate_joinsplit_proof, verify_joinsplit_proof,
-    JoinSplitCircuit, JoinSplitCircuitKeys, JOINSPLIT_CIRCUIT_SETUP_SEED,
+    generate_joinsplit_circuit_keys, generate_joinsplit_proof, get_or_init_joinsplit_circuit_keys,
+    verify_joinsplit_proof, JoinSplitCircuit, JoinSplitCircuitKeys, JOINSPLIT_CIRCUIT_SETUP_SEED,
     NUM_JOINSPLIT_PUBLIC_INPUTS,
 };
 

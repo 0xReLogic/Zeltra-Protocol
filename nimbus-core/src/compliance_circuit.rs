@@ -9,8 +9,8 @@
 //! > 1. **Unconstrained Public Inputs**: The variables `_root_var`, `_recipient_var`,
 //! >    and `_amount_var` in `generate_constraints` are intentionally unconstrained in this prototype.
 //! > 2. **Production Settlement Rails**: Production shielded value transfers in Zeltra Protocol
-//! >    use [`PrivateNoteCircuit`](crate::note_circuit::PrivateNoteCircuit) (12 public inputs)
-//! >    and [`JoinSplitCircuit`](crate::joinsplit_circuit::JoinSplitCircuit) (14 public inputs).
+//! >    use [`PrivateNoteCircuit`](crate::note_circuit::PrivateNoteCircuit) (16 public inputs)
+//! >    and [`JoinSplitCircuit`](crate::joinsplit_circuit::JoinSplitCircuit) (19 public inputs).
 //! >    Both circuits strictly enforce exact value conservation, 64-bit integer range constraints,
 //! >    Poseidon nullifier derivations, Merkle membership paths, and EVM target domain bindings.
 //! > 3. **Future ASP Roadmap (Phase 3)**: Formal Association Set Provider (ASP) membership proofs
@@ -67,7 +67,7 @@ impl ConstraintSynthesizer<Fr> for ComplianceCircuit {
         // In this experimental prototype, only the nullifier derivation is mathematically constrained.
         // `_root_var`, `_recipient_var`, and `_amount_var` are unconstrained placeholders.
         // DO NOT use for production fund transfers. Production settlement runs through
-        // `PrivateNoteCircuit` (12 public inputs) or `JoinSplitCircuit` (14 public inputs)
+        // `PrivateNoteCircuit` (16 public inputs) or `JoinSplitCircuit` (19 public inputs)
         // where all parameters are strictly bound and range-checked.
         let _root_var =
             cs.new_input_variable(|| self.root.ok_or(SynthesisError::AssignmentMissing))?;

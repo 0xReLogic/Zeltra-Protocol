@@ -222,6 +222,20 @@ pub fn derive_nullifier_epoch(
     derive_nullifier(nullifier_key, commitment, leaf_index, epoch_id)
 }
 
+/// Canonical nullifier derivation for Universal JoinSplit note (DEC-036A / INV-JS-6):
+/// nf = Poseidon_W5([nk, rho, epoch_id, 0], DOMAIN_NULLIFIER)
+pub fn derive_joinsplit_nullifier(nullifier_key: Fr, rho: Fr, epoch_id: u64) -> Fr {
+    let inputs = [nullifier_key, rho, Fr::from(epoch_id), Fr::from(0u64)];
+    native_poseidon_w5(&inputs, domain_nullifier())
+}
+
+/// Canonical dummy nullifier derivation for JoinSplit dummy slot (DEC-036A / A2.3):
+/// nf_dummy = Poseidon_W5([nk, session_nonce, 0, 0], DOMAIN_DUMMY_NULLIFIER)
+pub fn derive_joinsplit_dummy_nullifier(nullifier_key: Fr, session_nonce: Fr) -> Fr {
+    let inputs = [nullifier_key, session_nonce, Fr::from(0u64), Fr::from(0u64)];
+    native_poseidon_w5(&inputs, domain_dummy_nullifier())
+}
+
 // ═══════════════════════════════════════════════════════════════════════════
 // Incremental Merkle Tree Helpers
 // ═══════════════════════════════════════════════════════════════════════════
