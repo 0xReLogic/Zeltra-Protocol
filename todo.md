@@ -63,12 +63,12 @@ Ref: [`DEC-035`](file:///workspaces/Zeltra-Protocol/research/decisions/DEC-035-c
 - [ ] **Step 5 (Sepolia):** Full E2E verification di Arbitrum Sepolia (Gate G) tanpa utang teknis / celah arsitektur.
 
 ### Gate C2 / DEC-036 — Universal 2-in-2-out JoinSplit End-to-End Pipeline
-Ref: [`DEC-036`](file:///workspaces/Zeltra-Protocol/research/decisions/DEC-036-universal-2-in-2-out-joinsplit-full-stack-architecture.md) *(Universal Multi-UTXO Pre-MPC Protocol Standard)*
+Ref: [`DEC-036`](file:///workspaces/Zeltra-Protocol/research/decisions/DEC-036-universal-2-in-2-out-joinsplit-full-stack-architecture.md) *(Master Blueprint)* | [`DEC-036A`](file:///workspaces/Zeltra-Protocol/research/decisions/DEC-036A-universal-2-in-2-out-joinsplit-r1cs-circuit-specification.md) *(Circuit)* | [`DEC-036B`](file:///workspaces/Zeltra-Protocol/research/decisions/DEC-036B-client-sdk-knapsack-coin-selection-consolidation-and-bulk-sync.md) *(SDK & Sync)* | [`DEC-036C`](file:///workspaces/Zeltra-Protocol/research/decisions/DEC-036C-relayer-ingress-guard-and-stylus-joinsplit-settlement.md) *(Relayer & Contract)*
 
-- [ ] **Sirkuit (`nimbus-core`):** Upgrade `JoinSplitCircuit` dengan MMR bagging, 19 public inputs, dual-epoch nullifier PRF (DEC-033), Two-Limb quote hash & scope binding (DEC-035).
-- [ ] **SDK (`nimbus-sdk`):** Hubungkan dual MMR proof sync, dual-epoch handling, dan method submit `pay_joinsplit` ke relayer.
-- [ ] **Relayer (`nimbus-node`):** Tambah endpoint `POST /api/v1/spend-joinsplit`, dual-nullifier double-spend check di DB & on-chain, preflight Groth16, dan transaction dispatcher.
-- [ ] **Contract (`nimbus-contracts`):** Tambah entrypoint `spend_joinsplit`, Groth16 MSM/Pairing verifier untuk JoinSplit, dual-nullifier burning, dan dual change MMR insertion.
+- [ ] **Sirkuit (`nimbus-core`):** Upgrade `JoinSplitCircuit` dengan MMR bagging, 19 public inputs, dual-epoch nullifier PRF (DEC-033), Two-Limb quote hash & scope binding (DEC-035/DEC-036A), Direction B dummy output.
+- [ ] **SDK (`nimbus-sdk`):** Hubungkan bulk MMR proof sync anti-snooping, in-pool `consolidate_notes()`, dual-epoch handling, dan method submit `pay_joinsplit` ke relayer (DEC-036B).
+- [ ] **Relayer (`nimbus-node`):** Tambah endpoint `POST /api/v1/spend-joinsplit`, dual-nullifier double-spend check di DB & on-chain, preflight Groth16, dan transaction dispatcher (DEC-036C).
+- [ ] **Contract (`nimbus-contracts`):** Tambah entrypoint `spend_joinsplit`, Groth16 MSM/Pairing verifier untuk JoinSplit (EIP-2537), dual-nullifier burning, dan Direction B dual change MMR insertion (DEC-036C).
 
 ---
 
