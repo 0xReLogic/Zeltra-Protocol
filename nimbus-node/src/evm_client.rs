@@ -23,6 +23,14 @@ sol! {
         uint256 net_amount
     );
 
+    #[derive(Debug, PartialEq)]
+    event NoteCommitmentAppended(
+        uint256 indexed leaf_index,
+        bytes32 commitment,
+        bytes32 new_mmr_root,
+        uint256 leaf_count
+    );
+
     function spend(
         bytes32 root,
         bytes32 nullifier,
@@ -1753,6 +1761,52 @@ impl EvmClient {
         Ok(events)
     }
 
+    /// Query on-chain NoteCommitmentAppended events in a block range [from_block, to_block] (DEC-035C)
+    pub async fn get_mmr_commitment_events(
+        &self,
+        from_block: u64,
+        to_block: u64,
+    ) -> Result<Vec<NoteCommitmentEventInfo>> {
+        let filter = Filter::new()
+            .address(self.contract_address)
+            .event_signature(NoteCommitmentAppended::SIGNATURE_HASH)
+            .from_block(from_block)
+            .to_block(to_block);
+
+        let logs = self
+            .provider
+            .get_logs(&filter)
+            .await
+            .context("Failed to get NoteCommitmentAppended logs")?;
+
+        let mut events = Vec::new();
+        for log in logs {
+            if log.address() != self.contract_address {
+                continue;
+            }
+            if let Ok(decoded) =
+                NoteCommitmentAppended::decode_raw_log(log.topics(), &log.data().data)
+            {
+                let tx_hash = log
+                    .transaction_hash
+                    .map(|h| format!("{:#x}", h))
+                    .unwrap_or_default();
+                let block_number = log.block_number.unwrap_or(0);
+
+                events.push(NoteCommitmentEventInfo {
+                    leaf_index: decoded.leaf_index.to::<u64>(),
+                    commitment: decoded.commitment.0,
+                    new_mmr_root: decoded.new_mmr_root.0,
+                    leaf_count: decoded.leaf_count.to::<u64>(),
+                    tx_hash,
+                    block_number,
+                });
+            }
+        }
+
+        Ok(events)
+    }
+
     /// Check if a specific transaction contains a verified on-chain deposit event (DEC-018)
     pub async fn check_deposit_tx_on_chain(
         &self,
@@ -1822,6 +1876,17 @@ pub struct DepositEventInfo {
     pub gross_amount: u64,
     pub fee: u64,
     pub net_amount: u64,
+    pub tx_hash: String,
+    pub block_number: u64,
+}
+
+/// Information extracted from an on-chain NoteCommitmentAppended event (DEC-035C)
+#[derive(Clone, Debug, PartialEq)]
+pub struct NoteCommitmentEventInfo {
+    pub leaf_index: u64,
+    pub commitment: [u8; 32],
+    pub new_mmr_root: [u8; 32],
+    pub leaf_count: u64,
     pub tx_hash: String,
     pub block_number: u64,
 }

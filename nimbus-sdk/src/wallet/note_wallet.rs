@@ -241,6 +241,8 @@ pub enum WalletError {
     CryptoError(String),
     SerializationError(String),
     BackupDecryptionFailed,
+    NoteNotYetIndexed(u64),
+    RelayerError(String),
 }
 
 impl std::fmt::Display for WalletError {
@@ -263,11 +265,28 @@ impl std::fmt::Display for WalletError {
             Self::CryptoError(err) => write!(f, "Cryptographic error: {err}"),
             Self::SerializationError(err) => write!(f, "Serialization error: {err}"),
             Self::BackupDecryptionFailed => write!(f, "Backup decryption failed or corrupted"),
+            Self::NoteNotYetIndexed(idx) => {
+                write!(f, "Note at leaf index {idx} is not yet indexed on relayer")
+            }
+            Self::RelayerError(err) => write!(f, "Relayer sync error: {err}"),
         }
     }
 }
 
 impl std::error::Error for WalletError {}
+
+/// MMR inclusion proof retrieved from Relayer REST sync endpoint (DEC-035C)
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct MmrProofResponse {
+    pub leaf_index: u64,
+    pub leaf_count: u64,
+    pub commitment: String,
+    pub mountain_height: usize,
+    pub mountain_siblings: Vec<String>,
+    pub peak_bagging_siblings: Vec<String>,
+    pub bagged_root: String,
+    pub block_number: u64,
+}
 
 /// Private Note Wallet State
 #[derive(Clone, Serialize, Deserialize)]
@@ -278,6 +297,8 @@ pub struct PrivateNoteWallet {
     pub current_merkle_root_hex: Option<String>,
     #[serde(skip)]
     pub mmr: nimbus_core::MerkleMountainRange,
+    #[serde(skip)]
+    pub mmr_proof_cache: HashMap<(u64, String), MmrProofResponse>,
 }
 
 impl Drop for PrivateNoteWallet {
@@ -309,6 +330,7 @@ impl PrivateNoteWallet {
             notes: HashMap::new(),
             current_merkle_root_hex: None,
             mmr: nimbus_core::MerkleMountainRange::new(),
+            mmr_proof_cache: HashMap::new(),
         }
     }
 
@@ -704,6 +726,127 @@ impl PrivateNoteWallet {
         Ok(())
     }
 
+    /// Fetches MMR inclusion proof from Relayer REST sync endpoint (C4.1).
+    pub async fn fetch_mmr_proof(
+        &mut self,
+        relayer_url: &str,
+        leaf_index: u64,
+    ) -> Result<MmrProofResponse, WalletError> {
+        let url = format!(
+            "{}/api/v1/mmr/proof/{}",
+            relayer_url.trim_end_matches('/'),
+            leaf_index
+        );
+        let client = reqwest::Client::new();
+        let resp = client
+            .get(&url)
+            .send()
+            .await
+            .map_err(|e| WalletError::RelayerError(e.to_string()))?;
+
+        if resp.status() == reqwest::StatusCode::NOT_FOUND {
+            return Err(WalletError::NoteNotYetIndexed(leaf_index));
+        }
+
+        if !resp.status().is_success() {
+            let status = resp.status();
+            let body = resp.text().await.unwrap_or_default();
+            return Err(WalletError::RelayerError(format!("HTTP {status}: {body}")));
+        }
+
+        let proof_data: MmrProofResponse = resp
+            .json()
+            .await
+            .map_err(|e| WalletError::RelayerError(e.to_string()))?;
+
+        self.cache_mmr_proof(proof_data.clone());
+        Ok(proof_data)
+    }
+
+    /// Queries the relayer for the inclusion proof of a confirmed note and caches it.
+    pub async fn sync_note_mmr_proof(
+        &mut self,
+        relayer_url: &str,
+        commitment_hex: &str,
+    ) -> Result<MmrProofResponse, WalletError> {
+        let note = self
+            .notes
+            .get(commitment_hex)
+            .ok_or_else(|| WalletError::NoteNotFound(commitment_hex.to_string()))?;
+        let leaf_index = note
+            .leaf_index
+            .ok_or_else(|| WalletError::NoteMissingWitness("leaf_index".into()))?;
+        self.fetch_mmr_proof(relayer_url, leaf_index).await
+    }
+
+    /// Deserializes sibling hex strings from MmrProofResponse into Fr scalar arrays (C4.2).
+    pub fn deserialize_mmr_siblings(
+        proof_data: &MmrProofResponse,
+    ) -> Result<([Fr; 32], [Fr; 32]), WalletError> {
+        if proof_data.mountain_siblings.len() > 32 {
+            return Err(WalletError::CryptoError(format!(
+                "mountain_siblings length {} exceeds max 32",
+                proof_data.mountain_siblings.len()
+            )));
+        }
+        if proof_data.peak_bagging_siblings.len() > 32 {
+            return Err(WalletError::CryptoError(format!(
+                "peak_bagging_siblings length {} exceeds max 32",
+                proof_data.peak_bagging_siblings.len()
+            )));
+        }
+
+        let mut mountain_siblings = [Fr::from(0u64); 32];
+        for (i, hex_str) in proof_data.mountain_siblings.iter().enumerate() {
+            mountain_siblings[i] = parse_fr_from_hex(hex_str)?;
+        }
+
+        let mut peak_bagging_siblings = [Fr::from(0u64); 32];
+        for (i, hex_str) in proof_data.peak_bagging_siblings.iter().enumerate() {
+            peak_bagging_siblings[i] = parse_fr_from_hex(hex_str)?;
+        }
+
+        Ok((mountain_siblings, peak_bagging_siblings))
+    }
+
+    /// Caches an MMR inclusion proof locally (C4.4).
+    pub fn cache_mmr_proof(&mut self, proof: MmrProofResponse) {
+        self.mmr_proof_cache
+            .insert((proof.leaf_index, proof.bagged_root.clone()), proof);
+    }
+
+    /// Retrieves a cached MMR inclusion proof matching leaf_index and bagged_root (C4.4).
+    pub fn get_cached_mmr_proof(
+        &self,
+        leaf_index: u64,
+        bagged_root: &str,
+    ) -> Option<&MmrProofResponse> {
+        let clean = bagged_root.strip_prefix("0x").unwrap_or(bagged_root);
+        self.mmr_proof_cache
+            .iter()
+            .find(|((idx, root), _)| {
+                *idx == leaf_index
+                    && (root
+                        .strip_prefix("0x")
+                        .unwrap_or(root)
+                        .eq_ignore_ascii_case(clean))
+            })
+            .map(|(_, v)| v)
+    }
+
+    /// Retrieves any cached MMR inclusion proof for the specified leaf_index (most recent or available).
+    pub fn get_any_cached_mmr_proof_for_leaf(&self, leaf_index: u64) -> Option<&MmrProofResponse> {
+        self.mmr_proof_cache
+            .iter()
+            .find(|((idx, _), _)| *idx == leaf_index)
+            .map(|(_, v)| v)
+    }
+
+    /// Clears the local MMR proof cache.
+    pub fn clear_mmr_proof_cache(&mut self) {
+        self.mmr_proof_cache.clear();
+    }
+
     /// Prepares a Groth16 spend proof locally using `nimbus-core` PrivateNoteCircuit.
     ///
     /// Prepares a Groth16 spend proof locally using `nimbus-core` PrivateNoteCircuit.
@@ -797,27 +940,56 @@ impl PrivateNoteWallet {
         let note_epoch_id = input_note.epoch_id.unwrap_or(0);
         let nullifier = derive_nullifier(nk, in_cm, leaf_index, note_epoch_id);
 
-        // Synchronize local MMR if needed
-        if self.mmr.leaf_count <= leaf_index as usize {
-            while self.mmr.leaf_count < leaf_index as usize {
-                self.mmr.append(Fr::from(0u64));
+        // Synchronize local MMR if needed, or use cached canonical MMR proof (C4.3)
+        let (
+            note_root,
+            total_leaves,
+            mountain_height,
+            mountain_siblings,
+            peak_bagging_siblings,
+            peak_bagging_count,
+        ) = if let Some(cached) = self.get_any_cached_mmr_proof_for_leaf(leaf_index) {
+            let (m_sibs, p_sibs) = Self::deserialize_mmr_siblings(cached)?;
+            let root = parse_fr_from_hex(&cached.bagged_root)?;
+            (
+                root,
+                cached.leaf_count,
+                cached.mountain_height as u8,
+                m_sibs,
+                p_sibs,
+                cached.peak_bagging_siblings.len() as u8,
+            )
+        } else {
+            if self.mmr.leaf_count <= leaf_index as usize {
+                while self.mmr.leaf_count < leaf_index as usize {
+                    self.mmr.append(Fr::from(0u64));
+                }
+                self.mmr.append(in_cm);
             }
-            self.mmr.append(in_cm);
-        }
 
-        let mmr_proof = self.mmr.generate_proof(leaf_index as usize);
-        let note_root = self.mmr.get_root();
-        let total_leaves = self.mmr.leaf_count as u64;
+            let mmr_proof = self.mmr.generate_proof(leaf_index as usize);
+            let note_root = self.mmr.get_root();
+            let total_leaves = self.mmr.leaf_count as u64;
 
-        let mut mountain_siblings = [Fr::from(0u64); 32];
-        for (i, &s) in mmr_proof.mountain_siblings.iter().take(32).enumerate() {
-            mountain_siblings[i] = s;
-        }
+            let mut mountain_siblings = [Fr::from(0u64); 32];
+            for (i, &s) in mmr_proof.mountain_siblings.iter().take(32).enumerate() {
+                mountain_siblings[i] = s;
+            }
 
-        let mut peak_bagging_siblings = [Fr::from(0u64); 32];
-        for (i, &s) in mmr_proof.peak_bagging_siblings.iter().take(32).enumerate() {
-            peak_bagging_siblings[i] = s;
-        }
+            let mut peak_bagging_siblings = [Fr::from(0u64); 32];
+            for (i, &s) in mmr_proof.peak_bagging_siblings.iter().take(32).enumerate() {
+                peak_bagging_siblings[i] = s;
+            }
+
+            (
+                note_root,
+                total_leaves,
+                mmr_proof.mountain_height as u8,
+                mountain_siblings,
+                peak_bagging_siblings,
+                mmr_proof.peak_bagging_siblings.len() as u8,
+            )
+        };
 
         // Handle Change Note
         let (ch_val, ch_cm, ch_rho, ch_rand) = if selected.has_change {
@@ -918,10 +1090,10 @@ impl PrivateNoteWallet {
             input_rho: Some(in_rho),
             input_randomness: Some(in_rand),
             input_leaf_index: Some(Fr::from(leaf_index)),
-            mountain_height: Some(mmr_proof.mountain_height as u8),
+            mountain_height: Some(mountain_height),
             mountain_siblings: Some(mountain_siblings),
             peak_bagging_siblings: Some(peak_bagging_siblings),
-            peak_bagging_count: Some(mmr_proof.peak_bagging_siblings.len() as u8),
+            peak_bagging_count: Some(peak_bagging_count),
 
             change_value: Some(ch_val),
             change_owner_key: Some(sk),
@@ -983,6 +1155,41 @@ impl PrivateNoteWallet {
             proof_c_hex: hex::encode(proof_c),
             public_inputs_hex: public_inputs,
         })
+    }
+
+    /// Prepares spend proof using an explicit MmrProofResponse (C4.3).
+    #[allow(clippy::too_many_arguments)]
+    pub fn prepare_spend_proof_with_mmr(
+        &mut self,
+        selected: &SelectedSpend,
+        session_id: &str,
+        recipient_evm_address: &str,
+        max_execution_fee: u64,
+        quote_hash_hex: &str,
+        chain_id: u64,
+        contract_address_hex: &str,
+        expiry: u64,
+        target_change_epoch: Option<u32>,
+        is_rollover: bool,
+        mmr_proof: &MmrProofResponse,
+        current_time_secs: u64,
+        pk: &ark_groth16::ProvingKey<Bls12_381>,
+    ) -> Result<SpendProofPayload, WalletError> {
+        self.cache_mmr_proof(mmr_proof.clone());
+        self.prepare_spend_proof_with_epoch(
+            selected,
+            session_id,
+            recipient_evm_address,
+            max_execution_fee,
+            quote_hash_hex,
+            chain_id,
+            contract_address_hex,
+            expiry,
+            target_change_epoch,
+            is_rollover,
+            current_time_secs,
+            pk,
+        )
     }
 
     /// Builds an in-flight spend rollover proof (DEC-033).
@@ -2871,5 +3078,185 @@ mod tests {
 
         // 25_000_000 - 100_000 = 24_900_000
         assert_eq!(wallet.balance(), 24_900_000);
+    }
+
+    #[test]
+    fn test_mmr_proof_cache_and_deserialization_positive() {
+        let seed = [99u8; 32];
+        let mut wallet = PrivateNoteWallet::new(&seed);
+
+        let sib1 = hex::encode(fr_to_be_bytes(&Fr::from(12345u64)));
+        let sib2 = hex::encode(fr_to_be_bytes(&Fr::from(67890u64)));
+        let peak1 = hex::encode(fr_to_be_bytes(&Fr::from(54321u64)));
+        let root = hex::encode(fr_to_be_bytes(&Fr::from(99999u64)));
+
+        let proof = MmrProofResponse {
+            leaf_index: 5,
+            leaf_count: 10,
+            commitment: "0x1111".to_string(),
+            mountain_height: 2,
+            mountain_siblings: vec![sib1, sib2],
+            peak_bagging_siblings: vec![peak1],
+            bagged_root: format!("0x{root}"),
+            block_number: 1000,
+        };
+
+        // Cache proof
+        wallet.cache_mmr_proof(proof.clone());
+
+        // Retrieve from cache
+        let cached = wallet
+            .get_cached_mmr_proof(5, &format!("0x{root}"))
+            .unwrap();
+        assert_eq!(cached.leaf_index, 5);
+        assert_eq!(cached.mountain_height, 2);
+
+        // Retrieve any for leaf
+        let cached_any = wallet.get_any_cached_mmr_proof_for_leaf(5).unwrap();
+        assert_eq!(cached_any.leaf_count, 10);
+
+        // Deserialize siblings
+        let (m_sibs, p_sibs) = PrivateNoteWallet::deserialize_mmr_siblings(&proof).unwrap();
+        assert_eq!(m_sibs[0], Fr::from(12345u64));
+        assert_eq!(m_sibs[1], Fr::from(67890u64));
+        assert_eq!(m_sibs[2], Fr::from(0u64)); // zero-padded
+        assert_eq!(p_sibs[0], Fr::from(54321u64));
+        assert_eq!(p_sibs[1], Fr::from(0u64)); // zero-padded
+
+        // Clear cache
+        wallet.clear_mmr_proof_cache();
+        assert!(wallet
+            .get_cached_mmr_proof(5, &format!("0x{root}"))
+            .is_none());
+    }
+
+    #[test]
+    fn test_mmr_proof_deserialization_negative_bounds() {
+        // Negative test 1: mountain_siblings > 32
+        let invalid_m_sibs = vec!["00".repeat(32); 33];
+        let proof1 = MmrProofResponse {
+            leaf_index: 0,
+            leaf_count: 1,
+            commitment: "0x00".to_string(),
+            mountain_height: 1,
+            mountain_siblings: invalid_m_sibs,
+            peak_bagging_siblings: vec![],
+            bagged_root: "0x00".to_string(),
+            block_number: 1,
+        };
+        let err1 = PrivateNoteWallet::deserialize_mmr_siblings(&proof1);
+        assert!(err1.is_err());
+        assert!(format!("{err1:?}").contains("mountain_siblings length 33 exceeds max 32"));
+
+        // Negative test 2: peak_bagging_siblings > 32
+        let invalid_p_sibs = vec!["00".repeat(32); 33];
+        let proof2 = MmrProofResponse {
+            leaf_index: 0,
+            leaf_count: 1,
+            commitment: "0x00".to_string(),
+            mountain_height: 1,
+            mountain_siblings: vec![],
+            peak_bagging_siblings: invalid_p_sibs,
+            bagged_root: "0x00".to_string(),
+            block_number: 1,
+        };
+        let err2 = PrivateNoteWallet::deserialize_mmr_siblings(&proof2);
+        assert!(err2.is_err());
+        assert!(format!("{err2:?}").contains("peak_bagging_siblings length 33 exceeds max 32"));
+
+        // Negative test 3: non-canonical scalar in siblings
+        // Fr modulus + 1
+        let non_canonical_hex = "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff";
+        let proof3 = MmrProofResponse {
+            leaf_index: 0,
+            leaf_count: 1,
+            commitment: "0x00".to_string(),
+            mountain_height: 1,
+            mountain_siblings: vec![non_canonical_hex.to_string()],
+            peak_bagging_siblings: vec![],
+            bagged_root: "0x00".to_string(),
+            block_number: 1,
+        };
+        let err3 = PrivateNoteWallet::deserialize_mmr_siblings(&proof3);
+        assert!(err3.is_err());
+    }
+
+    #[test]
+    fn test_prepare_spend_proof_with_cached_mmr_proof() {
+        let seed = [77u8; 32];
+        let mut wallet = PrivateNoteWallet::new(&seed);
+        let sk = wallet.spending_key().unwrap();
+
+        // 1. Create a note and simulate on-chain MMR
+        let (note, cm) = wallet.create_deposit_note(10_000_000, 1000).unwrap();
+        let rho = parse_fr_from_hex(&note.rho_hex).unwrap();
+        let rand = parse_fr_from_hex(&note.randomness_hex).unwrap();
+        let fr_cm = nimbus_core::note_commitment(10_000_000, sk, rho, rand);
+
+        let mut mmr = nimbus_core::MerkleMountainRange::new();
+        mmr.append(fr_cm);
+        let mmr_proof = mmr.generate_proof(0);
+        let root = mmr.get_root();
+
+        let m_sibs_hex: Vec<String> = mmr_proof
+            .mountain_siblings
+            .iter()
+            .map(|s| hex::encode(fr_to_be_bytes(s)))
+            .collect();
+        let p_sibs_hex: Vec<String> = mmr_proof
+            .peak_bagging_siblings
+            .iter()
+            .map(|s| hex::encode(fr_to_be_bytes(s)))
+            .collect();
+        let root_hex = format!("0x{}", hex::encode(fr_to_be_bytes(&root)));
+
+        // Confirm note
+        wallet
+            .confirm_deposit(&cm, 0, dummy_merkle_path(), &root_hex)
+            .unwrap();
+
+        // Build MmrProofResponse
+        let mmr_resp = MmrProofResponse {
+            leaf_index: 0,
+            leaf_count: 1,
+            commitment: cm.clone(),
+            mountain_height: mmr_proof.mountain_height,
+            mountain_siblings: m_sibs_hex,
+            peak_bagging_siblings: p_sibs_hex,
+            bagged_root: root_hex.clone(),
+            block_number: 100,
+        };
+
+        // Cache proof into wallet
+        wallet.cache_mmr_proof(mmr_resp.clone());
+
+        // Generate proving key
+        let keys = nimbus_core::generate_note_circuit_keys().unwrap();
+
+        let selected = wallet
+            .select_note_for_spend(7_000_000, 31_500, 50_000, 1010)
+            .unwrap();
+
+        let payload = wallet
+            .prepare_spend_proof_with_mmr(
+                &selected,
+                "session_mmr_spend_1",
+                "0x1111111111111111111111111111111111111111",
+                100_000,
+                "0x2222222222222222222222222222222222222222222222222222222222222222",
+                421614,
+                "0x3333333333333333333333333333333333333333",
+                2000,
+                None,
+                false,
+                &mmr_resp,
+                1010,
+                &keys.proving_key,
+            )
+            .unwrap();
+
+        assert_eq!(payload.note_root_hex, hex::encode(fr_to_be_bytes(&root)));
+        assert_eq!(payload.leaf_count, 1);
+        assert_eq!(payload.public_inputs_hex.len(), 16);
     }
 }

@@ -14,6 +14,7 @@ pub mod http;
 pub mod key_rotation;
 pub mod kms;
 pub mod mempool_watchdog;
+pub mod mmr_indexer;
 pub mod sanctions_sync;
 pub mod state;
 pub mod validation;

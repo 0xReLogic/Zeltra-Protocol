@@ -593,3 +593,29 @@ pub struct TxStatusResponse {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error_reason: Option<String>,
 }
+
+// MMR Client Sync DTOs (DEC-035C / Merkle Mountain Range Sync)
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct MmrProofResponse {
+    pub leaf_index: u64,
+    pub leaf_count: u64,
+    pub commitment: String,
+    pub mountain_height: usize,
+    pub mountain_siblings: Vec<String>,
+    pub peak_bagging_siblings: Vec<String>,
+    pub bagged_root: String,
+    pub block_number: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct MmrTipResponse {
+    pub leaf_count: u64,
+    pub bagged_root: String,
+    pub last_indexed_block: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct MmrErrorResponse {
+    pub code: String,
+    pub message: String,
+}

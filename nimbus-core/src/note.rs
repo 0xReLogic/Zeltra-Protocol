@@ -386,6 +386,21 @@ impl MerkleMountainRange {
         (leaf_index, root)
     }
 
+    /// Helper to append a leaf, alias for append.
+    pub fn append_leaf(&mut self, leaf: Fr) -> (usize, Fr) {
+        self.append(leaf)
+    }
+
+    /// Total number of leaves as u64.
+    pub fn leaf_count(&self) -> u64 {
+        self.leaf_count as u64
+    }
+
+    /// Current bagged root, alias for get_root.
+    pub fn bagged_root(&self) -> Fr {
+        self.get_root()
+    }
+
     /// Returns all active peaks ordered from left to right (highest mountain to lowest mountain).
     pub fn get_peaks(&self) -> Vec<Fr> {
         let mut peaks = Vec::new();

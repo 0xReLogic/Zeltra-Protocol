@@ -97,7 +97,7 @@ fn test_qap_density_contextual_inputs() {
     for (var_idx, name) in target_vars {
         let mut total_occurrences = 0;
 
-        for (_name, matrix_list) in &matrices {
+        for matrix_list in matrices.values() {
             for matrix in matrix_list {
                 for row in matrix {
                     for (coeff, col) in row {

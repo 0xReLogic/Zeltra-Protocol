@@ -11,6 +11,7 @@ mod http;
 mod key_rotation;
 mod kms;
 mod mempool_watchdog;
+mod mmr_indexer;
 mod sanctions_sync;
 mod state;
 mod validation;
@@ -311,6 +312,12 @@ async fn main() {
         mempool_watchdog::mempool_lease_watchdog_worker(mempool_watchdog_state).await;
     });
 
+    // Spawn on-chain MMR event indexer background worker (DEC-035C)
+    let mmr_indexer_state = state.clone();
+    tokio::spawn(async move {
+        mmr_indexer::mmr_indexer_worker(mmr_indexer_state).await;
+    });
+
     let app = Router::new()
         .route("/health", get(health_check))
         .route("/live", get(liveness_check))
@@ -325,6 +332,8 @@ async fn main() {
         )
         .route("/api/quote/private-spend", get(handle_private_spend_quote))
         .route("/api/tx-status", get(handle_tx_status))
+        .route("/api/v1/mmr/proof/{leaf_index}", get(handle_mmr_proof))
+        .route("/api/v1/mmr/tip", get(handle_mmr_tip))
         .route("/api/x402/verify", post(handle_x402_verify))
         .route("/api/sign-share", post(handle_sign_share))
         .route("/api/leader/sign", post(handle_leader_sign))

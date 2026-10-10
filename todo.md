@@ -56,10 +56,10 @@ Ref: [`DEC-035`](file:///workspaces/Zeltra-Protocol/research/decisions/DEC-035-c
 - [x] **DEC-035A+B / Step 1 (Core):** Update `extract_public_inputs` (16 public inputs) & generate dev keys baru (`0x4e696d6275734e43`).
 - [x] **DEC-035A / Step 2 (Contract):** Update `_spend_private_note` di `spend.rs` (unpack `quote_hash: FixedBytes<32>` jadi `quote_hi` & `quote_lo`, calldata eksternal tetap `bytes32`).
 - [x] **DEC-035A+B / Step 2 (Contract):** Update `groth16_note_verifier.rs` dengan 17-point $IC$ verifying key baru.
-- [ ] **DEC-035C / Step 3 (Node):** Build worker indexer event `NoteCommitmentAppended` di `nimbus-node`.
-- [ ] **DEC-035C / Step 3 (Node):** Endpoint `GET /api/v1/mmr/proof/:leaf_index` di relayer untuk dynamic sync proof client.
+- [x] **DEC-035C / Step 3 (Node):** Build worker indexer event `NoteCommitmentAppended` di `nimbus-node`.
+- [x] **DEC-035C / Step 3 (Node):** Endpoint `GET /api/v1/mmr/proof/:leaf_index` di relayer untuk dynamic sync proof client.
 - [x] **DEC-035B / Step 3 (Node):** Tambah missing equality check `payload.quote_hash == compute_quote_hash(&execution_quote)` di `spend.rs`.
-- [ ] **DEC-035A+C / Step 4 (SDK):** Update `PrivateNoteWallet` untuk susun 16 public inputs dan fetch live MMR proof dari relayer.
+- [x] **DEC-035A+C / Step 4 (SDK):** Update `PrivateNoteWallet` untuk susun 16 public inputs dan fetch live MMR proof dari relayer.
 - [ ] **Step 5 (Sepolia):** Full E2E verification di Arbitrum Sepolia (Gate G) tanpa utang teknis / celah arsitektur.
 
 ### Gate C2 / DEC-036 — Universal 2-in-2-out JoinSplit End-to-End Pipeline
