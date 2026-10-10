@@ -1,0 +1,17 @@
+{
+  "version": 1,
+  "skills": {
+    "build-with-exa": {
+      "source": "exa-labs/agent-skills",
+      "sourceType": "github",
+      "skillPath": "skills/build-with-exa/SKILL.md",
+      "computedHash": "6eaf62e8f26d39614ef8d1b810d4f83f4f8e3b657fa772d28d35a4cee0047806"
+    },
+    "tavily-search": {
+      "source": "tavily-ai/skills",
+      "sourceType": "github",
+      "skillPath": "skills/tavily-search/SKILL.md",
+      "computedHash": "0e60c0488b004dd7b5a01fc19a36e52ffd8e763b409dc6c2e3c0aa6681182629"
+    }
+  }
+}

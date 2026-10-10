@@ -49,17 +49,17 @@ Ref: [`docs/todos/private-note-balance.md`](file:///workspaces/Zeltra-Protocol/d
 - [ ] Jalankan MPC ceremony hanya setelah seluruh constraint dan public-input ABI dibekukan serta direview.
 
 ### Gate C1 / DEC-035 — Zero Tech Debt Pre-Testnet Hardening
-Ref: [`DEC-035`](file:///workspaces/Zeltra-Protocol/research/decisions/DEC-035-cryptographic-canonicality-public-input-binding-and-mmr.md) *(Founder Approved Blueprint — Zero Tech Debt)*
+Ref: [`DEC-035`](file:///workspaces/Zeltra-Protocol/research/decisions/DEC-035-cryptographic-canonicality-public-input-binding-and-mmr.md) *(Founder Blueprint)*, [`DEC-035A`](file:///workspaces/Zeltra-Protocol/research/decisions/DEC-035A-two-limb-quote-hash-representation-and-range-constraints.md), [`DEC-035B`](file:///workspaces/Zeltra-Protocol/research/decisions/DEC-035B-formal-scope-binding-gadget-and-groth16-statement-integrity.md), [`DEC-035C`](file:///workspaces/Zeltra-Protocol/research/decisions/DEC-035C-relayer-mmr-indexer-worker-and-client-sync-architecture.md)
 
-- [ ] **Step 1 (Core):** Implementasi Two-Limb 128-bit quote decomposition & 128-bit range checks (`enforce_u128_range`) di `note_circuit.rs`.
-- [ ] **Step 1 (Core):** Implementasi Formal Scope Binding Gadget menggantikan dead code `_binding` di `note_circuit.rs`.
-- [ ] **Step 1 (Core):** Update `extract_public_inputs` (16 public inputs) & generate dev keys baru (`0x4e696d6275734e43`).
-- [ ] **Step 2 (Contract):** Update `_spend_private_note` di `spend.rs` (unpack `quote_hash: FixedBytes<32>` jadi `quote_hi` & `quote_lo`, calldata eksternal tetap `bytes32`).
-- [ ] **Step 2 (Contract):** Update `groth16_note_verifier.rs` dengan 17-point $IC$ verifying key baru.
-- [ ] **Step 3 (Node):** Build worker indexer event `NoteCommitmentAppended` di `nimbus-node`.
-- [ ] **Step 3 (Node):** Endpoint `GET /api/v1/mmr/proof/:leaf_index` di relayer untuk dynamic sync proof client.
-- [ ] **Step 3 (Node):** Tambah missing equality check `payload.quote_hash == compute_quote_hash(&execution_quote)` di `spend.rs`.
-- [ ] **Step 4 (SDK):** Update `PrivateNoteWallet` untuk susun 16 public inputs dan fetch live MMR proof dari relayer.
+- [ ] **DEC-035A / Step 1 (Core):** Implementasi Two-Limb 128-bit quote decomposition & 128-bit range checks (`enforce_u128_range`) di `note_circuit.rs`.
+- [ ] **DEC-035B / Step 1 (Core):** Implementasi Formal Scope Binding Gadget menggantikan dead code `_binding` di `note_circuit.rs`.
+- [ ] **DEC-035A+B / Step 1 (Core):** Update `extract_public_inputs` (16 public inputs) & generate dev keys baru (`0x4e696d6275734e43`).
+- [ ] **DEC-035A / Step 2 (Contract):** Update `_spend_private_note` di `spend.rs` (unpack `quote_hash: FixedBytes<32>` jadi `quote_hi` & `quote_lo`, calldata eksternal tetap `bytes32`).
+- [ ] **DEC-035A+B / Step 2 (Contract):** Update `groth16_note_verifier.rs` dengan 17-point $IC$ verifying key baru.
+- [ ] **DEC-035C / Step 3 (Node):** Build worker indexer event `NoteCommitmentAppended` di `nimbus-node`.
+- [ ] **DEC-035C / Step 3 (Node):** Endpoint `GET /api/v1/mmr/proof/:leaf_index` di relayer untuk dynamic sync proof client.
+- [ ] **DEC-035B / Step 3 (Node):** Tambah missing equality check `payload.quote_hash == compute_quote_hash(&execution_quote)` di `spend.rs`.
+- [ ] **DEC-035A+C / Step 4 (SDK):** Update `PrivateNoteWallet` untuk susun 16 public inputs dan fetch live MMR proof dari relayer.
 - [ ] **Step 5 (Sepolia):** Full E2E verification di Arbitrum Sepolia (Gate G) tanpa utang teknis / celah arsitektur.
 
 ### Gate C2 / DEC-036 — Universal 2-in-2-out JoinSplit End-to-End Pipeline

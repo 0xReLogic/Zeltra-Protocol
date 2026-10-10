@@ -107,10 +107,13 @@ Refund path: if quorum fails or k never released → 24h timelock → user claim
    - **Call Path & Verbatim Code (CodeGraph):** Panggil MCP tool `codegraph_explore` (atau shell `codegraph explore "<query>"`) untuk melihat isi baris implementasi dan dynamic hops setelah lokasinya dipetakan oleh Graphify.
    - **Maintenance:** Setelah melakukan modifikasi file Rust, jalankan `graphify update .` untuk menjaga graf tetap sinkron tanpa memicu LLM cost.
 4. **Prinsip ATMI (Amati, Tiru, Modifikasi, Inovasi)** — Belajar dan serap pola unggul dari paper kriptografi teruji dan repo battle-tested (seperti Zcash, Aztec Barretenberg, Railgun, zk-kit, zk-sunade, Wasabi). Amati polanya, tiru fondasinya, modifikasi agar cocok dengan Stylus/BLS12-381/ZK-UTXO Zeltra, dan inovasikan keunggulan baru (privacy 9.5/10, produk 10/10).
-5. **Research gate for critical changes** (financial logic, crypto, CCIP, custody, storage layout):
-   - Search Exa MCP for recent papers, audit reports, exploit post-mortems (2024-2026)
-   - Minimum 2 independent sources, 1 must be primary
-   - Write decision note in `research/decisions/`
+5. **Research Gate & External Intel (Exa & Tavily):**
+   Gunakan kedua tool pencarian ini secara kontekstual dan saling melengkapi sesuai kekuatannya:
+   - **Exa MCP (`web_search_exa`, `web_fetch_exa`) — Deep Technical & Code Archaeology:**
+     * *Best for:* Bedah paper kriptografi (2024–2026), post-mortem eksploitasi, riset implementasi lib/crate eksternal, dan dokumen arsitektur panjang. Exa mencari berdasarkan makna semantik ("deskripsikan halaman idealnya"), bukan sekadar keyword, sehingga sangat efektif menemukan bukti matematis atau contoh implementasi kode tersembunyi.
+   - **Tavily MCP (`tavily_search`, `tavily_extract`, `tavily_crawl`) — Real-Time Fact, News & Governance:**
+     * *Best for:* Pengecekan status live ekosistem (misal: voting AIP ArbitrumDAO, update rilis ArbOS/Stylus, breaking news), fact-checking cepat, atau crawling halaman web tertentu. Tavily dioptimalkan untuk latency rendah dan akurasi fakta real-time.
+   - *Sinergi Alur:* Saat menghadapi problem kritis (finansial, kriptografi, upgrade contract), gunakan Tavily untuk memetakan situasi/status terkini, lalu gunakan Exa untuk menyelami referensi teknis dan paper primernya. Catat temuan kunci di `research/decisions/`.
 
 ### While Coding
 
