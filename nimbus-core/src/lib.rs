@@ -71,25 +71,28 @@ pub use poseidon::{
     compute_nullifier, generate_grain_round_constants, native_poseidon_w5, GrainLfsr,
 };
 
-// Re-export Private Note V1 (DEC-016A & DEC-032 & DEC-035A)
+// Re-export Private Note V1 (DEC-016A & DEC-032 & DEC-035A & DEC-035B)
 pub use note::{
-    combine_limbs_to_quote_hash, compute_empty_hashes, compute_merkle_root, derive_nullifier,
-    derive_nullifier_epoch, derive_nullifier_key, derive_nullifier_v1, domain_dummy_nullifier,
+    combine_limbs_to_quote_hash, compute_binding_commitment, compute_empty_hashes,
+    compute_merkle_root, compute_scope_hash, derive_nullifier, derive_nullifier_epoch,
+    derive_nullifier_key, derive_nullifier_v1, domain_binding_v1, domain_dummy_nullifier,
     domain_initial_note, domain_merkle_node, domain_mmr_bag, domain_note_commitment,
-    domain_nullifier, fr_from_be_bytes, fr_to_be_bytes, merkle_append, merkle_hash,
-    note_commitment, split_quote_hash_to_limbs, verify_merkle_proof, verify_value_conservation,
-    MMRProof, MerkleMountainRange, PrivateNoteV1, DOMAIN_MMR_BAG_BYTES, MERKLE_TREE_DEPTH,
+    domain_nullifier, domain_quote_binding, domain_scope_v1, fr_from_be_bytes, fr_to_be_bytes,
+    merkle_append, merkle_hash, note_commitment, split_quote_hash_to_limbs, verify_merkle_proof,
+    verify_value_conservation, MMRProof, MerkleMountainRange, PrivateNoteV1, DOMAIN_BINDING_V1_HEX,
+    DOMAIN_MMR_BAG_BYTES, DOMAIN_SCOPE_V1_HEX, MERKLE_TREE_DEPTH,
 };
 
 // Re-export accounting state machine (DEC-016A Gate B)
 pub use accounting::{ContractAccounting, TransitionResult};
 
-// Re-export Private Note Circuit (DEC-016A Gate C & DEC-026 C-01)
+// Re-export Private Note Circuit (DEC-016A Gate C & DEC-026 C-01 & DEC-035B)
 pub use note_circuit::{
     create_dummy_circuit, extract_public_inputs, generate_note_circuit_evm_vk,
     generate_note_circuit_keys, generate_note_proof, get_or_init_note_circuit_keys,
     get_prepared_note_vk, verify_evm_note_proof, verify_note_proof, NoteCircuitKeys,
-    PrivateNoteCircuit, NOTE_CIRCUIT_SETUP_SEED, NUM_PUBLIC_INPUTS,
+    PrivateNoteCircuit, DOMAIN_BINDING_V1, DOMAIN_SCOPE_V1, NOTE_CIRCUIT_SETUP_SEED,
+    NUM_PUBLIC_INPUTS,
 };
 
 // Re-export Universal 2-in-2-out JoinSplit Circuit (DEC-030 Gate C0)

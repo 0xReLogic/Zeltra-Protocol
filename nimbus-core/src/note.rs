@@ -62,7 +62,7 @@ pub fn domain_dummy_nullifier() -> Fr {
     domain_from_label("nimbus.note.dummy.nullifier.v1")
 }
 
-/// Canonical domain separator bytes for MMR peak bagging (DEC-032).
+/// Canonical domain separator for MMR peak bagging (DEC-032).
 /// Keccak256("ZELTRA_MMR_BAG_V1") mod r.
 pub const DOMAIN_MMR_BAG_BYTES: [u8; 32] = [
     0x19, 0x4a, 0x8f, 0x9c, 0x1e, 0x7d, 0x23, 0x58, 0xb9, 0x01, 0xfc, 0x84, 0x33, 0x29, 0x10, 0x7b,
@@ -72,6 +72,38 @@ pub const DOMAIN_MMR_BAG_BYTES: [u8; 32] = [
 /// Domain tag for MMR peak bagging: Poseidon_W5([acc, Fr(leaf_count), 0, 0], DOMAIN_MMR_BAG).
 pub fn domain_mmr_bag() -> Fr {
     Fr::from_be_bytes_mod_order(&DOMAIN_MMR_BAG_BYTES)
+}
+
+/// Canonical domain separator for contextual scope hash (DEC-035B: "ZELTRA_SCOPE_V1" = 0x5a454c5452415f53434f50455f5631).
+pub const DOMAIN_SCOPE_V1_HEX: &str = "0x5a454c5452415f53434f50455f5631";
+
+/// Domain tag for contextual scope hash (DEC-035B Stage 1).
+pub fn domain_scope_v1() -> Fr {
+    Fr::from_be_bytes_mod_order(b"ZELTRA_SCOPE_V1")
+}
+
+/// Canonical domain separator for formal binding commitment (DEC-035B: "ZELTRA_BINDING_V1" = 0x5a454c5452415f42494e44494e475f5631).
+pub const DOMAIN_BINDING_V1_HEX: &str = "0x5a454c5452415f42494e44494e475f5631";
+
+/// Domain tag for formal binding commitment (DEC-035B Stage 2).
+pub fn domain_binding_v1() -> Fr {
+    Fr::from_be_bytes_mod_order(b"ZELTRA_BINDING_V1")
+}
+
+/// Compute the native contextual scope hash via Poseidon-W5 (DEC-035B Stage 1).
+pub fn compute_scope_hash(recipient: Fr, chain_id: Fr, contract_address: Fr, expiry: Fr) -> Fr {
+    native_poseidon_w5(
+        &[recipient, chain_id, contract_address, expiry],
+        domain_scope_v1(),
+    )
+}
+
+/// Compute the native formal binding commitment via Poseidon-W5 (DEC-035B Stage 2).
+pub fn compute_binding_commitment(quote_hash_hi: Fr, quote_hash_lo: Fr, scope_hash: Fr) -> Fr {
+    native_poseidon_w5(
+        &[quote_hash_hi, quote_hash_lo, scope_hash, Fr::from(0u64)],
+        domain_binding_v1(),
+    )
 }
 
 // ═══════════════════════════════════════════════════════════════════════════

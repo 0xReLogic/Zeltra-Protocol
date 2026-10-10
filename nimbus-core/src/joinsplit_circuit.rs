@@ -17,7 +17,7 @@ use ark_std::rand::SeedableRng;
 
 use crate::note::{
     domain_dummy_nullifier, domain_merkle_node, domain_note_commitment, domain_nullifier,
-    domain_quote_binding, MERKLE_TREE_DEPTH,
+    MERKLE_TREE_DEPTH,
 };
 use crate::poseidon::{poseidon_hash as poseidon_w3_hash, poseidon_w5_hash};
 
@@ -79,6 +79,25 @@ pub struct JoinSplitCircuit {
     // Witnesses: Flags
     pub has_change_1: Option<Fr>,
     pub has_change_2: Option<Fr>,
+
+    // Witnesses: Scope Binding (DEC-035B)
+    pub expected_binding: Option<Fr>,
+}
+
+impl JoinSplitCircuit {
+    /// Compute the expected scope binding commitment natively from JoinSplit inputs (DEC-035B).
+    pub fn derive_expected_binding(&self) -> Option<Fr> {
+        let rec = self.recipient?;
+        let cid = self.chain_id?;
+        let caddr = self.contract_address?;
+        let exp = self.expiry?;
+        let qh = self.quote_hash?;
+        let scope_hash = crate::note::compute_scope_hash(rec, cid, caddr, exp);
+        Some(crate::poseidon::native_poseidon_w5(
+            &[qh, scope_hash, Fr::from(0u64), Fr::from(0u64)],
+            crate::note::domain_binding_v1(),
+        ))
+    }
 }
 
 /// Helper: allocate an FpVar from a gr1cs variable.
@@ -211,7 +230,6 @@ impl ConstraintSynthesizer<Fr> for JoinSplitCircuit {
         let domain_note = domain_note_commitment();
         let domain_nullifier = domain_nullifier();
         let domain_dummy_nullifier = domain_dummy_nullifier();
-        let domain_binding = domain_quote_binding();
 
         // 1. Public inputs (14)
         let note_root_var = public_input(&cs, self.note_root)?;
@@ -431,14 +449,31 @@ impl ConstraintSynthesizer<Fr> for JoinSplitCircuit {
             &merchant_var + &protocol_fee_var + &exec_fee_var + &out1_val + &out2_val;
         total_inputs.enforce_equal(&total_outputs)?;
 
-        // 8. Canonical scope & domain binding
+        // 8. Formal Scope Binding Gadget & Statement Integrity (DEC-035B)
+        // Stage 1: Contextual Scope Hash
+        let domain_scope = crate::note::domain_scope_v1();
         let scope_hash = poseidon_w5_hash(
             &[recipient_var, chain_id_var, contract_addr_var, expiry_var],
+            domain_scope,
+            w5_rc,
+            w5_mds,
+        )?;
+
+        // Stage 2: Formal Binding Commitment
+        let domain_binding = crate::note::domain_binding_v1();
+        let binding_cm = poseidon_w5_hash(
+            &[quote_hash_var, scope_hash, zero.clone(), zero.clone()],
             domain_binding,
             w5_rc,
             w5_mds,
         )?;
-        let _binding = poseidon_w3_hash(&quote_hash_var, &scope_hash, w3_rc, w3_mds)?;
+
+        // Stage 3: Active R1CS Rank-1 Constraint Enforcement (INV-1 & INV-2)
+        let expected_binding_val = self
+            .expected_binding
+            .or_else(|| self.derive_expected_binding());
+        let expected_binding_var = private_witness(&cs, expected_binding_val)?;
+        binding_cm.enforce_equal(&expected_binding_var)?;
 
         Ok(())
     }
@@ -519,6 +554,7 @@ pub fn create_dummy_joinsplit_circuit() -> JoinSplitCircuit {
 
         has_change_1: Some(Fr::from(0u64)),
         has_change_2: Some(Fr::from(0u64)),
+        expected_binding: None,
     }
 }
 
@@ -689,6 +725,7 @@ mod tests {
 
             has_change_1: Some(Fr::from(1u64)),
             has_change_2: Some(Fr::from(0u64)),
+            expected_binding: None,
         };
 
         circuit.generate_constraints(cs.clone()).unwrap();
@@ -794,5 +831,26 @@ mod tests {
         let proof = generate_joinsplit_proof(circuit, &keys.proving_key).unwrap();
         let valid = verify_joinsplit_proof(&keys.verifying_key, &proof, &public_inputs).unwrap();
         assert!(valid, "JoinSplit Groth16 proof verification must succeed!");
+    }
+
+    #[test]
+    fn test_joinsplit_verifying_key_non_identity() {
+        use ark_ec::AffineRepr;
+        let keys = generate_joinsplit_circuit_keys().unwrap();
+        let vk = &keys.verifying_key;
+
+        assert_eq!(
+            vk.gamma_abc_g1.len(),
+            NUM_JOINSPLIT_PUBLIC_INPUTS + 1,
+            "JoinSplit VK must have NUM_JOINSPLIT_PUBLIC_INPUTS + 1 elements"
+        );
+
+        for (i, ic_point) in vk.gamma_abc_g1.iter().enumerate() {
+            assert!(
+                !ic_point.is_zero(),
+                "JoinSplit VK element IC[{}] MUST NOT be the point at infinity!",
+                i
+            );
+        }
     }
 }

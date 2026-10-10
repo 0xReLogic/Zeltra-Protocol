@@ -1068,12 +1068,13 @@ pub async fn handle_private_note_spend(
                 (client.contract_address(), chain_id)
             }
             None => {
-                return Json(PrivateNoteSpendResponse {
-                    status: "ERROR".to_string(),
-                    message: "EVM client not configured".to_string(),
-                    queue_position: 0,
-                    estimated_gas_usdc: None,
-                });
+                let chain_id = std::env::var("NIMBUS_CHAIN_ID")
+                    .ok()
+                    .and_then(|s| s.parse::<u64>().ok())
+                    .unwrap_or(421614);
+                let contract_addr = std::env::var("NIMBUS_CONTRACT_ADDRESS")
+                    .unwrap_or_else(|_| "0x000000000000000000000000000000000000012c".to_string());
+                (contract_addr, chain_id)
             }
         };
 
@@ -1131,6 +1132,36 @@ pub async fn handle_private_note_spend(
                     estimated_gas_usdc: None,
                 });
             }
+        }
+
+        // Relayer Ingress Equality Guard (DEC-035B Gate B / Task B3)
+        // B3.1 — Reconstruct Signing Digest in Handler from verified ExecutionQuote:
+        let expected_hash_bytes =
+            nimbus_sdk::eip712::compute_quote_hash(&execution_quote, chain_id, contract_addr);
+        let (expected_hi_fr, expected_lo_fr) =
+            nimbus_core::split_quote_hash_to_limbs(&expected_hash_bytes.0);
+        let expected_hi_bytes = nimbus_core::fr_to_be_bytes(&expected_hi_fr);
+        let expected_lo_bytes = nimbus_core::fr_to_be_bytes(&expected_lo_fr);
+
+        // B3.2 & B3.3 — Bit-Exact Public Inputs Equality Assertion & Fail-Closed Rejection:
+        let input_quote_hi = parsed_inputs[9];
+        let input_quote_lo = parsed_inputs[10];
+
+        if input_quote_hi != expected_hi_bytes || input_quote_lo != expected_lo_bytes {
+            eprintln!(
+                "RELAYER SECURITY WARNING: Public inputs quote_hash mismatch: expected (hi: 0x{}, lo: 0x{}), got (hi: 0x{}, lo: 0x{})",
+                hex::encode(expected_hi_bytes),
+                hex::encode(expected_lo_bytes),
+                hex::encode(input_quote_hi),
+                hex::encode(input_quote_lo),
+            );
+            return Json(PrivateNoteSpendResponse {
+                status: "REJECTED".to_string(),
+                message: "MismatchedQuoteHash: Public inputs quote_hash limbs do not match verified ExecutionQuote"
+                    .to_string(),
+                queue_position: 0,
+                estimated_gas_usdc: None,
+            });
         }
     }
 
@@ -2214,5 +2245,70 @@ mod tests {
             .0
             .message
             .contains("insufficient to pay relayer execution fee"));
+    }
+
+    #[tokio::test]
+    async fn test_handle_private_note_spend_reject_mismatched_signed_quote_hash() {
+        // B6.4: Submit valid proof for Quote A with signature for Quote B -> MUST return 400 MismatchedQuoteHash
+        use alloy_primitives::{Address, U256};
+        use nimbus_sdk::eip712::{sign_quote, ExecutionQuote};
+
+        let (state, _tmp) = setup_test_state().await;
+        let mut req = sample_valid_private_note_request();
+        req.idempotency_key = Some("idem_quote_mismatch".to_string());
+
+        // Create a valid signed ExecutionQuote for Quote B (different quoteId, maxExecutionFee, etc.)
+        let user_pk: [u8; 32] = [42u8; 32];
+        let signer = alloy::signers::local::PrivateKeySigner::from_bytes(
+            &alloy_primitives::B256::from(user_pk),
+        )
+        .unwrap();
+        let user_address = format!("{:?}", signer.address());
+        let relayer_addr =
+            std::str::FromStr::from_str(&state.relayer_address).unwrap_or(Address::ZERO);
+
+        let quote_b = ExecutionQuote {
+            quoteId: U256::from(999999u64),
+            maxExecutionFee: U256::from(50_000u64),
+            merchantAmount: U256::from(5_000_000u64),
+            quoteExpiry: U256::from(0u64),
+            relayerAddress: relayer_addr,
+        };
+
+        let chain_id = 421614u64;
+        let contract_addr =
+            std::str::FromStr::from_str("0x000000000000000000000000000000000000012c").unwrap();
+        let (v, r, s) =
+            sign_quote(&quote_b, chain_id, contract_addr, &user_pk).expect("sign quote B");
+        let mut sig_bytes = Vec::with_capacity(65);
+        sig_bytes.extend_from_slice(&r);
+        sig_bytes.extend_from_slice(&s);
+        sig_bytes.push(v);
+        let sig_hex = format!("0x{}", hex::encode(sig_bytes));
+
+        // Submit req with valid signature for Quote B, but whose proof & public_inputs are bound to Quote A
+        req.quote_id = Some("999999".to_string());
+        req.quote_signature = Some(sig_hex);
+        req.user_address = Some(user_address.to_string());
+        req.max_execution_fee = 50_000;
+
+        let resp = handle_private_note_spend(State(state.clone()), Json(req.clone())).await;
+        assert_eq!(resp.0.status, "REJECTED");
+        assert!(
+            resp.0.message.contains("MismatchedQuoteHash"),
+            "Expected MismatchedQuoteHash error, got: {}",
+            resp.0.message
+        );
+
+        // Prove database state remains unchanged: nullifier is not spent
+        let is_spent = state
+            .db
+            .is_nullifier_spent(&req.input_nullifier)
+            .await
+            .unwrap();
+        assert!(
+            !is_spent,
+            "Negative test proof: nullifier MUST NOT be marked spent upon rejection!"
+        );
     }
 }

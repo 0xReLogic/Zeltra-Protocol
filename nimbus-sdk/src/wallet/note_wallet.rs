@@ -884,7 +884,17 @@ impl PrivateNoteWallet {
         };
         let note_epoch_id_fr = Fr::from(note_epoch_id as u64);
 
-        // Construct PrivateNoteCircuit (DEC-032, DEC-033, DEC-035A 16 Public Inputs)
+        // Compute Scope Binding Commitment (DEC-035B Stage 1 & Stage 2)
+        let scope_hash = nimbus_core::compute_scope_hash(
+            recipient_fr,
+            Fr::from(chain_id),
+            contract_fr,
+            Fr::from(expiry),
+        );
+        let expected_binding =
+            nimbus_core::compute_binding_commitment(quote_hi_fr, quote_lo_fr, scope_hash);
+
+        // Construct PrivateNoteCircuit (DEC-032, DEC-033, DEC-035A, DEC-035B 16 Public Inputs)
         let circuit = nimbus_core::PrivateNoteCircuit {
             note_root: Some(note_root),
             leaf_count: Some(Fr::from(total_leaves)),
@@ -917,6 +927,7 @@ impl PrivateNoteWallet {
             change_owner_key: Some(sk),
             change_rho: Some(ch_rho),
             change_randomness: Some(ch_rand),
+            expected_binding: Some(expected_binding),
         };
 
         // Generate Groth16 Proof
@@ -1405,6 +1416,7 @@ impl PrivateNoteWallet {
 
             has_change_1: Some(has_change_1_fr),
             has_change_2: Some(has_change_2_fr),
+            expected_binding: None,
         };
 
         // 8. Generate Groth16 Proof

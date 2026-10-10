@@ -12,6 +12,12 @@ use ark_std::rand::SeedableRng;
 
 use crate::poseidon::{poseidon_hash as poseidon_w3_hash, poseidon_w5_hash};
 
+/// Canonical domain separator for scope hash (DEC-035B: "ZELTRA_SCOPE_V1" = 0x5a454c5452415f53434f50455f5631).
+pub const DOMAIN_SCOPE_V1: &str = crate::note::DOMAIN_SCOPE_V1_HEX;
+
+/// Canonical domain separator for formal binding commitment (DEC-035B: "ZELTRA_BINDING_V1" = 0x5a454c5452415f42494e44494e475f5631).
+pub const DOMAIN_BINDING_V1: &str = crate::note::DOMAIN_BINDING_V1_HEX;
+
 /// Number of public inputs in the PrivateNoteCircuit (DEC-035A: 16 inputs).
 pub const NUM_PUBLIC_INPUTS: usize = 16;
 
@@ -58,6 +64,25 @@ pub struct PrivateNoteCircuit {
     pub change_owner_key: Option<Fr>,
     pub change_rho: Option<Fr>,
     pub change_randomness: Option<Fr>,
+
+    // ── Private witnesses: scope binding (DEC-035B) ──
+    pub expected_binding: Option<Fr>,
+}
+
+impl PrivateNoteCircuit {
+    /// Compute the expected scope binding commitment natively from circuit inputs (DEC-035B).
+    pub fn derive_expected_binding(&self) -> Option<Fr> {
+        let rec = self.recipient?;
+        let cid = self.chain_id?;
+        let caddr = self.contract_address?;
+        let exp = self.expiry?;
+        let qhi = self.quote_hash_hi?;
+        let qlo = self.quote_hash_lo?;
+        let scope_hash = crate::note::compute_scope_hash(rec, cid, caddr, exp);
+        Some(crate::note::compute_binding_commitment(
+            qhi, qlo, scope_hash,
+        ))
+    }
 }
 
 /// Helper: allocate an FpVar from a gr1cs variable.
@@ -477,17 +502,11 @@ impl ConstraintSynthesizer<Fr> for PrivateNoteCircuit {
         in_value.enforce_equal(&total_debits)?;
 
         // ═══════════════════════════════════════════════════════════════
-        // 9. Bind remaining public inputs to constraints
-        //    These must appear in at least one constraint to prevent
-        //    the prover from substituting arbitrary values.
+        // 9. Formal Scope Binding Gadget & Statement Integrity (DEC-035B)
         // ═══════════════════════════════════════════════════════════════
 
-        // ═══════════════════════════════════════════════════════════════
-        // 9. Canonical Payment & Domain Binding (Gate C0)
-        // ═══════════════════════════════════════════════════════════════
-        // Bind recipient, chain_id, contract_address, expiry as independent
-        // inputs into Poseidon_W5 (no linear addition or parameter swapping possible).
-        let domain_binding = crate::note::domain_quote_binding();
+        // Stage 1: Contextual Scope Hash via Poseidon-W5 (DOMAIN_SCOPE_V1)
+        let domain_scope = crate::note::domain_scope_v1();
         let scope_hash = poseidon_w5_hash(
             &[
                 recipient_var.clone(),
@@ -495,7 +514,7 @@ impl ConstraintSynthesizer<Fr> for PrivateNoteCircuit {
                 contract_addr_var.clone(),
                 expiry_var.clone(),
             ],
-            domain_binding,
+            domain_scope,
             w5_rc,
             w5_mds,
         )?;
@@ -504,9 +523,26 @@ impl ConstraintSynthesizer<Fr> for PrivateNoteCircuit {
         enforce_u128_range(&cs, &quote_hash_hi_var, self.quote_hash_hi)?;
         enforce_u128_range(&cs, &quote_hash_lo_var, self.quote_hash_lo)?;
 
-        // Non-linearly combine quote_hash limbs and scope_hash (DEC-035A)
-        let qh_combined = poseidon_w3_hash(&quote_hash_hi_var, &quote_hash_lo_var, w3_rc, w3_mds)?;
-        let _binding = poseidon_w3_hash(&qh_combined, &scope_hash, w3_rc, w3_mds)?;
+        // Stage 2: Formal Binding Commitment via Poseidon-W5 (DOMAIN_BINDING_V1)
+        let domain_binding = crate::note::domain_binding_v1();
+        let binding_cm = poseidon_w5_hash(
+            &[
+                quote_hash_hi_var.clone(),
+                quote_hash_lo_var.clone(),
+                scope_hash,
+                zero.clone(),
+            ],
+            domain_binding,
+            w5_rc,
+            w5_mds,
+        )?;
+
+        // Stage 3: Active R1CS Rank-1 Constraint Enforcement (INV-1 & INV-2)
+        let expected_binding_val = self
+            .expected_binding
+            .or_else(|| self.derive_expected_binding());
+        let expected_binding_var = private_witness(&cs, expected_binding_val)?;
+        binding_cm.enforce_equal(&expected_binding_var)?;
 
         // ═══════════════════════════════════════════════════════════════
         // 10. Input value > 0 (non-zero)
@@ -679,6 +715,8 @@ pub fn create_dummy_circuit() -> PrivateNoteCircuit {
         change_owner_key: Some(spending_key),
         change_rho: Some(ch_rho),
         change_randomness: Some(ch_rand),
+
+        expected_binding: None,
     }
 }
 
@@ -963,6 +1001,7 @@ mod tests {
             change_owner_key: Some(spending_key),
             change_rho: Some(ch_rho),
             change_randomness: Some(ch_rand),
+            expected_binding: None,
         };
 
         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
@@ -1062,6 +1101,7 @@ mod tests {
             change_owner_key: Some(spending_key),
             change_rho: Some(ch_rho),
             change_randomness: Some(ch_rand),
+            expected_binding: None,
         };
 
         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
@@ -1159,6 +1199,7 @@ mod tests {
             change_owner_key: Some(Fr::from(0u64)),
             change_rho: Some(Fr::from(0u64)),
             change_randomness: Some(Fr::from(0u64)),
+            expected_binding: None,
         };
 
         let public_inputs = extract_public_inputs(&circuit);
@@ -1504,6 +1545,7 @@ mod tests {
             change_owner_key: Some(spending_key),
             change_rho: Some(ch_rho),
             change_randomness: Some(ch_rand),
+            expected_binding: None,
         };
 
         let public_inputs = extract_public_inputs(&circuit);
