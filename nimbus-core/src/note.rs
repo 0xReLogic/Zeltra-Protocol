@@ -358,6 +358,8 @@ pub struct MerkleMountainRange {
     pub leaves: Vec<Fr>,
     /// Active peaks by height index (peaks_by_height[h] is Some(peak) if bit h of leaf_count is 1).
     peaks_by_height: Vec<Option<Fr>>,
+    /// Cached bagged root (computed on append, O(1) get_root lookup).
+    cached_root: Option<Fr>,
 }
 
 impl MerkleMountainRange {
@@ -367,6 +369,7 @@ impl MerkleMountainRange {
             leaf_count: 0,
             leaves: Vec::new(),
             peaks_by_height: Vec::new(),
+            cached_root: None,
         }
     }
 
@@ -396,7 +399,8 @@ impl MerkleMountainRange {
         self.peaks_by_height[height] = Some(current);
         self.leaf_count += 1;
 
-        let root = self.get_root();
+        let root = Self::bag_peaks(&self.get_peaks(), self.leaf_count);
+        self.cached_root = Some(root);
         (leaf_index, root)
     }
 
@@ -450,9 +454,12 @@ impl MerkleMountainRange {
         native_poseidon_w5(&inputs, domain_mmr_bag())
     }
 
-    /// Compute the current bagged MMR root.
+    /// Compute the current bagged MMR root (O(1) when cached).
     pub fn get_root(&self) -> Fr {
-        Self::bag_peaks(&self.get_peaks(), self.leaf_count)
+        match self.cached_root {
+            Some(root) => root,
+            None => Self::bag_peaks(&self.get_peaks(), self.leaf_count),
+        }
     }
 
     /// Generate an MMR membership proof for `leaf_index`.
@@ -1328,6 +1335,12 @@ mod tests {
         }
 
         assert_eq!(mmr.leaf_count, 1000);
+        // Verify cached_root matches direct bag_peaks calculation
+        assert_eq!(
+            mmr.get_root(),
+            MerkleMountainRange::bag_peaks(&mmr.get_peaks(), mmr.leaf_count),
+            "Cached root must exactly match direct bag_peaks computation"
+        );
 
         // Verify proofs for leaves at various checkpoint counts
         let checkpoints = [1usize, 2, 3, 7, 8, 15, 16, 63, 64, 127, 255, 500, 1000];
