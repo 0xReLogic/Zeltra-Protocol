@@ -94,6 +94,16 @@ Ref: [`DEC-037`](file:///workspaces/Zeltra-Protocol/research/decisions/DEC-037-n
 - [x] **DEC-037 / Step 3 (SDK):** Integrasi viewing key storage & export pada `PrivateNoteWallet`, fungsi pemulihan `recover_notes` dan standalone `recover_from_viewing_key` dengan pengecekan nullifier on-chain (Faerie Gold mitigation & timing side-channel safety), serta pembuatan otomatis memo kembalian terenkripsi pada `prepare_spend_proof` (47/47 tests pass).
 - [x] **DEC-037 / Step 4 (Relayer Ingress):** Update DTO `SpendRequest` & `PrivateNoteSpendRequest` untuk menerima `change_encrypted_memo`, propagasi calldata ke `spend_private_note` via `evm_client.rs`, dan ekstraksi `encrypted_memo` pada MMR indexer event parser (110/110 node tests pass).
 
+### Gate I / DEC-038 — Pure ZK-UTXO Migration & Direct MMR Inflow (Deprecation of Threshold BLS)
+Ref: [`DEC-038`](file:///workspaces/Zeltra-Protocol/research/decisions/DEC-038-pure-zk-utxo-migration-and-direct-mmr-deposit.md) *(Zero-Guardian Inflow & Full-Stack Simplification Masterplan)*
+
+- [ ] **DEC-038 / Step 1 (Contracts):** Implementasi entrypoint `deposit_direct_note(amount, note_commitment, encrypted_memo)` di `deposit.rs` & `lib.rs`, mutasi langsung `user_note_liability`, penegasan invariant solvensi, dan emisi `NoteCommitmentAppended` via `_mmr_insert`.
+- [ ] **DEC-038 / Step 2 (Contracts):** Tandai `_deposit`, `_reveal_mask_key`, dan `_claim_refund` sebagai deprecated dengan unit tests isolasi penuh untuk memastikan backward compatibility.
+- [ ] **DEC-038 / Step 3 (Core):** Tandai modul `blind_sign.rs` dan `threshold.rs` dengan atribut `#[deprecated]`, jadikan Poseidon MMR + Groth16 sebagai standar tunggal protokol.
+- [ ] **DEC-038 / Step 4 (SDK):** Implementasikan `prepare_direct_deposit()` pada `PrivateNoteWallet` untuk pembuatan note lokal instan, pembuatan komitmen Poseidon 74µs, dan pendaftaran otomatis status UNSPENT pasca konfirmasi blok L2 (250ms).
+- [ ] **DEC-038 / Step 5 (Relayer Node):** Nonaktifkan worker `deposit_indexer.rs` dan rute handler `handlers/threshold.rs`, rampingkan binary relayer menjadi sequencer tunggal murni (`mmr_indexer.rs` + spend dispatcher).
+- [ ] **DEC-038 / Step 6 (Integration Tests & Sepolia):** Uji alur E2E baru: `deposit_direct_note` (1 tx L2) $\rightarrow$ note unspent di SDK $\rightarrow$ spend Groth16 $\rightarrow$ change note otomatis terverifikasi di Arbitrum Sepolia.
+
 ---
 
 ## 4. Relayer & Node Settlement (`nimbus-node`)
