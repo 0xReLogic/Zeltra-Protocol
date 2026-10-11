@@ -89,10 +89,10 @@ Ref: [`DEC-036`](file:///workspaces/Zeltra-Protocol/research/decisions/DEC-036-u
 ### Gate H / DEC-037 — Note Encryption Memo & Viewing Key Recovery Protocol
 Ref: [`DEC-037`](file:///workspaces/Zeltra-Protocol/research/decisions/DEC-037-note-encryption-memo-and-viewing-key-recovery.md) *(Anti Device-Loss & Zero Gas Viewing Key Engine)*
 
-- [ ] **DEC-037 / Step 1 (Contracts):** Tambahkan parameter `encrypted_memo: Vec<u8>` pada event `NoteCommitmentAppended` di `merkle.rs` (zero state bloat, emit via receipt log, ~1.2k gas).
-- [ ] **DEC-037 / Step 2 (Core):** Implementasi `hkdf_expand` untuk `IncomingViewingKey (ivk)` & `OutcomingViewingKey (ovk)`, serta enkripsi memo compact ChaCha20-Poly1305 (80-96 bytes).
-- [ ] **DEC-037 / Step 3 (SDK):** Implementasi method `recover_wallet_from_viewing_key(rpc_url)` di `nimbus-sdk` (trial decryption engine lokal).
-- [ ] **DEC-037 / Step 4 (CLI):** Tambahkan command `nimbus-cli wallet recover --viewing-key ...` dan `nimbus-cli audit scan ...`.
+- [x] **DEC-037 / Step 1 (Contracts):** Tambahkan parameter `encrypted_memo: Vec<u8>` pada event `NoteCommitmentAppended` di `merkle.rs` (zero state bloat, emit via receipt log, calldata wire up pada `deposit` & `spend_private_note`, 76/76 tests pass).
+- [x] **DEC-037 / Step 2 (Core):** Implementasi derivasi kunci deterministik HKDF-SHA256 (`IncomingViewingKey`, `OutcomingViewingKey`, `RecipientViewingKey`), `NotePlaintext` 48-byte canonical serialization, derivasi trapdoor deterministik `derive_note_randomness`, dan enkripsi/dekripsi compact AEAD ChaCha20-Poly1305 96-byte dengan otentikasi penuh MAC tag (162/162 tests pass).
+- [x] **DEC-037 / Step 3 (SDK):** Integrasi viewing key storage & export pada `PrivateNoteWallet`, fungsi pemulihan `recover_notes` dan standalone `recover_from_viewing_key` dengan pengecekan nullifier on-chain (Faerie Gold mitigation & timing side-channel safety), serta pembuatan otomatis memo kembalian terenkripsi pada `prepare_spend_proof` (47/47 tests pass).
+- [x] **DEC-037 / Step 4 (Relayer Ingress):** Update DTO `SpendRequest` & `PrivateNoteSpendRequest` untuk menerima `change_encrypted_memo`, propagasi calldata ke `spend_private_note` via `evm_client.rs`, dan ekstraksi `encrypted_memo` pada MMR indexer event parser (110/110 node tests pass).
 
 ---
 

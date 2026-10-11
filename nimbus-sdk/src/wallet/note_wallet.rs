@@ -18,10 +18,11 @@ use chacha20poly1305::{
     ChaCha20Poly1305, Nonce,
 };
 use nimbus_core::{
-    derive_joinsplit_dummy_nullifier, derive_joinsplit_nullifier, derive_nullifier,
-    derive_nullifier_key, extract_joinsplit_public_inputs, fr_from_be_bytes, fr_to_be_bytes,
+    decrypt_note_memo, derive_joinsplit_dummy_nullifier, derive_joinsplit_nullifier,
+    derive_note_randomness, derive_nullifier, derive_nullifier_key, derive_viewing_keys,
+    encrypt_note_memo, extract_joinsplit_public_inputs, fr_from_be_bytes, fr_to_be_bytes,
     generate_joinsplit_proof, generate_note_proof, note_commitment, split_quote_hash_to_limbs,
-    to_evm_g1, to_evm_g2, JoinSplitCircuit,
+    to_evm_g1, to_evm_g2, IncomingViewingKey, JoinSplitCircuit, OutcomingViewingKey,
 };
 use rand::rngs::OsRng;
 use serde::{Deserialize, Serialize};
@@ -173,6 +174,39 @@ impl SelectedSpend {
     }
 }
 
+/// Note commitment appended on-chain event log representation (DEC-037).
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct NoteEvent {
+    pub leaf_index: u64,
+    pub commitment_hex: String,
+    pub new_mmr_root_hex: String,
+    pub leaf_count: u64,
+    pub encrypted_memo: Vec<u8>,
+    #[serde(default)]
+    pub block_number: Option<u64>,
+}
+
+/// A note recovered via trial decryption from an on-chain memo (DEC-037).
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct RecoveredNote {
+    pub commitment_hex: String,
+    pub nullifier_hex: String,
+    pub leaf_index: u64,
+    pub value: u64,
+    pub asset_id: u64,
+    pub rho_hex: String,
+    pub is_spent: bool,
+}
+
+/// Result of trial decryption and balance recovery (DEC-037).
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+pub struct RecoveryResult {
+    pub scanned_events: usize,
+    pub recovered_notes: Vec<RecoveredNote>,
+    pub total_unspent_balance: u64,
+    pub total_spent_balance: u64,
+}
+
 /// Spend Proof Payload generated locally by client SDK (1-in 1-out PrivateNoteCircuit, DEC-032, DEC-033)
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct SpendProofPayload {
@@ -200,6 +234,8 @@ pub struct SpendProofPayload {
     pub proof_b_hex: String,            // 256 bytes EVM format
     pub proof_c_hex: String,            // 128 bytes EVM format
     pub public_inputs_hex: Vec<String>, // 16 x 32 bytes EVM scalars (DEC-035A)
+    #[serde(default)]
+    pub change_encrypted_memo_hex: Option<String>, // 96-byte AEAD memo (DEC-037)
 }
 
 /// Universal 2-in-2-out JoinSplit Spend Proof Payload generated locally by client SDK (DEC-030 / DEC-036B)
@@ -395,6 +431,12 @@ pub struct MmrProofResponse {
 pub struct PrivateNoteWallet {
     spending_key_hex: String,
     nullifier_key_hex: String,
+    #[serde(default)]
+    incoming_viewing_key_hex: String,
+    #[serde(default)]
+    incoming_viewing_public_key_hex: String,
+    #[serde(default)]
+    outcoming_viewing_key_hex: String,
     pub notes: HashMap<String, WalletNote>,
     pub current_merkle_root_hex: Option<String>,
     #[serde(skip)]
@@ -407,13 +449,15 @@ impl Drop for PrivateNoteWallet {
     fn drop(&mut self) {
         crate::secure_zeroize_string(&mut self.spending_key_hex);
         crate::secure_zeroize_string(&mut self.nullifier_key_hex);
+        crate::secure_zeroize_string(&mut self.incoming_viewing_key_hex);
+        crate::secure_zeroize_string(&mut self.outcoming_viewing_key_hex);
     }
 }
 
 impl PrivateNoteWallet {
     /// Initialize a new wallet deterministically from a 32-byte master seed.
     ///
-    /// Derives spending key and nullifier key using domain separation (DEC-024).
+    /// Derives spending key, nullifier key, and viewing keys using domain separation (DEC-024, DEC-037).
     pub fn new(seed: &[u8; 32]) -> Self {
         let mut hasher = Sha256::new();
         hasher.update(b"nimbus.wallet.seed.v1");
@@ -426,9 +470,17 @@ impl PrivateNoteWallet {
         let sk_hex = hex::encode(fr_to_be_bytes(&sk_fr));
         let nk_hex = hex::encode(fr_to_be_bytes(&nk_fr));
 
+        let (ivk, ovk) = derive_viewing_keys(seed);
+        let ivk_hex = hex::encode(ivk.secret_bytes());
+        let ivk_pub_hex = hex::encode(ivk.public_key());
+        let ovk_hex = hex::encode(ovk.as_bytes());
+
         Self {
             spending_key_hex: sk_hex,
             nullifier_key_hex: nk_hex,
+            incoming_viewing_key_hex: ivk_hex,
+            incoming_viewing_public_key_hex: ivk_pub_hex,
+            outcoming_viewing_key_hex: ovk_hex,
             notes: HashMap::new(),
             current_merkle_root_hex: None,
             mmr: nimbus_core::MerkleMountainRange::new(),
@@ -446,6 +498,201 @@ impl PrivateNoteWallet {
         parse_fr_from_hex(&self.nullifier_key_hex)
     }
 
+    /// Returns the Incoming Viewing Key (IVK) (DEC-037).
+    pub fn incoming_viewing_key(&self) -> Result<IncomingViewingKey, WalletError> {
+        if self.incoming_viewing_key_hex.is_empty() {
+            return Err(WalletError::CryptoError(
+                "Incoming viewing key not initialized".into(),
+            ));
+        }
+        let bytes = hex::decode(&self.incoming_viewing_key_hex)
+            .map_err(|e| WalletError::InvalidHex(e.to_string()))?;
+        if bytes.len() != 32 {
+            return Err(WalletError::CryptoError(
+                "Invalid viewing key length".into(),
+            ));
+        }
+        let mut arr = [0u8; 32];
+        arr.copy_from_slice(&bytes);
+        Ok(IncomingViewingKey::from_bytes(&arr))
+    }
+
+    /// Returns the public key associated with the Incoming Viewing Key (32 bytes).
+    pub fn incoming_viewing_public_key(&self) -> Result<[u8; 32], WalletError> {
+        self.incoming_viewing_key().map(|ivk| ivk.public_key())
+    }
+
+    /// Returns hex-encoded incoming viewing public key.
+    pub fn incoming_viewing_public_key_hex(&self) -> &str {
+        &self.incoming_viewing_public_key_hex
+    }
+
+    /// Returns the Outcoming Viewing Key (OVK) (DEC-037).
+    pub fn outcoming_viewing_key(&self) -> Result<OutcomingViewingKey, WalletError> {
+        if self.outcoming_viewing_key_hex.is_empty() {
+            return Err(WalletError::CryptoError(
+                "Outcoming viewing key not initialized".into(),
+            ));
+        }
+        let bytes = hex::decode(&self.outcoming_viewing_key_hex)
+            .map_err(|e| WalletError::InvalidHex(e.to_string()))?;
+        if bytes.len() != 32 {
+            return Err(WalletError::CryptoError(
+                "Invalid viewing key length".into(),
+            ));
+        }
+        let mut arr = [0u8; 32];
+        arr.copy_from_slice(&bytes);
+        Ok(OutcomingViewingKey::from_bytes(&arr))
+    }
+
+    /// Recovers notes from on-chain NoteEvent logs, checking nullifiers on-chain (DEC-037).
+    pub fn recover_notes<F>(
+        &mut self,
+        events: &[NoteEvent],
+        is_nullifier_spent_fn: F,
+    ) -> Result<RecoveryResult, WalletError>
+    where
+        F: Fn(&str) -> bool,
+    {
+        let ivk = self.incoming_viewing_key()?;
+        let sk = self.spending_key()?;
+        let nk = self.nullifier_key()?;
+
+        let mut res = RecoveryResult {
+            scanned_events: events.len(),
+            ..Default::default()
+        };
+
+        for ev in events {
+            if let Some(pt) = decrypt_note_memo(&ev.encrypted_memo, &ivk) {
+                let deterministic_r = derive_note_randomness(sk, pt.rho);
+                let note = pt.to_note(sk);
+                let cm = note.commitment();
+                let cm_hex = format!("0x{}", hex::encode(fr_to_be_bytes(&cm)));
+                let ev_cm_clean = ev
+                    .commitment_hex
+                    .strip_prefix("0x")
+                    .unwrap_or(&ev.commitment_hex);
+
+                // Verify that the note commitment actually matches the event leaf commitment
+                if hex::encode(fr_to_be_bytes(&cm)).to_lowercase() != ev_cm_clean.to_lowercase() {
+                    continue;
+                }
+
+                let nullifier = derive_nullifier(nk, cm, ev.leaf_index, 0);
+                let nf_hex = format!("0x{}", hex::encode(fr_to_be_bytes(&nullifier)));
+
+                let is_spent = is_nullifier_spent_fn(&nf_hex);
+
+                if is_spent {
+                    res.total_spent_balance += pt.value;
+                } else {
+                    res.total_unspent_balance += pt.value;
+                }
+
+                let recovered = RecoveredNote {
+                    commitment_hex: cm_hex.clone(),
+                    nullifier_hex: nf_hex.clone(),
+                    leaf_index: ev.leaf_index,
+                    value: pt.value,
+                    asset_id: pt.asset_id,
+                    rho_hex: format!("0x{}", hex::encode(fr_to_be_bytes(&pt.rho))),
+                    is_spent,
+                };
+
+                let wallet_note = WalletNote {
+                    commitment_hex: cm_hex.clone(),
+                    value: pt.value,
+                    owner_key_hex: hex::encode(fr_to_be_bytes(&sk)),
+                    rho_hex: hex::encode(fr_to_be_bytes(&pt.rho)),
+                    randomness_hex: hex::encode(fr_to_be_bytes(&deterministic_r)),
+                    leaf_index: Some(ev.leaf_index),
+                    leaf_count: Some(ev.leaf_count),
+                    epoch_id: Some(0),
+                    merkle_path_hex: None,
+                    status: if is_spent {
+                        NoteStatus::Spent {
+                            nullifier_hex: nf_hex.clone(),
+                            spent_at_secs: 0,
+                        }
+                    } else {
+                        NoteStatus::Unspent
+                    },
+                    created_at_secs: 0,
+                    session_id: None,
+                };
+
+                self.notes.insert(cm_hex, wallet_note);
+                res.recovered_notes.push(recovered);
+            }
+        }
+
+        Ok(res)
+    }
+}
+
+/// Standalone recovery function from an Incoming Viewing Key (IVK) (DEC-037).
+/// Allows recovery and audit scanning without requiring the wallet instance or spending key.
+pub fn recover_from_viewing_key<F>(
+    ivk: &IncomingViewingKey,
+    spending_key: Option<Fr>,
+    events: &[NoteEvent],
+    is_nullifier_spent_fn: F,
+) -> RecoveryResult
+where
+    F: Fn(&str) -> bool,
+{
+    let mut res = RecoveryResult {
+        scanned_events: events.len(),
+        ..Default::default()
+    };
+
+    let nk = spending_key.map(derive_nullifier_key);
+
+    for ev in events {
+        if let Some(pt) = decrypt_note_memo(&ev.encrypted_memo, ivk) {
+            let (cm_hex, nf_hex, is_spent) = if let (Some(sk), Some(nk_val)) = (spending_key, nk) {
+                let note = pt.to_note(sk);
+                let cm = note.commitment();
+                let cm_hex = format!("0x{}", hex::encode(fr_to_be_bytes(&cm)));
+                let ev_cm_clean = ev
+                    .commitment_hex
+                    .strip_prefix("0x")
+                    .unwrap_or(&ev.commitment_hex);
+                if hex::encode(fr_to_be_bytes(&cm)).to_lowercase() != ev_cm_clean.to_lowercase() {
+                    continue;
+                }
+                let nullifier = derive_nullifier(nk_val, cm, ev.leaf_index, 0);
+                let nf_hex = format!("0x{}", hex::encode(fr_to_be_bytes(&nullifier)));
+                let spent = is_nullifier_spent_fn(&nf_hex);
+                (cm_hex, nf_hex, spent)
+            } else {
+                (ev.commitment_hex.clone(), String::new(), false)
+            };
+
+            if is_spent {
+                res.total_spent_balance += pt.value;
+            } else {
+                res.total_unspent_balance += pt.value;
+            }
+
+            res.recovered_notes.push(RecoveredNote {
+                commitment_hex: cm_hex,
+                nullifier_hex: nf_hex,
+                leaf_index: ev.leaf_index,
+                value: pt.value,
+                asset_id: pt.asset_id,
+                rho_hex: format!("0x{}", hex::encode(fr_to_be_bytes(&pt.rho))),
+                is_spent,
+            });
+        }
+    }
+
+    res
+}
+
+impl PrivateNoteWallet {
     /// Aggregate balance of all fully confirmed, spendable notes.
     pub fn balance(&self) -> u64 {
         self.notes
@@ -1277,10 +1524,10 @@ impl PrivateNoteWallet {
         };
 
         // Handle Change Note
-        let (ch_val, ch_cm, ch_rho, ch_rand) = if selected.has_change {
+        let (ch_val, ch_cm, ch_rho, ch_rand, change_encrypted_memo_hex) = if selected.has_change {
             let mut rng = OsRng;
             let c_rho = Fr::rand(&mut rng);
-            let c_rand = Fr::rand(&mut rng);
+            let c_rand = derive_note_randomness(sk, c_rho);
             let c_cm = note_commitment(selected.change_amount, sk, c_rho, c_rand);
 
             let c_cm_hex = hex::encode(fr_to_be_bytes(&c_cm));
@@ -1289,6 +1536,11 @@ impl PrivateNoteWallet {
             let sk_hex = hex::encode(fr_to_be_bytes(&sk));
 
             let change_epoch = target_change_epoch.or(input_note.epoch_id).or(Some(0));
+
+            // Encrypt change memo with IVK (DEC-037)
+            let change_memo = self.incoming_viewing_key().ok().map(|ivk| {
+                hex::encode(encrypt_note_memo(selected.change_amount, c_rho, 1u64, &ivk))
+            });
 
             // Persist unconfirmed change note (2PC Phase 1)
             let change_note = WalletNote {
@@ -1308,13 +1560,20 @@ impl PrivateNoteWallet {
             self.notes
                 .insert(change_note.commitment_hex.clone(), change_note);
 
-            (Fr::from(selected.change_amount), c_cm, c_rho, c_rand)
+            (
+                Fr::from(selected.change_amount),
+                c_cm,
+                c_rho,
+                c_rand,
+                change_memo,
+            )
         } else {
             (
                 Fr::from(0u64),
                 Fr::from(0u64),
                 Fr::from(0u64),
                 Fr::from(0u64),
+                None,
             )
         };
 
@@ -1439,6 +1698,7 @@ impl PrivateNoteWallet {
             proof_b_hex: hex::encode(proof_b),
             proof_c_hex: hex::encode(proof_c),
             public_inputs_hex: public_inputs,
+            change_encrypted_memo_hex,
         })
     }
 
@@ -3014,8 +3274,8 @@ mod tests {
         assert_eq!(note.status, NoteStatus::Unconfirmed);
         assert_eq!(wallet.balance(), 0);
 
-        // Negative: Invalid path length rejected
-        let invalid_path = vec!["0x1234".to_string(); 5]; // Depth is 20, not 5
+        // Negative: Invalid path rejected (empty path)
+        let invalid_path = vec![];
         let err_path = wallet.update_note_witness(&cm, 0, invalid_path, "0xroot1");
         assert!(err_path.is_err());
         assert_eq!(wallet.balance(), 0);
@@ -3227,10 +3487,10 @@ mod tests {
         let path2_hex = vec!["0x04".to_string()];
 
         wallet
-            .confirm_deposit(&cm1, 0, path1_hex, &root_hex)
+            .confirm_deposit(&cm1, 0, path1_hex, root_hex)
             .unwrap();
         wallet
-            .confirm_deposit(&cm2, 1, path2_hex, &root_hex)
+            .confirm_deposit(&cm2, 1, path2_hex, root_hex)
             .unwrap();
         assert_eq!(wallet.balance(), 20_000_000);
 
@@ -3290,10 +3550,10 @@ mod tests {
         let path2_hex = vec!["0x04".to_string()];
 
         wallet
-            .confirm_deposit(&cm1, 0, path1_hex, &root_hex)
+            .confirm_deposit(&cm1, 0, path1_hex, root_hex)
             .unwrap();
         wallet
-            .confirm_deposit(&cm2, 1, path2_hex, &root_hex)
+            .confirm_deposit(&cm2, 1, path2_hex, root_hex)
             .unwrap();
         assert_eq!(wallet.balance(), 25_000_000);
 
@@ -3514,5 +3774,156 @@ mod tests {
         assert_eq!(payload.note_root_hex, hex::encode(fr_to_be_bytes(&root)));
         assert_eq!(payload.leaf_count, 1);
         assert_eq!(payload.public_inputs_hex.len(), 16);
+    }
+
+    #[test]
+    fn test_dec037_wallet_viewing_key_derivation_and_export() {
+        let seed = [0x42u8; 32];
+        let wallet = PrivateNoteWallet::new(&seed);
+
+        let ivk = wallet.incoming_viewing_key().expect("IVK should be valid");
+        let pk = wallet
+            .incoming_viewing_public_key()
+            .expect("Public key should be valid");
+        assert_eq!(ivk.public_key(), pk);
+        assert_eq!(wallet.incoming_viewing_public_key_hex(), hex::encode(pk));
+
+        let ovk = wallet.outcoming_viewing_key().expect("OVK should be valid");
+        assert_eq!(ovk.as_bytes().len(), 32);
+    }
+
+    #[test]
+    fn test_dec037_wallet_recover_notes_unspent_and_spent() {
+        let seed = [0x55u8; 32];
+        let mut wallet = PrivateNoteWallet::new(&seed);
+        let ivk = wallet.incoming_viewing_key().unwrap();
+        let sk = wallet.spending_key().unwrap();
+        let nk = wallet.nullifier_key().unwrap();
+
+        // Simulate 2 incoming notes: note 1 (10 USDC), note 2 (5 USDC)
+        let rho1 = Fr::from(111u64);
+        let val1 = 10_000_000u64;
+        let r1 = derive_note_randomness(sk, rho1);
+        let cm1 = note_commitment(val1, sk, rho1, r1);
+        let memo1 = encrypt_note_memo(val1, rho1, 1, &ivk);
+
+        let rho2 = Fr::from(222u64);
+        let val2 = 5_000_000u64;
+        let r2 = derive_note_randomness(sk, rho2);
+        let cm2 = note_commitment(val2, sk, rho2, r2);
+        let memo2 = encrypt_note_memo(val2, rho2, 1, &ivk);
+
+        // Third memo from an unrelated user (should be ignored by trial decryption)
+        let (other_ivk, _) = derive_viewing_keys(b"other_unrelated_user_seed");
+        let memo_other = encrypt_note_memo(100_000_000, Fr::from(999u64), 1, &other_ivk);
+
+        // Pre-compute nullifier for note 2 to simulate it as SPENT on-chain
+        let nf2 = derive_nullifier(nk, cm2, 1, 0);
+        let nf2_hex = format!("0x{}", hex::encode(fr_to_be_bytes(&nf2)));
+
+        let events = vec![
+            NoteEvent {
+                leaf_index: 0,
+                commitment_hex: format!("0x{}", hex::encode(fr_to_be_bytes(&cm1))),
+                new_mmr_root_hex: "0x123".into(),
+                leaf_count: 1,
+                encrypted_memo: memo1,
+                block_number: Some(10),
+            },
+            NoteEvent {
+                leaf_index: 1,
+                commitment_hex: format!("0x{}", hex::encode(fr_to_be_bytes(&cm2))),
+                new_mmr_root_hex: "0x456".into(),
+                leaf_count: 2,
+                encrypted_memo: memo2,
+                block_number: Some(11),
+            },
+            NoteEvent {
+                leaf_index: 2,
+                commitment_hex: "0x789".into(),
+                new_mmr_root_hex: "0x789".into(),
+                leaf_count: 3,
+                encrypted_memo: memo_other,
+                block_number: Some(12),
+            },
+        ];
+
+        // Execute recovery
+        let res = wallet
+            .recover_notes(&events, |nf| nf == nf2_hex)
+            .expect("Recovery must succeed");
+
+        assert_eq!(res.scanned_events, 3);
+        assert_eq!(res.recovered_notes.len(), 2);
+        assert_eq!(res.total_unspent_balance, val1);
+        assert_eq!(res.total_spent_balance, val2);
+
+        // Note 1 is Unspent, Note 2 is Spent
+        let cm1_hex = format!("0x{}", hex::encode(fr_to_be_bytes(&cm1)));
+        let cm2_hex = format!("0x{}", hex::encode(fr_to_be_bytes(&cm2)));
+        assert_eq!(
+            wallet.notes.get(&cm1_hex).unwrap().status,
+            NoteStatus::Unspent
+        );
+        assert_eq!(
+            wallet.notes.get(&cm2_hex).unwrap().status,
+            NoteStatus::Spent {
+                nullifier_hex: nf2_hex.clone(),
+                spent_at_secs: 0,
+            }
+        );
+        assert_eq!(wallet.balance(), val1);
+
+        // Standalone recovery also returns identical result
+        let standalone_res = recover_from_viewing_key(&ivk, Some(sk), &events, |nf| nf == nf2_hex);
+        assert_eq!(standalone_res.recovered_notes.len(), 2);
+        assert_eq!(standalone_res.total_unspent_balance, val1);
+        assert_eq!(standalone_res.total_spent_balance, val2);
+    }
+
+    #[test]
+    fn test_dec037_prepare_spend_proof_includes_change_memo() {
+        let mut wallet = PrivateNoteWallet::new(&[0x77u8; 32]);
+        let root = Fr::from(100u64);
+        let root_hex = format!("0x{}", hex::encode(fr_to_be_bytes(&root)));
+
+        // Deposit a 10 USDC note
+        let (_, cm) = wallet.create_deposit_note(10_000_000, 1000).unwrap();
+        wallet
+            .confirm_deposit(&cm, 0, dummy_merkle_path(), &root_hex)
+            .unwrap();
+
+        let keys = nimbus_core::generate_note_circuit_keys().unwrap();
+        let selected = wallet
+            .select_note_for_spend(6_000_000, 27_000, 50_000, 1010)
+            .unwrap();
+        assert!(selected.has_change);
+
+        let payload = wallet
+            .prepare_spend_proof(
+                &selected,
+                "session_dec037_memo_1",
+                "0x1111111111111111111111111111111111111111",
+                100_000,
+                "0x2222222222222222222222222222222222222222222222222222222222222222",
+                421614,
+                "0x3333333333333333333333333333333333333333",
+                2000,
+                1010,
+                &keys.proving_key,
+            )
+            .unwrap();
+
+        assert!(payload.has_change);
+        let memo_hex = payload
+            .change_encrypted_memo_hex
+            .expect("Change memo must be present");
+        let memo_bytes = hex::decode(memo_hex).expect("Memo must be valid hex");
+        assert_eq!(memo_bytes.len(), 96);
+
+        // Trial decrypt change memo with wallet's IVK
+        let ivk = wallet.incoming_viewing_key().unwrap();
+        let decrypted = decrypt_note_memo(&memo_bytes, &ivk).expect("Decryption must succeed");
+        assert_eq!(decrypted.value, selected.change_amount);
     }
 }

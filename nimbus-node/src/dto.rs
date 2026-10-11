@@ -104,6 +104,8 @@ pub struct SpendRequest {
     pub proof_c_hex: Option<String>,
     #[serde(default)]
     pub public_inputs_hex: Option<Vec<String>>,
+    #[serde(default)]
+    pub change_encrypted_memo: Option<String>,
 }
 
 impl SpendRequest {
@@ -216,6 +218,8 @@ pub struct PrivateNoteSpendRequest {
     pub public_inputs: Vec<String>,
     #[serde(default)]
     pub idempotency_key: Option<String>,
+    #[serde(alias = "change_encrypted_memo_hex", default)]
+    pub change_encrypted_memo: Option<String>,
 }
 
 /// Response DTO for ZK Private Note Spend (DEC-025 Gate F)
@@ -422,6 +426,7 @@ impl From<PrivateNoteSpendRequest> for SpendRequest {
             proof_b_hex: Some(req.proof_b),
             proof_c_hex: Some(req.proof_c),
             public_inputs_hex: Some(req.public_inputs),
+            change_encrypted_memo: req.change_encrypted_memo,
         }
     }
 }

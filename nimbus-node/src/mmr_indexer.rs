@@ -222,6 +222,7 @@ mod tests {
                 leaf_count: i + 1,
                 tx_hash: format!("0xtx_{}", i),
                 block_number: 100 + i,
+                encrypted_memo: Vec::new(),
             });
         }
 
@@ -280,6 +281,7 @@ mod tests {
             leaf_count: 2,
             tx_hash: "0xdead".to_string(),
             block_number: 10,
+            encrypted_memo: Vec::new(),
         };
 
         // Assert gap check triggers error
@@ -332,6 +334,7 @@ mod tests {
                 leaf_count: i + 1,
                 tx_hash: format!("0x{:04x}", i),
                 block_number: 100 + (i / 10), // 10 leaves per block
+                encrypted_memo: Vec::new(),
             });
         }
 

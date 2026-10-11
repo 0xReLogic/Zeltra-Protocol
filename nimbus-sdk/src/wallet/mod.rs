@@ -6,7 +6,8 @@
 pub mod note_wallet;
 
 pub use note_wallet::{
-    ConsolidationEstimate, ConsolidationRoundResult, ConsolidationSummary,
-    JoinSplitSpendProofPayload, NoteEpochStatus, NoteStatus, PrivateNoteWallet, PrivateNoteWitness,
-    SelectedSpend, SpendProofPayload, WalletError, WalletNote,
+    recover_from_viewing_key, ConsolidationEstimate, ConsolidationRoundResult,
+    ConsolidationSummary, JoinSplitSpendProofPayload, NoteEpochStatus, NoteEvent, NoteStatus,
+    PrivateNoteWallet, PrivateNoteWitness, RecoveredNote, RecoveryResult, SelectedSpend,
+    SpendProofPayload, WalletError, WalletNote,
 };

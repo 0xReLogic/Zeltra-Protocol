@@ -168,7 +168,11 @@ impl Nimbus {
     /// - Records new root into bounded `root_history` ring buffer (size 100)
     /// - Emits `NoteCommitmentAppended` and `ChangeCommitment` events
     /// - Returns (leaf_index, new_root)
-    pub fn _mmr_insert(&mut self, leaf: FixedBytes<32>) -> Result<(U256, FixedBytes<32>), Vec<u8>> {
+    pub fn _mmr_insert(
+        &mut self,
+        leaf: FixedBytes<32>,
+        encrypted_memo: Vec<u8>,
+    ) -> Result<(U256, FixedBytes<32>), Vec<u8>> {
         self.check_not_paused()?;
 
         // Leaf must be a valid Fr scalar (anti-wrap-around security check)
@@ -241,12 +245,13 @@ impl Nimbus {
         self.root_history.insert(slot, new_root_bytes);
         self.root_history_index.set(hist_idx + U256::from(1));
 
-        // Emit NoteCommitmentAppended event (DEC-032)
+        // Emit NoteCommitmentAppended event (DEC-032 & DEC-037)
         crate::events::emit_event(crate::events::NoteCommitmentAppended {
             leaf_index,
             commitment: leaf,
             new_mmr_root: new_root_bytes,
             leaf_count: new_leaf_count,
+            encrypted_memo: encrypted_memo.into(),
         });
 
         // Emit ChangeCommitment event for backward compatibility
@@ -265,7 +270,7 @@ impl Nimbus {
         &mut self,
         leaf: FixedBytes<32>,
     ) -> Result<(U256, FixedBytes<32>), Vec<u8>> {
-        self._mmr_insert(leaf)
+        self._mmr_insert(leaf, Vec::new())
     }
 
     /// Checks if a root hash is currently accepted:

@@ -28,7 +28,8 @@ sol! {
         uint256 indexed leaf_index,
         bytes32 commitment,
         bytes32 new_mmr_root,
-        uint256 leaf_count
+        uint256 leaf_count,
+        bytes encrypted_memo
     );
 
     function spend(
@@ -74,7 +75,8 @@ sol! {
         uint256 is_rollover,
         bytes calldata proof_a_neg,
         bytes calldata proof_b,
-        bytes calldata proof_c
+        bytes calldata proof_c,
+        bytes calldata encrypted_memo
     ) external returns (bool);
 
     function spendJoinsplit(
@@ -894,6 +896,7 @@ impl EvmClient {
         proof_a_neg_hex: &str,
         proof_b_hex: &str,
         proof_c_hex: &str,
+        change_encrypted_memo_hex: Option<&str>,
     ) -> Result<TransactionOutcome> {
         println!("RELAYER: Broadcasting private note spend transaction (DEC-025, DEC-033)");
         println!(
@@ -963,6 +966,10 @@ impl EvmClient {
         let proof_c =
             hex::decode(proof_c_hex.trim_start_matches("0x")).context("Invalid proof_c hex")?;
 
+        let memo_bytes = change_encrypted_memo_hex
+            .and_then(|m| hex::decode(m.trim_start_matches("0x")).ok())
+            .unwrap_or_default();
+
         let call_data = spendPrivateNoteCall {
             note_root: note_root_fixed.into(),
             leaf_count: U256::from(leaf_count),
@@ -981,6 +988,7 @@ impl EvmClient {
             proof_a_neg: proof_a_neg.into(),
             proof_b: proof_b.into(),
             proof_c: proof_c.into(),
+            encrypted_memo: memo_bytes.into(),
         }
         .abi_encode();
 
@@ -1960,6 +1968,7 @@ impl EvmClient {
                     commitment: decoded.commitment.0,
                     new_mmr_root: decoded.new_mmr_root.0,
                     leaf_count: decoded.leaf_count.to::<u64>(),
+                    encrypted_memo: decoded.encrypted_memo.to_vec(),
                     tx_hash,
                     block_number,
                 });
@@ -2049,6 +2058,7 @@ pub struct NoteCommitmentEventInfo {
     pub commitment: [u8; 32],
     pub new_mmr_root: [u8; 32],
     pub leaf_count: u64,
+    pub encrypted_memo: Vec<u8>,
     pub tx_hash: String,
     pub block_number: u64,
 }

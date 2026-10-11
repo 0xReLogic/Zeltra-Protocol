@@ -15,6 +15,9 @@
 
 use ark_bls12_381::Fr;
 use ark_ff::{BigInteger, PrimeField};
+use chacha20poly1305::aead::{Aead, KeyInit};
+use chacha20poly1305::{ChaCha20Poly1305, Key, Nonce};
+use rand::RngCore;
 use sha3::{Digest, Keccak256};
 
 use crate::poseidon::native_poseidon_w5;
@@ -104,6 +107,299 @@ pub fn compute_binding_commitment(quote_hash_hi: Fr, quote_hash_lo: Fr, scope_ha
         &[quote_hash_hi, quote_hash_lo, scope_hash, Fr::from(0u64)],
         domain_binding_v1(),
     )
+}
+
+/// Domain tag for deterministic note randomness derivation (DEC-037).
+pub fn domain_note_randomness() -> Fr {
+    domain_from_label("nimbus.note.randomness.v1")
+}
+
+/// Deterministically derives the note hiding randomness r from owner spending key and rho (DEC-037).
+/// r = Poseidon_W5([owner_key, rho, 0, 0], domain_note_randomness)
+pub fn derive_note_randomness(owner_key: Fr, rho: Fr) -> Fr {
+    native_poseidon_w5(
+        &[owner_key, rho, Fr::from(0u64), Fr::from(0u64)],
+        domain_note_randomness(),
+    )
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// DEC-037: Viewing Key Derivation & Note Encryption Memo
+// ═══════════════════════════════════════════════════════════════════════════
+
+/// Salt for HKDF master secret extraction (DEC-037).
+pub const SALT_MASTER_V1: &[u8] = b"ZELTRA_MASTER_V1";
+/// Info tag for HKDF spending key expansion (DEC-037).
+pub const INFO_SPENDING_KEY_V1: &[u8] = b"ZELTRA_SPENDING_KEY_V1";
+/// Info tag for HKDF viewing key expansion (DEC-037).
+pub const INFO_VIEWING_KEY_V1: &[u8] = b"ZELTRA_VIEWING_KEY_V1";
+/// Info tag for AEAD note memo cipher derivation (DEC-037).
+pub const INFO_MEMO_CIPHER_V1: &[u8] = b"ZELTRA_MEMO_CIPHER_V1";
+/// Total size of encrypted note memo in bytes: 32 (epk) + 48 (ciphertext) + 16 (tag) = 96 bytes.
+pub const ENCRYPTED_MEMO_SIZE: usize = 96;
+
+/// Incoming Viewing Key (IVK) for trial decryption of notes addressed to the owner.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub struct IncomingViewingKey {
+    secret: [u8; 32],
+    public: [u8; 32],
+}
+
+impl core::fmt::Debug for IncomingViewingKey {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("IncomingViewingKey")
+            .field("public", &hex::encode(self.public))
+            .finish_non_exhaustive()
+    }
+}
+
+impl IncomingViewingKey {
+    /// Instantiate IVK from a 32-byte secret scalar.
+    pub fn from_bytes(secret_bytes: &[u8; 32]) -> Self {
+        let static_secret = x25519_dalek::StaticSecret::from(*secret_bytes);
+        let public_key = x25519_dalek::PublicKey::from(&static_secret);
+        Self {
+            secret: *secret_bytes,
+            public: *public_key.as_bytes(),
+        }
+    }
+
+    /// Returns the 32-byte public key (for sending notes to this recipient).
+    pub fn public_key(&self) -> [u8; 32] {
+        self.public
+    }
+
+    /// Returns the private secret bytes.
+    pub fn secret_bytes(&self) -> [u8; 32] {
+        self.secret
+    }
+}
+
+/// Outcoming Viewing Key (OVK) for viewing change and payment history.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub struct OutcomingViewingKey {
+    key: [u8; 32],
+}
+
+impl core::fmt::Debug for OutcomingViewingKey {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("OutcomingViewingKey")
+            .field("key", &hex::encode(self.key))
+            .finish()
+    }
+}
+
+impl OutcomingViewingKey {
+    pub fn from_bytes(bytes: &[u8; 32]) -> Self {
+        Self { key: *bytes }
+    }
+
+    pub fn as_bytes(&self) -> &[u8; 32] {
+        &self.key
+    }
+}
+
+/// Helper trait allowing encrypt_note_memo to accept either a raw public key or an IVK.
+pub trait RecipientViewingKey {
+    fn recipient_pubkey(&self) -> [u8; 32];
+}
+
+impl RecipientViewingKey for [u8; 32] {
+    fn recipient_pubkey(&self) -> [u8; 32] {
+        *self
+    }
+}
+
+impl RecipientViewingKey for &[u8; 32] {
+    fn recipient_pubkey(&self) -> [u8; 32] {
+        **self
+    }
+}
+
+impl RecipientViewingKey for IncomingViewingKey {
+    fn recipient_pubkey(&self) -> [u8; 32] {
+        self.public_key()
+    }
+}
+
+impl RecipientViewingKey for &IncomingViewingKey {
+    fn recipient_pubkey(&self) -> [u8; 32] {
+        self.public_key()
+    }
+}
+
+/// Derives a 32-byte master secret from an arbitrary client seed or signature (DEC-037).
+pub fn derive_master_secret(seed: &[u8]) -> [u8; 32] {
+    let hk = hkdf::Hkdf::<sha2::Sha256>::new(Some(SALT_MASTER_V1), seed);
+    let mut prk = [0u8; 32];
+    hk.expand(b"ZELTRA_MASTER_PRK_V1", &mut prk)
+        .expect("32 bytes is valid length for HKDF-Expand");
+    prk
+}
+
+/// Derives the spending key scalar (Fr) from a 32-byte master secret (DEC-037).
+pub fn derive_spending_key(master_secret: &[u8; 32]) -> Fr {
+    let hk = hkdf::Hkdf::<sha2::Sha256>::new(None, master_secret);
+    let mut okm = [0u8; 32];
+    hk.expand(INFO_SPENDING_KEY_V1, &mut okm)
+        .expect("32 bytes is valid length for HKDF-Expand");
+    Fr::from_be_bytes_mod_order(&okm)
+}
+
+/// Derives the incoming and outcoming viewing keys from a 32-byte master secret.
+pub fn derive_viewing_keys_from_secret(
+    master_secret: &[u8; 32],
+) -> (IncomingViewingKey, OutcomingViewingKey) {
+    let hk = hkdf::Hkdf::<sha2::Sha256>::new(None, master_secret);
+    let mut okm = [0u8; 64];
+    hk.expand(INFO_VIEWING_KEY_V1, &mut okm)
+        .expect("64 bytes is valid length for HKDF-Expand");
+    let mut ivk_bytes = [0u8; 32];
+    let mut ovk_bytes = [0u8; 32];
+    ivk_bytes.copy_from_slice(&okm[0..32]);
+    ovk_bytes.copy_from_slice(&okm[32..64]);
+    (
+        IncomingViewingKey::from_bytes(&ivk_bytes),
+        OutcomingViewingKey::from_bytes(&ovk_bytes),
+    )
+}
+
+/// Derives the viewing keys from an arbitrary seed or 32-byte master secret (DEC-037).
+pub fn derive_viewing_keys(master_seed: &[u8]) -> (IncomingViewingKey, OutcomingViewingKey) {
+    let master_secret = if master_seed.len() == 32 {
+        let mut s = [0u8; 32];
+        s.copy_from_slice(master_seed);
+        s
+    } else {
+        derive_master_secret(master_seed)
+    };
+    derive_viewing_keys_from_secret(&master_secret)
+}
+
+/// Plaintext note payload contained in the encrypted memo (48 bytes) (DEC-037).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct NotePlaintext {
+    pub value: u64,
+    pub rho: Fr,
+    pub asset_id: u64,
+}
+
+impl NotePlaintext {
+    pub const SERIALIZED_SIZE: usize = 48;
+
+    /// Serializes plaintext note to 48 bytes (8B value || 32B rho scalar || 8B asset_id).
+    pub fn to_bytes(&self) -> [u8; Self::SERIALIZED_SIZE] {
+        let mut bytes = [0u8; Self::SERIALIZED_SIZE];
+        bytes[0..8].copy_from_slice(&self.value.to_be_bytes());
+        let rho_bytes = crate::to_evm_scalar(&self.rho);
+        bytes[8..40].copy_from_slice(&rho_bytes);
+        bytes[40..48].copy_from_slice(&self.asset_id.to_be_bytes());
+        bytes
+    }
+
+    /// Deserializes 48 bytes into a NotePlaintext.
+    /// Returns None if the rho scalar is non-canonical (>= r).
+    pub fn from_bytes(bytes: &[u8; Self::SERIALIZED_SIZE]) -> Option<Self> {
+        let value = u64::from_be_bytes(bytes[0..8].try_into().unwrap());
+        let mut rho_bytes = [0u8; 32];
+        rho_bytes.copy_from_slice(&bytes[8..40]);
+        let rho = crate::from_evm_scalar(&rho_bytes)?;
+        let asset_id = u64::from_be_bytes(bytes[40..48].try_into().unwrap());
+        Some(Self {
+            value,
+            rho,
+            asset_id,
+        })
+    }
+
+    /// Reconstructs the complete PrivateNoteV1 with deterministic randomness.
+    pub fn to_note(&self, owner_key: Fr) -> PrivateNoteV1 {
+        let randomness = derive_note_randomness(owner_key, self.rho);
+        PrivateNoteV1::new(self.value, owner_key, self.rho, randomness)
+    }
+}
+
+/// Encrypts note plaintext into a 96-byte AEAD memo using Ephemeral ECDH (X25519) and ChaCha20Poly1305.
+pub fn encrypt_note_memo<R: RecipientViewingKey>(
+    value: u64,
+    rho: Fr,
+    asset_id: u64,
+    recipient: &R,
+) -> Vec<u8> {
+    let recipient_pk_bytes = recipient.recipient_pubkey();
+    let plaintext = NotePlaintext {
+        value,
+        rho,
+        asset_id,
+    };
+    let pt_bytes = plaintext.to_bytes();
+
+    let mut eph_bytes = [0u8; 32];
+    rand::rngs::OsRng.fill_bytes(&mut eph_bytes);
+    let ephemeral_secret = x25519_dalek::StaticSecret::from(eph_bytes);
+    let ephemeral_public = x25519_dalek::PublicKey::from(&ephemeral_secret);
+    let recipient_public = x25519_dalek::PublicKey::from(recipient_pk_bytes);
+
+    let shared_secret = ephemeral_secret.diffie_hellman(&recipient_public);
+
+    let hk =
+        hkdf::Hkdf::<sha2::Sha256>::new(Some(b"ZELTRA_NOTE_MEMO_KDF_V1"), shared_secret.as_bytes());
+    let mut okm = [0u8; 44];
+    hk.expand(INFO_MEMO_CIPHER_V1, &mut okm)
+        .expect("44 bytes is valid HKDF-Expand length");
+    let mut key_bytes = [0u8; 32];
+    key_bytes.copy_from_slice(&okm[0..32]);
+    let cipher_key = Key::from(key_bytes);
+    let mut nonce_bytes = [0u8; 12];
+    nonce_bytes.copy_from_slice(&okm[32..44]);
+    let nonce = Nonce::from(nonce_bytes);
+
+    let cipher = ChaCha20Poly1305::new(&cipher_key);
+    let ciphertext_and_tag = cipher
+        .encrypt(&nonce, pt_bytes.as_ref())
+        .expect("ChaCha20Poly1305 encryption on 48 bytes must not fail");
+
+    let mut result = Vec::with_capacity(ENCRYPTED_MEMO_SIZE);
+    result.extend_from_slice(ephemeral_public.as_bytes());
+    result.extend_from_slice(&ciphertext_and_tag);
+    result
+}
+
+/// Decrypts a 96-byte AEAD note memo using the recipient's Incoming Viewing Key (IVK).
+/// Returns Some(NotePlaintext) if authentication succeeds and contents are canonical, or None.
+pub fn decrypt_note_memo(encrypted_memo: &[u8], ivk: &IncomingViewingKey) -> Option<NotePlaintext> {
+    if encrypted_memo.len() != ENCRYPTED_MEMO_SIZE {
+        return None;
+    }
+
+    let mut epk_bytes = [0u8; 32];
+    epk_bytes.copy_from_slice(&encrypted_memo[0..32]);
+    let epk = x25519_dalek::PublicKey::from(epk_bytes);
+
+    let static_secret = x25519_dalek::StaticSecret::from(ivk.secret);
+    let shared_secret = static_secret.diffie_hellman(&epk);
+
+    let hk =
+        hkdf::Hkdf::<sha2::Sha256>::new(Some(b"ZELTRA_NOTE_MEMO_KDF_V1"), shared_secret.as_bytes());
+    let mut okm = [0u8; 44];
+    hk.expand(INFO_MEMO_CIPHER_V1, &mut okm).ok()?;
+    let mut key_bytes = [0u8; 32];
+    key_bytes.copy_from_slice(&okm[0..32]);
+    let cipher_key = Key::from(key_bytes);
+    let mut nonce_bytes = [0u8; 12];
+    nonce_bytes.copy_from_slice(&okm[32..44]);
+    let nonce = Nonce::from(nonce_bytes);
+
+    let cipher = ChaCha20Poly1305::new(&cipher_key);
+    let decrypted = cipher.decrypt(&nonce, &encrypted_memo[32..96]).ok()?;
+
+    if decrypted.len() != NotePlaintext::SERIALIZED_SIZE {
+        return None;
+    }
+
+    let mut pt_buf = [0u8; NotePlaintext::SERIALIZED_SIZE];
+    pt_buf.copy_from_slice(&decrypted);
+    NotePlaintext::from_bytes(&pt_buf)
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -1381,6 +1677,155 @@ mod tests {
         assert_ne!(
             combine_limbs_to_quote_hash(&hi, &lo_tampered),
             keccak_sample
+        );
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // DEC-037 Unit Tests (Gate H)
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    #[test]
+    fn test_dec037_key_derivation_deterministic() {
+        let seed = b"test_client_signature_0x123456789abcdef";
+        let master1 = derive_master_secret(seed);
+        let master2 = derive_master_secret(seed);
+        assert_eq!(master1, master2);
+
+        let sk1 = derive_spending_key(&master1);
+        let sk2 = derive_spending_key(&master2);
+        assert_eq!(sk1, sk2);
+
+        let (ivk1, ovk1) = derive_viewing_keys(seed);
+        let (ivk2, ovk2) = derive_viewing_keys(seed);
+        assert_eq!(ivk1.secret_bytes(), ivk2.secret_bytes());
+        assert_eq!(ivk1.public_key(), ivk2.public_key());
+        assert_eq!(ovk1.as_bytes(), ovk2.as_bytes());
+
+        // Different seed produces different keys
+        let (ivk_diff, _) = derive_viewing_keys(b"other_seed");
+        assert_ne!(ivk1.public_key(), ivk_diff.public_key());
+    }
+
+    #[test]
+    fn test_dec037_memo_encryption_roundtrip() {
+        let seed = b"alice_test_seed_wallet_encryption";
+        let (ivk, _ovk) = derive_viewing_keys(seed);
+
+        let value = 125_000_000u64; // 125 USDC
+        let rho = Fr::from(999888777u64);
+        let asset_id = 1u64; // USDC
+
+        // Encrypt with IVK public key
+        let memo = encrypt_note_memo(value, rho, asset_id, &ivk.public_key());
+        assert_eq!(memo.len(), ENCRYPTED_MEMO_SIZE);
+
+        // Decrypt with IVK
+        let decrypted = decrypt_note_memo(&memo, &ivk).expect("Decryption must succeed");
+        assert_eq!(decrypted.value, value);
+        assert_eq!(decrypted.rho, rho);
+        assert_eq!(decrypted.asset_id, asset_id);
+
+        // Also works passing &ivk directly via RecipientViewingKey trait
+        let memo_ivk = encrypt_note_memo(value, rho, asset_id, &ivk);
+        let decrypted_ivk = decrypt_note_memo(&memo_ivk, &ivk).expect("Decryption must succeed");
+        assert_eq!(decrypted_ivk.value, value);
+    }
+
+    #[test]
+    fn test_dec037_reconstruct_note_matches_commitment() {
+        let seed = b"bob_deterministic_note_recovery_seed";
+        let master = derive_master_secret(seed);
+        let spending_key = derive_spending_key(&master);
+        let (ivk, _) = derive_viewing_keys(seed);
+
+        let value = 50_000_000u64; // 50 USDC
+        let rho = Fr::from(424242u64);
+        let asset_id = 1u64;
+
+        // Ground-truth note commitment
+        let deterministic_r = derive_note_randomness(spending_key, rho);
+        let expected_cm = note_commitment(value, spending_key, rho, deterministic_r);
+
+        // Encrypt and trial-decrypt memo
+        let memo = encrypt_note_memo(value, rho, asset_id, &ivk);
+        let decrypted_pt = decrypt_note_memo(&memo, &ivk).expect("Decryption must succeed");
+
+        // Reconstruct note from recovered plaintext + spending key
+        let reconstructed_note = decrypted_pt.to_note(spending_key);
+        assert_eq!(reconstructed_note.value, value);
+        assert_eq!(reconstructed_note.owner_key, spending_key);
+        assert_eq!(reconstructed_note.rho, rho);
+        assert_eq!(reconstructed_note.randomness, deterministic_r);
+        assert_eq!(reconstructed_note.commitment(), expected_cm);
+    }
+
+    #[test]
+    fn test_dec037_decrypt_wrong_key_fails() {
+        let (ivk_alice, _) = derive_viewing_keys(b"alice_key");
+        let (ivk_bob, _) = derive_viewing_keys(b"bob_key");
+
+        let memo = encrypt_note_memo(10_000_000, Fr::from(12345u64), 1, &ivk_alice);
+
+        // Bob cannot decrypt Alice's memo (Poly1305 MAC tag failure)
+        let attempt = decrypt_note_memo(&memo, &ivk_bob);
+        assert!(
+            attempt.is_none(),
+            "Decryption with wrong viewing key must fail authentication"
+        );
+    }
+
+    #[test]
+    fn test_dec037_tampered_ciphertext_fails() {
+        let (ivk, _) = derive_viewing_keys(b"tamper_test_seed");
+        let mut memo = encrypt_note_memo(10_000_000, Fr::from(12345u64), 1, &ivk);
+
+        // Tamper with byte in ciphertext section (bytes 32..80)
+        memo[40] ^= 0x01;
+
+        let attempt = decrypt_note_memo(&memo, &ivk);
+        assert!(
+            attempt.is_none(),
+            "Decryption with tampered ciphertext must be rejected by AEAD MAC"
+        );
+    }
+
+    #[test]
+    fn test_dec037_tampered_mac_tag_fails() {
+        let (ivk, _) = derive_viewing_keys(b"mac_tamper_test_seed");
+        let mut memo = encrypt_note_memo(10_000_000, Fr::from(12345u64), 1, &ivk);
+
+        // Tamper with byte in Poly1305 MAC tag section (bytes 80..96)
+        memo[90] ^= 0xff;
+
+        let attempt = decrypt_note_memo(&memo, &ivk);
+        assert!(
+            attempt.is_none(),
+            "Decryption with tampered MAC tag must be rejected"
+        );
+    }
+
+    #[test]
+    fn test_dec037_invalid_memo_length_fails() {
+        let (ivk, _) = derive_viewing_keys(b"length_test_seed");
+
+        assert!(decrypt_note_memo(&[], &ivk).is_none());
+        assert!(decrypt_note_memo(&[0u8; 95], &ivk).is_none());
+        assert!(decrypt_note_memo(&[0u8; 97], &ivk).is_none());
+        assert!(decrypt_note_memo(&[0u8; 32], &ivk).is_none());
+    }
+
+    #[test]
+    fn test_dec037_non_canonical_scalar_rejected() {
+        // Construct 48-byte buffer where rho is >= r
+        let mut buf = [0u8; 48];
+        buf[0..8].copy_from_slice(&100u64.to_be_bytes());
+        buf[8..40].fill(0xff); // Exceeds r
+        buf[40..48].copy_from_slice(&1u64.to_be_bytes());
+
+        let pt = NotePlaintext::from_bytes(&buf);
+        assert!(
+            pt.is_none(),
+            "Non-canonical scalar in NotePlaintext must be rejected"
         );
     }
 }

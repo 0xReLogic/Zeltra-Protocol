@@ -1569,6 +1569,7 @@ async fn process_single_spend(state: &AppState, item: QueuedSpend) {
                 proof_a,
                 proof_b,
                 proof_c,
+                request.change_encrypted_memo.as_deref(),
             )
             .await
     } else if let Some(cc) = &request.cross_chain {
@@ -2699,6 +2700,7 @@ mod tests {
                     proof_c: format!("0x{}", hex::encode(c)),
                     public_inputs,
                     idempotency_key: Some("idem_valid_1".to_string()),
+                    change_encrypted_memo: None,
                 }
             })
             .clone()

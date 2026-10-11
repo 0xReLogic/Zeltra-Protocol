@@ -220,6 +220,7 @@ impl Nimbus {
         k_bytes: Bytes,
         pk_iss_bytes: Bytes,
         com_k_bytes: Bytes,
+        encrypted_memo: Bytes,
     ) -> Result<bool, Vec<u8>> {
         self.check_not_paused()?;
         if !self.session_exists.get(sid) {
@@ -276,11 +277,11 @@ impl Nimbus {
                 self.user_note_liability.set(new_user_liab);
             }
 
-            // Gate D / DEC-032: If an initial note commitment was bound to this deposit session,
-            // atomically mint it into the on-chain Merkle Mountain Range
+            // Gate D / DEC-032 / DEC-037: If an initial note commitment was bound to this deposit session,
+            // atomically mint it into the on-chain Merkle Mountain Range with its encrypted memo
             let bound_commitment = self.session_note_commitment.get(sid);
             if bound_commitment != FixedBytes::ZERO {
-                self._mmr_insert(bound_commitment)?;
+                self._mmr_insert(bound_commitment, encrypted_memo.to_vec())?;
             }
 
             Ok(true)

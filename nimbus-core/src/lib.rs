@@ -32,7 +32,7 @@ pub use crypto::hash_to_g1;
 // Re-export EVM helpers
 pub use evm::{
     from_evm_g1, from_evm_g2, from_evm_proof, from_evm_scalar, get_alpha_neg_evm, get_hm_evm,
-    get_pk_iss_evm, to_evm_g1, to_evm_g2,
+    get_pk_iss_evm, to_evm_g1, to_evm_g2, to_evm_scalar,
 };
 
 // Re-export blind signature protocol
@@ -73,14 +73,17 @@ pub use poseidon::{
 
 // Re-export Private Note V1 (DEC-016A & DEC-032 & DEC-035A & DEC-035B)
 pub use note::{
-    combine_limbs_to_quote_hash, compute_binding_commitment, compute_scope_hash,
-    derive_joinsplit_dummy_nullifier, derive_joinsplit_nullifier, derive_nullifier,
-    derive_nullifier_epoch, derive_nullifier_key, derive_nullifier_v1, domain_binding_v1,
-    domain_dummy_nullifier, domain_initial_note, domain_merkle_node, domain_mmr_bag,
-    domain_note_commitment, domain_nullifier, domain_quote_binding, domain_scope_v1,
-    fr_from_be_bytes, fr_to_be_bytes, merkle_hash, note_commitment, split_quote_hash_to_limbs,
-    verify_value_conservation, MMRProof, MerkleMountainRange, PrivateNoteV1, DOMAIN_BINDING_V1_HEX,
-    DOMAIN_MMR_BAG_BYTES, DOMAIN_SCOPE_V1_HEX,
+    combine_limbs_to_quote_hash, compute_binding_commitment, compute_scope_hash, decrypt_note_memo,
+    derive_joinsplit_dummy_nullifier, derive_joinsplit_nullifier, derive_master_secret,
+    derive_note_randomness, derive_nullifier, derive_nullifier_epoch, derive_nullifier_key,
+    derive_nullifier_v1, derive_spending_key, derive_viewing_keys, derive_viewing_keys_from_secret,
+    domain_binding_v1, domain_dummy_nullifier, domain_initial_note, domain_merkle_node,
+    domain_mmr_bag, domain_note_commitment, domain_note_randomness, domain_nullifier,
+    domain_quote_binding, domain_scope_v1, encrypt_note_memo, fr_from_be_bytes, fr_to_be_bytes,
+    merkle_hash, note_commitment, split_quote_hash_to_limbs, verify_value_conservation,
+    IncomingViewingKey, MMRProof, MerkleMountainRange, NotePlaintext, OutcomingViewingKey,
+    PrivateNoteV1, RecipientViewingKey, DOMAIN_BINDING_V1_HEX, DOMAIN_MMR_BAG_BYTES,
+    DOMAIN_SCOPE_V1_HEX, ENCRYPTED_MEMO_SIZE,
 };
 
 // Re-export accounting state machine (DEC-016A Gate B)

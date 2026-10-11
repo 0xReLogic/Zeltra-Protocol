@@ -530,7 +530,18 @@ impl Nimbus {
         pk_iss_bytes: Bytes,
         com_k_bytes: Bytes,
     ) -> Result<bool, Vec<u8>> {
-        self._reveal_mask_key(sid, k_bytes, pk_iss_bytes, com_k_bytes)
+        self._reveal_mask_key(sid, k_bytes, pk_iss_bytes, com_k_bytes, Bytes::default())
+    }
+
+    pub fn reveal_mask_key_with_memo(
+        &mut self,
+        sid: FixedBytes<32>,
+        k_bytes: Bytes,
+        pk_iss_bytes: Bytes,
+        com_k_bytes: Bytes,
+        encrypted_memo: Bytes,
+    ) -> Result<bool, Vec<u8>> {
+        self._reveal_mask_key(sid, k_bytes, pk_iss_bytes, com_k_bytes, encrypted_memo)
     }
 
     pub fn claim_refund(&mut self, sid: FixedBytes<32>) -> Result<(), Vec<u8>> {
@@ -599,6 +610,7 @@ impl Nimbus {
         proof_a_neg: Bytes,
         proof_b: Bytes,
         proof_c: Bytes,
+        encrypted_memo: Bytes,
     ) -> Result<bool, Vec<u8>> {
         self._spend_private_note(
             note_root,
@@ -618,6 +630,7 @@ impl Nimbus {
             proof_a_neg,
             proof_b,
             proof_c,
+            encrypted_memo,
         )
     }
 
@@ -3358,6 +3371,7 @@ mod tests {
             proof_a,
             proof_b,
             proof_c,
+            vec![].into(),
         );
 
         assert_eq!(result, Ok(true));
@@ -3417,6 +3431,7 @@ mod tests {
                 vec![0x11; 128].into(),
                 vec![0x22; 256].into(),
                 vec![0x33; 128].into(),
+                vec![].into(),
             )
             .unwrap();
 
@@ -3439,6 +3454,7 @@ mod tests {
             vec![0x11; 128].into(),
             vec![0x22; 256].into(),
             vec![0x33; 128].into(),
+            vec![].into(),
         );
 
         assert_eq!(result, Err(b"NOTE_ALREADY_SPENT".to_vec()));
@@ -3472,6 +3488,7 @@ mod tests {
             vec![0x11; 128].into(),
             vec![0x22; 256].into(),
             vec![0x33; 128].into(),
+            vec![].into(),
         );
 
         assert_eq!(result, Err(b"UNACCEPTED_NOTE_ROOT".to_vec()));
@@ -3507,6 +3524,7 @@ mod tests {
             vec![0x11; 128].into(),
             vec![0x22; 256].into(),
             vec![0x33; 128].into(),
+            vec![].into(),
         );
 
         assert_eq!(result, Err(b"TRANSACTION_EXPIRED".to_vec()));
@@ -3541,6 +3559,7 @@ mod tests {
             vec![0x11; 128].into(),
             vec![0x22; 256].into(),
             vec![0x33; 128].into(),
+            vec![].into(),
         );
 
         assert_eq!(result, Err(b"EXECUTION_FEE_EXCEEDS_MAX".to_vec()));
@@ -3577,6 +3596,7 @@ mod tests {
             vec![0x11; 128].into(),
             vec![0x22; 256].into(),
             vec![0x33; 128].into(),
+            vec![].into(),
         );
 
         assert_eq!(result, Err(b"NONZERO_COMMITMENT_WITH_ZERO_CHANGE".to_vec()));
@@ -3612,6 +3632,7 @@ mod tests {
             vec![0x11; 128].into(),
             vec![0x22; 256].into(),
             vec![0x33; 128].into(),
+            vec![].into(),
         );
 
         assert_eq!(result, Err(b"INSUFFICIENT_NOTE_LIABILITY".to_vec()));
@@ -3650,6 +3671,7 @@ mod tests {
             vec![0x11; 128].into(),
             vec![0x22; 256].into(),
             vec![0x33; 128].into(),
+            vec![].into(),
         );
 
         assert_eq!(result, Err(b"INVALID_GROTH16_NOTE_PROOF".to_vec()));
@@ -3686,6 +3708,7 @@ mod tests {
             vec![0x11; 128].into(),
             vec![0x22; 256].into(),
             vec![0x33; 128].into(),
+            vec![].into(),
         );
 
         assert_eq!(result, Err(b"INVALID_LEAF_COUNT".to_vec()));
@@ -3702,7 +3725,7 @@ mod tests {
         let leaf = FixedBytes::from(alloy_primitives::hex!(
             "46d1b90c8a28c364fefdbb95bd709956e2f39a411750e6797fe1112b27635c59"
         ));
-        let (_, _canonical_root) = contract._mmr_insert(leaf).unwrap();
+        let (_, _canonical_root) = contract._mmr_insert(leaf, vec![]).unwrap();
 
         // Tampering with leaf_count produces a different root that is not accepted
         let fake_root = FixedBytes::repeat_byte(0x99);
@@ -3726,6 +3749,7 @@ mod tests {
             vec![0x11; 128].into(),
             vec![0x22; 256].into(),
             vec![0x33; 128].into(),
+            vec![].into(),
         );
 
         assert_eq!(result, Err(b"UNACCEPTED_NOTE_ROOT".to_vec()));
@@ -3738,7 +3762,7 @@ mod tests {
 
         // 0xff...ff is >= r (modulus of BLS12-381 Fr)
         let non_canonical_leaf = FixedBytes::repeat_byte(0xff);
-        let result = contract._mmr_insert(non_canonical_leaf);
+        let result = contract._mmr_insert(non_canonical_leaf, vec![]);
 
         assert_eq!(result, Err(b"INVALID_LEAF_SCALAR".to_vec()));
     }
@@ -3787,6 +3811,7 @@ mod tests {
             vec![0x11; 128].into(),
             vec![0x22; 256].into(),
             vec![0x33; 128].into(),
+            vec![].into(),
         );
 
         assert_eq!(res, Ok(true));
@@ -3839,6 +3864,7 @@ mod tests {
             vec![0x11; 128].into(),
             vec![0x22; 256].into(),
             vec![0x33; 128].into(),
+            vec![].into(),
         );
 
         assert_eq!(res, Ok(true));
@@ -3885,6 +3911,7 @@ mod tests {
             vec![0x11; 128].into(),
             vec![0x22; 256].into(),
             vec![0x33; 128].into(),
+            vec![].into(),
         );
 
         assert_eq!(res, Ok(true));
@@ -3938,6 +3965,7 @@ mod tests {
             vec![0x11; 128].into(),
             vec![0x22; 256].into(),
             vec![0x33; 128].into(),
+            vec![].into(),
         );
 
         assert_eq!(res, Err(b"EPOCH_EXPIRED_REQUIRE_ROLLOVER".to_vec()));
@@ -3977,6 +4005,7 @@ mod tests {
             vec![0x11; 128].into(),
             vec![0x22; 256].into(),
             vec![0x33; 128].into(),
+            vec![].into(),
         );
 
         assert_eq!(res, Err(b"EPOCH_IN_FUTURE".to_vec()));
@@ -4021,6 +4050,7 @@ mod tests {
             vec![0x11; 128].into(),
             vec![0x22; 256].into(),
             vec![0x33; 128].into(),
+            vec![].into(),
         );
 
         assert_eq!(res, Err(b"EPOCH_SLOT_DESYNCHRONIZED".to_vec()));
@@ -4060,6 +4090,7 @@ mod tests {
             vec![0x11; 128].into(),
             vec![0x22; 256].into(),
             vec![0x33; 128].into(),
+            vec![].into(),
         );
 
         assert_eq!(
@@ -4101,6 +4132,7 @@ mod tests {
             vec![0x11; 128].into(),
             vec![0x22; 256].into(),
             vec![0x33; 128].into(),
+            vec![].into(),
         );
 
         assert_eq!(res, Err(b"PROTOCOL_FEE_MUST_BE_ZERO_IN_ROLLOVER".to_vec()));
@@ -4139,6 +4171,7 @@ mod tests {
             vec![0x11; 128].into(),
             vec![0x22; 256].into(),
             vec![0x33; 128].into(),
+            vec![].into(),
         );
 
         assert_eq!(res, Err(b"ROLLOVER_MUST_HAVE_CHANGE".to_vec()));
@@ -4198,6 +4231,7 @@ mod tests {
                 vec![0x11; 128].into(),
                 vec![0x22; 256].into(),
                 vec![0x33; 128].into(),
+                vec![].into(),
             )
             .unwrap();
 
@@ -4220,6 +4254,7 @@ mod tests {
             vec![0x11; 128].into(),
             vec![0x22; 256].into(),
             vec![0x33; 128].into(),
+            vec![].into(),
         );
 
         assert_eq!(res, Err(b"NOTE_ALREADY_SPENT".to_vec()));
@@ -4641,5 +4676,80 @@ mod tests {
         );
 
         assert_eq!(result, Err(b"NON_CANONICAL_PUBLIC_INPUT_SCALAR".to_vec()));
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // DEC-037: Note Encryption Memo & Viewing Key Event Pipeline
+    // ═══════════════════════════════════════════════════════════════════════
+
+    #[test]
+    fn test_dec037_encrypted_memo_lifecycle() {
+        reset_test_state();
+        let owner = address!("1111111111111111111111111111111111111111");
+        let client = address!("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
+        let merchant = address!("2222222222222222222222222222222222222222");
+        set_msg_sender(owner);
+        set_block_timestamp(1000);
+
+        let mut contract = Nimbus::default();
+        contract.init(owner, Address::ZERO, Address::ZERO).unwrap();
+
+        // 1. Deposit with initial note commitment
+        set_msg_sender(client);
+        let sid = FixedBytes::<32>::from_slice(&[0xd1; 32]);
+        let dummy_com_k = vec![0x01; 256].into();
+        let initial_cm = FixedBytes::<32>::from_slice(&[0x0a; 32]);
+        let deposit_amount = U256::from(20_000_000); // 20 USDC
+
+        contract
+            .deposit_with_commitment(sid, dummy_com_k, deposit_amount, initial_cm)
+            .unwrap();
+
+        // 2. Reveal with encrypted memo (96 bytes)
+        let deposit_memo: Bytes = vec![0x7a; 96].into();
+        let k_bytes = vec![0x02; 32].into();
+        let pk_iss_bytes = vec![0x03; 256].into();
+        let com_k = vec![0x01; 256].into();
+
+        let reveal_ok = contract
+            .reveal_mask_key_with_memo(sid, k_bytes, pk_iss_bytes, com_k, deposit_memo)
+            .unwrap();
+        assert!(reveal_ok);
+        assert_eq!(contract.mmr_leaf_count().unwrap(), U256::from(1));
+        assert_eq!(contract.user_note_liability().unwrap(), deposit_amount);
+
+        // 3. Spend private note and append change note with change_encrypted_memo
+        let current_root = contract.note_tree_root().unwrap();
+        let nullifier = FixedBytes::<32>::from_slice(&[0x0a; 32]);
+        let change_cm = FixedBytes::<32>::from_slice(&[0x0b; 32]);
+        let change_memo: Bytes = vec![0x8b; 96].into();
+
+        let spend_ok = contract
+            .spend_private_note(
+                current_root,
+                U256::from(1),
+                nullifier,
+                U256::ZERO,
+                change_cm,
+                merchant,
+                U256::from(5_000_000), // 5 USDC
+                U256::from(22_500),    // 0.45% protocol fee
+                U256::from(23_000),    // execution fee
+                U256::from(25_000),    // max execution fee
+                FixedBytes::ZERO,
+                U256::from(5000),
+                U256::from(1), // has_change = 1
+                U256::ZERO,    // is_rollover = 0
+                vec![0x11; 128].into(),
+                vec![0x22; 256].into(),
+                vec![0x33; 128].into(),
+                change_memo,
+            )
+            .unwrap();
+
+        assert!(spend_ok);
+        assert!(contract.is_nullifier_spent(nullifier).unwrap());
+        // MMR leaf count incremented to 2 (1 initial deposit + 1 change note)
+        assert_eq!(contract.mmr_leaf_count().unwrap(), U256::from(2));
     }
 }

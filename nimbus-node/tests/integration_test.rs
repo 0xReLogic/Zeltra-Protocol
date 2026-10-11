@@ -278,6 +278,7 @@ async fn test_private_note_spend_enqueue_and_queue_lifecycle() {
             format!("0x{:064x}", 0u64),
         ],
         idempotency_key: Some("idem_private_1".to_string()),
+        change_encrypted_memo: None,
     };
 
     let spend_req = nimbus_node::dto::SpendRequest::from(priv_req.clone());
@@ -516,6 +517,7 @@ async fn test_end_to_end_multi_wallet_spend_with_mmr_sync() {
             .map(|p| format!("0x{p}"))
             .collect(),
         idempotency_key: Some("idem_e2e_multi_spend".to_string()),
+        change_encrypted_memo: None,
     };
 
     let spend_req = nimbus_node::dto::SpendRequest::from(priv_req);

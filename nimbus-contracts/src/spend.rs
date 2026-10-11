@@ -623,6 +623,7 @@ impl Nimbus {
         proof_a_neg: Bytes,
         proof_b: Bytes,
         proof_c: Bytes,
+        encrypted_memo: Bytes,
     ) -> Result<bool, Vec<u8>> {
         // 1. CHECKS
         self.check_not_paused()?;
@@ -791,7 +792,7 @@ impl Nimbus {
 
         // If has_change == 1, insert output_commitment into MMR (which emits NoteCommitmentAppended & ChangeCommitment)
         if has_change == U256::from(1) {
-            self._mmr_insert(output_commitment)?;
+            self._mmr_insert(output_commitment, encrypted_memo.to_vec())?;
         }
 
         // Multi-liability accounting (DEC-016 Gate B)
@@ -1066,8 +1067,8 @@ impl Nimbus {
         self.note_nullifiers.insert(nullifier_2, true);
 
         // C5.2: Direction B Constant-Arity MMR Appends (Always execute exactly 2 MMR insertions)
-        self._mmr_insert(output_cm_1)?;
-        self._mmr_insert(output_cm_2)?;
+        self._mmr_insert(output_cm_1, Vec::new())?;
+        self._mmr_insert(output_cm_2, Vec::new())?;
 
         // Multi-liability accounting
         self.user_note_liability.set(user_liab - total_debit);
