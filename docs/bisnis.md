@@ -54,40 +54,40 @@ Nimbus dirancang dengan arsitektur **pembuktian selektif mandiri (self-provable 
 
 | Pihak | Peran |
 |---|---|
-| Pengguna | Memiliki dan membelanjakan dana dari privacy pool |
-| AI agent | Berbelanja memakai mandat pemilik melalui Nimbus SDK |
-| Merchant | API provider, dApp, marketplace, game, atau penerima pembayaran |
-| Relayer | Membayar gas native terlebih dahulu dan mengirim transaksi |
-| Guardian | Menjalankan threshold signing dan menjaga availability |
-| Association Set Provider (ASP) | Pihak independen yang menerbitkan daftar deposit bersih (Merkle root) |
-| Protocol treasury | Membiayai pengembangan, RPC, domain, audit, monitoring, dan bug bounty |
+| Pengguna | Memiliki dan membelanjakan dana dari privacy pool via Private Note ZK-UTXO |
+| AI agent | Berbelanja mandiri memakai delegated session key melalui Zeltra SDK |
+| Merchant | API provider, e-commerce, dApp, atau penerima pembayaran publik |
+| Relayer | Stateless sequencer: membayari gas native di muka dan menyiarkan Groth16 proof |
+| Association Set Provider (ASP) | Pihak independen penerbit daftar deposit bersih (opsional bagi merchant institusi) |
+| Protocol treasury | Menerima 45 bps spend fee untuk membiayai pengembangan, audit, dan likuiditas |
 
-Merchant bukan hanya toko retail. Dalam konteks Nimbus, merchant adalah pihak mana
+Merchant bukan hanya toko retail. Dalam konteks Zeltra, merchant adalah pihak mana
 pun yang menerima pembayaran melalui protokol.
 
-## 4. Alur Pembayaran
+## 4. Alur Pembayaran (Pure ZK-UTXO Direct MMR - DEC-038)
 
-### 4.1 Shield (Deposit ke Private Note)
+### 4.1 Shield (Direct MMR Deposit)
 
-Pengguna memasukkan stablecoin (USDC) ke Nimbus Privacy Pool. Setelah proses verifikasi
-deposit dan issuance selesai, pengguna memperoleh **Initial Private Note commitment** yang
-tercatat di dalam on-chain Merkle tree dan dapat dibelanjakan berkali-kali tanpa perlu
-melakukan deposit ulang untuk setiap pembayaran.
+Pengguna memasukkan stablecoin (USDC) ke smart contract Zeltra di Arbitrum Stylus.
+Dalam satu transaksi atomik L2 (250 ms), smart contract memverifikasi transfer dana dan
+langsung menyisipkan daun komitmen `note_commitment` ke pohon Merkle Mountain Range (MMR)
+on-chain (`_mmr_insert`).
 
-Deposit/shield dikenai fee `0,20%`. Nilai bersih setelah fee menjadi private principal
-pengguna yang dienkripsi dan diikat ke spending key privat milik pengguna atau agent.
+**Deposit/shield dikenai fee 0,00% (0 bps permanen).** Tidak ada potongan, tidak ada koordinasi
+dengan server pihak ketiga, dan tidak ada masa tunggu. 100% dana langsung menjadi
+**Private Note UNSPENT** di dompet pengguna.
 
 ### 4.2 Private Spend & Change Output (UTXO Model)
 
-Pengguna atau AI agent membuat ZK payment payload melalui Nimbus SDK. Relayer memverifikasi
-proof dan quote, membayar gas native di muka, dan mengeksekusi settlement on-chain.
-Merchant menerima nominal invoice penuh tanpa potongan.
+Pengguna atau AI agent membuat ZK payment payload secara lokal melalui Zeltra SDK. Relayer memverifikasi
+Groth16 proof dan quote fee, membayar gas native di muka, dan mengeksekusi settlement on-chain.
+Merchant menerima nominal invoice penuh secara bersih.
 
 Pada transaksi partial spend (misal: saldo $100, bayar invoice $5):
 1. **Input Note** lama dikonsumsi dan menghasilkan nullifier unik on-chain (mencegah double spend).
-2. **Merchant Payout** dibayarkan penuh ke alamat recipient.
-3. **Protocol & Execution Fee** dipotong sesuai quote terverifikasi.
-4. **Change Note (Kembalian)** secara otomatis dibuat dan di-mint kembali ke Merkle tree
+2. **Merchant Payout** dibayarkan penuh ke alamat recipient publik.
+3. **Protocol Fee (45 bps)** dan **Execution Fee** dipotong sesuai quote terverifikasi.
+4. **Change Note (Kembalian)** secara otomatis dibuat dan disisipkan kembali ke pohon MMR on-chain
    secara privat untuk spending key pengirim via ZK-SNARK proof (Value Conservation).
 
 ```text
@@ -96,21 +96,16 @@ Input Note Value = Merchant Payout + Protocol Fee + Execution Fee + Output Chang
 
 Dengan model ini:
 * Tidak ada sisa dana yang terkunci (*no dead/locked funds*).
-* Pengguna tidak perlu menghitung gas manual sebelum deposit.
+* Mental model uang kas nyata: $10 bayar $3 kembali $7 secara otomatis dan privat.
 * Sisa kembalian langsung menjadi unspent note baru yang siap dibelanjakan lagi kapan saja.
 
-### 4.3 Unshield / Withdrawal (Konsolidasi)
+### 4.3 Unshield / Withdrawal (Penarikan Berdaulat)
 
-Pengguna dapat mengeluarkan saldo dari privacy pool menuju alamat publik kapan saja.
-Untuk menjaga kesederhanaan arsitektur dan efisiensi WASM di Arbitrum Stylus, tidak ada fungsi
-`withdraw()` terpisah. Penarikan saldo dilakukan dengan mengeksekusi **Private Spend**
-ke alamat dompet publik milik pengguna sendiri sebagai recipient. Sisa saldo (jika ada) tetap
-kembali sebagai change note privat.
-
-### 4.4 Emergency Exit / Ragequit (Penarikan Darurat Non-Privat)
-
-Jika pengguna mengalami kendala teknis pada cluster relayer, atau jika transaksi mereka ditolak oleh kebijakan ASP merchant tertentu, pengguna **tidak akan pernah kehilangan hak atas dananya**. 
-Pengguna dapat memanfaatkan jalur `claim_refund()` setelah timelock 24 jam untuk menarik 100% principal deposit mereka kembali ke alamat dompet penyetor asli secara transparan on-chain. Ini memberikan jaminan bahwa dana pengguna tidak dapat tertahan selamanya di dalam protokol.
+Pengguna dapat mengeluarkan saldo dari privacy pool menuju alamat publik mana pun kapan saja.
+Untuk menjaga efisiensi WASM di Arbitrum Stylus, tidak ada fungsi `withdraw()` terpisah. Penarikan saldo
+dilakukan dengan mengeksekusi **Private Spend** ke alamat dompet publik milik pengguna sendiri sebagai recipient.
+Sisa saldo (jika ada) tetap kembali sebagai change note privat di dalam pohon MMR. Pengguna memegang
+kendali kedaulatan mutlak (*100% self-custodial*) atas aset mereka tanpa bergantung pada izin relayer.
 
 ## 5. Model Biaya Target (Zero-Deposit & Fixed Mathematical Constants)
 
@@ -307,3 +302,84 @@ Dokumen ini menjelaskan **model bisnis target dan roadmap arsitektur**. Status t
   - Enforce boolean constraint pada `has_change` (mencegah pemalsuan output commitment).
 * **Gate D (Stylus Note Ledger):** Integrasi on-chain Merkle tree append-only dan multi-liability accounting (`user_note_liability`, `refundable_deposit_liability`, `accrued_execution_fee_liability`) di smart contract Stylus setelah Gate C0 lulus.
 * **Tokenomics & DAO:** Seluruh desain token $NIMB dan mekanisme voting DAO dibekukan hingga Mainnet Phase 3. Protokol saat ini beroperasi 100% menggunakan collateral USDC murni (Full Reserve) dengan aturan matematis yang terjamin.
+
+---
+
+## 12. Tiga Produk Inti & Matriks Adopsi Universal (Manusia, AI Agent, B2B & Bank)
+
+Untuk mewujudkan visi *"The Stripe of Web3 with Absolute Privacy"*, Zeltra menyederhanakan arsitektur produknya ke dalam **3 Produk Inti** yang dapat diadopsi oleh seluruh spektrum pelaku ekonomi dunia:
+
+```text
+┌────────────────────────────────────────────────────────────────────────────────────────┐
+│                          3 PRODUK INTI ZELTRA PROTOCOL                                 │
+├───────────────────────────────┬───────────────────────────────┬────────────────────────┤
+│ 1. "Apple Pay" of Web3        │ 2. AI Agent Autonomous Rail   │ 3. Shielded RWA Vaults │
+│ (Universal Shielded Checkout) │ (HTTP 402 Micro-Pay & Session)│ (Confidential Yield)   │
+└───────────────────────────────┴───────────────────────────────┴────────────────────────┘
+```
+
+### 12.1 Penjelasan 3 Produk Inti
+
+#### 1. "Apple Pay" of Web3 (Universal Shielded Checkout & Settlement)
+* **Untuk Siapa:** Siapa saja yang ingin membayar atau menerima uang (Retail, Merchant E-Commerce, Whales, Korporat).
+* **Cara Kerja:**
+  - Komponen 1-baris kode JavaScript/React: `<ZeltraCheckout />`.
+  - Pembeli membayar dari saldo privat Zeltra di Arbitrum Stylus (Groth16 spend).
+  - Melalui Chainlink CCIP, **merchant di rantai mana pun (Base, Optimism, Polygon, Solana EVM)** menerima USDC publik bersih secara instan di kasir mereka.
+  - **zk-Receipt (Proof of Source):** Pembeli otomatis menerima nota terenkripsi (via Viewing Key DEC-037) yang dapat diunduh untuk garansi atau pelaporan pajak tanpa pernah membuka riwayat dompet pribadinya.
+
+#### 2. AI Agent Autonomous Rail (HTTP 402 + Delegated Session Keys)
+* **Untuk Siapa:** AI Agent mandiri yang menyewa GPU (Akash/Render), membeli kueri LLM, atau scraping data.
+* **Cara Kerja & Anti-Spam Haram Sub-Sen:**
+  - *Anti-Spam Mutlak:* Transaksi sub-sen ($0.002) **dilarang diproses langsung ke on-chain L2** demi mencegah ledakan nullifier state bloat dan pemborosan gas relayer.
+  - *Solusi Aggregated Session Tab:*
+    1. Parent wallet mendelegasikan anggaran belanja harian via **EIP-7702 Ephemeral Session Key** (misal: "maksimal 50 USDC/hari untuk server AI").
+    2. AI Agent mengunci satu Note ZK (misal $10) dan melakukan streaming tiket mikro off-chain ke penyedia API.
+    3. Penyedia API melakukan klaim penyelesaian on-chain saat tab mencapai ambang batas (misal tiap $2.00 atau di akhir sesi) dalam **1 transaksi ZK spend tunggal**.
+
+#### 3. Sovereign Shielded RWA Staking Gateway (Opt-In Lindung Nilai Kas Rahasia)
+* **Untuk Siapa:** Korporat B2B, Whales, Institusi Finansial, dan Bank yang ingin kas jutaan dolarnya mendapatkan bunga (*yield*) tanpa membocorkan neraca keuangan.
+* **Prinsip Jalur Berdaulat (Bukan Pengalokasian Otomatis):**
+  - *Non-Custodial & Bebas Risiko Campur Tangan:* Zeltra **TIDAK mengalokasikan dana secara otomatis**. Dana kas pembayaran ritel tetap tersimpan 100% Full Reserve USDC murni di vault kontrak Stylus tanpa terpapar risiko pihak ketiga DeFi/RWA.
+  - *Gasless UX via Relayer (Biaya Ditanggung User, Ditalangi Relayer):* Pengguna tidak perlu memegang native ETH. Relayer menalangi gas L2 di muka, dan biaya gas aktual + markup 15% dipotong otomatis dalam USDC dari saldo Private Note pengguna via signed execution quote.
+  - *Privasi Posisi Neraca:* Kepemilikan token RWA dan akumulasi bunga dibungkus ke dalam komitmen Private Note ZK. Pengguna menikmati bunga 4–5% APY riil secara langsung, namun posisi saldo kas dan strategi perbendaharaan perusahaan tetap 100% terlindungi dari intelijen kompetitor.
+
+---
+
+### 12.2 Matriks Adopsi Universal: Semua Pihak Memakai Zeltra
+
+Zeltra dirancang tanpa diskriminasi—semua entitas memiliki use-case nyata:
+
+| Pengguna | Masalah Dunia Nyata | Solusi Zeltra |
+|---|---|---|
+| **Manusia / Retail** | Takut saldo di-doxx teman/keluarga, ingin belanja santai tanpa jejak publik. | Bayar kopi, belanja online, atau transfer privat 1-klik secepat Apple Pay. |
+| **AI Agent Otonom** | Membutuhkan pembayaran API machine-to-machine tanpa mengekspos dompet pemiliknya. | Bayar server/LLM otomatis via Delegated Session Key tanpa human-in-the-loop. |
+| **B2B / Korporat** | **Gaji Karyawan (Payroll):** Di blockchain biasa, karyawan bisa saling intip slip gaji rekan kerja.<br>**Strategi Bisnis:** Akuisisi, sewa vendor, atau kemitraan bisnis bocor ke kompetitor. | **Private Payroll:** Bayar ribuan gaji karyawan via Zeltra tanpa nominal gaji bocor di explorer.<br>**Confidential Vendor Settlement:** Invoice bisnis terbayar tanpa bocor ke publik. |
+| **Whale / Investor** | Membeli properti, tanah, atau aset investasi besar sering di-frontrun dan dipantau bot pelacak whale. | Sembunyikan strategi akumulasi aset dan transaksi besar secara matematis. |
+| **Bank / Neobank** | Nasabah VIP / HNW menuntut privasi perbankan tinggi saat bertransaksi di rel kripto. | Bank memasang backend Zeltra SDK untuk melayani rekening privat nasabah VIP dengan tetap mematuhi regulasi via selektif zk-Receipt. |
+
+---
+
+## 13. Urutan Prioritas Eksekusi (Engineering Sequencing)
+
+Agar eksekusi tidak bias dan fokus, pengerjaan diatur dalam 3 fase tegas:
+
+```text
+┌────────────────────────────────────────────────────────────────────────┐
+│                      ROADMAP PRIORITAS KERJA ZELTRA                    │
+├─────────┬──────────────────────────────────────────────────────────────┤
+│ FASE 1  │ CORE, SMART CONTRACT STYLUS & RELAYER (DEC-038)              │
+│ (FOKUS) │ • Hapus seluruh rel BLS/Guardian/Voucher tanpa sisa.         │
+│         │ • Terapkan deposit_direct_note (Direct MMR Inflow, 250ms).   │
+│         │ • Finalisasi Groth16 spend di Arbitrum Sepolia.              │
+├─────────┼──────────────────────────────────────────────────────────────┤
+│ FASE 2  │ CLIENT SDK & BROWSER PROVER (nimbus-sdk)                     │
+│         │ • Integrasikan prepare_direct_deposit & Viewing Key recovery.│
+│         │ • Optimalkan Groth16 prover Web Worker (1-2s stream).        │
+├─────────┼──────────────────────────────────────────────────────────────┤
+│ FASE 3  │ ADOPTION & COMMERCIAL PRODUCTS                               │
+│         │ • Build <ZeltraCheckout /> Widget untuk merchant Base/Poly. │
+│         │ • Upgrade x402 module ke Aggregated Session ZK Note.         │
+│         │ • Rancang modul alokasi Shielded Yield Vault RWA.            │
+└─────────┴──────────────────────────────────────────────────────────────┘
+```
