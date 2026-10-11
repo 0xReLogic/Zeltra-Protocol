@@ -597,7 +597,7 @@ impl Nimbus {
     ///
     /// Effects:
     /// - Marks nullifier as spent in note_nullifiers.
-    /// - If has_change == 1, inserts output_commitment into LeanIMT depth 20 tree via _merkle_insert.
+    /// - If has_change == 1, inserts output_commitment into MMR via _mmr_insert.
     /// - Transfers merchant_amount to recipient (ERC-20).
     /// - Decreases user_note_liability by (merchant_amount + protocol_fee + execution_fee).
     /// - Accrues execution_fee to accrued_execution_fee_liability and accumulated_execution_fees.

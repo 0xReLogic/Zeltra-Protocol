@@ -600,7 +600,7 @@ impl PrivateNoteWallet {
 
     /// Updates the Merkle witness and promotes an Unconfirmed or stale note to Unspent (DEC-030).
     ///
-    /// Essential for asynchronous LeanIMT indexing (eliminates Ghost Notes) and local witness fast-forwarding.
+    /// Essential for asynchronous MMR indexing (eliminates Ghost Notes) and local witness fast-forwarding.
     pub fn update_note_witness(
         &mut self,
         commitment_hex: &str,

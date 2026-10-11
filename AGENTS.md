@@ -13,7 +13,7 @@ Zero-friction inflow (0% deposit fee), volume-over-TVL economic velocity, and ab
 ## Repo Layout
 
 ```
-nimbus-contracts/  — Stylus WASM smart contract (deposit, spend, batch, ZK private note Groth16, LeanIMT tree)
+nimbus-contracts/  — Stylus WASM smart contract (deposit, spend, batch, ZK private note Groth16, Merkle Mountain Range / MMR)
 nimbus-core/       — Crypto primitives (BLS12-381, Groth16 PrivateNoteCircuit, Poseidon Grain-128, fees, accounting)
 nimbus-node/       — Relayer node (leader, guardian, spend queue, ZK note ingress & direct settlement, API)
 nimbus-sdk/        — Client SDK (PrivateNoteWallet, coin selection, local Groth16 prover, encrypted store)
@@ -55,7 +55,7 @@ Relayer broadcasts spend_private_note(...) to Stylus contract
   ↓
 Contract verifies Groth16 via EIP-2537 precompiles (0x0c MSM + 0x0f Pairing)
   ↓
-Contract marks note_nullifier spent, inserts change note to LeanIMT tree (depth 20), pays recipient USDC
+Contract marks note_nullifier spent, inserts change note to MMR tree (_mmr_insert), pays recipient USDC
   ↓
 Multi-liability reduced, exact value conservation maintained
 ```

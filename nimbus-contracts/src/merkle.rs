@@ -1,7 +1,7 @@
-//! Incremental Note Commitment Merkle Tree (LeanIMT Depth 20)
+//! Merkle Mountain Range (MMR, DEC-032) Note Commitment Tree
 //!
-//! Implements an append-only on-chain Merkle tree of depth 20 (up to 2^20 leaves)
-//! using Poseidon-W5 hashing and domain separation per DEC-016A.
+//! Implements an append-only on-chain Merkle Mountain Range (capacity up to 2^64 leaves)
+//! using Poseidon-W5 hashing and canonical peak bagging with DOMAIN_MMR_BAG per DEC-032.
 //!
 //! Security guarantees:
 //! - Leaf insertion is strictly gated: only callable via confirmed & revealed

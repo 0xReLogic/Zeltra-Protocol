@@ -36,7 +36,7 @@ Dokumen ini adalah memori konteks persisten untuk agen AI saat bekerja di reposi
   - Poseidon Grain-128 LFSR parameter generator (`DEC-021`, 108/108 tests pass).
 * **Gate D Merkle Tree & Verifier Terintegrasi (Contracts):**
   - Groth16 BLS12-381 verifier EIP-2537 (`0x0c` MSM + `0x0f` Pairing Check) terdeploy di Stylus WASM.
-  - State LeanIMT Merkle tree tingkat 20 (`_merkle_insert`) terdeploy on-chain dengan bounded accepted-root history.
+  - State Merkle Mountain Range (MMR, DEC-032) (`_mmr_insert`) terdeploy on-chain dengan bounded accepted-root history.
   - Entrypoint `spend_private_note(...)` teruji 53/53 tests pass.
 * **Gate E SDK Private Note Wallet Selesai:**
   - `PrivateNoteWallet` di `nimbus-sdk` menggantikan voucher exact-amount dengan saldo gabungan Note UTXO.
