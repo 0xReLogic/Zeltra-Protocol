@@ -172,6 +172,7 @@ pub async fn index_mmr_events_tick(state: &AppState, client: &EvmClient) -> Resu
             commitment: commitment_hex,
             tx_hash: ev.tx_hash,
             block_number: ev.block_number,
+            encrypted_memo: ev.encrypted_memo,
             created_at: None,
         });
     }
@@ -244,6 +245,7 @@ mod tests {
                 commitment: format!("0x{}", hex::encode(ev.commitment)),
                 tx_hash: ev.tx_hash.clone(),
                 block_number: ev.block_number,
+                encrypted_memo: ev.encrypted_memo.clone(),
                 created_at: None,
             });
         }
@@ -356,6 +358,7 @@ mod tests {
                 commitment: format!("0x{}", hex::encode(ev.commitment)),
                 tx_hash: ev.tx_hash.clone(),
                 block_number: ev.block_number,
+                encrypted_memo: ev.encrypted_memo.clone(),
                 created_at: None,
             });
             last_block = ev.block_number;
@@ -416,6 +419,7 @@ mod tests {
                 commitment: format!("0x{}", hex::encode(nimbus_core::fr_to_be_bytes(&fr))),
                 tx_hash: format!("0xa_{i}"),
                 block_number: block,
+                encrypted_memo: Vec::new(),
                 created_at: None,
             });
         }
@@ -453,6 +457,7 @@ mod tests {
                 commitment: format!("0x{}", hex::encode(nimbus_core::fr_to_be_bytes(&fr))),
                 tx_hash: format!("0xb_{i}"),
                 block_number: block,
+                encrypted_memo: Vec::new(),
                 created_at: None,
             });
         }

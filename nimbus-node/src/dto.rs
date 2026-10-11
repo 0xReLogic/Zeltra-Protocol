@@ -705,3 +705,19 @@ pub struct MmrErrorResponse {
     pub code: String,
     pub message: String,
 }
+
+// Note Memo Bulk Sync DTOs (DEC-037 / Client Recovery)
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct NoteSyncItem {
+    pub leaf_index: u64,
+    pub commitment: String,
+    pub encrypted_memo: String,
+    pub block_number: u64,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct NoteSyncQuery {
+    #[serde(default)]
+    pub from_leaf: u64,
+    pub limit: Option<u64>,
+}

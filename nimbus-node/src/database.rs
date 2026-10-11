@@ -77,7 +77,19 @@ pub struct MmrLeafRecord {
     pub commitment: String,
     pub tx_hash: String,
     pub block_number: u64,
+    #[serde(default)]
+    pub encrypted_memo: Vec<u8>,
     pub created_at: Option<String>,
+}
+
+/// Note memo row returned for bulk client sync (DEC-037)
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct LeafMemoRow {
+    pub leaf_index: u64,
+    pub commitment: String,
+    pub encrypted_memo: String,
+    pub block_number: u64,
+    pub tx_hash: String,
 }
 
 /// Persistent snapshot of the Merkle Mountain Range peak states (DEC-035C)
@@ -269,12 +281,13 @@ impl Database {
                 CREATE INDEX IF NOT EXISTS idx_relayer_tx_nonce ON relayer_transactions(nonce);
                 CREATE INDEX IF NOT EXISTS idx_relayer_tx_signer ON relayer_transactions(signer_address);
 
-                -- MMR note commitment leaves (DEC-035C / Merkle Mountain Range)
+                -- MMR note commitment leaves (DEC-035C / DEC-037 / Merkle Mountain Range)
                 CREATE TABLE IF NOT EXISTS mmr_leaves (
                     leaf_index INTEGER PRIMARY KEY,
                     commitment TEXT NOT NULL,
                     tx_hash TEXT NOT NULL,
                     block_number INTEGER NOT NULL,
+                    encrypted_memo BLOB NOT NULL DEFAULT X'',
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 );
                 CREATE INDEX IF NOT EXISTS idx_mmr_leaves_block ON mmr_leaves(block_number);
@@ -292,6 +305,10 @@ impl Database {
             )?;
 
             // Run migration for existing databases (fails silently if column already exists)
+            let _ = conn.execute(
+                "ALTER TABLE mmr_leaves ADD COLUMN encrypted_memo BLOB NOT NULL DEFAULT X''",
+                params![],
+            );
             let _ = conn.execute(
                 "ALTER TABLE sessions ADD COLUMN deposit_confirmed BOOLEAN NOT NULL DEFAULT 0",
                 params![],
@@ -2414,7 +2431,7 @@ impl Database {
         .await?
     }
 
-    /// Insert an indexed MMR leaf note commitment (DEC-035C)
+    /// Insert an indexed MMR leaf note commitment (DEC-035C / DEC-037)
     #[allow(dead_code)]
     pub async fn insert_mmr_leaf(
         &self,
@@ -2422,25 +2439,33 @@ impl Database {
         commitment: &str,
         tx_hash: &str,
         block_number: u64,
+        encrypted_memo: &[u8],
     ) -> Result<()> {
         let path = self.path.clone();
         let commitment = commitment.to_string();
         let tx_hash = tx_hash.to_string();
+        let memo = encrypted_memo.to_vec();
         let db_key = database_key()?;
 
         task::spawn_blocking(move || -> Result<()> {
             let conn = open_connection(&path, &db_key)?;
             conn.execute(
-                "INSERT INTO mmr_leaves (leaf_index, commitment, tx_hash, block_number)
-                 VALUES (?, ?, ?, ?)",
-                params![leaf_index as i64, commitment, tx_hash, block_number as i64],
+                "INSERT INTO mmr_leaves (leaf_index, commitment, tx_hash, block_number, encrypted_memo)
+                 VALUES (?, ?, ?, ?, ?)",
+                params![
+                    leaf_index as i64,
+                    commitment,
+                    tx_hash,
+                    block_number as i64,
+                    memo
+                ],
             )?;
             Ok(())
         })
         .await?
     }
 
-    /// Retrieve an MMR leaf record by leaf index (DEC-035C)
+    /// Retrieve an MMR leaf record by leaf index (DEC-035C / DEC-037)
     pub async fn get_mmr_leaf(&self, leaf_index: u64) -> Result<Option<MmrLeafRecord>> {
         let path = self.path.clone();
         let db_key = database_key()?;
@@ -2449,7 +2474,7 @@ impl Database {
             let conn = open_connection(&path, &db_key)?;
             let record = conn
                 .query_row(
-                    "SELECT leaf_index, commitment, tx_hash, block_number, created_at
+                    "SELECT leaf_index, commitment, tx_hash, block_number, encrypted_memo, created_at
                      FROM mmr_leaves WHERE leaf_index = ?",
                     params![leaf_index as i64],
                     |row| {
@@ -2458,7 +2483,8 @@ impl Database {
                             commitment: row.get(1)?,
                             tx_hash: row.get(2)?,
                             block_number: row.get::<_, i64>(3)? as u64,
-                            created_at: row.get(4)?,
+                            encrypted_memo: row.get::<_, Vec<u8>>(4).unwrap_or_default(),
+                            created_at: row.get(5)?,
                         })
                     },
                 )
@@ -2468,7 +2494,7 @@ impl Database {
         .await?
     }
 
-    /// Retrieve all indexed MMR leaves ordered by leaf index ascending (DEC-035C)
+    /// Retrieve all indexed MMR leaves ordered by leaf index ascending (DEC-035C / DEC-037)
     #[allow(dead_code)]
     pub async fn get_all_mmr_leaves(&self) -> Result<Vec<MmrLeafRecord>> {
         let path = self.path.clone();
@@ -2477,7 +2503,7 @@ impl Database {
         task::spawn_blocking(move || -> Result<Vec<MmrLeafRecord>> {
             let conn = open_connection(&path, &db_key)?;
             let mut stmt = conn.prepare(
-                "SELECT leaf_index, commitment, tx_hash, block_number, created_at
+                "SELECT leaf_index, commitment, tx_hash, block_number, encrypted_memo, created_at
                  FROM mmr_leaves ORDER BY leaf_index ASC",
             )?;
             let rows = stmt.query_map([], |row| {
@@ -2486,7 +2512,8 @@ impl Database {
                     commitment: row.get(1)?,
                     tx_hash: row.get(2)?,
                     block_number: row.get::<_, i64>(3)? as u64,
-                    created_at: row.get(4)?,
+                    encrypted_memo: row.get::<_, Vec<u8>>(4).unwrap_or_default(),
+                    created_at: row.get(5)?,
                 })
             })?;
             let mut leaves = Vec::new();
@@ -2494,6 +2521,48 @@ impl Database {
                 leaves.push(row?);
             }
             Ok(leaves)
+        })
+        .await?
+    }
+
+    /// Retrieve paginated chunk of note commitments and encrypted memos for client sync (DEC-037).
+    pub async fn get_notes_memo_chunk(
+        &self,
+        from_leaf: u64,
+        limit: u64,
+    ) -> Result<Vec<LeafMemoRow>> {
+        let path = self.path.clone();
+        let db_key = database_key()?;
+
+        task::spawn_blocking(move || -> Result<Vec<LeafMemoRow>> {
+            let conn = open_connection(&path, &db_key)?;
+            let mut stmt = conn.prepare(
+                "SELECT leaf_index, commitment, encrypted_memo, block_number, tx_hash
+                 FROM mmr_leaves
+                 WHERE leaf_index >= ?
+                 ORDER BY leaf_index ASC
+                 LIMIT ?",
+            )?;
+            let rows = stmt.query_map(params![from_leaf as i64, limit as i64], |row| {
+                let memo_bytes: Vec<u8> = row.get::<_, Vec<u8>>(2).unwrap_or_default();
+                let memo_hex = if memo_bytes.is_empty() {
+                    String::new()
+                } else {
+                    format!("0x{}", hex::encode(memo_bytes))
+                };
+                Ok(LeafMemoRow {
+                    leaf_index: row.get::<_, i64>(0)? as u64,
+                    commitment: row.get(1)?,
+                    encrypted_memo: memo_hex,
+                    block_number: row.get::<_, i64>(3)? as u64,
+                    tx_hash: row.get(4)?,
+                })
+            })?;
+            let mut list = Vec::new();
+            for r in rows {
+                list.push(r?);
+            }
+            Ok(list)
         })
         .await?
     }
@@ -2802,13 +2871,14 @@ impl Database {
 
             for leaf in &leaves_owned {
                 tx.execute(
-                    "INSERT INTO mmr_leaves (leaf_index, commitment, tx_hash, block_number)
-                     VALUES (?, ?, ?, ?)",
+                    "INSERT INTO mmr_leaves (leaf_index, commitment, tx_hash, block_number, encrypted_memo)
+                     VALUES (?, ?, ?, ?, ?)",
                     params![
                         leaf.leaf_index as i64,
                         leaf.commitment,
                         leaf.tx_hash,
                         leaf.block_number as i64,
+                        leaf.encrypted_memo,
                     ],
                 )?;
             }
@@ -3385,10 +3455,10 @@ mod tests {
         let leaf0_hex = format!("0x{}", hex::encode(nimbus_core::fr_to_be_bytes(&leaf0_fr)));
         let leaf1_hex = format!("0x{}", hex::encode(nimbus_core::fr_to_be_bytes(&leaf1_fr)));
 
-        db.insert_mmr_leaf(0, &leaf0_hex, "0xtx0", 100)
+        db.insert_mmr_leaf(0, &leaf0_hex, "0xtx0", 100, &[])
             .await
             .unwrap();
-        db.insert_mmr_leaf(1, &leaf1_hex, "0xtx1", 101)
+        db.insert_mmr_leaf(1, &leaf1_hex, "0xtx1", 101, &[])
             .await
             .unwrap();
 
@@ -3442,12 +3512,12 @@ mod tests {
         let leaf0_hex = format!("0x{}", hex::encode(nimbus_core::fr_to_be_bytes(&leaf0_fr)));
 
         // 1. Insert leaf 0
-        db.insert_mmr_leaf(0, &leaf0_hex, "0xtx0", 50)
+        db.insert_mmr_leaf(0, &leaf0_hex, "0xtx0", 50, &[])
             .await
             .unwrap();
 
         // 2. Negative Test: Duplicate leaf_index 0 must fail (PRIMARY KEY UNIQUE constraint)
-        let dup_res = db.insert_mmr_leaf(0, &leaf0_hex, "0xtx_dup", 51).await;
+        let dup_res = db.insert_mmr_leaf(0, &leaf0_hex, "0xtx_dup", 51, &[]).await;
         assert!(
             dup_res.is_err(),
             "Duplicate leaf_index must be rejected by SQLite primary key"
@@ -3456,7 +3526,7 @@ mod tests {
         // 3. Negative Test: Out-of-bounds non-contiguous leaf 2 (missing leaf 1) must fail closed upon load_mmr_tree
         let leaf2_fr = nimbus_core::Fr::from(200u64);
         let leaf2_hex = format!("0x{}", hex::encode(nimbus_core::fr_to_be_bytes(&leaf2_fr)));
-        db.insert_mmr_leaf(2, &leaf2_hex, "0xtx2", 52)
+        db.insert_mmr_leaf(2, &leaf2_hex, "0xtx2", 52, &[])
             .await
             .unwrap();
 
@@ -3483,9 +3553,15 @@ mod tests {
         let hex1 = format!("0x{}", hex::encode(nimbus_core::fr_to_be_bytes(&fr1)));
         let hex2 = format!("0x{}", hex::encode(nimbus_core::fr_to_be_bytes(&fr2)));
 
-        db.insert_mmr_leaf(0, &hex0, "0xtx0", 100).await.unwrap();
-        db.insert_mmr_leaf(1, &hex1, "0xtx1", 101).await.unwrap();
-        db.insert_mmr_leaf(2, &hex2, "0xtx2", 102).await.unwrap();
+        db.insert_mmr_leaf(0, &hex0, "0xtx0", 100, &[])
+            .await
+            .unwrap();
+        db.insert_mmr_leaf(1, &hex1, "0xtx1", 101, &[])
+            .await
+            .unwrap();
+        db.insert_mmr_leaf(2, &hex2, "0xtx2", 102, &[])
+            .await
+            .unwrap();
 
         let mut tree_3 = nimbus_core::MerkleMountainRange::new();
         tree_3.append(fr0);
@@ -3548,6 +3624,7 @@ mod tests {
                 commitment: hex0,
                 tx_hash: "0xtx0".to_string(),
                 block_number: 500,
+                encrypted_memo: vec![0xaa; 96],
                 created_at: None,
             },
             MmrLeafRecord {
@@ -3555,6 +3632,7 @@ mod tests {
                 commitment: hex1,
                 tx_hash: "0xtx1".to_string(),
                 block_number: 500,
+                encrypted_memo: vec![0xbb; 96],
                 created_at: None,
             },
         ];
@@ -3571,5 +3649,44 @@ mod tests {
         assert_eq!(state.leaf_count, 2);
         assert_eq!(state.last_indexed_block, 500);
         assert_eq!(db.get_all_mmr_leaves().await.unwrap().len(), 2);
+    }
+
+    #[tokio::test]
+    async fn test_get_notes_memo_chunk_pagination() {
+        std::env::set_var("NIMBUS_DB_KEY", "test-encryption-key");
+        let tmp = TempDir::new().unwrap();
+        let db_path = tmp.path().join("mmr_chunk.db");
+        let db = Database::new(&db_path).await.unwrap();
+
+        for i in 0..10u64 {
+            let cm = format!("0x{:064x}", i + 1);
+            let memo = vec![(i as u8) + 1; 96];
+            db.insert_mmr_leaf(i, &cm, &format!("0xtx{}", i), 1000 + i, &memo)
+                .await
+                .unwrap();
+        }
+
+        // Test chunk from 0 limit 4
+        let chunk1 = db.get_notes_memo_chunk(0, 4).await.unwrap();
+        assert_eq!(chunk1.len(), 4);
+        assert_eq!(chunk1[0].leaf_index, 0);
+        assert_eq!(chunk1[3].leaf_index, 3);
+        assert!(chunk1[0].encrypted_memo.starts_with("0x0101"));
+
+        // Test chunk from 4 limit 4
+        let chunk2 = db.get_notes_memo_chunk(4, 4).await.unwrap();
+        assert_eq!(chunk2.len(), 4);
+        assert_eq!(chunk2[0].leaf_index, 4);
+        assert_eq!(chunk2[3].leaf_index, 7);
+
+        // Test chunk from 8 limit 10 (returns remaining 2)
+        let chunk3 = db.get_notes_memo_chunk(8, 10).await.unwrap();
+        assert_eq!(chunk3.len(), 2);
+        assert_eq!(chunk3[0].leaf_index, 8);
+        assert_eq!(chunk3[1].leaf_index, 9);
+
+        // Test out of bounds chunk
+        let chunk_empty = db.get_notes_memo_chunk(50, 10).await.unwrap();
+        assert!(chunk_empty.is_empty());
     }
 }

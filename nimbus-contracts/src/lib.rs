@@ -374,6 +374,18 @@ impl Nimbus {
         Ok(self.nullifiers.get(nullifier) || self.note_nullifiers.get(nullifier) || is_note_spent)
     }
 
+    /// Batch queries multiple nullifiers for double-spend status in a single call (DEC-037).
+    pub fn are_nullifiers_spent(
+        &self,
+        nullifiers: Vec<FixedBytes<32>>,
+    ) -> Result<Vec<bool>, Vec<u8>> {
+        let mut results = Vec::with_capacity(nullifiers.len());
+        for nf in nullifiers {
+            results.push(self.is_nullifier_spent(nf)?);
+        }
+        Ok(results)
+    }
+
     /// Returns whether a private note nullifier has already been spent on-chain (DEC-025 & DEC-033).
     pub fn is_note_nullifier_spent(&self, nullifier: FixedBytes<32>) -> Result<bool, Vec<u8>> {
         let current_epoch = self.current_epoch.get().to::<u32>();
@@ -4749,6 +4761,11 @@ mod tests {
 
         assert!(spend_ok);
         assert!(contract.is_nullifier_spent(nullifier).unwrap());
+        let unspent_nf = FixedBytes::repeat_byte(0xfe);
+        let batch_res = contract
+            .are_nullifiers_spent(vec![nullifier, unspent_nf])
+            .unwrap();
+        assert_eq!(batch_res, vec![true, false]);
         // MMR leaf count incremented to 2 (1 initial deposit + 1 change note)
         assert_eq!(contract.mmr_leaf_count().unwrap(), U256::from(2));
     }

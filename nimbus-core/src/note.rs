@@ -1828,4 +1828,64 @@ mod tests {
             "Non-canonical scalar in NotePlaintext must be rejected"
         );
     }
+
+    #[test]
+    fn test_dec037_trial_decryption_1000_random_notes_simulation() {
+        use rand::RngCore;
+
+        let (ivk, _) = derive_viewing_keys(b"simulation_ivk_seed");
+        let (other_ivk, _) = derive_viewing_keys(b"other_client_seed");
+
+        // Prepare 3 valid notes encrypted specifically for this ivk
+        let valid_note_1 = encrypt_note_memo(1_000_000, Fr::from(111u64), 1, &ivk);
+        let valid_note_2 = encrypt_note_memo(2_500_000, Fr::from(222u64), 1, &ivk);
+        let valid_note_3 = encrypt_note_memo(5_000_000, Fr::from(333u64), 1, &ivk);
+
+        let mut memos: Vec<Vec<u8>> = Vec::with_capacity(1000);
+        let mut rng = rand::thread_rng();
+
+        // 1. Generate 900 completely random 96-byte buffers
+        for _ in 0..900 {
+            let mut buf = vec![0u8; 96];
+            rng.fill_bytes(&mut buf);
+            memos.push(buf);
+        }
+
+        // 2. Generate 97 notes encrypted for another recipient (valid ciphertexts, wrong recipient)
+        for i in 0..97 {
+            let memo_other = encrypt_note_memo(500_000 + i, Fr::from(1000u64 + i), 1, &other_ivk);
+            memos.push(memo_other);
+        }
+
+        // 3. Inject the 3 valid notes at deterministic locations
+        memos.insert(100, valid_note_1);
+        memos.insert(500, valid_note_2);
+        memos.insert(999, valid_note_3);
+
+        assert_eq!(memos.len(), 1000);
+
+        let start = std::time::Instant::now();
+        let mut recovered = Vec::new();
+
+        for (idx, memo) in memos.iter().enumerate() {
+            if let Some(pt) = decrypt_note_memo(memo, &ivk) {
+                recovered.push((idx, pt));
+            }
+        }
+
+        let elapsed = start.elapsed();
+        assert_eq!(
+            recovered.len(),
+            3,
+            "Exactly 3 valid notes must be recovered out of 1000 scanned"
+        );
+        assert_eq!(recovered[0].1.value, 1_000_000);
+        assert_eq!(recovered[1].1.value, 2_500_000);
+        assert_eq!(recovered[2].1.value, 5_000_000);
+        println!(
+            "Scanned 1,000 memos in {:?}, recovered {} notes successfully",
+            elapsed,
+            recovered.len()
+        );
+    }
 }

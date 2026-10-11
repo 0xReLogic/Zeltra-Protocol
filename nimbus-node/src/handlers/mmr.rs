@@ -6,10 +6,10 @@
 //! Enforces strict Hyperbridge (2026) out-of-bounds upper bound checks (INV-4)
 //! and strict zero-knowledge privacy boundaries (INV-3: only public integer index accepted).
 
-use crate::dto::{MmrErrorResponse, MmrProofResponse, MmrTipResponse};
+use crate::dto::{MmrErrorResponse, MmrProofResponse, MmrTipResponse, NoteSyncItem, NoteSyncQuery};
 use crate::state::AppState;
 use axum::{
-    extract::{Path, State},
+    extract::{Path, Query, State},
     http::StatusCode,
     response::{IntoResponse, Response},
     Json,
@@ -166,6 +166,43 @@ pub async fn handle_mmr_tip(State(state): State<AppState>) -> Response {
     }
 }
 
+/// Paginated Bulk Note Sync endpoint for client recovery (DEC-037).
+///
+/// `GET /api/v1/notes/sync?from_leaf={u64}&limit={u64}`
+///
+/// Default limit: 1000, max: 5000.
+pub async fn handle_notes_sync(
+    State(state): State<AppState>,
+    Query(query): Query<NoteSyncQuery>,
+) -> Response {
+    let limit = query.limit.unwrap_or(1000).clamp(1, 5000);
+    match state.db.get_notes_memo_chunk(query.from_leaf, limit).await {
+        Ok(rows) => {
+            let items: Vec<NoteSyncItem> = rows
+                .into_iter()
+                .map(|r| NoteSyncItem {
+                    leaf_index: r.leaf_index,
+                    commitment: r.commitment,
+                    encrypted_memo: r.encrypted_memo,
+                    block_number: r.block_number,
+                })
+                .collect();
+            Json(items).into_response()
+        }
+        Err(e) => {
+            eprintln!("NOTES_SYNC ERROR: Failed to query memo chunk: {:?}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(MmrErrorResponse {
+                    code: "InternalStorageError".to_string(),
+                    message: "Database query failed for notes sync".to_string(),
+                }),
+            )
+                .into_response()
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -209,7 +246,7 @@ mod tests {
         let hex_cm = format!("0x{}", hex::encode(nimbus_core::fr_to_be_bytes(&fr)));
         state
             .db
-            .insert_mmr_leaf(0, &hex_cm, "0xtx0", 123)
+            .insert_mmr_leaf(0, &hex_cm, "0xtx0", 123, &[])
             .await
             .unwrap();
 
@@ -250,17 +287,17 @@ mod tests {
 
         state
             .db
-            .insert_mmr_leaf(0, &hex0, "0xtx0", 500)
+            .insert_mmr_leaf(0, &hex0, "0xtx0", 500, &[])
             .await
             .unwrap();
         state
             .db
-            .insert_mmr_leaf(1, &hex1, "0xtx1", 501)
+            .insert_mmr_leaf(1, &hex1, "0xtx1", 501, &[])
             .await
             .unwrap();
         state
             .db
-            .insert_mmr_leaf(2, &hex2, "0xtx2", 502)
+            .insert_mmr_leaf(2, &hex2, "0xtx2", 502, &[])
             .await
             .unwrap();
 
@@ -336,12 +373,12 @@ mod tests {
 
         state
             .db
-            .insert_mmr_leaf(0, &hex0, "0xtx0", 10)
+            .insert_mmr_leaf(0, &hex0, "0xtx0", 10, &[])
             .await
             .unwrap();
         state
             .db
-            .insert_mmr_leaf(1, &hex1, "0xtx1", 11)
+            .insert_mmr_leaf(1, &hex1, "0xtx1", 11, &[])
             .await
             .unwrap();
 
@@ -368,5 +405,38 @@ mod tests {
             .unwrap();
         let err2: MmrErrorResponse = serde_json::from_slice(&body_bytes2).unwrap();
         assert_eq!(err2.code, "LeafIndexOutOfBounds");
+    }
+
+    #[tokio::test]
+    async fn test_handle_notes_sync_endpoint() {
+        let (state, _tmp) = setup_test_state().await;
+
+        for i in 0..5u64 {
+            let cm = format!("0x{:064x}", i + 1);
+            let memo = vec![0x77; 96];
+            state
+                .db
+                .insert_mmr_leaf(i, &cm, &format!("0xtx_{i}"), 200 + i, &memo)
+                .await
+                .unwrap();
+        }
+
+        let query = NoteSyncQuery {
+            from_leaf: 1,
+            limit: Some(3),
+        };
+        let resp = handle_notes_sync(State(state.clone()), Query(query)).await;
+        assert_eq!(resp.status(), StatusCode::OK);
+
+        let body_bytes = axum::body::to_bytes(resp.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let items: Vec<NoteSyncItem> = serde_json::from_slice(&body_bytes).unwrap();
+
+        assert_eq!(items.len(), 3);
+        assert_eq!(items[0].leaf_index, 1);
+        assert_eq!(items[1].leaf_index, 2);
+        assert_eq!(items[2].leaf_index, 3);
+        assert!(items[0].encrypted_memo.starts_with("0x7777"));
     }
 }

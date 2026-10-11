@@ -335,6 +335,7 @@ async fn main() {
         .route("/api/tx-status", get(handle_tx_status))
         .route("/api/v1/mmr/proof/{leaf_index}", get(handle_mmr_proof))
         .route("/api/v1/mmr/tip", get(handle_mmr_tip))
+        .route("/api/v1/notes/sync", get(handle_notes_sync))
         .route("/api/x402/verify", post(handle_x402_verify))
         .route("/api/sign-share", post(handle_sign_share))
         .route("/api/leader/sign", post(handle_leader_sign))

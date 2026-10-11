@@ -357,6 +357,7 @@ async fn test_end_to_end_multi_wallet_spend_with_mmr_sync() {
         commitment: cm_a_hex.clone(),
         tx_hash: "0xtx_deposit_a".to_string(),
         block_number: 100,
+        encrypted_memo: Vec::new(),
         created_at: None,
     };
     db.atomic_append_mmr_leaves_and_state(&[leaf_0_record], &on_chain_mmr, 100)
@@ -384,6 +385,7 @@ async fn test_end_to_end_multi_wallet_spend_with_mmr_sync() {
         commitment: cm_b_hex.clone(),
         tx_hash: "0xtx_deposit_b".to_string(),
         block_number: 101,
+        encrypted_memo: Vec::new(),
         created_at: None,
     };
     db.atomic_append_mmr_leaves_and_state(&[leaf_1_record], &on_chain_mmr, 101)

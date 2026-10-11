@@ -6,8 +6,9 @@
 pub mod note_wallet;
 
 pub use note_wallet::{
-    recover_from_viewing_key, ConsolidationEstimate, ConsolidationRoundResult,
-    ConsolidationSummary, JoinSplitSpendProofPayload, NoteEpochStatus, NoteEvent, NoteStatus,
-    PrivateNoteWallet, PrivateNoteWitness, RecoveredNote, RecoveryResult, SelectedSpend,
-    SpendProofPayload, WalletError, WalletNote,
+    check_nullifiers_spent_batch, recover_from_viewing_key, recover_from_viewing_key_batch,
+    ConsolidationEstimate, ConsolidationRoundResult, ConsolidationSummary,
+    JoinSplitSpendProofPayload, NoteEpochStatus, NoteEvent, NoteStatus, PrivateNoteWallet,
+    PrivateNoteWitness, RecoveredNote, RecoveryResult, SelectedSpend, SpendProofPayload,
+    WalletError, WalletNote,
 };

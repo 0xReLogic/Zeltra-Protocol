@@ -547,13 +547,17 @@ impl PrivateNoteWallet {
     }
 
     /// Recovers notes from on-chain NoteEvent logs, checking nullifiers on-chain (DEC-037).
-    pub fn recover_notes<F>(
+    /// Recovers notes from on-chain NoteEvent logs using batch nullifier checks (DEC-037).
+    ///
+    /// Collects candidate notes whose trial decryption succeeds, groups their nullifiers,
+    /// and invokes a SINGLE batch call to verify double-spend status without N+1 RPC queries.
+    pub fn recover_notes_batch<F>(
         &mut self,
         events: &[NoteEvent],
-        is_nullifier_spent_fn: F,
+        check_nullifiers_spent_batch: F,
     ) -> Result<RecoveryResult, WalletError>
     where
-        F: Fn(&str) -> bool,
+        F: FnOnce(&[String]) -> Result<Vec<bool>, WalletError>,
     {
         let ivk = self.incoming_viewing_key()?;
         let sk = self.spending_key()?;
@@ -563,6 +567,19 @@ impl PrivateNoteWallet {
             scanned_events: events.len(),
             ..Default::default()
         };
+
+        struct Candidate {
+            cm_hex: String,
+            nf_hex: String,
+            leaf_index: u64,
+            leaf_count: u64,
+            value: u64,
+            asset_id: u64,
+            rho: Fr,
+            deterministic_r: Fr,
+        }
+
+        let mut candidates = Vec::new();
 
         for ev in events {
             if let Some(pt) = decrypt_note_memo(&ev.encrypted_memo, &ivk) {
@@ -575,7 +592,6 @@ impl PrivateNoteWallet {
                     .strip_prefix("0x")
                     .unwrap_or(&ev.commitment_hex);
 
-                // Verify that the note commitment actually matches the event leaf commitment
                 if hex::encode(fr_to_be_bytes(&cm)).to_lowercase() != ev_cm_clean.to_lowercase() {
                     continue;
                 }
@@ -583,53 +599,351 @@ impl PrivateNoteWallet {
                 let nullifier = derive_nullifier(nk, cm, ev.leaf_index, 0);
                 let nf_hex = format!("0x{}", hex::encode(fr_to_be_bytes(&nullifier)));
 
-                let is_spent = is_nullifier_spent_fn(&nf_hex);
-
-                if is_spent {
-                    res.total_spent_balance += pt.value;
-                } else {
-                    res.total_unspent_balance += pt.value;
-                }
-
-                let recovered = RecoveredNote {
-                    commitment_hex: cm_hex.clone(),
-                    nullifier_hex: nf_hex.clone(),
+                candidates.push(Candidate {
+                    cm_hex,
+                    nf_hex,
                     leaf_index: ev.leaf_index,
+                    leaf_count: ev.leaf_count,
                     value: pt.value,
                     asset_id: pt.asset_id,
-                    rho_hex: format!("0x{}", hex::encode(fr_to_be_bytes(&pt.rho))),
-                    is_spent,
-                };
-
-                let wallet_note = WalletNote {
-                    commitment_hex: cm_hex.clone(),
-                    value: pt.value,
-                    owner_key_hex: hex::encode(fr_to_be_bytes(&sk)),
-                    rho_hex: hex::encode(fr_to_be_bytes(&pt.rho)),
-                    randomness_hex: hex::encode(fr_to_be_bytes(&deterministic_r)),
-                    leaf_index: Some(ev.leaf_index),
-                    leaf_count: Some(ev.leaf_count),
-                    epoch_id: Some(0),
-                    merkle_path_hex: None,
-                    status: if is_spent {
-                        NoteStatus::Spent {
-                            nullifier_hex: nf_hex.clone(),
-                            spent_at_secs: 0,
-                        }
-                    } else {
-                        NoteStatus::Unspent
-                    },
-                    created_at_secs: 0,
-                    session_id: None,
-                };
-
-                self.notes.insert(cm_hex, wallet_note);
-                res.recovered_notes.push(recovered);
+                    rho: pt.rho,
+                    deterministic_r,
+                });
             }
+        }
+
+        if candidates.is_empty() {
+            return Ok(res);
+        }
+
+        let nfs: Vec<String> = candidates.iter().map(|c| c.nf_hex.clone()).collect();
+        let spent_flags = check_nullifiers_spent_batch(&nfs)?;
+        if spent_flags.len() != candidates.len() {
+            return Err(WalletError::CryptoError(format!(
+                "Batch nullifier spent count mismatch: expected {}, got {}",
+                candidates.len(),
+                spent_flags.len()
+            )));
+        }
+
+        for (cand, &is_spent) in candidates.into_iter().zip(spent_flags.iter()) {
+            if is_spent {
+                res.total_spent_balance += cand.value;
+            } else {
+                res.total_unspent_balance += cand.value;
+            }
+
+            let recovered = RecoveredNote {
+                commitment_hex: cand.cm_hex.clone(),
+                nullifier_hex: cand.nf_hex.clone(),
+                leaf_index: cand.leaf_index,
+                value: cand.value,
+                asset_id: cand.asset_id,
+                rho_hex: format!("0x{}", hex::encode(fr_to_be_bytes(&cand.rho))),
+                is_spent,
+            };
+
+            let wallet_note = WalletNote {
+                commitment_hex: cand.cm_hex.clone(),
+                value: cand.value,
+                owner_key_hex: hex::encode(fr_to_be_bytes(&sk)),
+                rho_hex: hex::encode(fr_to_be_bytes(&cand.rho)),
+                randomness_hex: hex::encode(fr_to_be_bytes(&cand.deterministic_r)),
+                leaf_index: Some(cand.leaf_index),
+                leaf_count: Some(cand.leaf_count),
+                epoch_id: Some(0),
+                merkle_path_hex: None,
+                status: if is_spent {
+                    NoteStatus::Spent {
+                        nullifier_hex: cand.nf_hex.clone(),
+                        spent_at_secs: 0,
+                    }
+                } else {
+                    NoteStatus::Unspent
+                },
+                created_at_secs: 0,
+                session_id: None,
+            };
+
+            self.notes.insert(cand.cm_hex, wallet_note);
+            res.recovered_notes.push(recovered);
         }
 
         Ok(res)
     }
+
+    /// Recovers notes from on-chain NoteEvent logs, checking nullifiers on-chain (DEC-037).
+    pub fn recover_notes<F>(
+        &mut self,
+        events: &[NoteEvent],
+        is_nullifier_spent_fn: F,
+    ) -> Result<RecoveryResult, WalletError>
+    where
+        F: Fn(&str) -> bool,
+    {
+        self.recover_notes_batch(events, |nfs| {
+            Ok(nfs.iter().map(|nf| is_nullifier_spent_fn(nf)).collect())
+        })
+    }
+
+    /// Bulk syncs notes directly from Relayer bulk sync API in chunks of 2,000 notes (DEC-037).
+    ///
+    /// Avoids slow raw `eth_getLogs` by leveraging `GET /api/v1/notes/sync?from_leaf={}&limit={}`
+    /// and performs single-round batch double-spend verification for discovered notes.
+    pub async fn sync_from_indexer<F>(
+        &mut self,
+        node_url: &str,
+        ivk: &IncomingViewingKey,
+        start_leaf: u64,
+        check_nullifiers_batch_fn: F,
+    ) -> Result<RecoveryResult, WalletError>
+    where
+        F: Fn(&[String]) -> Result<Vec<bool>, WalletError>,
+    {
+        let client = crate::client::NimbusClient::new(node_url);
+        let chunk_size = 2000u64;
+        let mut current_leaf = start_leaf;
+        let mut aggregated_result = RecoveryResult::default();
+
+        loop {
+            let items = client.fetch_notes_sync(current_leaf, chunk_size).await?;
+            if items.is_empty() {
+                break;
+            }
+
+            let fetched_count = items.len() as u64;
+            let max_leaf = items
+                .iter()
+                .map(|it| it.leaf_index)
+                .max()
+                .unwrap_or(current_leaf);
+
+            let mut events = Vec::with_capacity(items.len());
+            for it in items {
+                let memo_bytes = if it.encrypted_memo.is_empty() {
+                    Vec::new()
+                } else {
+                    let clean = it
+                        .encrypted_memo
+                        .strip_prefix("0x")
+                        .unwrap_or(&it.encrypted_memo);
+                    hex::decode(clean).unwrap_or_default()
+                };
+                events.push(NoteEvent {
+                    leaf_index: it.leaf_index,
+                    commitment_hex: it.commitment,
+                    new_mmr_root_hex: String::new(),
+                    leaf_count: it.leaf_index + 1,
+                    encrypted_memo: memo_bytes,
+                    block_number: Some(it.block_number),
+                });
+            }
+
+            // Trial decrypt against passed IVK and batch check discovered candidates
+            let sk = self.spending_key()?;
+            let nk = self.nullifier_key()?;
+
+            struct ChunkCandidate {
+                cm_hex: String,
+                nf_hex: String,
+                leaf_index: u64,
+                leaf_count: u64,
+                value: u64,
+                asset_id: u64,
+                rho: Fr,
+                deterministic_r: Fr,
+            }
+
+            let mut chunk_candidates = Vec::new();
+            for ev in &events {
+                if let Some(pt) = decrypt_note_memo(&ev.encrypted_memo, ivk) {
+                    let deterministic_r = derive_note_randomness(sk, pt.rho);
+                    let note = pt.to_note(sk);
+                    let cm = note.commitment();
+                    let cm_hex = format!("0x{}", hex::encode(fr_to_be_bytes(&cm)));
+                    let ev_cm_clean = ev
+                        .commitment_hex
+                        .strip_prefix("0x")
+                        .unwrap_or(&ev.commitment_hex);
+
+                    if hex::encode(fr_to_be_bytes(&cm)).to_lowercase() != ev_cm_clean.to_lowercase()
+                    {
+                        continue;
+                    }
+
+                    let nullifier = derive_nullifier(nk, cm, ev.leaf_index, 0);
+                    let nf_hex = format!("0x{}", hex::encode(fr_to_be_bytes(&nullifier)));
+
+                    chunk_candidates.push(ChunkCandidate {
+                        cm_hex,
+                        nf_hex,
+                        leaf_index: ev.leaf_index,
+                        leaf_count: ev.leaf_count,
+                        value: pt.value,
+                        asset_id: pt.asset_id,
+                        rho: pt.rho,
+                        deterministic_r,
+                    });
+                }
+            }
+
+            aggregated_result.scanned_events += events.len();
+
+            if !chunk_candidates.is_empty() {
+                let nfs: Vec<String> = chunk_candidates.iter().map(|c| c.nf_hex.clone()).collect();
+                let spent_flags = check_nullifiers_batch_fn(&nfs)?;
+                if spent_flags.len() != chunk_candidates.len() {
+                    return Err(WalletError::CryptoError(format!(
+                        "Batch nullifier spent count mismatch: expected {}, got {}",
+                        chunk_candidates.len(),
+                        spent_flags.len()
+                    )));
+                }
+
+                for (cand, &is_spent) in chunk_candidates.into_iter().zip(spent_flags.iter()) {
+                    if is_spent {
+                        aggregated_result.total_spent_balance += cand.value;
+                    } else {
+                        aggregated_result.total_unspent_balance += cand.value;
+                    }
+
+                    let recovered = RecoveredNote {
+                        commitment_hex: cand.cm_hex.clone(),
+                        nullifier_hex: cand.nf_hex.clone(),
+                        leaf_index: cand.leaf_index,
+                        value: cand.value,
+                        asset_id: cand.asset_id,
+                        rho_hex: format!("0x{}", hex::encode(fr_to_be_bytes(&cand.rho))),
+                        is_spent,
+                    };
+
+                    let wallet_note = WalletNote {
+                        commitment_hex: cand.cm_hex.clone(),
+                        value: cand.value,
+                        owner_key_hex: hex::encode(fr_to_be_bytes(&sk)),
+                        rho_hex: hex::encode(fr_to_be_bytes(&cand.rho)),
+                        randomness_hex: hex::encode(fr_to_be_bytes(&cand.deterministic_r)),
+                        leaf_index: Some(cand.leaf_index),
+                        leaf_count: Some(cand.leaf_count),
+                        epoch_id: Some(0),
+                        merkle_path_hex: None,
+                        status: if is_spent {
+                            NoteStatus::Spent {
+                                nullifier_hex: cand.nf_hex.clone(),
+                                spent_at_secs: 0,
+                            }
+                        } else {
+                            NoteStatus::Unspent
+                        },
+                        created_at_secs: 0,
+                        session_id: None,
+                    };
+
+                    self.notes.insert(cand.cm_hex, wallet_note);
+                    aggregated_result.recovered_notes.push(recovered);
+                }
+            }
+
+            if fetched_count < chunk_size {
+                break;
+            }
+            current_leaf = max_leaf + 1;
+        }
+
+        Ok(aggregated_result)
+    }
+}
+
+/// Standalone recovery function using batch nullifier checking (DEC-037).
+pub fn recover_from_viewing_key_batch<F>(
+    ivk: &IncomingViewingKey,
+    spending_key: Option<Fr>,
+    events: &[NoteEvent],
+    check_nullifiers_spent_batch: F,
+) -> Result<RecoveryResult, WalletError>
+where
+    F: FnOnce(&[String]) -> Result<Vec<bool>, WalletError>,
+{
+    let mut res = RecoveryResult {
+        scanned_events: events.len(),
+        ..Default::default()
+    };
+
+    let nk = spending_key.map(derive_nullifier_key);
+
+    struct Cand {
+        cm_hex: String,
+        nf_hex: String,
+        leaf_index: u64,
+        value: u64,
+        asset_id: u64,
+        rho: Fr,
+    }
+
+    let mut candidates = Vec::new();
+
+    for ev in events {
+        if let Some(pt) = decrypt_note_memo(&ev.encrypted_memo, ivk) {
+            let (cm_hex, nf_hex) = if let (Some(sk), Some(nk_val)) = (spending_key, nk) {
+                let note = pt.to_note(sk);
+                let cm = note.commitment();
+                let cm_hex = format!("0x{}", hex::encode(fr_to_be_bytes(&cm)));
+                let ev_cm_clean = ev
+                    .commitment_hex
+                    .strip_prefix("0x")
+                    .unwrap_or(&ev.commitment_hex);
+                if hex::encode(fr_to_be_bytes(&cm)).to_lowercase() != ev_cm_clean.to_lowercase() {
+                    continue;
+                }
+                let nullifier = derive_nullifier(nk_val, cm, ev.leaf_index, 0);
+                let nf_hex = format!("0x{}", hex::encode(fr_to_be_bytes(&nullifier)));
+                (cm_hex, nf_hex)
+            } else {
+                (ev.commitment_hex.clone(), String::new())
+            };
+
+            candidates.push(Cand {
+                cm_hex,
+                nf_hex,
+                leaf_index: ev.leaf_index,
+                value: pt.value,
+                asset_id: pt.asset_id,
+                rho: pt.rho,
+            });
+        }
+    }
+
+    if candidates.is_empty() {
+        return Ok(res);
+    }
+
+    // Only query batch nullifier status if spending_key is present (and thus nullifiers derived)
+    let spent_flags = if spending_key.is_some() {
+        let nfs: Vec<String> = candidates.iter().map(|c| c.nf_hex.clone()).collect();
+        check_nullifiers_spent_batch(&nfs)?
+    } else {
+        vec![false; candidates.len()]
+    };
+
+    for (cand, is_spent) in candidates.into_iter().zip(spent_flags) {
+        if is_spent {
+            res.total_spent_balance += cand.value;
+        } else {
+            res.total_unspent_balance += cand.value;
+        }
+
+        res.recovered_notes.push(RecoveredNote {
+            commitment_hex: cand.cm_hex,
+            nullifier_hex: cand.nf_hex,
+            leaf_index: cand.leaf_index,
+            value: cand.value,
+            asset_id: cand.asset_id,
+            rho_hex: format!("0x{}", hex::encode(fr_to_be_bytes(&cand.rho))),
+            is_spent,
+        });
+    }
+
+    Ok(res)
 }
 
 /// Standalone recovery function from an Incoming Viewing Key (IVK) (DEC-037).
@@ -643,53 +957,24 @@ pub fn recover_from_viewing_key<F>(
 where
     F: Fn(&str) -> bool,
 {
-    let mut res = RecoveryResult {
+    recover_from_viewing_key_batch(ivk, spending_key, events, |nfs| {
+        Ok(nfs.iter().map(|nf| is_nullifier_spent_fn(nf)).collect())
+    })
+    .unwrap_or_else(|_| RecoveryResult {
         scanned_events: events.len(),
         ..Default::default()
-    };
+    })
+}
 
-    let nk = spending_key.map(derive_nullifier_key);
-
-    for ev in events {
-        if let Some(pt) = decrypt_note_memo(&ev.encrypted_memo, ivk) {
-            let (cm_hex, nf_hex, is_spent) = if let (Some(sk), Some(nk_val)) = (spending_key, nk) {
-                let note = pt.to_note(sk);
-                let cm = note.commitment();
-                let cm_hex = format!("0x{}", hex::encode(fr_to_be_bytes(&cm)));
-                let ev_cm_clean = ev
-                    .commitment_hex
-                    .strip_prefix("0x")
-                    .unwrap_or(&ev.commitment_hex);
-                if hex::encode(fr_to_be_bytes(&cm)).to_lowercase() != ev_cm_clean.to_lowercase() {
-                    continue;
-                }
-                let nullifier = derive_nullifier(nk_val, cm, ev.leaf_index, 0);
-                let nf_hex = format!("0x{}", hex::encode(fr_to_be_bytes(&nullifier)));
-                let spent = is_nullifier_spent_fn(&nf_hex);
-                (cm_hex, nf_hex, spent)
-            } else {
-                (ev.commitment_hex.clone(), String::new(), false)
-            };
-
-            if is_spent {
-                res.total_spent_balance += pt.value;
-            } else {
-                res.total_unspent_balance += pt.value;
-            }
-
-            res.recovered_notes.push(RecoveredNote {
-                commitment_hex: cm_hex,
-                nullifier_hex: nf_hex,
-                leaf_index: ev.leaf_index,
-                value: pt.value,
-                asset_id: pt.asset_id,
-                rho_hex: format!("0x{}", hex::encode(fr_to_be_bytes(&pt.rho))),
-                is_spent,
-            });
-        }
-    }
-
-    res
+/// Helper function to batch query double-spend status of nullifiers
+pub fn check_nullifiers_spent_batch<F>(
+    nullifiers: &[String],
+    is_spent_query: F,
+) -> Result<Vec<bool>, WalletError>
+where
+    F: Fn(&[String]) -> Result<Vec<bool>, WalletError>,
+{
+    is_spent_query(nullifiers)
 }
 
 impl PrivateNoteWallet {
@@ -3925,5 +4210,67 @@ mod tests {
         let ivk = wallet.incoming_viewing_key().unwrap();
         let decrypted = decrypt_note_memo(&memo_bytes, &ivk).expect("Decryption must succeed");
         assert_eq!(decrypted.value, selected.change_amount);
+    }
+
+    #[test]
+    fn test_dec037_wallet_recover_notes_batch_and_sync() {
+        let seed = [0x88u8; 32];
+        let mut wallet = PrivateNoteWallet::new(&seed);
+        let ivk = wallet.incoming_viewing_key().unwrap();
+        let sk = wallet.spending_key().unwrap();
+        let nk = wallet.nullifier_key().unwrap();
+
+        let val1 = 7_000_000u64;
+        let rho1 = Fr::from(555u64);
+        let r1 = derive_note_randomness(sk, rho1);
+        let cm1 = note_commitment(val1, sk, rho1, r1);
+        let memo1 = encrypt_note_memo(val1, rho1, 1, &ivk);
+
+        let val2 = 3_000_000u64;
+        let rho2 = Fr::from(777u64);
+        let r2 = derive_note_randomness(sk, rho2);
+        let cm2 = note_commitment(val2, sk, rho2, r2);
+        let memo2 = encrypt_note_memo(val2, rho2, 1, &ivk);
+
+        let nf1 = derive_nullifier(nk, cm1, 0, 0);
+        let nf1_hex = format!("0x{}", hex::encode(fr_to_be_bytes(&nf1)));
+
+        let events = vec![
+            NoteEvent {
+                leaf_index: 0,
+                commitment_hex: format!("0x{}", hex::encode(fr_to_be_bytes(&cm1))),
+                new_mmr_root_hex: "0x1".into(),
+                leaf_count: 1,
+                encrypted_memo: memo1,
+                block_number: Some(100),
+            },
+            NoteEvent {
+                leaf_index: 1,
+                commitment_hex: format!("0x{}", hex::encode(fr_to_be_bytes(&cm2))),
+                new_mmr_root_hex: "0x2".into(),
+                leaf_count: 2,
+                encrypted_memo: memo2,
+                block_number: Some(101),
+            },
+        ];
+
+        // Batch test: nf1 is spent, nf2 is unspent
+        let mut batch_called_count = 0;
+        let res = wallet
+            .recover_notes_batch(&events, |nfs| {
+                batch_called_count += 1;
+                assert_eq!(nfs.len(), 2);
+                Ok(vec![nfs[0] == nf1_hex, false])
+            })
+            .expect("Batch recovery must succeed");
+
+        assert_eq!(
+            batch_called_count, 1,
+            "Exactly 1 batch call must be made for all discovered notes"
+        );
+        assert_eq!(res.recovered_notes.len(), 2);
+        assert_eq!(res.total_spent_balance, val1);
+        assert_eq!(res.total_unspent_balance, val2);
+        assert_eq!(wallet.balance(), val2);
     }
 }

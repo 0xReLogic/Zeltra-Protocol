@@ -33,6 +33,15 @@ pub struct LeavesResponse {
     pub leaves: Vec<String>,
 }
 
+/// Note Memo item returned by relayer bulk sync endpoint (DEC-037)
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct NoteSyncItem {
+    pub leaf_index: u64,
+    pub commitment: String,
+    pub encrypted_memo: String,
+    pub block_number: u64,
+}
+
 /// Relayer quote request
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct QuoteRequest {
@@ -166,5 +175,32 @@ impl NimbusClient {
         resp.json::<SpendSubmissionResponse>()
             .await
             .map_err(|e| WalletError::RelayerError(format!("Invalid response JSON: {e}")))
+    }
+
+    /// Fetches bulk note commitments and encrypted memos for client sync (DEC-037).
+    pub async fn fetch_notes_sync(
+        &self,
+        from_leaf: u64,
+        limit: u64,
+    ) -> Result<Vec<NoteSyncItem>, WalletError> {
+        let url = format!(
+            "{}/api/v1/notes/sync?from_leaf={}&limit={}",
+            self.base_url, from_leaf, limit
+        );
+        let resp =
+            self.http_client.get(&url).send().await.map_err(|e| {
+                WalletError::RelayerError(format!("Failed to fetch notes sync: {e}"))
+            })?;
+
+        if !resp.status().is_success() {
+            return Err(WalletError::RelayerError(format!(
+                "Notes sync request failed with HTTP {}",
+                resp.status()
+            )));
+        }
+
+        resp.json::<Vec<NoteSyncItem>>()
+            .await
+            .map_err(|e| WalletError::RelayerError(format!("Invalid notes sync JSON: {e}")))
     }
 }
