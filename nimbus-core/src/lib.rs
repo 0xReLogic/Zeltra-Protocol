@@ -73,15 +73,14 @@ pub use poseidon::{
 
 // Re-export Private Note V1 (DEC-016A & DEC-032 & DEC-035A & DEC-035B)
 pub use note::{
-    combine_limbs_to_quote_hash, compute_binding_commitment, compute_empty_hashes,
-    compute_merkle_root, compute_scope_hash, derive_joinsplit_dummy_nullifier,
-    derive_joinsplit_nullifier, derive_nullifier, derive_nullifier_epoch, derive_nullifier_key,
-    derive_nullifier_v1, domain_binding_v1, domain_dummy_nullifier, domain_initial_note,
-    domain_merkle_node, domain_mmr_bag, domain_note_commitment, domain_nullifier,
-    domain_quote_binding, domain_scope_v1, fr_from_be_bytes, fr_to_be_bytes, merkle_append,
-    merkle_hash, note_commitment, split_quote_hash_to_limbs, verify_merkle_proof,
+    combine_limbs_to_quote_hash, compute_binding_commitment, compute_scope_hash,
+    derive_joinsplit_dummy_nullifier, derive_joinsplit_nullifier, derive_nullifier,
+    derive_nullifier_epoch, derive_nullifier_key, derive_nullifier_v1, domain_binding_v1,
+    domain_dummy_nullifier, domain_initial_note, domain_merkle_node, domain_mmr_bag,
+    domain_note_commitment, domain_nullifier, domain_quote_binding, domain_scope_v1,
+    fr_from_be_bytes, fr_to_be_bytes, merkle_hash, note_commitment, split_quote_hash_to_limbs,
     verify_value_conservation, MMRProof, MerkleMountainRange, PrivateNoteV1, DOMAIN_BINDING_V1_HEX,
-    DOMAIN_MMR_BAG_BYTES, DOMAIN_SCOPE_V1_HEX, MERKLE_TREE_DEPTH,
+    DOMAIN_MMR_BAG_BYTES, DOMAIN_SCOPE_V1_HEX,
 };
 
 // Re-export accounting state machine (DEC-016A Gate B)

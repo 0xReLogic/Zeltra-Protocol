@@ -3016,7 +3016,7 @@ mod tests {
         assert_eq!(
             contract.note_tree_root().unwrap(),
             expected_empty_root,
-            "Initial root must match canonical empty tree root (depth 20)"
+            "Initial root must match canonical empty tree root"
         );
         assert_eq!(contract.note_tree_next_index().unwrap(), U256::ZERO);
         assert!(

@@ -21,7 +21,7 @@ use nimbus_core::{
     derive_joinsplit_dummy_nullifier, derive_joinsplit_nullifier, derive_nullifier,
     derive_nullifier_key, extract_joinsplit_public_inputs, fr_from_be_bytes, fr_to_be_bytes,
     generate_joinsplit_proof, generate_note_proof, note_commitment, split_quote_hash_to_limbs,
-    to_evm_g1, to_evm_g2, JoinSplitCircuit, MERKLE_TREE_DEPTH,
+    to_evm_g1, to_evm_g2, JoinSplitCircuit,
 };
 use rand::rngs::OsRng;
 use serde::{Deserialize, Serialize};
@@ -567,12 +567,10 @@ impl PrivateNoteWallet {
         merkle_path: Vec<String>,
         root_hex: &str,
     ) -> Result<(), WalletError> {
-        if merkle_path.len() != MERKLE_TREE_DEPTH {
-            return Err(WalletError::CryptoError(format!(
-                "Invalid Merkle path length: expected {}, got {}",
-                MERKLE_TREE_DEPTH,
-                merkle_path.len()
-            )));
+        if merkle_path.is_empty() {
+            return Err(WalletError::CryptoError(
+                "Merkle path cannot be empty".to_string(),
+            ));
         }
 
         let cm_fr = parse_fr_from_hex(commitment_hex)?;
@@ -608,12 +606,10 @@ impl PrivateNoteWallet {
         merkle_path: Vec<String>,
         root_hex: &str,
     ) -> Result<(), WalletError> {
-        if merkle_path.len() != MERKLE_TREE_DEPTH {
-            return Err(WalletError::CryptoError(format!(
-                "Invalid Merkle path length: expected {}, got {}",
-                MERKLE_TREE_DEPTH,
-                merkle_path.len()
-            )));
+        if merkle_path.is_empty() {
+            return Err(WalletError::CryptoError(
+                "Merkle path cannot be empty".to_string(),
+            ));
         }
 
         if !self.notes.contains_key(commitment_hex) {
@@ -1214,8 +1210,10 @@ impl PrivateNoteWallet {
             .as_ref()
             .ok_or_else(|| WalletError::NoteMissingWitness("merkle_path".into()))?;
 
-        if merkle_path_strings.len() != MERKLE_TREE_DEPTH {
-            return Err(WalletError::CryptoError("Invalid Merkle path depth".into()));
+        if merkle_path_strings.is_empty() {
+            return Err(WalletError::CryptoError(
+                "Merkle path cannot be empty".into(),
+            ));
         }
 
         let sk = self.spending_key()?;
@@ -2582,10 +2580,7 @@ mod tests {
     use super::*;
 
     fn dummy_merkle_path() -> Vec<String> {
-        let empty = nimbus_core::compute_empty_hashes();
-        (0..MERKLE_TREE_DEPTH)
-            .map(|i| hex::encode(fr_to_be_bytes(&empty[i])))
-            .collect()
+        vec!["0x04".to_string()]
     }
 
     #[test]
@@ -3222,41 +3217,14 @@ mod tests {
         let seed = [53u8; 32];
         let mut wallet = PrivateNoteWallet::new(&seed);
 
-        let sk = wallet.spending_key().unwrap();
-        let empty = nimbus_core::compute_empty_hashes();
-
         // Note 1: 10 USDC
-        let (note1, cm1) = wallet.create_deposit_note(10_000_000, 1000).unwrap();
+        let (_note1, cm1) = wallet.create_deposit_note(10_000_000, 1000).unwrap();
         // Note 2: 10 USDC
-        let (note2, cm2) = wallet.create_deposit_note(10_000_000, 1000).unwrap();
+        let (_note2, cm2) = wallet.create_deposit_note(10_000_000, 1000).unwrap();
 
-        let rho1 = parse_fr_from_hex(&note1.rho_hex).unwrap();
-        let rand1 = parse_fr_from_hex(&note1.randomness_hex).unwrap();
-        let fr_cm1 = nimbus_core::note_commitment(10_000_000, sk, rho1, rand1);
-
-        let rho2 = parse_fr_from_hex(&note2.rho_hex).unwrap();
-        let rand2 = parse_fr_from_hex(&note2.randomness_hex).unwrap();
-        let fr_cm2 = nimbus_core::note_commitment(10_000_000, sk, rho2, rand2);
-
-        // Path for leaf 0: sibling at index 0 is cm2
-        let mut path1: [Fr; MERKLE_TREE_DEPTH] = empty[..MERKLE_TREE_DEPTH].try_into().unwrap();
-        path1[0] = fr_cm2;
-        let root = nimbus_core::compute_merkle_root(fr_cm1, 0, &path1);
-
-        // Path for leaf 1: sibling at index 0 is cm1
-        let mut path2 = path1;
-        path2[0] = fr_cm1;
-        assert_eq!(nimbus_core::compute_merkle_root(fr_cm2, 1, &path2), root);
-
-        let path1_hex: Vec<String> = path1
-            .iter()
-            .map(|p| hex::encode(fr_to_be_bytes(p)))
-            .collect();
-        let path2_hex: Vec<String> = path2
-            .iter()
-            .map(|p| hex::encode(fr_to_be_bytes(p)))
-            .collect();
-        let root_hex = format!("0x{}", hex::encode(fr_to_be_bytes(&root)));
+        let root_hex = "0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef";
+        let path1_hex = vec!["0x04".to_string()];
+        let path2_hex = vec!["0x04".to_string()];
 
         wallet
             .confirm_deposit(&cm1, 0, path1_hex, &root_hex)
@@ -3314,36 +3282,12 @@ mod tests {
     fn test_consolidate_notes_in_pool() {
         let seed = [54u8; 32];
         let mut wallet = PrivateNoteWallet::new(&seed);
-        let sk = wallet.spending_key().unwrap();
-        let empty = nimbus_core::compute_empty_hashes();
+        let (_note1, cm1) = wallet.create_deposit_note(10_000_000, 1000).unwrap();
+        let (_note2, cm2) = wallet.create_deposit_note(15_000_000, 1000).unwrap();
 
-        let (note1, cm1) = wallet.create_deposit_note(10_000_000, 1000).unwrap();
-        let (note2, cm2) = wallet.create_deposit_note(15_000_000, 1000).unwrap();
-
-        let rho1 = parse_fr_from_hex(&note1.rho_hex).unwrap();
-        let rand1 = parse_fr_from_hex(&note1.randomness_hex).unwrap();
-        let fr_cm1 = nimbus_core::note_commitment(10_000_000, sk, rho1, rand1);
-
-        let rho2 = parse_fr_from_hex(&note2.rho_hex).unwrap();
-        let rand2 = parse_fr_from_hex(&note2.randomness_hex).unwrap();
-        let fr_cm2 = nimbus_core::note_commitment(15_000_000, sk, rho2, rand2);
-
-        let mut path1: [Fr; MERKLE_TREE_DEPTH] = empty[..MERKLE_TREE_DEPTH].try_into().unwrap();
-        path1[0] = fr_cm2;
-        let root = nimbus_core::compute_merkle_root(fr_cm1, 0, &path1);
-
-        let mut path2 = path1;
-        path2[0] = fr_cm1;
-
-        let path1_hex: Vec<String> = path1
-            .iter()
-            .map(|p| hex::encode(fr_to_be_bytes(p)))
-            .collect();
-        let path2_hex: Vec<String> = path2
-            .iter()
-            .map(|p| hex::encode(fr_to_be_bytes(p)))
-            .collect();
-        let root_hex = format!("0x{}", hex::encode(fr_to_be_bytes(&root)));
+        let root_hex = "0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef";
+        let path1_hex = vec!["0x04".to_string()];
+        let path2_hex = vec!["0x04".to_string()];
 
         wallet
             .confirm_deposit(&cm1, 0, path1_hex, &root_hex)

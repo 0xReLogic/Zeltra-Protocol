@@ -1,54 +1,7 @@
 //! Precomputed Poseidon-W5 constants and Merkle tree parameters for Stylus contract
 //! Generated automatically from nimbus-core canonical parameters (DEC-016A)
 
-pub const MERKLE_TREE_DEPTH: usize = 20;
 pub const ROOT_HISTORY_SIZE: usize = 100;
-
-/// Canonical empty subtree hashes for levels 0..=20 (big-endian 32-byte EVM representation)
-pub const EMPTY_SUBTREE_HASHES_BYTES: [[u8; 32]; 21] = [
-    // Level 0
-    alloy_primitives::hex!("0000000000000000000000000000000000000000000000000000000000000000"),
-    // Level 1
-    alloy_primitives::hex!("59d5b840624b9ff3cb5b3b2c3ad9a1a091178055360dc7f343df59138d805e31"),
-    // Level 2
-    alloy_primitives::hex!("188d3ef3bd2c69b9f197f39899a49e3961e217123b162d0b30d3d2cb0f6a3dfa"),
-    // Level 3
-    alloy_primitives::hex!("07c0481cffecc1021957a4f6887142d2bee56b7094b981d561deed9df542825d"),
-    // Level 4
-    alloy_primitives::hex!("0cbd0158de47658987e92761e1a205a979291487be590bd248ba591f928a8c28"),
-    // Level 5
-    alloy_primitives::hex!("39436f2bb4bffc735675449250e4476e714f6338afadcbfac235171bd37241fa"),
-    // Level 6
-    alloy_primitives::hex!("1a90e1095bfd7197b5347a9eece9187a3a4557c0d8f86c670228410b007c57b7"),
-    // Level 7
-    alloy_primitives::hex!("20566df512c659c9c914bdc1bc05541c7f5a1c9aee02749b2fab0e71a2abe48e"),
-    // Level 8
-    alloy_primitives::hex!("5c8f5d217b807d7ab00f65d27efc29aee4f34d3ecbe8f75dd874cd4860e39f00"),
-    // Level 9
-    alloy_primitives::hex!("5222a8f042e09321e6fd59cb827de32e5df9b6acf7888cba64e441fa0360fd12"),
-    // Level 10
-    alloy_primitives::hex!("3fc4100e992024acf6023eea2da40748b438b8927646737b2a4fea273ea3e097"),
-    // Level 11
-    alloy_primitives::hex!("549221c1d4f0ae2b205dd73c5fc5566f9c48f8b0359c61b99c7b1b266c700ec9"),
-    // Level 12
-    alloy_primitives::hex!("4859a4552aed13b074f31ed366b7ffccf41358464a4623b59c5b61c23312b31f"),
-    // Level 13
-    alloy_primitives::hex!("168a673ddc1b0d89a5bb20c58c72d49eaaa46697277e4f9f2e23ce198bfaad92"),
-    // Level 14
-    alloy_primitives::hex!("5ac6e44bdf528670936ce433a5e7e94ddda1351091db195819b8ca81e55b3af9"),
-    // Level 15
-    alloy_primitives::hex!("117db7a5f13a12e4a88ebfaafc0b143d552f1102571e53a79f04acd8db64b9a4"),
-    // Level 16
-    alloy_primitives::hex!("4caef736639f9564a2e330f80c63c6e78847b1934f1383ad2e53c10409474c2c"),
-    // Level 17
-    alloy_primitives::hex!("4309ed8cd6c35969742455aef799bfe226d882fd9e511c0890b94d2f71ce84cc"),
-    // Level 18
-    alloy_primitives::hex!("66f530cea013c39cbf46154c808743f00b4ee9eed60f75e45a32f65b10591c5e"),
-    // Level 19
-    alloy_primitives::hex!("130602be40c36527e853d20ffd48317f63c9e58801128f451515097417b96cae"),
-    // Level 20
-    alloy_primitives::hex!("4e9a77b95958924d004a9841dfb0f92c8d70f99c54bc59da1fa53320c0aaa6d2"),
-];
 
 /// Domain separator for Merkle internal node (big-endian 32-byte)
 pub const DOMAIN_MERKLE_NODE_BYTES: [u8; 32] =
@@ -58,7 +11,7 @@ pub const DOMAIN_MERKLE_NODE_BYTES: [u8; 32] =
 pub const DOMAIN_MMR_BAG_BYTES: [u8; 32] =
     alloy_primitives::hex!("194a8f9c1e7d2358b901fc843329107ba8921dfbb3024859aef029147da290bf");
 
-/// Canonical Empty Tree Root (Depth 20, big-endian 32-byte)
+/// Canonical Empty Tree Root (big-endian 32-byte)
 pub const EMPTY_TREE_ROOT_BYTES: [u8; 32] =
     alloy_primitives::hex!("4e9a77b95958924d004a9841dfb0f92c8d70f99c54bc59da1fa53320c0aaa6d2");
 

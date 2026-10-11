@@ -240,90 +240,12 @@ pub fn derive_joinsplit_dummy_nullifier(nullifier_key: Fr, session_nonce: Fr) ->
 // Incremental Merkle Tree Helpers
 // ═══════════════════════════════════════════════════════════════════════════
 
-/// Merkle tree depth. Supports 2^20 = 1,048,576 leaves.
-pub const MERKLE_TREE_DEPTH: usize = 20;
-
 /// Hash two child nodes to produce a parent node.
 ///
 /// parent = Poseidon_W5(left, right, 0, 0; DOMAIN_MERKLE_NODE_V1)
 pub fn merkle_hash(left: Fr, right: Fr) -> Fr {
     let inputs = [left, right, Fr::from(0u64), Fr::from(0u64)];
     native_poseidon_w5(&inputs, domain_merkle_node())
-}
-
-/// Compute the empty subtree hashes for all levels.
-///
-/// EMPTY[0] = Fr(0)  (empty leaf)
-/// EMPTY[i] = merkle_hash(EMPTY[i-1], EMPTY[i-1])
-///
-/// Returns an array of 21 elements (levels 0 through 20).
-pub fn compute_empty_hashes() -> [Fr; MERKLE_TREE_DEPTH + 1] {
-    let mut hashes = [Fr::from(0u64); MERKLE_TREE_DEPTH + 1];
-    for i in 1..=MERKLE_TREE_DEPTH {
-        hashes[i] = merkle_hash(hashes[i - 1], hashes[i - 1]);
-    }
-    hashes
-}
-
-/// Compute the Merkle root given a leaf and its membership proof (sibling path).
-///
-/// `leaf_index` determines left/right ordering at each level:
-/// - Even index: leaf is left child
-/// - Odd index: leaf is right child
-pub fn compute_merkle_root(leaf: Fr, leaf_index: u64, siblings: &[Fr; MERKLE_TREE_DEPTH]) -> Fr {
-    let mut current = leaf;
-    let mut index = leaf_index;
-
-    for sibling in siblings.iter() {
-        current = if index.is_multiple_of(2) {
-            merkle_hash(current, *sibling)
-        } else {
-            merkle_hash(*sibling, current)
-        };
-        index /= 2;
-    }
-
-    current
-}
-
-/// Verify a Merkle membership proof.
-pub fn verify_merkle_proof(
-    root: Fr,
-    leaf: Fr,
-    leaf_index: u64,
-    siblings: &[Fr; MERKLE_TREE_DEPTH],
-) -> bool {
-    compute_merkle_root(leaf, leaf_index, siblings) == root
-}
-
-/// Append a leaf to the Merkle tree, updating the frontier.
-///
-/// The frontier stores the left-most hash at each level, enabling O(depth)
-/// append operations without storing the full tree.
-///
-/// Returns the new root after insertion.
-pub fn merkle_append(
-    frontier: &mut [Fr; MERKLE_TREE_DEPTH + 1],
-    next_index: u64,
-    leaf: Fr,
-    empty_hashes: &[Fr; MERKLE_TREE_DEPTH + 1],
-) -> Fr {
-    let mut current = leaf;
-    let mut index = next_index;
-
-    for level in 0..MERKLE_TREE_DEPTH {
-        if index.is_multiple_of(2) {
-            // Left child: store in frontier, sibling is empty
-            frontier[level] = current;
-            current = merkle_hash(current, empty_hashes[level]);
-        } else {
-            // Right child: sibling is stored frontier
-            current = merkle_hash(frontier[level], current);
-        }
-        index /= 2;
-    }
-
-    current
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -871,78 +793,6 @@ mod tests {
     }
 
     #[test]
-    fn test_merkle_empty_root() {
-        let empty = compute_empty_hashes();
-        // Root of empty tree at depth 20
-        let root = empty[MERKLE_TREE_DEPTH];
-        assert_ne!(root, Fr::from(0u64), "Empty tree root must not be zero");
-    }
-
-    #[test]
-    fn test_merkle_single_leaf() {
-        let empty = compute_empty_hashes();
-        let mut frontier = [Fr::from(0u64); MERKLE_TREE_DEPTH + 1];
-        let leaf = Fr::from(42u64);
-
-        let root = merkle_append(&mut frontier, 0, leaf, &empty);
-
-        // Verify: the root should be derivable from the leaf + empty siblings
-        let siblings: [Fr; MERKLE_TREE_DEPTH] = std::array::from_fn(|i| empty[i]);
-        let computed_root = compute_merkle_root(leaf, 0, &siblings);
-        assert_eq!(root, computed_root, "Merkle append and proof must agree");
-    }
-
-    #[test]
-    fn test_merkle_proof_valid() {
-        let empty = compute_empty_hashes();
-        let mut frontier = [Fr::from(0u64); MERKLE_TREE_DEPTH + 1];
-
-        // Insert 3 leaves
-        let leaves = [Fr::from(10u64), Fr::from(20u64), Fr::from(30u64)];
-        let mut roots = [Fr::from(0u64); 3];
-
-        for (i, &leaf) in leaves.iter().enumerate() {
-            roots[i] = merkle_append(&mut frontier, i as u64, leaf, &empty);
-        }
-
-        // Build proof for leaf at index 1 (after 3 insertions)
-        // After 3 insertions, the tree has leaves at indices 0, 1, 2
-        // For index 1, siblings are:
-        //   level 0: leaf[0] (sibling of leaf[1])
-        //   level 1+: depends on tree structure
-        // For simplicity, verify with the 2-leaf tree (after 2 insertions)
-        let mut frontier2 = [Fr::from(0u64); MERKLE_TREE_DEPTH + 1];
-        let _r0 = merkle_append(&mut frontier2, 0, leaves[0], &empty);
-        let r1 = merkle_append(&mut frontier2, 1, leaves[1], &empty);
-
-        // Proof for leaf[1]: sibling at level 0 is leaf[0], rest are empty
-        let mut siblings = [Fr::from(0u64); MERKLE_TREE_DEPTH];
-        siblings[0] = leaves[0]; // level 0 sibling
-        siblings[1..MERKLE_TREE_DEPTH].copy_from_slice(&empty[1..MERKLE_TREE_DEPTH]);
-
-        assert!(
-            verify_merkle_proof(r1, leaves[1], 1, &siblings),
-            "Valid Merkle proof must verify"
-        );
-    }
-
-    #[test]
-    fn test_merkle_proof_invalid_wrong_leaf() {
-        let empty = compute_empty_hashes();
-        let mut frontier = [Fr::from(0u64); MERKLE_TREE_DEPTH + 1];
-        let leaf = Fr::from(42u64);
-        let root = merkle_append(&mut frontier, 0, leaf, &empty);
-
-        let siblings: [Fr; MERKLE_TREE_DEPTH] = std::array::from_fn(|i| empty[i]);
-        let wrong_leaf = Fr::from(99u64);
-
-        assert!(
-            !verify_merkle_proof(root, wrong_leaf, 0, &siblings),
-            "Invalid leaf must not verify"
-        );
-    }
-
-    #[test]
     fn test_value_conservation_exact() {
         // Input: 100 USDC
         // Merchant: 5 USDC, Protocol fee: 0.0125 USDC, Exec fee: 0.023 USDC
@@ -1221,37 +1071,6 @@ mod tests {
     }
 
     #[test]
-    fn known_answer_merkle_single_insert() {
-        let empty = compute_empty_hashes();
-        let mut frontier = [Fr::from(0u64); MERKLE_TREE_DEPTH + 1];
-
-        let note = PrivateNoteV1::new(99_800_000, Fr::from(42u64), Fr::from(1u64), Fr::from(2u64));
-        let cm = note.commitment();
-        let root = merkle_append(&mut frontier, 0, cm, &empty);
-        let root_hex = hex::encode(fr_to_be_bytes(&root));
-
-        assert_eq!(
-            root_hex, "3ed6d45ee8da74b055fa37a13ec3459e9fa97db5f89d014fdb0e41013fb56bfd",
-            "Merkle root after 1 insert must match canonical DEC-016A KAV and stylus contract"
-        );
-
-        // Verify the root with a Merkle proof
-        let siblings: [Fr; MERKLE_TREE_DEPTH] = std::array::from_fn(|i| empty[i]);
-        assert!(
-            verify_merkle_proof(root, cm, 0, &siblings),
-            "Merkle proof must verify for single insert"
-        );
-
-        // Invalid sibling must reject proof
-        let mut corrupt_siblings = siblings;
-        corrupt_siblings[0] = Fr::from(999u64);
-        assert!(
-            !verify_merkle_proof(root, cm, 0, &corrupt_siblings),
-            "Corrupt sibling proof must be rejected"
-        );
-    }
-
-    #[test]
     fn known_answer_value_conservation_spend() {
         // DEC-028 Flat Fee Model:
         // Input note: 10_000_000 (10 USDC)
@@ -1289,17 +1108,6 @@ mod tests {
             exec_fee,
             &[change - 1],
         ));
-    }
-
-    #[test]
-    fn known_answer_empty_tree_root() {
-        let empty = compute_empty_hashes();
-        let root_hex = hex::encode(fr_to_be_bytes(&empty[MERKLE_TREE_DEPTH]));
-
-        assert_eq!(
-            root_hex, "4e9a77b95958924d004a9841dfb0f92c8d70f99c54bc59da1fa53320c0aaa6d2",
-            "Empty tree root must match canonical Stylus contract EMPTY_TREE_ROOT_BYTES"
-        );
     }
 
     #[test]

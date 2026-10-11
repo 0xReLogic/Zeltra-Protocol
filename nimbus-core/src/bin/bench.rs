@@ -162,14 +162,14 @@ fn main() {
         );
     }
 
-    // 8. Merkle Tree Root (Depth 20)
+    // 8. Dynamic Merkle Mountain Range (MMR - DEC-032)
     {
         use ark_bls12_381::Fr;
-        let leaf = Fr::from(999999999u64);
-        let siblings = [Fr::from(42u64); MERKLE_TREE_DEPTH];
+        let mut mmr = MerkleMountainRange::new();
         let start = Instant::now();
         for i in 0..ITERATIONS {
-            let _ = compute_merkle_root(leaf, i as u64, &siblings);
+            let leaf = Fr::from((i as u64) * 31 + 7);
+            let _ = mmr.append(leaf);
         }
         let elapsed = start.elapsed();
         let total_ms = elapsed.as_millis() as f64;
@@ -177,7 +177,7 @@ fn main() {
         let ops_per_sec = ITERATIONS as f64 / elapsed.as_secs_f64();
         println!(
             "{:<30} | {:<12.2} | {:<12.2} | {:<12.0}",
-            "Merkle Root (Depth 20)", total_ms, avg_us, ops_per_sec
+            "MMR Append + Root (O(1) cache)", total_ms, avg_us, ops_per_sec
         );
     }
 

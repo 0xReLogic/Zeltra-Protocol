@@ -15,9 +15,8 @@ use alloy_primitives::{FixedBytes, U256};
 use ark_bls12_381::Fr;
 
 use crate::poseidon_w5_constants::{
-    DOMAIN_MERKLE_NODE_BYTES, DOMAIN_MMR_BAG_BYTES, EMPTY_SUBTREE_HASHES_BYTES,
-    EMPTY_TREE_ROOT_BYTES, MERKLE_TREE_DEPTH, POSEIDON_W5_MDS_BYTES, POSEIDON_W5_RC_BYTES,
-    ROOT_HISTORY_SIZE,
+    DOMAIN_MERKLE_NODE_BYTES, DOMAIN_MMR_BAG_BYTES, EMPTY_TREE_ROOT_BYTES, POSEIDON_W5_MDS_BYTES,
+    POSEIDON_W5_RC_BYTES, ROOT_HISTORY_SIZE,
 };
 use crate::storage::Nimbus;
 use crate::types::{from_evm_scalar, to_evm_scalar};
@@ -109,20 +108,6 @@ pub fn load_mds() -> [[Fr; 5]; 5] {
         }
     }
     mds
-}
-
-/// Load canonical empty subtree hash for a given tree level
-pub fn load_empty_subtree_hash(level: usize) -> Fr {
-    from_evm_scalar(&EMPTY_SUBTREE_HASHES_BYTES[level]).expect("valid empty subtree hash")
-}
-
-/// Load all canonical empty subtree hashes for levels 0..=20 once into Fr elements
-pub fn load_all_empty_subtree_hashes() -> [Fr; 21] {
-    let mut arr = [Fr::from(0u64); 21];
-    for i in 0..21 {
-        arr[i] = from_evm_scalar(&EMPTY_SUBTREE_HASHES_BYTES[i]).expect("valid empty subtree hash");
-    }
-    arr
 }
 
 /// Load canonical domain separator for Merkle node hashing
