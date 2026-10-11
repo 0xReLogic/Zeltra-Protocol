@@ -86,6 +86,14 @@ Ref: [`DEC-036`](file:///workspaces/Zeltra-Protocol/research/decisions/DEC-036-u
 
 - [ ] WebAssembly / Browser packaging test runner untuk eksekusi sirkuit client-side secara non-blocking via Web Worker.
 
+### Gate H / DEC-037 — Note Encryption Memo & Viewing Key Recovery Protocol
+Ref: [`DEC-037`](file:///workspaces/Zeltra-Protocol/research/decisions/DEC-037-note-encryption-memo-and-viewing-key-recovery.md) *(Anti Device-Loss & Zero Gas Viewing Key Engine)*
+
+- [ ] **DEC-037 / Step 1 (Contracts):** Tambahkan parameter `encrypted_memo: Vec<u8>` pada event `NoteCommitmentAppended` di `merkle.rs` (zero state bloat, emit via receipt log, ~1.2k gas).
+- [ ] **DEC-037 / Step 2 (Core):** Implementasi `hkdf_expand` untuk `IncomingViewingKey (ivk)` & `OutcomingViewingKey (ovk)`, serta enkripsi memo compact ChaCha20-Poly1305 (80-96 bytes).
+- [ ] **DEC-037 / Step 3 (SDK):** Implementasi method `recover_wallet_from_viewing_key(rpc_url)` di `nimbus-sdk` (trial decryption engine lokal).
+- [ ] **DEC-037 / Step 4 (CLI):** Tambahkan command `nimbus-cli wallet recover --viewing-key ...` dan `nimbus-cli audit scan ...`.
+
 ---
 
 ## 4. Relayer & Node Settlement (`nimbus-node`)
