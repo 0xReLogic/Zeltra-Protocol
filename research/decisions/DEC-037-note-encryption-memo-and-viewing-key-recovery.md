@@ -85,3 +85,28 @@ Ketika user membuka browser baru:
 1. **Zero-Knowledge Preserved:** Relayer dan validator hanya melihat bytes acak terenkripsi di event log.
 2. **Deterministic Restorability:** Wallet dapat direkonstruksi 100% hanya dari Viewing Key dan on-chain logs.
 3. **No Storage State Bloat:** Encrypted memo tidak pernah disimpan di storage contract, hanya di receipt log event (zero state bloat).
+
+## References & Academic Citations
+1. **Zcash Protocol Specification (Version 2024.5.1 [NU5/Orchard]):**
+   - Section 4.19: *In-band Secret Distribution and Note Plaintexts*.
+   - Section 4.2: *Key Components (Spend Authorizing Key, Full Viewing Key, Incoming Viewing Key)*.
+   - Ref: D. Hopwood, S. Bowe, E. Taylor, N. Wilcox. Electric Coin Company, 2024.
+2. **Zcash Improvement Proposal 231 (ZIP 231):**
+   - *Memo Bundles: Decoupling Note Encryption from Memo Payloads & Mitigating Timing Side-Channels in Trial Decryption*.
+   - Ref: S. Bowe, D. Hopwood. Electric Coin Company, 2024. URL: https://zips.z.cash/zip-0231
+3. **Zcash Sapling Security Analysis & The "Faerie Gold" Post-Mortem:**
+   - *A Security Analysis of the Zcash Sapling Protocol: Spendability, Non-malleability, and Nullifier Uniqueness Proofs*.
+   - Ref: M. Maller, S. Bowe. IACR Cryptology ePrint Archive / QED-it Security Audit, 2018-2024.
+4. **Railgun Private Proof of Innocence (PPOI) Flaw & Retrospective Analysis:**
+   - *Private Proofs of Innocence: A Circuit Soundness Flaw in Dummy Note Classification*.
+   - Ref: ZKNOX Research Team, October 2026. URL: https://zknox.eth.limo/posts/2026/10/08/ppoi-dummybug.html
+5. **RFC 8439 / RFC 5869:**
+   - *ChaCha20 and Poly1305 for IETF Protocols* (AEAD Authenticated Encryption).
+   - *HMAC-based Extract-and-Expand Key Derivation Function (HKDF)*.
+   - Ref: Y. Nir, A. Langley. IETF, RFC 8439 (2018) & RFC 5869 (2010).
+6. **Zeltra Architecture Decisions:**
+   - [`DEC-016A: Private Note Specification & Cryptographic Invariants`](file:///workspaces/Zeltra-Protocol/research/decisions/DEC-016A-private-note-spec-freeze.md)
+   - [`DEC-026: Receiver-Enforced Modular ASP & Low-Cost Sanctions Screening`](file:///workspaces/Zeltra-Protocol/research/decisions/DEC-026-receiver-enforced-compliance-zero-cost-sanctions-filtering-relayer-protection.md)
+   - [`DEC-032: Merkle Mountain Range Commitment Accumulator`](file:///workspaces/Zeltra-Protocol/research/decisions/DEC-032-merkle-mountain-range-commitment-accumulator.md)
+   - [`DEC-036A: Universal 2-in-2-out JoinSplit R1CS Circuit Specification`](file:///workspaces/Zeltra-Protocol/research/decisions/DEC-036A-universal-2-in-2-out-joinsplit-r1cs-circuit-specification.md)
+
