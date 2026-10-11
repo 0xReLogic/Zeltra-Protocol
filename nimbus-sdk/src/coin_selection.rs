@@ -173,41 +173,73 @@ pub fn select_notes_stochastic_knapsack<'a>(
     }
 
     // Tier 3: 2-Note Combination via Stochastic Knapsack (v_i + v_j >= total_required)
+    // Optimized with sorting + two-pointer search (O(n log n) vs O(n²))
     let n = spendable.len();
-    let mut pair_candidates: Vec<(usize, usize, f64, u64)> = Vec::new(); // (i, j, cost, sum)
 
+    if n < 2 {
+        // Not enough notes for 2-note combination
+        return Err(WalletError::InsufficientBalance {
+            requested: total_required,
+            available: total_available,
+        });
+    }
+
+    // Sort spendable notes by value for two-pointer search
+    let mut sorted_indices: Vec<usize> = (0..n).collect();
+    sorted_indices.sort_by_key(|&i| spendable[i].value);
+
+    let mut best_pair: Option<(usize, usize, f64, u64)> = None; // (i, j, cost, sum)
+    let mut best_cost = f64::MAX;
     let mut rng = rand::thread_rng();
 
-    for i in 0..n {
-        for j in (i + 1)..n {
-            if let Some(sum) = spendable[i].value.checked_add(spendable[j].value) {
-                if sum >= total_required {
-                    let noise = if config.noise_sigma > 0.0 {
-                        rng.gen_range(0.0..config.noise_sigma)
-                    } else {
-                        0.0
-                    };
-                    let cost = evaluate_pair_cost(
-                        spendable[i].value,
-                        spendable[j].value,
-                        spendable[i].epoch(),
-                        spendable[j].epoch(),
-                        total_required,
-                        current_epoch,
-                        config,
-                        noise,
-                    );
-                    pair_candidates.push((i, j, cost, sum));
+    // Two-pointer search: start from ends and move inward
+    let mut left = 0;
+    let mut right = n - 1;
+
+    while left < right {
+        let i = sorted_indices[left];
+        let j = sorted_indices[right];
+
+        if let Some(sum) = spendable[i].value.checked_add(spendable[j].value) {
+            if sum >= total_required {
+                let noise = if config.noise_sigma > 0.0 {
+                    rng.gen_range(0.0..config.noise_sigma)
+                } else {
+                    0.0
+                };
+                let cost = evaluate_pair_cost(
+                    spendable[i].value,
+                    spendable[j].value,
+                    spendable[i].epoch(),
+                    spendable[j].epoch(),
+                    total_required,
+                    current_epoch,
+                    config,
+                    noise,
+                );
+
+                if cost < best_cost {
+                    best_cost = cost;
+                    best_pair = Some((i, j, cost, sum));
                 }
+
+                // Try smaller sum to find tighter fit
+                if right > left + 1 {
+                    right -= 1;
+                } else {
+                    break;
+                }
+            } else {
+                // Sum too small, increase left for larger sum
+                left += 1;
             }
+        } else {
+            // Overflow, skip this pair
+            left += 1;
         }
     }
 
-    if !pair_candidates.is_empty() {
-        // Choose the pair that minimizes the stochastic cost
-        pair_candidates.sort_by(|a, b| a.2.partial_cmp(&b.2).unwrap_or(std::cmp::Ordering::Equal));
-        let chosen = &pair_candidates[0];
-
+    if let Some(chosen) = best_pair {
         let note_1 = spendable[chosen.0];
         let note_2 = spendable[chosen.1];
         let sum = chosen.3;
