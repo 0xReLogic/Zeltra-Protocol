@@ -1948,6 +1948,85 @@ impl Database {
         .await?
     }
 
+    /// Check and insert dual nullifiers atomically in a single transaction (DEC-036C C2.1).
+    /// Both nullifiers must not exist, and nullifier_1 must not equal nullifier_2.
+    /// If either already exists, returns Ok(false) with no state changes.
+    pub async fn check_and_insert_dual_nullifiers(
+        &self,
+        nullifier_1: &str,
+        nullifier_2: &str,
+        tx_hash: Option<&str>,
+    ) -> Result<bool> {
+        if nullifier_1 == nullifier_2 {
+            return Ok(false);
+        }
+        let path = self.path.clone();
+        let nf1 = nullifier_1.to_string();
+        let nf2 = nullifier_2.to_string();
+        let tx_hash = tx_hash.map(|s| s.to_string());
+        let db_key = database_key()?;
+
+        task::spawn_blocking(move || -> Result<bool> {
+            let mut conn = open_connection(&path, &db_key)?;
+            let now = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)?
+                .as_secs() as i64;
+
+            let tx = conn.transaction()?;
+
+            let exists_1: Option<i64> = tx
+                .query_row(
+                    "SELECT 1 FROM nullifiers WHERE nullifier = ?",
+                    params![nf1],
+                    |row| row.get(0),
+                )
+                .optional()?;
+
+            let exists_2: Option<i64> = tx
+                .query_row(
+                    "SELECT 1 FROM nullifiers WHERE nullifier = ?",
+                    params![nf2],
+                    |row| row.get(0),
+                )
+                .optional()?;
+
+            if exists_1.is_some() || exists_2.is_some() {
+                return Ok(false);
+            }
+
+            tx.execute(
+                "INSERT INTO nullifiers (nullifier, spent_at, tx_hash) VALUES (?, ?, ?)",
+                params![nf1, now, tx_hash],
+            )?;
+            tx.execute(
+                "INSERT INTO nullifiers (nullifier, spent_at, tx_hash) VALUES (?, ?, ?)",
+                params![nf2, now, tx_hash],
+            )?;
+
+            tx.commit()?;
+            Ok(true)
+        })
+        .await?
+    }
+
+    /// Releases reserved nullifiers if downstream simulation, preflight, or broadcast fails (DEC-036C).
+    pub async fn release_nullifiers(&self, nullifier_1: &str, nullifier_2: &str) -> Result<()> {
+        let path = self.path.clone();
+        let nf1 = nullifier_1.to_string();
+        let nf2 = nullifier_2.to_string();
+        let db_key = database_key()?;
+
+        task::spawn_blocking(move || -> Result<()> {
+            let mut conn = open_connection(&path, &db_key)?;
+            let tx = conn.transaction()?;
+            tx.execute("DELETE FROM nullifiers WHERE nullifier = ?", params![nf1])?;
+            tx.execute("DELETE FROM nullifiers WHERE nullifier = ?", params![nf2])?;
+            tx.commit()?;
+            Ok(())
+        })
+        .await?
+    }
+
     /// Check if quote_id has been used and atomically insert it if not
     /// Returns true if successfully inserted (not used before), false if already exists
     pub async fn check_and_insert_quote_id(

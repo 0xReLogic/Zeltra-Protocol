@@ -228,6 +228,87 @@ pub struct PrivateNoteSpendResponse {
     pub estimated_gas_usdc: Option<f64>,
 }
 
+/// Request DTO for Universal 2-in-2-out JoinSplit Spend (DEC-036 / DEC-036C)
+#[derive(Clone, Serialize, Deserialize, Debug)]
+pub struct JoinSplitSpendRequest {
+    #[serde(alias = "session_id", default)]
+    pub session_id: Option<String>,
+    #[serde(alias = "input_commitment_1_hex", default)]
+    pub input_commitment_1: Option<String>,
+    #[serde(alias = "input_commitment_2_hex", default)]
+    pub input_commitment_2: Option<String>,
+    #[serde(alias = "input_nullifier_1_hex", alias = "nullifier_1")]
+    pub input_nullifier_1: String,
+    #[serde(alias = "input_nullifier_2_hex", alias = "nullifier_2")]
+    pub input_nullifier_2: String,
+    #[serde(alias = "note_root_hex")]
+    pub note_root: String,
+    #[serde(alias = "leaf_count_hex", default)]
+    pub leaf_count: Option<u64>,
+    #[serde(alias = "epoch_id_1", default)]
+    pub epoch_id_1: Option<u32>,
+    #[serde(alias = "epoch_id_2", default)]
+    pub epoch_id_2: Option<u32>,
+    #[serde(alias = "output_commitment_1_hex", alias = "output_cm_1", default)]
+    pub output_commitment_1: String,
+    #[serde(alias = "output_commitment_2_hex", alias = "output_cm_2", default)]
+    pub output_commitment_2: String,
+    #[serde(alias = "recipient_hex")]
+    pub recipient: String,
+    #[serde(default)]
+    pub merchant_amount: u64,
+    #[serde(default)]
+    pub protocol_fee: u64,
+    #[serde(default)]
+    pub execution_fee: u64,
+    #[serde(default)]
+    pub max_execution_fee: u64,
+    #[serde(alias = "quote_hash_hex", default)]
+    pub quote_hash: Option<String>,
+    #[serde(default)]
+    pub quote_signature: Option<String>,
+    #[serde(default)]
+    pub quote_id: Option<String>,
+    #[serde(default)]
+    pub user_address: Option<String>,
+    #[serde(default)]
+    pub expiry: Option<u64>,
+    #[serde(default)]
+    pub has_change_1: Option<serde_json::Value>,
+    #[serde(default)]
+    pub has_change_2: Option<serde_json::Value>,
+    #[serde(default)]
+    pub flags_packed: Option<u8>,
+    #[serde(alias = "is_rollover", default)]
+    pub is_rollover: Option<u64>,
+    #[serde(default)]
+    pub chain_id: Option<u64>,
+    #[serde(alias = "contract_address_hex", default)]
+    pub contract_address: Option<String>,
+    #[serde(alias = "proof_a_neg_hex")]
+    pub proof_a_neg: String,
+    #[serde(alias = "proof_b_hex")]
+    pub proof_b: String,
+    #[serde(alias = "proof_c_hex")]
+    pub proof_c: String,
+    #[serde(alias = "public_inputs_hex", default)]
+    pub public_inputs: Vec<String>,
+    #[serde(default)]
+    pub idempotency_key: Option<String>,
+}
+
+/// Response DTO for JoinSplit Spend (DEC-036C)
+#[derive(Clone, Serialize, Deserialize, Debug)]
+pub struct JoinSplitSpendResponse {
+    pub status: String,
+    pub message: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tx_hash: Option<String>,
+    pub queue_position: usize,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub estimated_gas_usdc: Option<f64>,
+}
+
 impl From<PrivateNoteSpendRequest> for SpendRequest {
     fn from(req: PrivateNoteSpendRequest) -> Self {
         let has_change_u64 = match req.has_change {

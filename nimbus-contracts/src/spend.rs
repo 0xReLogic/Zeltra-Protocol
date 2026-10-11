@@ -870,6 +870,280 @@ impl Nimbus {
 
         Ok(true)
     }
+
+    /// Executes a Universal 2-in-2-out JoinSplit private spend or consolidation (DEC-036 / DEC-036C).
+    pub(crate) fn _spend_joinsplit(
+        &mut self,
+        proof_a_neg: Bytes,
+        proof_b: Bytes,
+        proof_c: Bytes,
+        note_root: FixedBytes<32>,
+        leaf_count: U256,
+        nullifier_1: FixedBytes<32>,
+        nullifier_2: FixedBytes<32>,
+        epoch_id_1: U256,
+        epoch_id_2: U256,
+        output_cm_1: FixedBytes<32>,
+        output_cm_2: FixedBytes<32>,
+        recipient: Address,
+        merchant_amount: U256,
+        protocol_fee: U256,
+        execution_fee: U256,
+        max_execution_fee: U256,
+        quote_hash: FixedBytes<32>,
+        expiry: U256,
+        flags_packed: U256,
+        is_rollover: U256,
+    ) -> Result<bool, Vec<u8>> {
+        // 1. CHECKS
+        self.check_not_paused()?;
+
+        // Execution fee validation
+        if execution_fee > max_execution_fee {
+            return Err(b"EXECUTION_FEE_EXCEEDS_MAX".to_vec());
+        }
+
+        // Expiry check (C4.2)
+        let current_time = U256::from(self.block_timestamp());
+        if expiry != U256::ZERO && current_time > expiry {
+            return Err(b"QuoteExpired".to_vec());
+        }
+
+        // Non-aliasing guard: nf1 != nf2 (Singularity Defense, Zellic 2024 / C4.4)
+        if nullifier_1 == nullifier_2 {
+            return Err(b"DuplicateNullifierInSameTx".to_vec());
+        }
+
+        // On-chain nullifier spent guard (C4.4)
+        if self.note_nullifiers.get(nullifier_1) {
+            return Err(b"Nullifier1AlreadySpent".to_vec());
+        }
+        if self.note_nullifiers.get(nullifier_2) {
+            return Err(b"Nullifier2AlreadySpent".to_vec());
+        }
+
+        // Generational nullifiers guard (DEC-033)
+        let current_epoch_u256 = self.current_epoch.get();
+        if epoch_id_1 > current_epoch_u256 || epoch_id_2 > current_epoch_u256 {
+            return Err(b"EPOCH_IN_FUTURE".to_vec());
+        }
+        let current_epoch = current_epoch_u256.to::<u32>();
+        let min_active_epoch = current_epoch.saturating_sub(1);
+        if epoch_id_1 < U256::from(min_active_epoch) || epoch_id_2 < U256::from(min_active_epoch) {
+            return Err(b"EPOCH_EXPIRED_REQUIRE_ROLLOVER".to_vec());
+        }
+
+        let slot1 = (epoch_id_1.to::<u32>() % 2) as u8;
+        let slot2 = (epoch_id_2.to::<u32>() % 2) as u8;
+        let gen_key1 = crate::storage::generational_nullifier_key(slot1, nullifier_1);
+        let gen_key2 = crate::storage::generational_nullifier_key(slot2, nullifier_2);
+        if self.generation_nullifiers.get(gen_key1) {
+            return Err(b"Nullifier1AlreadySpent".to_vec());
+        }
+        if self.generation_nullifiers.get(gen_key2) {
+            return Err(b"Nullifier2AlreadySpent".to_vec());
+        }
+
+        // Rollover mode validation
+        if is_rollover != U256::ZERO && is_rollover != U256::from(1) {
+            return Err(b"INVALID_IS_ROLLOVER_FLAG".to_vec());
+        }
+        if is_rollover == U256::ZERO {
+            if merchant_amount == U256::ZERO {
+                return Err(b"MERCHANT_AMOUNT_ZERO".to_vec());
+            }
+        } else {
+            if merchant_amount != U256::ZERO {
+                return Err(b"MERCHANT_AMOUNT_MUST_BE_ZERO_IN_ROLLOVER".to_vec());
+            }
+            if protocol_fee != U256::ZERO {
+                return Err(b"PROTOCOL_FEE_MUST_BE_ZERO_IN_ROLLOVER".to_vec());
+            }
+        }
+
+        // leaf_count validation
+        if leaf_count == U256::ZERO {
+            return Err(b"INVALID_LEAF_COUNT".to_vec());
+        }
+
+        // flags_packed range check (0..=3)
+        if flags_packed > U256::from(3) {
+            return Err(b"INVALID_FLAGS_PACKED".to_vec());
+        }
+
+        // Note root must be recorded in accepted_note_roots
+        let root_timestamp = self.accepted_note_roots.get(note_root);
+        if root_timestamp == U256::ZERO {
+            return Err(b"UNACCEPTED_NOTE_ROOT".to_vec());
+        }
+
+        // Fail-Fast Check: Validate total debit and note liability BEFORE expensive ZK precompile calls
+        let total_debit = merchant_amount
+            .checked_add(protocol_fee)
+            .ok_or_else(|| b"TOTAL_DEBIT_OVERFLOW".to_vec())?
+            .checked_add(execution_fee)
+            .ok_or_else(|| b"TOTAL_DEBIT_OVERFLOW".to_vec())?;
+
+        let user_liab = self.user_note_liability.get();
+        if user_liab < total_debit {
+            return Err(b"INSUFFICIENT_NOTE_LIABILITY".to_vec());
+        }
+
+        // Construct 19 public input scalars in big-endian EVM format (C4.3 & Phase 6)
+        let mut recipient_bytes = [0u8; 32];
+        recipient_bytes[12..].copy_from_slice(recipient.as_slice());
+
+        let mut contract_bytes = [0u8; 32];
+        contract_bytes[12..].copy_from_slice(self.env_contract_address().as_slice());
+
+        let chain_id_bytes = U256::from(self.env_chain_id()).to_be_bytes::<32>();
+        let leaf_count_bytes = leaf_count.to_be_bytes::<32>();
+        let epoch1_bytes = epoch_id_1.to_be_bytes::<32>();
+        let epoch2_bytes = epoch_id_2.to_be_bytes::<32>();
+        let merchant_amount_bytes = merchant_amount.to_be_bytes::<32>();
+        let protocol_fee_bytes = protocol_fee.to_be_bytes::<32>();
+        let execution_fee_bytes = execution_fee.to_be_bytes::<32>();
+        let expiry_bytes = expiry.to_be_bytes::<32>();
+        let flags_packed_bytes = flags_packed.to_be_bytes::<32>();
+        let is_rollover_bytes = is_rollover.to_be_bytes::<32>();
+
+        // Unpack 32-byte quote_hash into two 128-bit EVM words (C4.3)
+        let quote_hash_slice = quote_hash.as_slice();
+        let mut quote_hi = [0u8; 32];
+        quote_hi[16..32].copy_from_slice(&quote_hash_slice[0..16]);
+        let mut quote_lo = [0u8; 32];
+        quote_lo[16..32].copy_from_slice(&quote_hash_slice[16..32]);
+
+        let public_inputs: [[u8; 32]; 19] = [
+            note_root.0,           // 0
+            leaf_count_bytes,      // 1
+            nullifier_1.0,         // 2
+            nullifier_2.0,         // 3
+            epoch1_bytes,          // 4
+            epoch2_bytes,          // 5
+            output_cm_1.0,         // 6
+            output_cm_2.0,         // 7
+            recipient_bytes,       // 8
+            merchant_amount_bytes, // 9
+            protocol_fee_bytes,    // 10
+            execution_fee_bytes,   // 11
+            quote_hi,              // 12
+            quote_lo,              // 13
+            chain_id_bytes,        // 14
+            contract_bytes,        // 15
+            expiry_bytes,          // 16
+            flags_packed_bytes,    // 17
+            is_rollover_bytes,     // 18
+        ];
+
+        // Validate canonicality for each of 19 public input scalars
+        for input_scalar in &public_inputs {
+            if crate::types::from_evm_scalar(input_scalar).is_none() {
+                return Err(b"NON_CANONICAL_PUBLIC_INPUT_SCALAR".to_vec());
+            }
+        }
+
+        // Compute linear combination L in G1 via MSM precompile (0x0c, 3,200 bytes buffer)
+        let public_inputs_g1 =
+            crate::groth16_joinsplit_verifier::compute_joinsplit_public_inputs_g1(&public_inputs)?;
+
+        // Verify Groth16 proof via 4-pairing precompile check (0x0f, 1,536 bytes buffer)
+        let is_valid = crate::groth16_joinsplit_verifier::verify_joinsplit_groth16(
+            &proof_a_neg,
+            &proof_b,
+            &proof_c,
+            &public_inputs_g1,
+        )?;
+        if !is_valid {
+            return Err(b"INVALID_GROTH16_JOINSPLIT_PROOF".to_vec());
+        }
+
+        // 2. EFFECTS
+        // C5.1: Nullifier Burning State Update
+        self.generation_nullifiers.insert(gen_key1, true);
+        self.generation_nullifiers.insert(gen_key2, true);
+        self.note_nullifiers.insert(nullifier_1, true);
+        self.note_nullifiers.insert(nullifier_2, true);
+
+        // C5.2: Direction B Constant-Arity MMR Appends (Always execute exactly 2 MMR insertions)
+        self._mmr_insert(output_cm_1)?;
+        self._mmr_insert(output_cm_2)?;
+
+        // Multi-liability accounting
+        self.user_note_liability.set(user_liab - total_debit);
+
+        let new_accumulated_fees = self
+            .accumulated_execution_fees
+            .get()
+            .checked_add(execution_fee)
+            .ok_or_else(|| b"EXECUTION_FEE_OVERFLOW".to_vec())?;
+        self.accumulated_execution_fees.set(new_accumulated_fees);
+
+        let new_accrued_fees = self
+            .accrued_execution_fee_liability
+            .get()
+            .checked_add(execution_fee)
+            .ok_or_else(|| b"ACCRUED_FEE_OVERFLOW".to_vec())?;
+        self.accrued_execution_fee_liability.set(new_accrued_fees);
+
+        let new_realized_fees = self
+            .realized_protocol_fees
+            .get()
+            .checked_add(protocol_fee)
+            .unwrap_or_else(|| self.realized_protocol_fees.get());
+        self.realized_protocol_fees.set(new_realized_fees);
+
+        // 3. INTERACTIONS (Token transfer to recipient)
+        #[cfg(not(test))]
+        {
+            if recipient != Address::ZERO && merchant_amount > U256::ZERO {
+                self.ensure_liquidity(merchant_amount)?;
+                let stablecoin_address = self.stablecoin.get();
+                let erc20 = IErc20::new(stablecoin_address);
+                let host = Self::runtime_host();
+                let call_res =
+                    erc20.transfer(&host, Call::new_mutating(self), recipient, merchant_amount);
+                match call_res {
+                    Ok(true) => {}
+                    _ => return Err(b"ERC20_TRANSFER_FAILED".to_vec()),
+                }
+            }
+        }
+
+        // 4. EVENTS
+        crate::events::emit_event(crate::events::JoinSplitSpendExecuted {
+            nullifier_1,
+            nullifier_2,
+            recipient,
+            merchant_amount,
+            output_cm_1,
+            output_cm_2,
+            flags_packed,
+        });
+
+        if protocol_fee > U256::ZERO {
+            crate::events::emit_event(crate::events::ProtocolFee {
+                nullifier: nullifier_1,
+                recipient,
+                amount: merchant_amount,
+                fee_bps: U256::from(45),
+                protocol_fee,
+            });
+        }
+
+        if execution_fee > U256::ZERO {
+            crate::events::emit_event(crate::events::ExecutionFee {
+                nullifier: nullifier_1,
+                execution_fee,
+                max_execution_fee,
+            });
+        }
+
+        // 5. SOLVENCY INVARIANT (C5.4)
+        self.check_liability_invariant()?;
+
+        Ok(true)
+    }
 }
 
 pub(crate) fn recipient_hash(recipient: Address) -> FixedBytes<32> {

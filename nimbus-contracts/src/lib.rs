@@ -20,6 +20,7 @@ getrandom::register_custom_getrandom!(reject_runtime_randomness);
 mod constants;
 mod deposit;
 mod events;
+pub mod groth16_joinsplit_verifier;
 pub mod groth16_note_verifier;
 mod helpers;
 mod interfaces;
@@ -617,6 +618,54 @@ impl Nimbus {
             proof_a_neg,
             proof_b,
             proof_c,
+        )
+    }
+
+    /// Executes a Universal 2-in-2-out JoinSplit private spend or consolidation using Groth16 (DEC-036 / DEC-036C).
+    pub fn spend_joinsplit(
+        &mut self,
+        proof_a_neg: Bytes,
+        proof_b: Bytes,
+        proof_c: Bytes,
+        note_root: FixedBytes<32>,
+        leaf_count: U256,
+        nullifier_1: FixedBytes<32>,
+        nullifier_2: FixedBytes<32>,
+        epoch_id_1: U256,
+        epoch_id_2: U256,
+        output_cm_1: FixedBytes<32>,
+        output_cm_2: FixedBytes<32>,
+        recipient: Address,
+        merchant_amount: U256,
+        protocol_fee: U256,
+        execution_fee: U256,
+        max_execution_fee: U256,
+        quote_hash: FixedBytes<32>,
+        expiry: U256,
+        flags_packed: U256,
+        is_rollover: U256,
+    ) -> Result<bool, Vec<u8>> {
+        self._spend_joinsplit(
+            proof_a_neg,
+            proof_b,
+            proof_c,
+            note_root,
+            leaf_count,
+            nullifier_1,
+            nullifier_2,
+            epoch_id_1,
+            epoch_id_2,
+            output_cm_1,
+            output_cm_2,
+            recipient,
+            merchant_amount,
+            protocol_fee,
+            execution_fee,
+            max_execution_fee,
+            quote_hash,
+            expiry,
+            flags_packed,
+            is_rollover,
         )
     }
 
@@ -4174,5 +4223,423 @@ mod tests {
         );
 
         assert_eq!(res, Err(b"NOTE_ALREADY_SPENT".to_vec()));
+    }
+
+    #[test]
+    fn test_spend_joinsplit_success_1_in_dummy_change() {
+        reset_test_state();
+        let owner = address!("1111111111111111111111111111111111111111");
+        let merchant = address!("2222222222222222222222222222222222222222");
+        let stablecoin = address!("3333333333333333333333333333333333333333");
+        set_msg_sender(owner);
+        set_block_timestamp(1000);
+
+        let mut contract = Nimbus::default();
+        contract.init(owner, stablecoin, Address::ZERO).unwrap();
+
+        let initial_root =
+            FixedBytes::<32>::from_slice(&crate::poseidon_w5_constants::EMPTY_TREE_ROOT_BYTES);
+        contract
+            .accepted_note_roots
+            .insert(initial_root, U256::from(1000));
+        contract.user_note_liability.set(U256::from(100_000_000)); // 100 USDC liability
+
+        let nullifier_1 = FixedBytes::<32>::from_slice(&[0x1a; 32]);
+        let nullifier_2 = FixedBytes::<32>::from_slice(&[0x1b; 32]);
+        let change_cm_1 = FixedBytes::<32>::from_slice(&[0x2a; 32]);
+        let change_cm_2 = FixedBytes::<32>::from_slice(&[0x2b; 32]);
+        let quote_hash = FixedBytes::<32>::from_slice(&[0x3a; 32]);
+
+        let proof_a = vec![0x11; 128].into();
+        let proof_b = vec![0x22; 256].into();
+        let proof_c = vec![0x33; 128].into();
+
+        let result = contract.spend_joinsplit(
+            proof_a,
+            proof_b,
+            proof_c,
+            initial_root,
+            U256::from(1),
+            nullifier_1,
+            nullifier_2,
+            U256::ZERO,
+            U256::ZERO,
+            change_cm_1,
+            change_cm_2,
+            merchant,
+            U256::from(5_000_000), // 5 USDC
+            U256::from(22_500),    // protocol fee
+            U256::from(23_000),    // execution fee
+            U256::from(25_000),    // max execution fee
+            quote_hash,
+            U256::from(2000), // expiry
+            U256::from(1),    // flags_packed: 1 change note, 1 dummy
+            U256::ZERO,       // is_rollover: 0
+        );
+
+        assert_eq!(result, Ok(true));
+        assert!(contract.note_nullifiers.get(nullifier_1));
+        assert!(contract.note_nullifiers.get(nullifier_2));
+        // Remaining liability = 100M - 5M - 22.5k - 23k = 94_954_500
+        assert_eq!(contract.user_note_liability.get(), U256::from(94_954_500));
+        assert_eq!(
+            contract.accumulated_execution_fees.get(),
+            U256::from(23_000)
+        );
+        assert_eq!(
+            contract.accrued_execution_fee_liability.get(),
+            U256::from(23_000)
+        );
+        assert_eq!(contract.realized_protocol_fees.get(), U256::from(22_500));
+        // Direction B Constant Arity: exactly 2 MMR insertions
+        assert_eq!(contract.mmr_leaf_count.get(), U256::from(2));
+    }
+
+    #[test]
+    fn test_spend_joinsplit_singularity_aliasing_rejected() {
+        reset_test_state();
+        let owner = address!("1111111111111111111111111111111111111111");
+        let merchant = address!("2222222222222222222222222222222222222222");
+        set_msg_sender(owner);
+        set_block_timestamp(1000);
+
+        let mut contract = Nimbus::default();
+        contract.init(owner, Address::ZERO, Address::ZERO).unwrap();
+
+        let initial_root =
+            FixedBytes::<32>::from_slice(&crate::poseidon_w5_constants::EMPTY_TREE_ROOT_BYTES);
+        contract
+            .accepted_note_roots
+            .insert(initial_root, U256::from(1000));
+        contract.user_note_liability.set(U256::from(100_000_000));
+
+        let same_nullifier = FixedBytes::<32>::from_slice(&[0x77; 32]);
+        let change_cm_1 = FixedBytes::<32>::from_slice(&[0x2a; 32]);
+        let change_cm_2 = FixedBytes::<32>::from_slice(&[0x2b; 32]);
+
+        // Attempt spend with identical nullifier_1 and nullifier_2
+        let result = contract.spend_joinsplit(
+            vec![0x11; 128].into(),
+            vec![0x22; 256].into(),
+            vec![0x33; 128].into(),
+            initial_root,
+            U256::from(1),
+            same_nullifier,
+            same_nullifier,
+            U256::ZERO,
+            U256::ZERO,
+            change_cm_1,
+            change_cm_2,
+            merchant,
+            U256::from(5_000_000),
+            U256::from(22_500),
+            U256::from(23_000),
+            U256::from(25_000),
+            FixedBytes::ZERO,
+            U256::from(2000),
+            U256::ZERO,
+            U256::ZERO,
+        );
+
+        assert_eq!(result, Err(b"DuplicateNullifierInSameTx".to_vec()));
+        assert!(!contract.note_nullifiers.get(same_nullifier));
+        assert_eq!(contract.user_note_liability.get(), U256::from(100_000_000));
+        assert_eq!(contract.mmr_leaf_count.get(), U256::ZERO);
+    }
+
+    #[test]
+    fn test_spend_joinsplit_double_spend_nullifier_1_rejected() {
+        reset_test_state();
+        let owner = address!("1111111111111111111111111111111111111111");
+        let merchant = address!("2222222222222222222222222222222222222222");
+        set_msg_sender(owner);
+        set_block_timestamp(1000);
+
+        let mut contract = Nimbus::default();
+        contract.init(owner, Address::ZERO, Address::ZERO).unwrap();
+
+        let initial_root =
+            FixedBytes::<32>::from_slice(&crate::poseidon_w5_constants::EMPTY_TREE_ROOT_BYTES);
+        contract
+            .accepted_note_roots
+            .insert(initial_root, U256::from(1000));
+        contract.user_note_liability.set(U256::from(100_000_000));
+
+        let nf1 = FixedBytes::<32>::from_slice(&[0x88; 32]);
+        let nf2 = FixedBytes::<32>::from_slice(&[0x89; 32]);
+
+        // Pre-mark nullifier 1 as spent
+        contract.note_nullifiers.insert(nf1, true);
+
+        let result = contract.spend_joinsplit(
+            vec![0x11; 128].into(),
+            vec![0x22; 256].into(),
+            vec![0x33; 128].into(),
+            initial_root,
+            U256::from(1),
+            nf1,
+            nf2,
+            U256::ZERO,
+            U256::ZERO,
+            FixedBytes::ZERO,
+            FixedBytes::ZERO,
+            merchant,
+            U256::from(5_000_000),
+            U256::from(22_500),
+            U256::from(23_000),
+            U256::from(25_000),
+            FixedBytes::ZERO,
+            U256::from(2000),
+            U256::ZERO,
+            U256::ZERO,
+        );
+
+        assert_eq!(result, Err(b"Nullifier1AlreadySpent".to_vec()));
+        assert!(!contract.note_nullifiers.get(nf2));
+        assert_eq!(contract.user_note_liability.get(), U256::from(100_000_000));
+    }
+
+    #[test]
+    fn test_spend_joinsplit_double_spend_nullifier_2_rejected() {
+        reset_test_state();
+        let owner = address!("1111111111111111111111111111111111111111");
+        let merchant = address!("2222222222222222222222222222222222222222");
+        set_msg_sender(owner);
+        set_block_timestamp(1000);
+
+        let mut contract = Nimbus::default();
+        contract.init(owner, Address::ZERO, Address::ZERO).unwrap();
+
+        let initial_root =
+            FixedBytes::<32>::from_slice(&crate::poseidon_w5_constants::EMPTY_TREE_ROOT_BYTES);
+        contract
+            .accepted_note_roots
+            .insert(initial_root, U256::from(1000));
+        contract.user_note_liability.set(U256::from(100_000_000));
+
+        let nf1 = FixedBytes::<32>::from_slice(&[0x98; 32]);
+        let nf2 = FixedBytes::<32>::from_slice(&[0x99; 32]);
+
+        // Pre-mark nullifier 2 as spent
+        contract.note_nullifiers.insert(nf2, true);
+
+        let result = contract.spend_joinsplit(
+            vec![0x11; 128].into(),
+            vec![0x22; 256].into(),
+            vec![0x33; 128].into(),
+            initial_root,
+            U256::from(1),
+            nf1,
+            nf2,
+            U256::ZERO,
+            U256::ZERO,
+            FixedBytes::ZERO,
+            FixedBytes::ZERO,
+            merchant,
+            U256::from(5_000_000),
+            U256::from(22_500),
+            U256::from(23_000),
+            U256::from(25_000),
+            FixedBytes::ZERO,
+            U256::from(2000),
+            U256::ZERO,
+            U256::ZERO,
+        );
+
+        assert_eq!(result, Err(b"Nullifier2AlreadySpent".to_vec()));
+        assert!(!contract.note_nullifiers.get(nf1));
+        assert_eq!(contract.user_note_liability.get(), U256::from(100_000_000));
+    }
+
+    #[test]
+    fn test_spend_joinsplit_quote_expired_rejected() {
+        reset_test_state();
+        let owner = address!("1111111111111111111111111111111111111111");
+        let merchant = address!("2222222222222222222222222222222222222222");
+        set_msg_sender(owner);
+        set_block_timestamp(5000);
+
+        let mut contract = Nimbus::default();
+        contract.init(owner, Address::ZERO, Address::ZERO).unwrap();
+
+        let initial_root =
+            FixedBytes::<32>::from_slice(&crate::poseidon_w5_constants::EMPTY_TREE_ROOT_BYTES);
+        contract
+            .accepted_note_roots
+            .insert(initial_root, U256::from(1000));
+        contract.user_note_liability.set(U256::from(100_000_000));
+
+        let nf1 = FixedBytes::<32>::from_slice(&[0xa1; 32]);
+        let nf2 = FixedBytes::<32>::from_slice(&[0xa2; 32]);
+
+        let result = contract.spend_joinsplit(
+            vec![0x11; 128].into(),
+            vec![0x22; 256].into(),
+            vec![0x33; 128].into(),
+            initial_root,
+            U256::from(1),
+            nf1,
+            nf2,
+            U256::ZERO,
+            U256::ZERO,
+            FixedBytes::ZERO,
+            FixedBytes::ZERO,
+            merchant,
+            U256::from(5_000_000),
+            U256::from(22_500),
+            U256::from(23_000),
+            U256::from(25_000),
+            FixedBytes::ZERO,
+            U256::from(4999), // expiry < 5000
+            U256::ZERO,
+            U256::ZERO,
+        );
+
+        assert_eq!(result, Err(b"QuoteExpired".to_vec()));
+    }
+
+    #[test]
+    fn test_spend_joinsplit_insufficient_liability_rejected() {
+        reset_test_state();
+        let owner = address!("1111111111111111111111111111111111111111");
+        let merchant = address!("2222222222222222222222222222222222222222");
+        set_msg_sender(owner);
+        set_block_timestamp(1000);
+
+        let mut contract = Nimbus::default();
+        contract.init(owner, Address::ZERO, Address::ZERO).unwrap();
+
+        let initial_root =
+            FixedBytes::<32>::from_slice(&crate::poseidon_w5_constants::EMPTY_TREE_ROOT_BYTES);
+        contract
+            .accepted_note_roots
+            .insert(initial_root, U256::from(1000));
+        contract.user_note_liability.set(U256::from(1_000_000)); // Only 1 USDC liability
+
+        let nf1 = FixedBytes::<32>::from_slice(&[0xb1; 32]);
+        let nf2 = FixedBytes::<32>::from_slice(&[0xb2; 32]);
+
+        // Attempt spend of 5 USDC (> 1 USDC liability)
+        let result = contract.spend_joinsplit(
+            vec![0x11; 128].into(),
+            vec![0x22; 256].into(),
+            vec![0x33; 128].into(),
+            initial_root,
+            U256::from(1),
+            nf1,
+            nf2,
+            U256::ZERO,
+            U256::ZERO,
+            FixedBytes::ZERO,
+            FixedBytes::ZERO,
+            merchant,
+            U256::from(5_000_000),
+            U256::from(22_500),
+            U256::from(23_000),
+            U256::from(25_000),
+            FixedBytes::ZERO,
+            U256::from(2000),
+            U256::ZERO,
+            U256::ZERO,
+        );
+
+        assert_eq!(result, Err(b"INSUFFICIENT_NOTE_LIABILITY".to_vec()));
+    }
+
+    #[test]
+    fn test_spend_joinsplit_invalid_proof_rejected() {
+        reset_test_state();
+        let owner = address!("1111111111111111111111111111111111111111");
+        let merchant = address!("2222222222222222222222222222222222222222");
+        set_msg_sender(owner);
+        set_block_timestamp(1000);
+
+        let mut contract = Nimbus::default();
+        contract.init(owner, Address::ZERO, Address::ZERO).unwrap();
+
+        let initial_root =
+            FixedBytes::<32>::from_slice(&crate::poseidon_w5_constants::EMPTY_TREE_ROOT_BYTES);
+        contract
+            .accepted_note_roots
+            .insert(initial_root, U256::from(1000));
+        contract.user_note_liability.set(U256::from(100_000_000));
+
+        let nf1 = FixedBytes::<32>::from_slice(&[0x1c; 32]);
+        let nf2 = FixedBytes::<32>::from_slice(&[0x1d; 32]);
+
+        set_pairing_result(false);
+
+        let result = contract.spend_joinsplit(
+            vec![0x11; 128].into(),
+            vec![0x22; 256].into(),
+            vec![0x33; 128].into(),
+            initial_root,
+            U256::from(1),
+            nf1,
+            nf2,
+            U256::ZERO,
+            U256::ZERO,
+            FixedBytes::ZERO,
+            FixedBytes::ZERO,
+            merchant,
+            U256::from(5_000_000),
+            U256::from(22_500),
+            U256::from(23_000),
+            U256::from(25_000),
+            FixedBytes::ZERO,
+            U256::from(2000),
+            U256::ZERO,
+            U256::ZERO,
+        );
+
+        assert_eq!(result, Err(b"INVALID_GROTH16_JOINSPLIT_PROOF".to_vec()));
+    }
+
+    #[test]
+    fn test_spend_joinsplit_non_canonical_scalar_rejected() {
+        reset_test_state();
+        let owner = address!("1111111111111111111111111111111111111111");
+        let merchant = address!("2222222222222222222222222222222222222222");
+        set_msg_sender(owner);
+        set_block_timestamp(1000);
+
+        let mut contract = Nimbus::default();
+        contract.init(owner, Address::ZERO, Address::ZERO).unwrap();
+
+        let initial_root =
+            FixedBytes::<32>::from_slice(&crate::poseidon_w5_constants::EMPTY_TREE_ROOT_BYTES);
+        contract
+            .accepted_note_roots
+            .insert(initial_root, U256::from(1000));
+        contract.user_note_liability.set(U256::from(100_000_000));
+
+        // Non-canonical scalar: 0xFF >= r
+        let non_canonical_nf = FixedBytes::<32>::from_slice(&[0xff; 32]);
+        let nf2 = FixedBytes::<32>::from_slice(&[0x1d; 32]);
+
+        let result = contract.spend_joinsplit(
+            vec![0x11; 128].into(),
+            vec![0x22; 256].into(),
+            vec![0x33; 128].into(),
+            initial_root,
+            U256::from(1),
+            non_canonical_nf,
+            nf2,
+            U256::ZERO,
+            U256::ZERO,
+            FixedBytes::ZERO,
+            FixedBytes::ZERO,
+            merchant,
+            U256::from(5_000_000),
+            U256::from(22_500),
+            U256::from(23_000),
+            U256::from(25_000),
+            FixedBytes::ZERO,
+            U256::from(2000),
+            U256::ZERO,
+            U256::ZERO,
+        );
+
+        assert_eq!(result, Err(b"NON_CANONICAL_PUBLIC_INPUT_SCALAR".to_vec()));
     }
 }

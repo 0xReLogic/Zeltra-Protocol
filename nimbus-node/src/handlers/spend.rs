@@ -1813,6 +1813,801 @@ fn parse_contract_address_to_32bytes(addr_str: &str) -> Option<[u8; 32]> {
     None
 }
 
+/// Handler for Universal 2-in-2-out JoinSplit Spend (DEC-036 / DEC-036C)
+///
+/// POST /api/v1/spend-joinsplit
+pub async fn handle_spend_joinsplit(
+    axum::extract::State(state): axum::extract::State<AppState>,
+    Json(payload): Json<JoinSplitSpendRequest>,
+) -> Json<JoinSplitSpendResponse> {
+    // 1. Idempotency check
+    if let Some(ref idem_key) = payload.idempotency_key {
+        match state
+            .db
+            .check_idempotency(idem_key, "joinsplit_spend")
+            .await
+        {
+            Ok(Some(cached_json)) => {
+                if let Ok(cached_resp) =
+                    serde_json::from_str::<JoinSplitSpendResponse>(&cached_json)
+                {
+                    println!(
+                        "IDEMPOTENCY: Returning cached response for joinsplit spend key {}...",
+                        &idem_key[..8.min(idem_key.len())]
+                    );
+                    return Json(cached_resp);
+                }
+            }
+            Ok(None) => {}
+            Err(e) => {
+                eprintln!("RELAYER WARNING: Idempotency check failed: {}", e);
+            }
+        }
+    }
+
+    // 2. Anti-Aliasing Guard (Zellic 2024 / Singularity Defense)
+    if payload.input_nullifier_1 == payload.input_nullifier_2 {
+        let response = JoinSplitSpendResponse {
+            status: "REJECTED".to_string(),
+            message: "DuplicateNullifierInSameTx: input_nullifier_1 and input_nullifier_2 must not be identical".to_string(),
+            tx_hash: None,
+            queue_position: 0,
+            estimated_gas_usdc: None,
+        };
+        return Json(response);
+    }
+
+    // 3. Expiry check
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+    if let Some(expiry) = payload.expiry {
+        if expiry > 0 && now > expiry {
+            let response = JoinSplitSpendResponse {
+                status: "REJECTED".to_string(),
+                message: format!("Transaction expired. Expiry: {}, Current: {}", expiry, now),
+                tx_hash: None,
+                queue_position: 0,
+                estimated_gas_usdc: None,
+            };
+            if let Some(ref idem_key) = payload.idempotency_key {
+                if let Ok(json) = serde_json::to_string(&response) {
+                    let _ = state
+                        .db
+                        .store_idempotency(idem_key, "joinsplit_spend", &json)
+                        .await;
+                }
+            }
+            return Json(response);
+        }
+    }
+
+    // 4. Amount and fee invariant checks
+    let is_rollover_req = payload.is_rollover == Some(1);
+    if payload.merchant_amount == 0 && !is_rollover_req {
+        return Json(JoinSplitSpendResponse {
+            status: "REJECTED".to_string(),
+            message: "merchant_amount must be greater than zero for normal spend".to_string(),
+            tx_hash: None,
+            queue_position: 0,
+            estimated_gas_usdc: None,
+        });
+    }
+
+    if payload.execution_fee > payload.max_execution_fee {
+        return Json(JoinSplitSpendResponse {
+            status: "REJECTED".to_string(),
+            message: format!(
+                "Execution fee ({}) exceeds max execution fee ({})",
+                payload.execution_fee, payload.max_execution_fee
+            ),
+            tx_hash: None,
+            queue_position: 0,
+            estimated_gas_usdc: None,
+        });
+    }
+
+    // 5. Change flags and flags_packed validation
+    let hc1 = match payload.has_change_1 {
+        Some(serde_json::Value::Bool(b)) => {
+            if b {
+                1u8
+            } else {
+                0u8
+            }
+        }
+        Some(serde_json::Value::Number(ref n)) => n.as_u64().unwrap_or(0) as u8,
+        _ => 0u8,
+    };
+    let hc2 = match payload.has_change_2 {
+        Some(serde_json::Value::Bool(b)) => {
+            if b {
+                1u8
+            } else {
+                0u8
+            }
+        }
+        Some(serde_json::Value::Number(ref n)) => n.as_u64().unwrap_or(0) as u8,
+        _ => 0u8,
+    };
+    let expected_flags = hc1 + 2 * hc2;
+    let flags_packed = payload.flags_packed.unwrap_or(expected_flags);
+    if flags_packed != expected_flags {
+        return Json(JoinSplitSpendResponse {
+            status: "REJECTED".to_string(),
+            message: format!(
+                "flags_packed ({}) does not match decomposed change flags (has_change_1: {}, has_change_2: {})",
+                flags_packed, hc1, hc2
+            ),
+            tx_hash: None,
+            queue_position: 0,
+            estimated_gas_usdc: None,
+        });
+    }
+
+    // 6. Recipient address validation & Sanctions screening (DEC-026)
+    use alloy_primitives::U256;
+    let recipient_addr = match Address::from_str(&payload.recipient) {
+        Ok(addr) if payload.recipient.trim_start_matches("0x").len() == 40 => addr,
+        _ => {
+            return Json(JoinSplitSpendResponse {
+                status: "REJECTED".to_string(),
+                message: format!("Invalid recipient address: {}", payload.recipient),
+                tx_hash: None,
+                queue_position: 0,
+                estimated_gas_usdc: None,
+            });
+        }
+    };
+
+    let limits = crate::validation::SafetyLimits::default();
+    if limits.is_sanctioned(&recipient_addr) {
+        return Json(JoinSplitSpendResponse {
+            status: "REJECTED".to_string(),
+            message: format!(
+                "Recipient address {} is restricted under public sanctions policy (DEC-026)",
+                payload.recipient
+            ),
+            tx_hash: None,
+            queue_position: 0,
+            estimated_gas_usdc: None,
+        });
+    }
+
+    if let Some(ref client) = state.evm_client {
+        if client
+            .is_sanctioned_on_chain(&recipient_addr)
+            .await
+            .unwrap_or(false)
+        {
+            return Json(JoinSplitSpendResponse {
+                status: "REJECTED".to_string(),
+                message: format!(
+                    "Recipient address {} is sanctioned per on-chain Chainalysis Oracle (DEC-026)",
+                    payload.recipient
+                ),
+                tx_hash: None,
+                queue_position: 0,
+                estimated_gas_usdc: None,
+            });
+        }
+    }
+
+    // 7. Note root and nullifier format check
+    let note_root_bytes = match hex::decode(payload.note_root.trim_start_matches("0x")) {
+        Ok(b) if b.len() == 32 => b,
+        _ => {
+            return Json(JoinSplitSpendResponse {
+                status: "REJECTED".to_string(),
+                message: "note_root must be a 32-byte hex string".to_string(),
+                tx_hash: None,
+                queue_position: 0,
+                estimated_gas_usdc: None,
+            });
+        }
+    };
+
+    let nf1_bytes = match hex::decode(payload.input_nullifier_1.trim_start_matches("0x")) {
+        Ok(b) if b.len() == 32 => b,
+        _ => {
+            return Json(JoinSplitSpendResponse {
+                status: "REJECTED".to_string(),
+                message: "input_nullifier_1 must be a 32-byte hex string".to_string(),
+                tx_hash: None,
+                queue_position: 0,
+                estimated_gas_usdc: None,
+            });
+        }
+    };
+
+    let nf2_bytes = match hex::decode(payload.input_nullifier_2.trim_start_matches("0x")) {
+        Ok(b) if b.len() == 32 => b,
+        _ => {
+            return Json(JoinSplitSpendResponse {
+                status: "REJECTED".to_string(),
+                message: "input_nullifier_2 must be a 32-byte hex string".to_string(),
+                tx_hash: None,
+                queue_position: 0,
+                estimated_gas_usdc: None,
+            });
+        }
+    };
+
+    // 8. Proof byte lengths validation (EIP-2537: G1=128 bytes, G2=256 bytes)
+    let proof_a_vec = match hex::decode(payload.proof_a_neg.trim_start_matches("0x")) {
+        Ok(b) if b.len() == 128 => b,
+        _ => {
+            return Json(JoinSplitSpendResponse {
+                status: "REJECTED".to_string(),
+                message: "proof_a_neg must be a 128-byte hex string".to_string(),
+                tx_hash: None,
+                queue_position: 0,
+                estimated_gas_usdc: None,
+            });
+        }
+    };
+    let proof_b_vec = match hex::decode(payload.proof_b.trim_start_matches("0x")) {
+        Ok(b) if b.len() == 256 => b,
+        _ => {
+            return Json(JoinSplitSpendResponse {
+                status: "REJECTED".to_string(),
+                message: "proof_b must be a 256-byte hex string".to_string(),
+                tx_hash: None,
+                queue_position: 0,
+                estimated_gas_usdc: None,
+            });
+        }
+    };
+    let proof_c_vec = match hex::decode(payload.proof_c.trim_start_matches("0x")) {
+        Ok(b) if b.len() == 128 => b,
+        _ => {
+            return Json(JoinSplitSpendResponse {
+                status: "REJECTED".to_string(),
+                message: "proof_c must be a 128-byte hex string".to_string(),
+                tx_hash: None,
+                queue_position: 0,
+                estimated_gas_usdc: None,
+            });
+        }
+    };
+
+    // 9. Public inputs canonical scalar check & semantic binding (19 public inputs)
+    if payload.public_inputs.len() != 19 {
+        return Json(JoinSplitSpendResponse {
+            status: "REJECTED".to_string(),
+            message: format!(
+                "Expected 19 public inputs for JoinSplitCircuit, got {}",
+                payload.public_inputs.len()
+            ),
+            tx_hash: None,
+            queue_position: 0,
+            estimated_gas_usdc: None,
+        });
+    }
+
+    let mut parsed_inputs = Vec::with_capacity(19);
+    for (idx, pi_hex) in payload.public_inputs.iter().enumerate() {
+        let bytes = match hex::decode(pi_hex.trim_start_matches("0x")) {
+            Ok(b) if b.len() == 32 => b,
+            _ => {
+                return Json(JoinSplitSpendResponse {
+                    status: "REJECTED".to_string(),
+                    message: format!("public_inputs[{}] must be a 32-byte hex scalar", idx),
+                    tx_hash: None,
+                    queue_position: 0,
+                    estimated_gas_usdc: None,
+                });
+            }
+        };
+        let mut fixed = [0u8; 32];
+        fixed.copy_from_slice(&bytes);
+
+        // Canonical scalar check: Fr < r
+        if nimbus_core::from_evm_scalar(&fixed).is_none() {
+            return Json(JoinSplitSpendResponse {
+                status: "REJECTED".to_string(),
+                message: format!("public_inputs[{}] is a non-canonical scalar (>= r)", idx),
+                tx_hash: None,
+                queue_position: 0,
+                estimated_gas_usdc: None,
+            });
+        }
+        parsed_inputs.push(fixed);
+    }
+
+    // Semantic public input binding (DEC-036A, DEC-036C)
+    // Index 0: note_root
+    if parsed_inputs[0] != note_root_bytes[..] {
+        return Json(JoinSplitSpendResponse {
+            status: "REJECTED".to_string(),
+            message: "public_inputs[0] does not match note_root".to_string(),
+            tx_hash: None,
+            queue_position: 0,
+            estimated_gas_usdc: None,
+        });
+    }
+
+    // Index 1: leaf_count (> 0)
+    let leaf_count_u64 = U256::from_be_bytes(parsed_inputs[1]).to::<u64>();
+    if leaf_count_u64 == 0 {
+        return Json(JoinSplitSpendResponse {
+            status: "REJECTED".to_string(),
+            message: "leaf_count in public_inputs[1] must be greater than zero".to_string(),
+            tx_hash: None,
+            queue_position: 0,
+            estimated_gas_usdc: None,
+        });
+    }
+    if let Some(expected_lc) = payload.leaf_count {
+        if leaf_count_u64 != expected_lc {
+            return Json(JoinSplitSpendResponse {
+                status: "REJECTED".to_string(),
+                message: "public_inputs[1] does not match leaf_count".to_string(),
+                tx_hash: None,
+                queue_position: 0,
+                estimated_gas_usdc: None,
+            });
+        }
+    }
+
+    // Index 2: input_nullifier_1
+    if parsed_inputs[2] != nf1_bytes[..] {
+        return Json(JoinSplitSpendResponse {
+            status: "REJECTED".to_string(),
+            message: "public_inputs[2] does not match input_nullifier_1".to_string(),
+            tx_hash: None,
+            queue_position: 0,
+            estimated_gas_usdc: None,
+        });
+    }
+
+    // Index 3: input_nullifier_2
+    if parsed_inputs[3] != nf2_bytes[..] {
+        return Json(JoinSplitSpendResponse {
+            status: "REJECTED".to_string(),
+            message: "public_inputs[3] does not match input_nullifier_2".to_string(),
+            tx_hash: None,
+            queue_position: 0,
+            estimated_gas_usdc: None,
+        });
+    }
+
+    // Index 4 & 5: epoch_id_1 & epoch_id_2
+    if let Some(ep1) = payload.epoch_id_1 {
+        let actual_ep1 = U256::from_be_bytes(parsed_inputs[4]).to::<u32>();
+        if actual_ep1 != ep1 {
+            return Json(JoinSplitSpendResponse {
+                status: "REJECTED".to_string(),
+                message: "public_inputs[4] does not match epoch_id_1".to_string(),
+                tx_hash: None,
+                queue_position: 0,
+                estimated_gas_usdc: None,
+            });
+        }
+    }
+    if let Some(ep2) = payload.epoch_id_2 {
+        let actual_ep2 = U256::from_be_bytes(parsed_inputs[5]).to::<u32>();
+        if actual_ep2 != ep2 {
+            return Json(JoinSplitSpendResponse {
+                status: "REJECTED".to_string(),
+                message: "public_inputs[5] does not match epoch_id_2".to_string(),
+                tx_hash: None,
+                queue_position: 0,
+                estimated_gas_usdc: None,
+            });
+        }
+    }
+
+    // Index 6 & 7: output_commitment_1 & output_commitment_2
+    let mut expected_cm1 = [0u8; 32];
+    if let Ok(b) = hex::decode(payload.output_commitment_1.trim_start_matches("0x")) {
+        if b.len() == 32 {
+            expected_cm1.copy_from_slice(&b);
+        }
+    }
+    if parsed_inputs[6] != expected_cm1 {
+        return Json(JoinSplitSpendResponse {
+            status: "REJECTED".to_string(),
+            message: "public_inputs[6] does not match output_commitment_1".to_string(),
+            tx_hash: None,
+            queue_position: 0,
+            estimated_gas_usdc: None,
+        });
+    }
+
+    let mut expected_cm2 = [0u8; 32];
+    if let Ok(b) = hex::decode(payload.output_commitment_2.trim_start_matches("0x")) {
+        if b.len() == 32 {
+            expected_cm2.copy_from_slice(&b);
+        }
+    }
+    if parsed_inputs[7] != expected_cm2 {
+        return Json(JoinSplitSpendResponse {
+            status: "REJECTED".to_string(),
+            message: "public_inputs[7] does not match output_commitment_2".to_string(),
+            tx_hash: None,
+            queue_position: 0,
+            estimated_gas_usdc: None,
+        });
+    }
+
+    // Index 8: recipient address
+    let mut expected_recipient = [0u8; 32];
+    expected_recipient[12..].copy_from_slice(recipient_addr.as_slice());
+    if parsed_inputs[8] != expected_recipient {
+        return Json(JoinSplitSpendResponse {
+            status: "REJECTED".to_string(),
+            message: "public_inputs[8] does not match recipient address".to_string(),
+            tx_hash: None,
+            queue_position: 0,
+            estimated_gas_usdc: None,
+        });
+    }
+
+    // Index 9: merchant_amount
+    let expected_merchant = U256::from(payload.merchant_amount).to_be_bytes::<32>();
+    if parsed_inputs[9] != expected_merchant {
+        return Json(JoinSplitSpendResponse {
+            status: "REJECTED".to_string(),
+            message: "public_inputs[9] does not match merchant_amount".to_string(),
+            tx_hash: None,
+            queue_position: 0,
+            estimated_gas_usdc: None,
+        });
+    }
+
+    // Index 10: protocol_fee
+    let expected_proto = U256::from(payload.protocol_fee).to_be_bytes::<32>();
+    if parsed_inputs[10] != expected_proto {
+        return Json(JoinSplitSpendResponse {
+            status: "REJECTED".to_string(),
+            message: "public_inputs[10] does not match protocol_fee".to_string(),
+            tx_hash: None,
+            queue_position: 0,
+            estimated_gas_usdc: None,
+        });
+    }
+
+    // Index 11: execution_fee
+    let expected_exec = U256::from(payload.execution_fee).to_be_bytes::<32>();
+    if parsed_inputs[11] != expected_exec {
+        return Json(JoinSplitSpendResponse {
+            status: "REJECTED".to_string(),
+            message: "public_inputs[11] does not match execution_fee".to_string(),
+            tx_hash: None,
+            queue_position: 0,
+            estimated_gas_usdc: None,
+        });
+    }
+
+    // Index 12 & 13: quote_hash_hi & quote_hash_lo (Two-Limb Representation)
+    if parsed_inputs[12][0..16] != [0u8; 16] {
+        return Json(JoinSplitSpendResponse {
+            status: "REJECTED".to_string(),
+            message: "public_inputs[12] (quote_hash_hi) exceeds 128-bit range (>= 2^128)"
+                .to_string(),
+            tx_hash: None,
+            queue_position: 0,
+            estimated_gas_usdc: None,
+        });
+    }
+    if parsed_inputs[13][0..16] != [0u8; 16] {
+        return Json(JoinSplitSpendResponse {
+            status: "REJECTED".to_string(),
+            message: "public_inputs[13] (quote_hash_lo) exceeds 128-bit range (>= 2^128)"
+                .to_string(),
+            tx_hash: None,
+            queue_position: 0,
+            estimated_gas_usdc: None,
+        });
+    }
+
+    if let Some(ref qh) = payload.quote_hash {
+        if let Ok(b) = hex::decode(qh.trim_start_matches("0x")) {
+            if b.len() == 32 {
+                let mut expected_hi = [0u8; 32];
+                expected_hi[16..32].copy_from_slice(&b[0..16]);
+                let mut expected_lo = [0u8; 32];
+                expected_lo[16..32].copy_from_slice(&b[16..32]);
+
+                if parsed_inputs[12] != expected_hi {
+                    return Json(JoinSplitSpendResponse {
+                        status: "REJECTED".to_string(),
+                        message: "public_inputs[12] does not match quote_hash_hi".to_string(),
+                        tx_hash: None,
+                        queue_position: 0,
+                        estimated_gas_usdc: None,
+                    });
+                }
+                if parsed_inputs[13] != expected_lo {
+                    return Json(JoinSplitSpendResponse {
+                        status: "REJECTED".to_string(),
+                        message: "public_inputs[13] does not match quote_hash_lo".to_string(),
+                        tx_hash: None,
+                        queue_position: 0,
+                        estimated_gas_usdc: None,
+                    });
+                }
+            }
+        }
+    }
+
+    // Index 14: chain_id
+    if let Some(expected_cid) = payload.chain_id {
+        let actual_cid = U256::from_be_bytes(parsed_inputs[14]).to::<u64>();
+        if actual_cid != expected_cid {
+            return Json(JoinSplitSpendResponse {
+                status: "REJECTED".to_string(),
+                message: "public_inputs[14] does not match chain_id".to_string(),
+                tx_hash: None,
+                queue_position: 0,
+                estimated_gas_usdc: None,
+            });
+        }
+    }
+
+    // Index 15: contract_address
+    if let Some(ref caddr_str) = payload.contract_address {
+        if let Some(expected_caddr) = parse_contract_address_to_32bytes(caddr_str) {
+            if parsed_inputs[15] != expected_caddr {
+                return Json(JoinSplitSpendResponse {
+                    status: "REJECTED".to_string(),
+                    message: "public_inputs[15] does not match contract_address".to_string(),
+                    tx_hash: None,
+                    queue_position: 0,
+                    estimated_gas_usdc: None,
+                });
+            }
+        }
+    }
+
+    // Index 16: expiry
+    let expected_exp = U256::from(payload.expiry.unwrap_or(0)).to_be_bytes::<32>();
+    if parsed_inputs[16] != expected_exp {
+        return Json(JoinSplitSpendResponse {
+            status: "REJECTED".to_string(),
+            message: "public_inputs[16] does not match expiry".to_string(),
+            tx_hash: None,
+            queue_position: 0,
+            estimated_gas_usdc: None,
+        });
+    }
+
+    // Index 17: flags_packed
+    let expected_fp = U256::from(flags_packed).to_be_bytes::<32>();
+    if parsed_inputs[17] != expected_fp {
+        return Json(JoinSplitSpendResponse {
+            status: "REJECTED".to_string(),
+            message: "public_inputs[17] does not match flags_packed".to_string(),
+            tx_hash: None,
+            queue_position: 0,
+            estimated_gas_usdc: None,
+        });
+    }
+
+    // Index 18: is_rollover
+    let is_rollover_u64 = U256::from_be_bytes(parsed_inputs[18]).to::<u64>();
+    if is_rollover_u64 != 0 && is_rollover_u64 != 1 {
+        return Json(JoinSplitSpendResponse {
+            status: "REJECTED".to_string(),
+            message: "public_inputs[18] (is_rollover) must be 0 or 1".to_string(),
+            tx_hash: None,
+            queue_position: 0,
+            estimated_gas_usdc: None,
+        });
+    }
+    if let Some(expected_ro) = payload.is_rollover {
+        if is_rollover_u64 != expected_ro {
+            return Json(JoinSplitSpendResponse {
+                status: "REJECTED".to_string(),
+                message: "public_inputs[18] does not match is_rollover flag".to_string(),
+                tx_hash: None,
+                queue_position: 0,
+                estimated_gas_usdc: None,
+            });
+        }
+    }
+
+    // 10. Local CPU Groth16 Preflight Verifier (Phase 3: Gas Griefing Defense against EIP-2537)
+    let mut proof_a_bytes = [0u8; 128];
+    proof_a_bytes.copy_from_slice(&proof_a_vec);
+    let mut proof_b_bytes = [0u8; 256];
+    proof_b_bytes.copy_from_slice(&proof_b_vec);
+    let mut proof_c_bytes = [0u8; 128];
+    proof_c_bytes.copy_from_slice(&proof_c_vec);
+
+    let mut fr_public_inputs = [nimbus_core::Fr::default(); 19];
+    for (idx, pi) in parsed_inputs.iter().enumerate().take(19) {
+        if let Some(fr) = nimbus_core::from_evm_scalar(pi) {
+            fr_public_inputs[idx] = fr;
+        }
+    }
+
+    let Some(proof) = nimbus_core::from_evm_proof(&proof_a_bytes, &proof_b_bytes, &proof_c_bytes)
+    else {
+        return Json(JoinSplitSpendResponse {
+            status: "REJECTED".to_string(),
+            message: "Failed to deserialize Groth16 proof points".to_string(),
+            tx_hash: None,
+            queue_position: 0,
+            estimated_gas_usdc: None,
+        });
+    };
+
+    let keys = nimbus_core::joinsplit_circuit::get_or_init_joinsplit_circuit_keys();
+    let is_valid = nimbus_core::joinsplit_circuit::verify_joinsplit_proof(
+        &keys.verifying_key,
+        &proof,
+        &fr_public_inputs,
+    )
+    .unwrap_or(false);
+
+    if !is_valid {
+        return Json(JoinSplitSpendResponse {
+            status: "REJECTED".to_string(),
+            message: "Invalid Groth16 proof: preflight verification failed (gas griefing defense)"
+                .to_string(),
+            tx_hash: None,
+            queue_position: 0,
+            estimated_gas_usdc: None,
+        });
+    }
+
+    // 11. SQLite Atomic Dual Nullifier Reservation (Phase 2: C2.1)
+    let reserved = match state
+        .db
+        .check_and_insert_dual_nullifiers(
+            &payload.input_nullifier_1,
+            &payload.input_nullifier_2,
+            None,
+        )
+        .await
+    {
+        Ok(res) => res,
+        Err(e) => {
+            eprintln!("Database error checking nullifiers: {}", e);
+            return Json(JoinSplitSpendResponse {
+                status: "ERROR".to_string(),
+                message: "Database error during nullifier check".to_string(),
+                tx_hash: None,
+                queue_position: 0,
+                estimated_gas_usdc: None,
+            });
+        }
+    };
+    if !reserved {
+        return Json(JoinSplitSpendResponse {
+            status: "REJECTED".to_string(),
+            message: "Nullifier already spent in relayer database".to_string(),
+            tx_hash: None,
+            queue_position: 0,
+            estimated_gas_usdc: None,
+        });
+    }
+
+    // 12. On-Chain Simulation Verification (Phase 2: C2.2)
+    if let Some(ref client) = state.evm_client {
+        let is_spent_1 = client
+            .is_nullifier_spent(&payload.input_nullifier_1)
+            .await
+            .unwrap_or(false);
+        let is_spent_2 = client
+            .is_nullifier_spent(&payload.input_nullifier_2)
+            .await
+            .unwrap_or(false);
+        if is_spent_1 || is_spent_2 {
+            let _ = state
+                .db
+                .release_nullifiers(&payload.input_nullifier_1, &payload.input_nullifier_2)
+                .await;
+            return Json(JoinSplitSpendResponse {
+                status: "REJECTED".to_string(),
+                message: "Nullifier already spent on-chain".to_string(),
+                tx_hash: None,
+                queue_position: 0,
+                estimated_gas_usdc: None,
+            });
+        }
+    }
+
+    // 13. Broadcast transaction to chain or enqueue
+    if let Some(ref client) = state.evm_client {
+        let epoch_1 = payload
+            .epoch_id_1
+            .unwrap_or_else(|| U256::from_be_bytes(parsed_inputs[4]).to::<u32>());
+        let epoch_2 = payload
+            .epoch_id_2
+            .unwrap_or_else(|| U256::from_be_bytes(parsed_inputs[5]).to::<u32>());
+        let quote_hash_hex = payload.quote_hash.as_deref().unwrap_or("0x00");
+
+        match client
+            .broadcast_spend_joinsplit_transaction(
+                &payload.proof_a_neg,
+                &payload.proof_b,
+                &payload.proof_c,
+                &payload.note_root,
+                leaf_count_u64,
+                &payload.input_nullifier_1,
+                &payload.input_nullifier_2,
+                epoch_1,
+                epoch_2,
+                &payload.output_commitment_1,
+                &payload.output_commitment_2,
+                &payload.recipient,
+                payload.merchant_amount,
+                payload.protocol_fee,
+                payload.execution_fee,
+                payload.max_execution_fee,
+                quote_hash_hex,
+                payload.expiry.unwrap_or(0),
+                flags_packed,
+                is_rollover_u64,
+            )
+            .await
+        {
+            Ok(outcome) => {
+                let resp = JoinSplitSpendResponse {
+                    status: "CONFIRMED".to_string(),
+                    message: format!(
+                        "JoinSplit transaction confirmed in block {}",
+                        outcome.block_number
+                    ),
+                    tx_hash: Some(outcome.tx_hash),
+                    queue_position: 0,
+                    estimated_gas_usdc: None,
+                };
+                if let Some(ref idem) = payload.idempotency_key {
+                    let _ = state
+                        .db
+                        .store_idempotency(
+                            idem,
+                            "joinsplit_spend",
+                            &serde_json::to_string(&resp).unwrap_or_default(),
+                        )
+                        .await;
+                }
+                Json(resp)
+            }
+            Err(e) => {
+                let _ = state
+                    .db
+                    .release_nullifiers(&payload.input_nullifier_1, &payload.input_nullifier_2)
+                    .await;
+                Json(JoinSplitSpendResponse {
+                    status: "ERROR".to_string(),
+                    message: format!("Broadcast transaction failed: {}", e),
+                    tx_hash: None,
+                    queue_position: 0,
+                    estimated_gas_usdc: None,
+                })
+            }
+        }
+    } else {
+        let resp = JoinSplitSpendResponse {
+            status: "ACCEPTED".to_string(),
+            message: "JoinSplit transaction accepted and verified by relayer preflight".to_string(),
+            tx_hash: Some(format!(
+                "0xmockjoinsplit_{}",
+                hex::encode(&parsed_inputs[2][0..8])
+            )),
+            queue_position: 1,
+            estimated_gas_usdc: None,
+        };
+        if let Some(ref idem) = payload.idempotency_key {
+            let _ = state
+                .db
+                .store_idempotency(
+                    idem,
+                    "joinsplit_spend",
+                    &serde_json::to_string(&resp).unwrap_or_default(),
+                )
+                .await;
+        }
+        Json(resp)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2310,5 +3105,400 @@ mod tests {
             !is_spent,
             "Negative test proof: nullifier MUST NOT be marked spent upon rejection!"
         );
+    }
+
+    fn create_test_joinsplit_circuit_with_expiry(
+        exp_val: u64,
+    ) -> nimbus_core::joinsplit_circuit::JoinSplitCircuit {
+        use nimbus_core::{
+            compute_binding_commitment, compute_scope_hash, derive_joinsplit_dummy_nullifier,
+            derive_joinsplit_nullifier, derive_nullifier_key, note_commitment, MerkleMountainRange,
+        };
+
+        let sk = Fr::from(100u64);
+        let nk = derive_nullifier_key(sk);
+        let rho1 = Fr::from(200u64);
+        let rand1 = Fr::from(300u64);
+        let v_in1 = 10_000_000u64; // 10 USDC
+
+        let cm1 = note_commitment(v_in1, sk, rho1, rand1);
+
+        let mut mmr = MerkleMountainRange::new();
+        let (leaf_idx1, root) = mmr.append(cm1);
+        let proof1 = mmr.generate_proof(leaf_idx1);
+
+        let mut in1_sibs = [Fr::from(0u64); 32];
+        for (i, sib) in proof1.mountain_siblings.iter().enumerate() {
+            in1_sibs[i] = *sib;
+        }
+
+        let mut peaks = [Fr::from(0u64); 32];
+        let all_peaks = mmr.get_peaks();
+        for (i, p) in all_peaks.iter().enumerate() {
+            peaks[i] = *p;
+        }
+
+        let epoch1 = 10u64;
+        let nf1 = derive_joinsplit_nullifier(nk, rho1, epoch1);
+
+        let nonce = Fr::from(999u64);
+        let nf2 = derive_joinsplit_dummy_nullifier(nk, nonce);
+
+        let rho_out1 = Fr::from(401u64);
+        let rand_out1 = Fr::from(402u64);
+        let cm_out1 = note_commitment(0, sk, rho_out1, rand_out1);
+
+        let rho_out2 = Fr::from(501u64);
+        let rand_out2 = Fr::from(502u64);
+        let cm_out2 = note_commitment(0, sk, rho_out2, rand_out2);
+
+        let merch_amt = 9_900_000u64;
+        let proto_fee = (merch_amt * 45).div_ceil(10_000); // 44_550
+        let exec_fee = v_in1 - merch_amt - proto_fee; // 55_450
+
+        let rec = Fr::from(0x1234u64);
+        let cid = Fr::from(421614u64);
+        let caddr = Fr::from(0x5678u64);
+        let exp = Fr::from(exp_val);
+        let q_hi = Fr::from(0x1111u64);
+        let q_lo = Fr::from(0x2222u64);
+
+        let scope_hash = compute_scope_hash(rec, cid, caddr, exp);
+        let binding = compute_binding_commitment(q_hi, q_lo, scope_hash);
+
+        nimbus_core::joinsplit_circuit::JoinSplitCircuit {
+            note_root: Some(root),
+            leaf_count: Some(Fr::from(mmr.leaf_count())),
+            input_nullifier_1: Some(nf1),
+            input_nullifier_2: Some(nf2),
+            epoch_id_1: Some(Fr::from(epoch1)),
+            epoch_id_2: Some(Fr::from(epoch1)),
+            output_commitment_1: Some(cm_out1),
+            output_commitment_2: Some(cm_out2),
+            recipient: Some(rec),
+            merchant_amount: Some(Fr::from(merch_amt)),
+            protocol_fee: Some(Fr::from(proto_fee)),
+            execution_fee: Some(Fr::from(exec_fee)),
+            quote_hash_hi: Some(q_hi),
+            quote_hash_lo: Some(q_lo),
+            chain_id: Some(cid),
+            contract_address: Some(caddr),
+            expiry: Some(exp),
+            flags_packed: Some(Fr::from(0u64)),
+            is_rollover: Some(Fr::from(0u64)),
+
+            in1_value: Some(Fr::from(v_in1)),
+            in1_owner_key: Some(sk),
+            in1_rho: Some(rho1),
+            in1_randomness: Some(rand1),
+            in1_leaf_index: Some(Fr::from(leaf_idx1 as u64)),
+            in1_mountain_height: Some(proof1.mountain_height as u8),
+            in1_mountain_siblings: Some(in1_sibs),
+
+            in2_value: Some(Fr::from(0u64)),
+            in2_owner_key: Some(sk),
+            in2_rho: Some(Fr::from(0u64)),
+            in2_randomness: Some(Fr::from(0u64)),
+            in2_leaf_index: Some(Fr::from(0u64)),
+            in2_mountain_height: Some(0),
+            in2_mountain_siblings: Some([Fr::from(0u64); 32]),
+            in2_is_dummy: Some(Fr::from(1u64)),
+            in2_session_nonce: Some(nonce),
+
+            mmr_peaks: Some(peaks),
+
+            out1_value: Some(Fr::from(0u64)),
+            out1_owner_key: Some(sk),
+            out1_rho: Some(rho_out1),
+            out1_randomness: Some(rand_out1),
+
+            out2_value: Some(Fr::from(0u64)),
+            out2_owner_key: Some(sk),
+            out2_rho: Some(rho_out2),
+            out2_randomness: Some(rand_out2),
+
+            has_change_1: Some(Fr::from(0u64)),
+            has_change_2: Some(Fr::from(0u64)),
+            expected_binding: Some(binding),
+        }
+    }
+
+    fn sample_valid_joinsplit_request() -> JoinSplitSpendRequest {
+        use nimbus_core::joinsplit_circuit::{
+            extract_joinsplit_public_inputs, generate_joinsplit_proof,
+            get_or_init_joinsplit_circuit_keys,
+        };
+        use nimbus_core::{fr_to_be_bytes, to_evm_g1, to_evm_g2};
+
+        static CACHED_JS_REQ: std::sync::OnceLock<JoinSplitSpendRequest> =
+            std::sync::OnceLock::new();
+        CACHED_JS_REQ
+            .get_or_init(|| {
+                let keys = get_or_init_joinsplit_circuit_keys();
+                let circuit = create_test_joinsplit_circuit_with_expiry(0);
+                let pis = extract_joinsplit_public_inputs(&circuit);
+                let proof = generate_joinsplit_proof(circuit, &keys.proving_key).expect("prove");
+
+                let mut a_neg = [0u8; 128];
+                a_neg.copy_from_slice(&to_evm_g1(&-proof.a));
+                let mut b = [0u8; 256];
+                b.copy_from_slice(&to_evm_g2(&proof.b));
+                let mut c = [0u8; 128];
+                c.copy_from_slice(&to_evm_g1(&proof.c));
+
+                let note_root = format!("0x{}", hex::encode(fr_to_be_bytes(&pis[0])));
+                let leaf_count = 1u64;
+                let input_nullifier_1 = format!("0x{}", hex::encode(fr_to_be_bytes(&pis[2])));
+                let input_nullifier_2 = format!("0x{}", hex::encode(fr_to_be_bytes(&pis[3])));
+                let epoch_id_1 = 10u32;
+                let epoch_id_2 = 10u32;
+                let output_commitment_1 = format!("0x{}", hex::encode(fr_to_be_bytes(&pis[6])));
+                let output_commitment_2 = format!("0x{}", hex::encode(fr_to_be_bytes(&pis[7])));
+                let recipient = "0x0000000000000000000000000000000000001234".to_string();
+                let merchant_amount = 9_900_000u64;
+                let protocol_fee = 44_550u64;
+                let execution_fee = 55_450u64;
+                let max_execution_fee = 60_000u64;
+                let quote_hash = format!(
+                    "0x{}",
+                    hex::encode(nimbus_core::combine_limbs_to_quote_hash(&pis[12], &pis[13]))
+                );
+                let chain_id = 421614u64;
+                let contract_address = "0x0000000000000000000000000000000000005678".to_string();
+                let expiry = 0u64;
+                let flags_packed = 0u8;
+                let is_rollover = 0u64;
+
+                let public_inputs: Vec<String> = pis
+                    .iter()
+                    .map(|fr| format!("0x{}", hex::encode(fr_to_be_bytes(fr))))
+                    .collect();
+
+                JoinSplitSpendRequest {
+                    session_id: None,
+                    input_commitment_1: None,
+                    input_commitment_2: None,
+                    note_root,
+                    leaf_count: Some(leaf_count),
+                    input_nullifier_1,
+                    input_nullifier_2,
+                    epoch_id_1: Some(epoch_id_1),
+                    epoch_id_2: Some(epoch_id_2),
+                    output_commitment_1,
+                    output_commitment_2,
+                    recipient,
+                    merchant_amount,
+                    protocol_fee,
+                    execution_fee,
+                    max_execution_fee,
+                    quote_hash: Some(quote_hash),
+                    quote_signature: None,
+                    quote_id: None,
+                    user_address: None,
+                    chain_id: Some(chain_id),
+                    contract_address: Some(contract_address),
+                    expiry: Some(expiry),
+                    has_change_1: Some(serde_json::Value::Number(0.into())),
+                    has_change_2: Some(serde_json::Value::Number(0.into())),
+                    flags_packed: Some(flags_packed),
+                    is_rollover: Some(is_rollover),
+                    proof_a_neg: format!("0x{}", hex::encode(a_neg)),
+                    proof_b: format!("0x{}", hex::encode(b)),
+                    proof_c: format!("0x{}", hex::encode(c)),
+                    public_inputs,
+                    idempotency_key: Some("idem_js_valid_1".to_string()),
+                }
+            })
+            .clone()
+    }
+
+    #[tokio::test]
+    async fn test_handle_spend_joinsplit_success() {
+        let (state, _tmp) = setup_test_state().await;
+        let req = sample_valid_joinsplit_request();
+
+        let resp = handle_spend_joinsplit(State(state.clone()), Json(req.clone())).await;
+        assert_eq!(resp.0.status, "ACCEPTED");
+        assert!(resp.0.message.contains("JoinSplit transaction accepted"));
+
+        // Verify nullifiers are reserved in DB
+        let is_spent_1 = state
+            .db
+            .is_nullifier_spent(&req.input_nullifier_1)
+            .await
+            .unwrap();
+        let is_spent_2 = state
+            .db
+            .is_nullifier_spent(&req.input_nullifier_2)
+            .await
+            .unwrap();
+        assert!(is_spent_1, "input_nullifier_1 must be marked spent");
+        assert!(is_spent_2, "input_nullifier_2 must be marked spent");
+
+        // Verify idempotency cache return
+        let resp_cached = handle_spend_joinsplit(State(state), Json(req)).await;
+        assert_eq!(resp_cached.0.status, "ACCEPTED");
+    }
+
+    #[tokio::test]
+    async fn test_handle_spend_joinsplit_aliasing_rejected() {
+        // Singularity Defense (Zellic 2024): input_nullifier_1 == input_nullifier_2 must be rejected
+        let (state, _tmp) = setup_test_state().await;
+        let mut req = sample_valid_joinsplit_request();
+        req.input_nullifier_2 = req.input_nullifier_1.clone();
+
+        let resp = handle_spend_joinsplit(State(state.clone()), Json(req.clone())).await;
+        assert_eq!(resp.0.status, "REJECTED");
+        assert!(resp.0.message.contains("DuplicateNullifierInSameTx"));
+
+        // Verify neither nullifier is spent
+        let is_spent = state
+            .db
+            .is_nullifier_spent(&req.input_nullifier_1)
+            .await
+            .unwrap();
+        assert!(
+            !is_spent,
+            "Nullifier must not be marked spent on aliasing failure"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_handle_spend_joinsplit_invalid_proof_preflight_rejected() {
+        // Gas griefing defense against EIP-2537: valid curve points that fail Groth16 pairing
+        let (state, _tmp) = setup_test_state().await;
+        let mut req = sample_valid_joinsplit_request();
+        // Replace proof_c with proof_a_neg: valid G1 point on curve, but invalidates pairing equation
+        req.proof_c = req.proof_a_neg.clone();
+
+        let resp = handle_spend_joinsplit(State(state.clone()), Json(req.clone())).await;
+        assert_eq!(resp.0.status, "REJECTED");
+        assert!(resp
+            .0
+            .message
+            .contains("Invalid Groth16 proof: preflight verification failed"));
+
+        // Verify nullifiers are NOT reserved
+        let is_spent_1 = state
+            .db
+            .is_nullifier_spent(&req.input_nullifier_1)
+            .await
+            .unwrap();
+        let is_spent_2 = state
+            .db
+            .is_nullifier_spent(&req.input_nullifier_2)
+            .await
+            .unwrap();
+        assert!(
+            !is_spent_1,
+            "nullifier 1 must not be spent on invalid proof"
+        );
+        assert!(
+            !is_spent_2,
+            "nullifier 2 must not be spent on invalid proof"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_handle_spend_joinsplit_malformed_proof_deserialization_rejected() {
+        let (state, _tmp) = setup_test_state().await;
+        let mut req = sample_valid_joinsplit_request();
+        req.proof_a_neg = format!("0x{}", "11".repeat(128));
+
+        let resp = handle_spend_joinsplit(State(state.clone()), Json(req.clone())).await;
+        assert_eq!(resp.0.status, "REJECTED");
+        assert!(resp
+            .0
+            .message
+            .contains("Failed to deserialize Groth16 proof points"));
+
+        // Verify nullifiers are NOT reserved
+        let is_spent_1 = state
+            .db
+            .is_nullifier_spent(&req.input_nullifier_1)
+            .await
+            .unwrap();
+        assert!(
+            !is_spent_1,
+            "nullifier must not be spent on malformed proof"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_handle_spend_joinsplit_double_spend_rejected() {
+        let (state, _tmp) = setup_test_state().await;
+        let req = sample_valid_joinsplit_request();
+
+        // Mark nullifier 1 as already spent in DB
+        state
+            .db
+            .check_and_insert_nullifier(&req.input_nullifier_1, Some("0xexisting_tx"))
+            .await
+            .unwrap();
+
+        let resp = handle_spend_joinsplit(State(state), Json(req)).await;
+        assert_eq!(resp.0.status, "REJECTED");
+        assert!(resp
+            .0
+            .message
+            .contains("Nullifier already spent in relayer database"));
+    }
+
+    #[tokio::test]
+    async fn test_handle_spend_joinsplit_non_canonical_scalar_rejected() {
+        let (state, _tmp) = setup_test_state().await;
+        let mut req = sample_valid_joinsplit_request();
+        // Replace public input at index 0 with field overflow >= r
+        req.public_inputs[0] =
+            "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff".to_string();
+
+        let resp = handle_spend_joinsplit(State(state), Json(req)).await;
+        assert_eq!(resp.0.status, "REJECTED");
+        assert!(resp.0.message.contains("non-canonical scalar"));
+    }
+
+    #[tokio::test]
+    async fn test_handle_spend_joinsplit_semantic_mismatch_rejected() {
+        let (state, _tmp) = setup_test_state().await;
+        let mut req = sample_valid_joinsplit_request();
+        // Tamper with merchant_amount in payload
+        req.merchant_amount = 5_000_000;
+
+        let resp = handle_spend_joinsplit(State(state), Json(req)).await;
+        assert_eq!(resp.0.status, "REJECTED");
+        assert!(resp.0.message.contains("does not match merchant_amount"));
+    }
+
+    #[tokio::test]
+    async fn test_handle_spend_joinsplit_flags_packed_mismatch_rejected() {
+        let (state, _tmp) = setup_test_state().await;
+        let mut req = sample_valid_joinsplit_request();
+        // Change flags_packed from 0 to 3 while has_change is 0
+        req.flags_packed = Some(3);
+
+        let resp = handle_spend_joinsplit(State(state), Json(req)).await;
+        assert_eq!(resp.0.status, "REJECTED");
+        assert!(resp
+            .0
+            .message
+            .contains("does not match decomposed change flags"));
+    }
+
+    #[tokio::test]
+    async fn test_handle_spend_joinsplit_sanctioned_recipient_rejected() {
+        let (state, _tmp) = setup_test_state().await;
+        let mut req = sample_valid_joinsplit_request();
+        req.recipient = crate::validation::sanctioned_evm_addresses()
+            .iter()
+            .next()
+            .unwrap()
+            .to_string();
+
+        let resp = handle_spend_joinsplit(State(state), Json(req)).await;
+        assert_eq!(resp.0.status, "REJECTED");
+        assert!(resp
+            .0
+            .message
+            .contains("restricted under public sanctions policy"));
     }
 }

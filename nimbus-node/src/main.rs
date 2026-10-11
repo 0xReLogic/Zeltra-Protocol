@@ -330,6 +330,7 @@ async fn main() {
             "/api/v1/spend-private-note",
             post(handle_private_note_spend),
         )
+        .route("/api/v1/spend-joinsplit", post(handle_spend_joinsplit))
         .route("/api/quote/private-spend", get(handle_private_spend_quote))
         .route("/api/tx-status", get(handle_tx_status))
         .route("/api/v1/mmr/proof/{leaf_index}", get(handle_mmr_proof))

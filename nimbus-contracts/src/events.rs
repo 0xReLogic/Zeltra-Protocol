@@ -88,6 +88,17 @@ sol! {
         bytes32 new_commitment,
         uint64 fee
     );
+
+    /// Emitted when a Universal JoinSplit transaction is executed (DEC-036 / DEC-036C).
+    event JoinSplitSpendExecuted(
+        bytes32 indexed nullifier_1,
+        bytes32 indexed nullifier_2,
+        address indexed recipient,
+        uint256 merchant_amount,
+        bytes32 output_cm_1,
+        bytes32 output_cm_2,
+        uint256 flags_packed
+    );
 }
 
 /// Safe event emission helper that logs to EVM in production and operates safely in unit tests.

@@ -77,6 +77,29 @@ sol! {
         bytes calldata proof_c
     ) external returns (bool);
 
+    function spendJoinsplit(
+        bytes calldata proof_a_neg,
+        bytes calldata proof_b,
+        bytes calldata proof_c,
+        bytes32 note_root,
+        uint256 leaf_count,
+        bytes32 nullifier_1,
+        bytes32 nullifier_2,
+        uint256 epoch_id_1,
+        uint256 epoch_id_2,
+        bytes32 output_cm_1,
+        bytes32 output_cm_2,
+        address recipient,
+        uint256 merchant_amount,
+        uint256 protocol_fee,
+        uint256 execution_fee,
+        uint256 max_execution_fee,
+        bytes32 quote_hash,
+        uint256 expiry,
+        uint256 flags_packed,
+        uint256 is_rollover
+    ) external returns (bool);
+
     function getCurrentEpoch() external view returns (uint32);
 
     function claimExecutionFees(uint256 amount) external;
@@ -975,6 +998,145 @@ impl EvmClient {
         let outcome = self.send_tx_with_fallback(tx).await?;
 
         println!("RELAYER: Private note spend transaction broadcasted");
+        println!("  Tx Hash     : {}", outcome.tx_hash);
+
+        Ok(outcome)
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub async fn broadcast_spend_joinsplit_transaction(
+        &self,
+        proof_a_neg_hex: &str,
+        proof_b_hex: &str,
+        proof_c_hex: &str,
+        note_root_hex: &str,
+        leaf_count: u64,
+        input_nullifier_1_hex: &str,
+        input_nullifier_2_hex: &str,
+        epoch_id_1: u32,
+        epoch_id_2: u32,
+        output_cm_1_hex: &str,
+        output_cm_2_hex: &str,
+        recipient: &str,
+        merchant_amount: u64,
+        protocol_fee: u64,
+        execution_fee: u64,
+        max_execution_fee: u64,
+        quote_hash_hex: &str,
+        expiry: u64,
+        flags_packed: u8,
+        is_rollover: u64,
+    ) -> Result<TransactionOutcome> {
+        println!("RELAYER: Broadcasting Universal JoinSplit spend transaction (DEC-036, DEC-036C)");
+        println!(
+            "  Nullifier 1     : {}...",
+            &input_nullifier_1_hex[..core::cmp::min(10, input_nullifier_1_hex.len())]
+        );
+        println!(
+            "  Nullifier 2     : {}...",
+            &input_nullifier_2_hex[..core::cmp::min(10, input_nullifier_2_hex.len())]
+        );
+        println!("  Epoch IDs       : ({}, {})", epoch_id_1, epoch_id_2);
+        println!("  Recipient       : {}", recipient);
+        println!(
+            "  Merchant Amount : {} USDC",
+            merchant_amount as f64 / 1_000_000.0
+        );
+        println!(
+            "  Execution Fee   : {} USDC",
+            execution_fee as f64 / 1_000_000.0
+        );
+
+        let note_root_bytes =
+            hex::decode(note_root_hex.trim_start_matches("0x")).context("Invalid note_root hex")?;
+        let mut note_root_fixed = [0u8; 32];
+        if note_root_bytes.len() == 32 {
+            note_root_fixed.copy_from_slice(&note_root_bytes);
+        }
+
+        let nf1_bytes = hex::decode(input_nullifier_1_hex.trim_start_matches("0x"))
+            .context("Invalid input_nullifier_1 hex")?;
+        let mut nf1_fixed = [0u8; 32];
+        if nf1_bytes.len() == 32 {
+            nf1_fixed.copy_from_slice(&nf1_bytes);
+        }
+
+        let nf2_bytes = hex::decode(input_nullifier_2_hex.trim_start_matches("0x"))
+            .context("Invalid input_nullifier_2 hex")?;
+        let mut nf2_fixed = [0u8; 32];
+        if nf2_bytes.len() == 32 {
+            nf2_fixed.copy_from_slice(&nf2_bytes);
+        }
+
+        let cm1_bytes =
+            hex::decode(output_cm_1_hex.trim_start_matches("0x")).unwrap_or_else(|_| vec![0u8; 32]);
+        let mut cm1_fixed = [0u8; 32];
+        if cm1_bytes.len() == 32 {
+            cm1_fixed.copy_from_slice(&cm1_bytes);
+        }
+
+        let cm2_bytes =
+            hex::decode(output_cm_2_hex.trim_start_matches("0x")).unwrap_or_else(|_| vec![0u8; 32]);
+        let mut cm2_fixed = [0u8; 32];
+        if cm2_bytes.len() == 32 {
+            cm2_fixed.copy_from_slice(&cm2_bytes);
+        }
+
+        let recipient_addr = Address::from_str(recipient)
+            .map_err(|e| anyhow::anyhow!("Invalid recipient address '{}': {}", recipient, e))?;
+
+        let quote_hash_bytes =
+            hex::decode(quote_hash_hex.trim_start_matches("0x")).unwrap_or_else(|_| vec![0u8; 32]);
+        let mut quote_hash_fixed = [0u8; 32];
+        if quote_hash_bytes.len() == 32 {
+            quote_hash_fixed.copy_from_slice(&quote_hash_bytes);
+        }
+
+        let proof_a_neg = hex::decode(proof_a_neg_hex.trim_start_matches("0x"))
+            .context("Invalid proof_a_neg hex")?;
+        let proof_b =
+            hex::decode(proof_b_hex.trim_start_matches("0x")).context("Invalid proof_b hex")?;
+        let proof_c =
+            hex::decode(proof_c_hex.trim_start_matches("0x")).context("Invalid proof_c hex")?;
+
+        let call_data = spendJoinsplitCall {
+            proof_a_neg: proof_a_neg.into(),
+            proof_b: proof_b.into(),
+            proof_c: proof_c.into(),
+            note_root: note_root_fixed.into(),
+            leaf_count: U256::from(leaf_count),
+            nullifier_1: nf1_fixed.into(),
+            nullifier_2: nf2_fixed.into(),
+            epoch_id_1: U256::from(epoch_id_1),
+            epoch_id_2: U256::from(epoch_id_2),
+            output_cm_1: cm1_fixed.into(),
+            output_cm_2: cm2_fixed.into(),
+            recipient: recipient_addr,
+            merchant_amount: U256::from(merchant_amount),
+            protocol_fee: U256::from(protocol_fee),
+            execution_fee: U256::from(execution_fee),
+            max_execution_fee: U256::from(max_execution_fee),
+            quote_hash: quote_hash_fixed.into(),
+            expiry: U256::from(expiry),
+            flags_packed: U256::from(flags_packed),
+            is_rollover: U256::from(is_rollover),
+        }
+        .abi_encode();
+
+        let gas_price = self.get_gas_price().await.unwrap_or(20_000_000);
+        let max_fee = gas_price * 125 / 100;
+
+        let tx = TransactionRequest::default()
+            .with_to(self.contract_address)
+            .with_value(U256::ZERO)
+            .with_gas_limit(3_000_000)
+            .with_max_fee_per_gas(max_fee)
+            .with_max_priority_fee_per_gas(1_000_000)
+            .with_input(Bytes::from(call_data));
+
+        let outcome = self.send_tx_with_fallback(tx).await?;
+
+        println!("RELAYER: JoinSplit spend transaction broadcasted");
         println!("  Tx Hash     : {}", outcome.tx_hash);
 
         Ok(outcome)
