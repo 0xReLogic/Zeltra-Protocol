@@ -358,6 +358,8 @@ pub struct MerkleMountainRange {
     pub leaves: Vec<Fr>,
     /// Active peaks by height index (peaks_by_height[h] is Some(peak) if bit h of leaf_count is 1).
     peaks_by_height: Vec<Option<Fr>>,
+    /// Cached bagged root (updated on append, O(1) get_root lookup).
+    cached_root: Option<Fr>,
 }
 
 impl MerkleMountainRange {
@@ -367,6 +369,7 @@ impl MerkleMountainRange {
             leaf_count: 0,
             leaves: Vec::new(),
             peaks_by_height: Vec::new(),
+            cached_root: None,
         }
     }
 
@@ -396,7 +399,10 @@ impl MerkleMountainRange {
         self.peaks_by_height[height] = Some(current);
         self.leaf_count += 1;
 
-        let root = self.get_root();
+        // Invalidate cached root and compute new root
+        self.cached_root = None;
+        let root = Self::bag_peaks(&self.get_peaks(), self.leaf_count);
+        self.cached_root = Some(root);
         (leaf_index, root)
     }
 
@@ -450,9 +456,12 @@ impl MerkleMountainRange {
         native_poseidon_w5(&inputs, domain_mmr_bag())
     }
 
-    /// Compute the current bagged MMR root.
+    /// Compute the current bagged MMR root (O(1) with caching).
     pub fn get_root(&self) -> Fr {
-        Self::bag_peaks(&self.get_peaks(), self.leaf_count)
+        match self.cached_root {
+            Some(root) => root,
+            None => Self::bag_peaks(&self.get_peaks(), self.leaf_count),
+        }
     }
 
     /// Generate an MMR membership proof for `leaf_index`.
