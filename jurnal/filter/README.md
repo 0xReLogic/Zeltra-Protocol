@@ -1,46 +1,47 @@
-# Curated Cryptographic Research Index for Nimbus Protocol
+# Curated Cryptographic Research Index for Zeltra Protocol
 
-Folder `jurnal/filter/` berisi hasil kurasi dan ekstraksi analitis dari 424 jurnal kriptografi (IACR ePrint & Tier-1 Conferences 2024–2026). Setiap dokumen memetakan paper terpilih langsung ke arsitektur modul Nimbus, masalah konkret yang diselesaikan, dan mekanisme implementasinya.
+Folder `jurnal/filter/` berisi hasil kurasi dan ekstraksi analitis dari jurnal kriptografi terpilih (IACR ePrint & Tier-1 Conferences 2024–2026). Setiap dokumen memetakan paper terpilih langsung ke arsitektur modul Zeltra, masalah konkret yang diselesaikan, dan mekanisme implementasinya.
 
 ---
 
 ## Struktur Kurasi Berdasarkan Lapisan Arsitektur
 
-| File Kurasi | Lapisan Nimbus | Komponen Terkait | Fokus Utama Inovasi |
+| File Kurasi | Lapisan Zeltra | Komponen Terkait | Fokus Utama Inovasi |
 |---|---|---|---|
-| [`01-contract-innovations.md`](file:///workspaces/Zeltra-Protocol/jurnal/filter/01-contract-innovations.md) | **`nimbus-contracts`** (Stylus WASM) | `spend.rs`, `deposit.rs`, `storage.rs`, EIP-2537 | Prunable nullifier storage, constant-size state accumulators, gasless rate-limiting, batch verification. |
-| [`02-core-innovations.md`](file:///workspaces/Zeltra-Protocol/jurnal/filter/02-core-innovations.md) | **`nimbus-core`** (Rust Crypto) | `circuit.rs`, `bls.rs`, `poseidon.rs`, `bdhke.rs` | Defense leakage Groth16, Round-Optimal Blind Signatures, Adaptively secure threshold OPRF, Cryptographic Erasure. |
-| [`03-relayer-innovations.md`](file:///workspaces/Zeltra-Protocol/jurnal/filter/03-relayer-innovations.md) | **`nimbus-node`** (Relayer & Cluster) | `settlement.rs`, `guardian.rs`, `queue.rs`, Quorum | Asynchronous robust signing (RSS), fair batch sequencing anti-MEV, Auditing Budget, WabiSabi multi-party coordination. |
-| [`04-sdk-innovations.md`](file:///workspaces/Zeltra-Protocol/jurnal/filter/04-sdk-innovations.md) | **`nimbus-sdk`** (Client & Wallet) | `note_wallet.rs`, `zk_wasm.rs`, Coin Selection | Oblivious note synchronization, Auditable stealth addresses (zkBSA), zero-leakage scanning, HD stealth keys. |
+| [`01-contract-innovations.md`](file:///workspaces/Zeltra-Protocol/jurnal/filter/01-contract-innovations.md) | **`nimbus-contracts`** (Stylus WASM) | `spend.rs`, `deposit.rs`, `storage.rs`, EIP-2537 | Merkle Mountain Range accumulator, gasless rate-limiting, EIP-2537 batch verification, ring buffer pruning. |
+| [`02-core-innovations.md`](file:///workspaces/Zeltra-Protocol/jurnal/filter/02-core-innovations.md) | **`nimbus-core`** (Rust Crypto) | `note_circuit.rs`, `joinsplit_circuit.rs`, `poseidon.rs` | Sanitasi subgroup Groth16 (Argo), Jacobian circuit diagnostics, Cryptographic Erasure, Decoy dummy slots. |
+| [`03-relayer-innovations.md`](file:///workspaces/Zeltra-Protocol/jurnal/filter/03-relayer-innovations.md) | **`nimbus-node`** (Stateless Sequencer) | `validation.rs`, `database.rs`, `evm_client.rs` | Preflight CPU verification, Auditing Budget (AuditPay), fair batch sequencing anti-MEV, WabiSabi decomposition. |
+| [`04-sdk-innovations.md`](file:///workspaces/Zeltra-Protocol/jurnal/filter/04-sdk-innovations.md) | **`nimbus-sdk`** (Client & Wallet) | `note_wallet.rs`, `zk_wasm.rs`, Viewing Keys | Oblivious note synchronization, Auditable stealth addresses (zkBSA), zero-leakage scanning, MinMandate agentic workflows. |
 
 ---
 
-## Peta Sinergi Antar-Lapisan
+## Peta Sinergi Antar-Lapisan (Pure ZK-UTXO)
 
 ```
 +-------------------------------------------------------------------------+
-|                              NIMBUS SDK                                 |
+|                               ZELTRA SDK                                |
 |   Oblivious Note Sync (2025/2031)  |  Auditable Stealth Addr (zkBSA)    |
+|   MinMandate Agentic Spending      |  Viewing Key Trial Decryption      |
 +------------------------------------+------------------------------------+
-                                     | (Encrypted Quotes / Blind Proofs)
+                                     | (ZK Proofs & Public Inputs)
                                      v
 +-------------------------------------------------------------------------+
-|                             NIMBUS NODE                                 |
-|   Robust Signing RSS (2026/1670)   |  Fair Batching Anti-MEV (Velox)    |
-|   Auditing Budget Cap (AuditPay)   |  Gasless RLN Spam Defense (2025)   |
+|                       ZELTRA STATELESS SEQUENCER                        |
+|   Local CPU Groth16 Preflight      |  Fair Batching Anti-MEV (Otter)    |
+|   Auditing Budget Cap (AuditPay)   |  Three-Way Reconciliation          |
 +------------------------------------+------------------------------------+
-                                     | (Settlement Execution & BLS Quorum)
+                                     | (L2 Broadcast via Alloy)
                                      v
 +------------------------------------+------------------------------------+
-|                             NIMBUS CORE                                 |
-|   Groth16 Leak Defense (Argo)      |  Adaptive Threshold OPRF (2025)   |
+|                               ZELTRA CORE                               |
+|   Groth16 Leak Defense (Argo)      |  Jacobian Soundness Diagnostics    |
 |   Provable Key Erasure (2026/1109) |  Audited Poseidon Grain (DEC-021)  |
 +------------------------------------+------------------------------------+
-                                     | (Proof Points & Curve Operations)
+                                     | (Proof Points & Curve Verification)
                                      v
 +-------------------------------------------------------------------------+
-|                           NIMBUS CONTRACTS                              |
-|   Evolving Nullifiers (2025/2031)  |  Bonsai O(1) Pruning (2026/1987)   |
-|   Stylus Circular Ring Buffer      |  EIP-2537 Precompile Optimizations |
+|                            ZELTRA CONTRACTS                             |
+|   Merkle Mountain Range (DEC-032)  |  2-Epoch Nullifiers (DEC-033)      |
+|   Stylus Circular Ring Buffer      |  EIP-2537 Precompile Host Calls    |
 +-------------------------------------------------------------------------+
 ```
