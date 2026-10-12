@@ -25,6 +25,7 @@ pub const NUM_PUBLIC_INPUTS: usize = 16;
 ///
 /// This circuit is independent from `ComplianceCircuit` — it uses different
 /// Poseidon widths, different nullifier derivation, and different public inputs.
+#[derive(Clone)]
 pub struct PrivateNoteCircuit {
     // ── Public inputs (16 scalar field elements, DEC-035A) ──
     pub note_root: Option<Fr>,
