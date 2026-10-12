@@ -15,16 +15,14 @@ hasil legacy sebagai bukti private balance baru sudah aman.
 
 ## Tujuan Produk
 
-User dapat deposit nominal bebas, melakukan pembayaran berkali-kali, dan selalu
-memiliki hak atas seluruh sisa dana.
+User dapat deposit nominal bebas via direct MMR deposit (`deposit_direct_note`), melakukan pembayaran berkali-kali (1-in-1-out atau 2-in-2-out JoinSplit), dan selalu memiliki hak atas seluruh sisa dana via change note.
 
 ```text
 net deposit
   = merchant payouts
-  + protocol fees
-  + execution fees
+  + protocol fees (flat 45 bps)
+  + execution fees (gas reimbursement + 15% markup)
   + current unspent private notes
-  + valid refunds
 ```
 
 Tidak ada fungsi contract `withdraw()` terpisah. Withdrawal adalah `spend()` ke
@@ -32,75 +30,64 @@ wallet publik milik user.
 
 ---
 
-## Gap Fatal yang Telah Dituntaskan (Sprint DEC-016 s/d DEC-031)
+## Gap Fatal yang Telah Dituntaskan (Sprint DEC-016 s/d DEC-038)
 
-Seluruh 7 gap fatal legacy berikut telah **dituntaskan 100%**:
-- **Solusi Compliance:** `ComplianceCircuit` unconstrained telah di-deprecate dan digantikan oleh Receiver-Enforced ASP & Layer-1/HTTP OFAC screening ([`DEC-026`](file:///workspaces/Zeltra-Protocol/research/decisions/DEC-026-receiver-enforced-compliance-zero-cost-sanctions-filtering-relayer-protection.md)).
-- **Solusi Principal & Fees:** Execution fee mengurangi user principal secara tepat dan solven lewat multi-liability accounting ([`DEC-019`](file:///workspaces/Zeltra-Protocol/research/decisions/DEC-019-merkle-tree-sizing-and-solvency-invariants.md), Gate B & D).
-- **Solusi Quote Enforce:** Signed quote diwajibkan *fail-closed* di endpoint spend ([`DEC-025`](file:///workspaces/Zeltra-Protocol/research/decisions/DEC-025-relayer-zk-note-spend-settlement-atomic-batching-and-reconciliation.md)).
-- **Solusi Domain Binding:** Validasi domain EIP-712 terikat ketat ke contract address & chain ID ([`DEC-031`](file:///workspaces/Zeltra-Protocol/research/decisions/DEC-031-relayer-reconciliation-solvency-observability-quote-domain-binding.md)).
-- **Solusi Batch Execution Fee:** Akumulasi execution fee per item terintegrasi di `batch_spend()` & single settlement.
-- **Solusi Reconcile:** Relayer Three-Way Reconciliation mencatat exact `execution_fee` on-chain vs DB vs receipts ([`DEC-031`](file:///workspaces/Zeltra-Protocol/research/decisions/DEC-031-relayer-reconciliation-solvency-observability-quote-domain-binding.md)).
-- **Solusi UTXO Fragmentation & Consolidation:** Universal 2-in-2-out JoinSplit Groth16 circuit, Tiered Stochastic Knapsack coin selection, dan in-pool autonomous consolidation ([`DEC-030`](file:///workspaces/Zeltra-Protocol/research/decisions/DEC-030-multi-utxo-joinsplit-coin-selection-zeroize-and-aead-backup.md)).
-
----
-
-## Gate A - Bekukan Model dan Encoding
-
-> **Status Gate A Primitives:** **SELESAI (100%)** — Dasar encoding, model Rust, dan known-answer vectors (KAV) untuk note commitment, nullifier, parent hash, LeanIMT depth 20 Merkle root/proof, exact value conservation, serta domain separation telah teruji dan diverifikasi secara identik di `nimbus-core` dan `nimbus-contracts`.
-
-- [ ] Independent design review: tidak ada jalur mint liability dari BLS dan ZK secara bersamaan.
+Seluruh gap fatal legacy berikut telah **dituntaskan 100%**:
+- **Pemusnahan Legacy Threshold BLS (DEC-038A):** Seluruh kode blind signing, guardian network, session storage (11 storage slot kontrak), dan alur refund timelock 24 jam telah dihapus bersih. Arsitektur kini 100% murni ZK-UTXO.
+- **Direct MMR Deposit (DEC-038B/C):** Deposit langsung menyisipkan komitmen note ke Merkle Mountain Range (`_mmr_insert`) dengan 96-byte AEAD encrypted memo (`NoteCommitmentAppended`, DEC-037).
+- **Akumulator MMR Skalabel (DEC-032):** Menggantikan batas kaku LeanIMT depth 20 dengan infinite-horizon Merkle Mountain Range (MMR) berbasis canonical peak bagging backward fold (`DOMAIN_MMR_BAG`) dan proteksi anti-Hyperbridge ($leaf\_index < leaf\_count$).
+- **Generational Nullifiers & Rollover (DEC-033):** 2-Epoch Generational Window ($E$ dan $E-1$) untuk pencegahan storage bloat nullifier pada Stylus contract.
+- **Two-Limb Quote Hash & Scope Binding (DEC-035A/B):** 128-bit limb range checks ($H_{\text{hi}}, H_{\text{lo}} < 2^{128}$) dan Formal Scope Binding Gadget terintegrasi di `PrivateNoteCircuit` (16 public inputs).
+- **Universal 2-in-2-out JoinSplit (DEC-036A/B/C):** Topology universal konstan (19 public inputs, 448 quadratic range gates), Knapsack coin selection, dan in-pool autonomous consolidation.
+- **Viewing Key Recovery (DEC-037):** Derivasi kunci HKDF (`IncomingViewingKey`, `OutcomingViewingKey`) dan trial decryption saldo dari memo on-chain (`recover_notes`).
+- **Solusi Compliance & Sanctions:** Receiver-Enforced ASP & Layer-1/HTTP OFAC screening fail-closed ([`DEC-026`](file:///workspaces/Zeltra-Protocol/research/decisions/DEC-026-receiver-enforced-compliance-zero-cost-sanctions-filtering-relayer-protection.md)).
+- **Solusi Reconcile & Solvensi:** Relayer Three-Way Reconciliation engine mencocokkan exact fee on-chain vs DB vs receipts ([`DEC-031`](file:///workspaces/Zeltra-Protocol/research/decisions/DEC-031-relayer-reconciliation-solvency-observability-quote-domain-binding.md)).
 
 ---
 
-## Gate B - Perbaiki Accounting Sebelum Note Circuit
+## Gate A - Model dan Encoding ZK-UTXO
 
-> **Status Gate B:** **SELESAI (100%)** — Storage multi-liability (`user_note_liability`, `refundable_deposit_liability`, `accrued_execution_fee_liability`), checks-effects-interactions, solvency check on-chain (`assets >= total_liabilities`), dan event logging telah diimplementasikan dan diverifikasi dengan 45/45 test di Stylus contract dan 23/23 test di core accounting.
+> **Status Gate A Primitives:** **SELESAI (100%)** — Model Rust, domain separation (Poseidon Grain-128 W3/W5, DEC-021), note commitment, nullifier derivation, dan Merkle Mountain Range (MMR, DEC-032) telah teruji dan diverifikasi secara identik di `nimbus-core` dan `nimbus-contracts`.
 
 ---
 
-## Gate C - Implementasi Private Note Circuit
+## Gate B - Accounting & Solvensi Multi-Liability
+
+> **Status Gate B:** **SELESAI (100%)** — Storage akuntansi solvensi (`user_note_liability`, `accrued_execution_fee_liability`, `realized_protocol_fees`), checks-effects-interactions, dan solvency invariant mutlak on-chain (`USDC balance >= total_liabilities`) telah diverifikasi di Stylus contract dan core accounting.
+
+---
+
+## Gate C - Implementasi ZK Circuits (Groth16)
 
 ### Keys and artifacts (Pending)
-- [ ] Version circuit ID dan verifying key ID.
-- [ ] Jangan generate proving key saat runtime (bundle static precompiled artifacts).
-- [ ] Tambahkan hash artifact ke manifest rilis.
-- [ ] Rencanakan MPC ceremony setelah circuit freeze (MVP: single-party seed per DEC-016B).
+- [ ] Simpan proving/verifying key sebagai artifact versioned; cache development key pada test runner.
+- [ ] Rencanakan MPC trusted setup ceremony setelah circuit constraints dan public ABI dibekukan.
 - [ ] Independent circuit security review sebelum trusted setup production.
 
 ---
 
-## Gate C0 - Security Repair Sebelum Integrasi Contract
+## Gate C0 - Security Repair & Range Constraints
 
-> **Status Gate C0:** **SELESAI (100%)** — Seluruh 3 blocker keamanan P0 (leaf index Merkle binding, 64-bit integer range gadget, boolean constraint `has_change`) dan negative test suite telah lulus 100%. Parameter Poseidon Grain-128 LFSR terimplementasi di [`nimbus-core/src/poseidon.rs`](file:///workspaces/Zeltra-Protocol/nimbus-core/src/poseidon.rs) ([`DEC-021`](file:///workspaces/Zeltra-Protocol/research/decisions/DEC-021-audited-poseidon-parameters-grain-lfsr-defense.md)) dan divalidasi dengan implementasi referensi independen.
+> **Status Gate C0:** **SELESAI (100%)** — Range constraints 64-bit integer, boolean constraint `has_change`, two-limb quote hash 128-bit range checks, formal scope binding gadget, dan parameter Poseidon Grain-128 LFSR ([`DEC-021`](file:///workspaces/Zeltra-Protocol/research/decisions/DEC-021-audited-poseidon-parameters-grain-lfsr-defense.md)) telah lolos test suite formal.
 
 - [ ] Jalankan MPC ceremony hanya setelah seluruh constraint dan public-input ABI dibekukan serta direview.
 
 ---
 
-## Gate D - Contract Private Note Ledger
+## Gate D - Stylus Contract Note Ledger & Verifiers
 
-> **Status Gate D:** **SELESAI (100%)** — Module verifier Groth16 BLS12-381 via EIP-2537 (`0x0c` MSM + `0x0f` Pairing Check) dan entrypoint `spend_private_note(...)` telah diimplementasikan di Stylus (`nimbus-contracts`). Didukung dengan pohon LeanIMT depth 20 (`_merkle_insert`), namespaced note nullifiers, multi-liability invariant, Stylus WASM target check lulus, serta 53/53 tests passing (termasuk 8 positive & negative tests untuk ZK private note spend).
-
-### Referensi Repositori Kloning / ATM (Amati, Tiru, Modifikasi):
-1. **[`https://github.com/supernovahs/zk-sunade`](https://github.com/supernovahs/zk-sunade):**
-   - *Apa yang diamati & ditiru:* Pola verifier Groth16 di Stylus SDK menggunakan `RawCall::new_static` ke host precompile tanpa memasukkan full arkworks library ke contract WASM. Menghasilkan binary super lean (<25 KB compressed) dan gas ~250k.
-   - *Modifikasi untuk Nimbus:* `zk-sunade` menggunakan BN254 (`0x06`, `0x07`, `0x08`). Di Nimbus kita adaptasi ke **EIP-2537 BLS12-381** (`0x0c` MSM dan `0x0f` Pairing Check) yang sudah terbukti lolos 13/13 testnet tests di Sepolia.
-2. **[`https://github.com/Railgun-Privacy/contract`](https://github.com/Railgun-Privacy/contract):**
-   - *Apa yang diamati & ditiru:* Smart contract Railgun: struktur `Commitments.sol` (accumulator UTXO, nullifier mapping, root history ring buffer), verifier integration, dan token transfer logic.
-   - *Modifikasi untuk Nimbus:* Sirkuit Nimbus jauh lebih ramping (fokus 1-in / 2-out: payout + optional change note), menghindari kompleksitas 54 circuit terpisah ala Railgun.
-3. **[`https://github.com/zk-kit/zk-kit`](https://github.com/zk-kit/zk-kit):**
-   - *Apa yang diamati & ditiru:* Monorepo resmi Privacy & Scaling Explorations (PSE) Ethereum Foundation untuk reusable ZK libraries (`lean-imt.sol`, `imt.sol`, dan parameter hashing Poseidon ter-audit).
+> **Status Gate D:** **SELESAI (100%)** — Verifier Groth16 BLS12-381 via EIP-2537 (`0x0c` MSM + `0x0f` Pairing Check) untuk `PrivateNoteCircuit` (16 public inputs) dan `JoinSplitCircuit` (19 public inputs) telah terpasang di Stylus (`nimbus-contracts`). Didukung dengan on-chain Merkle Mountain Range (`_mmr_insert`), namespaced note nullifiers, generational nullifier slots, dan multi-liability solvency invariant.
 
 ### Pipeline Verifikasi Groth16 BLS12-381 On-Chain:
 - **Proof format (512 bytes):**
   - $A \in \mathbb{G}_1$ (128 bytes EVM uncompressed: X, Y)
   - $B \in \mathbb{G}_2$ (256 bytes EVM uncompressed: X1, X2, Y1, Y2)
   - $C \in \mathbb{G}_1$ (128 bytes EVM uncompressed: X, Y)
-- **Public inputs (12 field elements $\in \mathbb{F}_r$, masing-masing 32 bytes):**
-  `[merkle_root, input_nullifier, output_commitment, recipient, merchant_amount, protocol_fee, execution_fee, quote_hash, chain_id, contract_address, expiry, has_change]`
+- **Public Inputs:**
+  - `PrivateNoteCircuit` (16 scalars): `[note_root, leaf_count, input_nullifier, note_epoch_id, output_commitment, recipient, merchant_amount, protocol_fee, execution_fee, quote_hash_hi, quote_hash_lo, chain_id, contract_address, expiry, has_change, is_rollover]`
+  - `JoinSplitCircuit` (19 scalars): `[note_root, leaf_count, input_nullifier_1, input_nullifier_2, epoch_id_1, epoch_id_2, output_commitment_1, output_commitment_2, recipient, merchant_amount, protocol_fee, execution_fee, quote_hash_hi, quote_hash_lo, chain_id, contract_address, expiry, is_dummy_2, session_nonce]`
 - **Dua Tahap Precompile EIP-2537:**
-  1. `0x0c` (`BLS12_G1MSM`): Hitung linear combination $\mathcal{L} = \text{IC}_0 + \sum_{i=1}^{12} x_i \text{IC}_i$ dalam 1 batch call host.
+  1. `0x0c` (`BLS12_G1MSM`): Hitung linear combination $\mathcal{L} = \text{IC}_0 + \sum_{i=1}^{k} x_i \text{IC}_i$ dalam 1 batch call host.
   2. `0x0f` (`BLS12_PAIRING_CHECK`): Evaluasi 4-pairing equation dalam 1 call buffer 1536 bytes:
      $$e(-A, B) \cdot e(\alpha, \beta) \cdot e(\mathcal{L}, \gamma) \cdot e(C, \delta) == 1$$
 
@@ -108,13 +95,16 @@ Seluruh 7 gap fatal legacy berikut telah **dituntaskan 100%**:
 
 ## Gate E - SDK Private Wallet State
 
-> **Status Gate E:** **SELESAI (100%)** — `PrivateNoteWallet` (`nimbus-sdk/src/wallet/note_wallet.rs`) menggantikan voucher exact-amount dengan model saldo terpadu note UTXO. Mendukung encrypted note store (DEC-024), versioned backup dengan HMAC-SHA256, siklus hidup note 4-tahap (`unconfirmed -> unspent -> reserved -> spent`), crash-safe two-phase commit, local Groth16 proof generation (`prepare_spend_proof`), privacy-aware coin selection, multi-tab lease reservation (120s), dan 20/20 test suite pass.
+> **Status Gate E:** **SELESAI (100%)** — `PrivateNoteWallet` (`nimbus-sdk/src/wallet/note_wallet.rs`) mendukung direct deposit prep (Poseidon + AEAD memo), encrypted note store (DEC-024), versioned backup dengan HMAC-SHA256, siklus hidup note 4-tahap (`PendingDeposit -> Unspent -> Reserved -> Spent`), crash-safe two-phase commit, local Groth16 proof generation (`prepare_spend_proof`, `prepare_joinsplit_proof`), stochastic knapsack coin selection, autonomous note consolidation (`consolidate_notes`), dan viewing key trial decryption (`recover_notes`).
+
+### Fitur Ekosistem Lanjutan (Fase 3):
+- [ ] **Shielded-to-Shielded In-Pool Transfer:** Pengiriman private note langsung antar akun/merchant Zeltra (menggunakan `output_commitment_1` untuk penerima dan `output_commitment_2` untuk change note) tanpa penarikan USDC publik on-chain, menjaga omset merchant 100% terlindungi (Merchant Masking).
 
 ---
 
-## Gate F - Node, Quote, dan Batch
+## Gate F - Node, Quote, dan Settlement
 
-> **Status Gate F:** **SELESAI (100% Full Pipeline & Solvency Observability)** — Sesuai [`DEC-025`](file:///workspaces/Zeltra-Protocol/research/decisions/DEC-025-relayer-zk-note-spend-settlement-atomic-batching-and-reconciliation.md) & [`DEC-031`](file:///workspaces/Zeltra-Protocol/research/decisions/DEC-031-relayer-reconciliation-solvency-observability-quote-domain-binding.md), relayer telah mengimplementasikan pipeline validasi fail-closed, endpoint ingress `/api/v1/spend-private-note`, pre-flight kanonikalitas 12 skalar, semantic public input binding, dual-layer double-spend guard (`is_nullifier_spent`), single-item & batch settlement dispatcher, three-way reconciliation engine (`reconcile_execution_fees`), pemusnahan total fallback quote berstatus OK tanpa signing domain, zero-leakage solvency observability di endpoint `/health`, pooling TLS client dengan strict timeouts (`http.rs`), periodic rate-limit pruner anti memory-leak, serta dedicated `/live` dan `/ready` health probes (147/147 node tests pass, clippy clean).
+> **Status Gate F:** **SELESAI (100% Full Pipeline & Solvency Observability)** — Stateless sequencer relayer (`nimbus-node`) dengan validasi fail-closed, endpoint `/api/v1/spend-private-note`, `/api/v1/spend-joinsplit`, MMR dynamic sync (`/api/v1/mmr/proof/:leaf_index`), preflight Groth16 verifier lokal (DEC-026 C-01), dual-layer double-spend guard (`is_nullifier_spent`), direct settlement dispatcher, three-way reconciliation engine (`reconcile_execution_fees`), zero-leakage solvency observability di endpoint `/health`, mempool lease watchdog worker, MMR event indexer worker, serta dedicated `/live` dan `/ready` health probes.
 
 ---
 
@@ -149,15 +139,33 @@ Seluruh 7 gap fatal legacy berikut telah **dituntaskan 100%**:
 
 ---
 
-## Mainnet Terminal Condition
+## Mainnet Terminal Condition & Master Roadmap Alignment
 
-Semua syarat berikut wajib:
+Semua syarat berikut wajib sebelum rilis production:
 
-- [ ] Gate A-G selesai.
+### 1. Gate A-G & Testnet Arbitrum Sepolia
+- [ ] Gate A-G selesai dan diverifikasi di testnet Arbitrum Sepolia.
 - [ ] `DEC-016` status Accepted.
-- [ ] Circuit dan accounting mendapat independent security review.
-- [ ] Production proving/verifying artifacts selesai dan diverifikasi.
 - [ ] Deposit -> repeated partial spends -> withdraw-all lulus testnet.
 - [ ] Contract balance reconcile exact terhadap seluruh liability.
+- [ ] Cross-chain CCIP testnet flow (source -> router -> destination -> confirmation).
+- [ ] Testing batas idempotensi & crash-recovery relayer node.
+
+### 2. Kriptografi & Trusted Setup (Gate C)
+- [ ] Freeze ABI sirkuit 16 PIs & 19 PIs beserta batasan constraints.
+- [ ] Production proving/verifying artifacts (keys) selesai dan versioned.
+- [ ] Persiapan dan pelaksanaan Trusted Setup Ceremony (MPC Phase 2).
+- [ ] Circuit dan accounting mendapat independent security review (Audit Tier-1: Zellic / Trail of Bits).
+
+### 3. Ekosistem SDK, Kepatuhan & AI Commerce (Fase 3 Blueprint)
+- [ ] **Shielded-to-Shielded In-Pool Transfer:** Pengiriman private note langsung antar akun/merchant Zeltra (menggunakan `output_commitment_1` untuk penerima dan `output_commitment_2` untuk change note) tanpa penarikan USDC publik on-chain (Merchant Masking).
+- [ ] **Viewing Key Export Suite:** Tooling UI/CLI bagi akuntan B2B untuk export laporan audit SPT/pajak berbasis `ovk`.
+- [ ] **SDK Helper CEX:** Helper otomatis "Export Source of Funds" buat bypass freeze bursa (Binance/Coinbase).
+- [ ] **In-Browser WebAssembly SDK Prover:** Runner prover Groth16 langsung di browser/mobile via WASM web worker tanpa backend prover.
+- [ ] **Integrasi x402 Facilitator:** Jalur streaming payment mikro HTTP 402 untuk AI Agent.
+
+### 4. Mainnet Go-Live & Pilot (Fase 4 Blueprint)
+- [ ] Program Bug Bounty Publik di Arbitrum One.
+- [ ] Pilot Payroll B2B & Kemitraan Merchant Commerce.
+- [ ] Deployment baru, ABI, contract address, dan circuit version terdokumentasi.
 - [ ] Tidak ada legacy user balance yang dimigrasikan tanpa ownership proof.
-- [ ] Deployment baru, ABI, contract address, and circuit version terdokumentasi.
