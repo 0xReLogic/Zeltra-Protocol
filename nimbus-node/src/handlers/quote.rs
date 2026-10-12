@@ -9,9 +9,24 @@ use std::str::FromStr;
 /// Quote expiry time in seconds (5 minutes)
 const QUOTE_EXPIRY_SECS: u64 = 300;
 
+/// Create an EIP-712 signed execution quote via POST (DEC-038C)
+pub async fn create_quote(
+    State(state): State<AppState>,
+    Json(payload): Json<PrivateSpendQuoteRequest>,
+) -> Json<PrivateSpendQuoteResponse> {
+    compute_quote(&state, payload).await
+}
+
 pub async fn handle_private_spend_quote(
     State(state): State<AppState>,
     Query(query): Query<PrivateSpendQuoteRequest>,
+) -> Json<PrivateSpendQuoteResponse> {
+    compute_quote(&state, query).await
+}
+
+pub async fn compute_quote(
+    state: &AppState,
+    query: PrivateSpendQuoteRequest,
 ) -> Json<PrivateSpendQuoteResponse> {
     let relayer_gas_cost = query.estimated_gas_cost.unwrap_or_else(default_gas_cost);
     let relayer_markup_bps = query

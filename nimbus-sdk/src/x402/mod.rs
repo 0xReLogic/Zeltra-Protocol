@@ -90,7 +90,7 @@ mod tests {
         let failed_hmac = "0000000000000000000000000000000000000000000000000000000000000000";
         let err = decode_payment_required_secure(&encoded, failed_hmac, secret);
         assert!(err.is_err());
-        assert_eq!(err.err().unwrap(), "Verifikasi integritas payload gagal");
+        assert_eq!(err.err().unwrap(), "Payload integrity verification failed");
     }
 
     #[test]

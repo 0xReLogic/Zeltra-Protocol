@@ -252,7 +252,7 @@ impl Nimbus {
         });
 
         // Enforce invariant: contract_assets >= outstanding_liabilities
-        // Tolak claim on-chain yang menyentuh backing deposit user/refund (DEC-016 & Gate B)
+        // Reject on-chain claims touching user/refund deposit backing (DEC-016 & Gate B)
         self.check_liability_invariant()?;
 
         Ok(true)
@@ -1144,7 +1144,10 @@ mod tests {
         let root = contract.note_tree_root.get();
         assert_ne!(root, FixedBytes::ZERO);
         assert!(contract._is_accepted_note_root(root));
-        assert_eq!(contract.accepted_note_roots.get(root), U256::from(1_700_000_000));
+        assert_eq!(
+            contract.accepted_note_roots.get(root),
+            U256::from(1_700_000_000)
+        );
         assert_eq!(contract.root_history.get(U256::ZERO), root);
         assert_eq!(contract.root_history_index.get(), U256::from(1));
     }

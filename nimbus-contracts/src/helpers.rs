@@ -96,14 +96,15 @@ impl Nimbus {
             let stablecoin_address = self.stablecoin.get();
             let erc20 = IErc20::new(stablecoin_address);
             let host = Self::runtime_host();
-            erc20.transfer_from(
-                &host,
-                Call::new_mutating(self),
-                client,
-                this_address,
-                amount,
-            )
-            .map_err(|_| b"TRANSFER_FROM_FAILED".to_vec())
+            erc20
+                .transfer_from(
+                    &host,
+                    Call::new_mutating(self),
+                    client,
+                    this_address,
+                    amount,
+                )
+                .map_err(|_| b"TRANSFER_FROM_FAILED".to_vec())
         }
     }
 }

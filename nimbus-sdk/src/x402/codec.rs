@@ -19,7 +19,7 @@ pub fn decode_payment_required_secure(
     if !expected_hmac.is_empty() {
         let calculated_hmac = hex::encode(crate::hmac_sha256(secret_key, header_value.as_bytes()));
         if calculated_hmac != expected_hmac {
-            return Err("Verifikasi integritas payload gagal".to_string());
+            return Err("Payload integrity verification failed".to_string());
         }
     }
 
@@ -50,7 +50,7 @@ pub fn decode_payment_response_secure(
     if !expected_hmac.is_empty() {
         let calculated_hmac = hex::encode(crate::hmac_sha256(secret_key, header_value.as_bytes()));
         if calculated_hmac != expected_hmac {
-            return Err("Verifikasi integritas payload gagal".to_string());
+            return Err("Payload integrity verification failed".to_string());
         }
     }
 

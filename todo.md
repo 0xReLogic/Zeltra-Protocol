@@ -84,7 +84,7 @@ Ref: [`DEC-036`](file:///workspaces/Zeltra-Protocol/research/decisions/DEC-036-u
 
 > **Status Gate E:** SELESAI (100%) — `PrivateNoteWallet` mengelola saldo UTXO, coin selection, local proof generation, dan persistensi terenkripsi (DEC-024). Tiered Stochastic Knapsack Coin Selection & in-pool `consolidate_notes()` telah terintegrasi (DEC-030, 29/29 tests pass).
 
-- [ ] WebAssembly / Browser packaging test runner untuk eksekusi sirkuit client-side secara non-blocking via Web Worker.
+- [x] WebAssembly / Browser packaging test runner untuk eksekusi sirkuit client-side secara non-blocking via Web Worker (3/3 unit tests pass di `nimbus-sdk/js/test_worker_runner.js`).
 
 ### Gate H / DEC-037 — Note Encryption Memo & Viewing Key Recovery Protocol
 Ref: [`DEC-037`](file:///workspaces/Zeltra-Protocol/research/decisions/DEC-037-note-encryption-memo-and-viewing-key-recovery.md) *(Anti Device-Loss & Zero Gas Viewing Key Engine)*
@@ -115,11 +115,11 @@ Ref: [`DEC-038B`](file:///workspaces/Zeltra-Protocol/research/decisions/DEC-038B
 
 #### Gate I.C / DEC-038C — Single Sequencer Relayer, Client SDK Direct Inflow, & Pure ZK CLI
 Ref: [`DEC-038C`](file:///workspaces/Zeltra-Protocol/research/decisions/DEC-038C-relayer-sequencer-sdk-direct-deposit-and-cli.md) *(Stateless Sequencer, 2PC SDK Inflow, & Ephemeral WASM)*
-- [ ] **Step 1 (Relayer Router & DB):** Konfigurasi Axum 0.8 router di `nimbus-node/src/main.rs` murni untuk `/health`, `/api/v1/quote`, `/api/v1/spend-private-note`, `/api/v1/spend-joinsplit`, dan `/api/v1/mmr/proof/:leaf_index`. Finalisasi skema SQLite SQLCipher dengan mode WAL & normal sync.
-- [ ] **Step 2 (SDK Direct Inflow):** Implementasikan `prepare_direct_deposit()` di `nimbus-sdk/src/wallet/note_wallet.rs` dengan komputasi lokal Poseidon hash ($74.7\ \mu\text{s}$) dan ChaCha20Poly1305 memo encryption ($15\ \mu\text{s}$), staging note ke database lokal (2PC state `PendingDeposit` $\rightarrow$ `Unspent`).
-- [ ] **Step 3 (Ephemeral WASM Lifecycle):** Terapkan arsitektur isolasi memori Web Worker pada browser klien (`worker.terminate()`) untuk menjamin zero memory leak dan mencegah crash OOM linear WebAssembly pada perangkat mobile retail.
-- [ ] **Step 4 (Pure ZK CLI):** Implementasikan subcommands baru di `nimbus-cli`: `GenerateWallet`, `CreateDepositNote`, `InspectMmr`, dan `VerifyProof`.
-- [ ] **Step 5 (E2E & Negative Matrix):** Verifikasi test suite off-chain: relayer crash independence pada saat deposit, resilience terhadap event log memo rusak, penolakan preflight double-spend (HTTP 409), dan pemulihan crash 2PC.
+- [x] **Step 1 (Relayer Router & DB):** Konfigurasi Axum 0.8 router di `nimbus-node/src/main.rs` murni untuk `/health`, `/api/v1/quote`, `/api/v1/spend-private-note`, `/api/v1/spend-joinsplit`, dan `/api/v1/mmr/proof/:leaf_index`. Finalisasi skema SQLite SQLCipher dengan mode WAL & normal sync.
+- [x] **Step 2 (SDK Direct Inflow):** Implementasikan `prepare_direct_deposit()` di `nimbus-sdk/src/wallet/note_wallet.rs` dengan komputasi lokal Poseidon hash ($74.7\ \mu\text{s}$) dan ChaCha20Poly1305 memo encryption ($15\ \mu\text{s}$), staging note ke database lokal (2PC state `PendingDeposit` $\rightarrow$ `Unspent`).
+- [x] **Step 3 (Ephemeral WASM Lifecycle):** Terapkan arsitektur isolasi memori Web Worker pada browser klien (`worker.terminate()`) untuk menjamin zero memory leak dan mencegah crash OOM linear WebAssembly pada perangkat mobile retail.
+- [x] **Step 4 (Pure ZK CLI):** Implementasikan subcommands baru di `nimbus-cli`: `GenerateWallet`, `CreateDepositNote`, `InspectMmr`, dan `VerifyProof`.
+- [x] **Step 5 (E2E & Negative Matrix):** Verifikasi test suite off-chain: relayer crash independence pada saat deposit, resilience terhadap event log memo rusak, penolakan preflight double-spend (HTTP 409), dan pemulihan crash 2PC.
 
 ---
 

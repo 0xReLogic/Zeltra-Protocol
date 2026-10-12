@@ -20,6 +20,9 @@ const GAS_LIMIT_STANDARD: f64 = 1_500_000.0;
 /// Handler for ZK Private Note Spend (DEC-025 Gate F)
 ///
 /// POST /api/v1/spend-private-note
+pub use handle_private_note_spend as spend_private_note;
+pub use handle_spend_joinsplit as spend_joinsplit;
+
 pub async fn handle_private_note_spend(
     axum::extract::State(state): axum::extract::State<AppState>,
     Json(payload): Json<PrivateNoteSpendRequest>,

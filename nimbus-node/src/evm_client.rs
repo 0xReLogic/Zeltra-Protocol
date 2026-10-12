@@ -197,7 +197,7 @@ impl EvmClient {
                 .wallet(wallet.clone())
                 .connect_ws(ws)
                 .await
-                .context("Gagal connect ke RPC primary via WebSocket")?;
+                .context("Failed to connect to primary RPC via WebSocket")?;
             DynProvider::new(p)
         } else {
             let url = rpc_url
@@ -209,7 +209,7 @@ impl EvmClient {
             DynProvider::new(p)
         };
 
-        // Fallback provider (opsional, dari env var NIMBUS_RPC_FALLBACK_URL)
+        // Fallback provider (optional, from env var NIMBUS_RPC_FALLBACK_URL)
         let fallback_provider = if let Ok(fallback_url) = std::env::var("NIMBUS_RPC_FALLBACK_URL") {
             let fallback_wallet = EthereumWallet::from(signer.clone());
 
@@ -239,7 +239,7 @@ impl EvmClient {
                     Some(p)
                 }
                 Err(e) => {
-                    eprintln!("WARNING: Fallback RPC gagal connect: {}", e);
+                    eprintln!("WARNING: Fallback RPC failed to connect: {}", e);
                     None
                 }
             }
@@ -697,10 +697,10 @@ impl EvmClient {
                     fallback
                         .get_gas_price()
                         .await
-                        .context("Fallback RPC gas price juga gagal")
+                        .context("Fallback RPC gas price also failed")
                 } else {
                     Err(anyhow::anyhow!(
-                        "Primary RPC gagal dan no fallback configured for gas price: {}",
+                        "Primary RPC failed and no fallback configured for gas price: {}",
                         e
                     ))
                 }
@@ -722,10 +722,10 @@ impl EvmClient {
                     fallback
                         .get_balance(self.signer_address)
                         .await
-                        .context("Fallback RPC balance juga gagal")?
+                        .context("Fallback RPC balance also failed")?
                 } else {
                     return Err(anyhow::anyhow!(
-                        "Primary RPC gagal dan no fallback configured for balance: {}",
+                        "Primary RPC failed and no fallback configured for balance: {}",
                         e
                     ));
                 }

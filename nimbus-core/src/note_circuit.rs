@@ -51,11 +51,11 @@ pub struct PrivateNoteCircuit {
     pub input_randomness: Option<Fr>,
     pub input_leaf_index: Option<Fr>,
 
-    // MMR Internal Mountain Path (maksimal tinggi 32)
+    // MMR Internal Mountain Path (maximum height 32)
     pub mountain_height: Option<u8>,
     pub mountain_siblings: Option<[Fr; 32]>,
 
-    // MMR Bagging Siblings (peak-peak lain yang membentuk root)
+    // MMR Bagging Siblings (other peaks forming the root)
     pub peak_bagging_siblings: Option<[Fr; 32]>,
     pub peak_bagging_count: Option<u8>,
 

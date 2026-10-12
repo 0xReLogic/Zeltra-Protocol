@@ -183,6 +183,14 @@ impl Database {
                 );
                 CREATE INDEX IF NOT EXISTS idx_nullifiers_spent ON nullifiers(spent_at);
 
+                -- Fast Nullifier Cache (DEC-038C / Anti-Spam & Preflight)
+                CREATE TABLE IF NOT EXISTS nullifier_cache (
+                    nullifier TEXT PRIMARY KEY,
+                    spent_at_block INTEGER,
+                    first_seen_at INTEGER NOT NULL
+                );
+                CREATE INDEX IF NOT EXISTS idx_nullifier_cache_seen ON nullifier_cache(first_seen_at);
+
                 -- Spend queue (batching optimization)
                 CREATE TABLE IF NOT EXISTS spend_queue (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,

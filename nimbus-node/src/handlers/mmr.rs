@@ -15,6 +15,9 @@ use axum::{
     Json,
 };
 
+pub use handle_mmr_proof as get_mmr_proof;
+pub use handle_notes_sync as get_bulk_leaves;
+
 /// Retrieve cryptographic MMR inclusion proof for a given leaf index (DEC-035C Section 5.C)
 pub async fn handle_mmr_proof(
     State(state): State<AppState>,

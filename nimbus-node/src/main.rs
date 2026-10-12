@@ -276,25 +276,7 @@ async fn main() {
         mmr_indexer::mmr_indexer_worker(mmr_indexer_state).await;
     });
 
-    let app = Router::new()
-        .route("/health", get(health_check))
-        .route("/live", get(liveness_check))
-        .route("/ready", get(readiness_check))
-        .route(
-            "/api/v1/spend-private-note",
-            post(handle_private_note_spend),
-        )
-        .route("/api/v1/spend-joinsplit", post(handle_spend_joinsplit))
-        .route("/api/quote/private-spend", get(handle_private_spend_quote))
-        .route("/api/tx-status", get(handle_tx_status))
-        .route("/api/v1/mmr/proof/{leaf_index}", get(handle_mmr_proof))
-        .route("/api/v1/mmr/tip", get(handle_mmr_tip))
-        .route("/api/v1/notes/sync", get(handle_notes_sync))
-        .route("/api/x402/verify", post(handle_x402_verify))
-        .route("/api/ccip/refund", post(handle_ccip_refund))
-        .layer(axum::middleware::from_fn(rate_limit_middleware))
-        .layer(DefaultBodyLimit::max(64 * 1024)) // 64KB request body size limit
-        .with_state(state.clone());
+    let app = create_relayer_router(state.clone());
 
     let network_config = NetworkConfig::from_env();
 
@@ -352,6 +334,27 @@ async fn main() {
     println!("------------------------------------------------------------");
 
     axum::serve(listener, app).await.unwrap();
+}
+
+pub fn create_relayer_router(state: AppState) -> Router {
+    Router::new()
+        .route("/health", get(health_check))
+        .route("/live", get(liveness_check))
+        .route("/ready", get(readiness_check))
+        .route("/api/v1/quote", post(create_quote))
+        .route("/api/quote/private-spend", get(handle_private_spend_quote))
+        .route("/api/v1/spend-private-note", post(spend_private_note))
+        .route("/api/v1/spend-joinsplit", post(spend_joinsplit))
+        .route("/api/v1/mmr/proof/{leaf_index}", get(get_mmr_proof))
+        .route("/api/v1/mmr/leaves", get(get_bulk_leaves))
+        .route("/api/v1/mmr/tip", get(handle_mmr_tip))
+        .route("/api/v1/notes/sync", get(handle_notes_sync))
+        .route("/api/tx-status", get(handle_tx_status))
+        .route("/api/x402/verify", post(handle_x402_verify))
+        .route("/api/ccip/refund", post(handle_ccip_refund))
+        .layer(axum::middleware::from_fn(rate_limit_middleware))
+        .layer(DefaultBodyLimit::max(64 * 1024))
+        .with_state(state)
 }
 
 async fn rate_limit_middleware(request: Request<Body>, next: Next) -> Result<Response, StatusCode> {
