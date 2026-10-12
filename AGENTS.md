@@ -157,9 +157,9 @@ Under DEC-028, holding-time fee discounts are abolished to eliminate root age ga
 
 - **Runtime Config:** `nimbus-node/.env.test` is the single source of truth (RPC URLs, keys, contract addresses, DB cipher keys, Vault/KMS settings). Always run `source nimbus-node/.env.test` before executing nodes or deployment tools.
 - **Stylus Contract Deployment:** `cargo stylus check` / `cargo stylus deploy` from `nimbus-contracts/`.
-- **Guardian Cluster Automation:**
+- **Relayer Sequencer Automation (DEC-038A):**
   ```bash
-  bash scripts/start_cluster.sh {start|status|stop}  # 1 leader + 4 guardians + Vault (3-of-5 threshold)
+  bash scripts/start_relayer.sh {start|status|stop|restart}  # Single sequencer relayer node
   ```
 
-Threshold 3/5. Auto-loads `.env.test` for RPC/contract/key. Health check timeout ≥15s.
+Auto-loads `nimbus-node/.env.test` for RPC/contract/key. Health check endpoint `/health` & `/live`.

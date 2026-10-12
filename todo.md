@@ -99,11 +99,11 @@ Ref: [`DEC-038`](file:///workspaces/Zeltra-Protocol/research/decisions/DEC-038-p
 
 #### Gate I.A / DEC-038A — Zero-Legacy Purge & Threshold BLS Elimination
 Ref: [`DEC-038A`](file:///workspaces/Zeltra-Protocol/research/decisions/DEC-038A-zero-legacy-purge-and-threshold-bls-elimination.md) *(Zero Dead Code, Zero Deprecated Shims, Complete Decommissioning)*
-- [ ] **Fase 1 (Core):** Hapus fisik `nimbus-core/src/blind_sign.rs` dan `src/threshold.rs`, bersihkan seluruh BLS point/scalar types dari `types.rs` & `lib.rs`, verifikasi `cargo test -p nimbus-core` 100% pass.
-- [ ] **Fase 2 (Contracts):** Bersihkan 11 storage slots sesi lama dari `storage.rs`, hapus precompile `0x0e` (BLS12_G2_MSM) dan konstanta generator EVM, hapus entrypoints `_reveal_mask_key`, `_claim_refund`, `verify_bls_spend`, `_spend`, `_batch_spend`.
-- [ ] **Fase 3 (Node):** Hapus `nimbus-node/src/handlers/threshold.rs`, `handlers/deposit.rs`, `circuit_breaker.rs`, dan worker `deposit_indexer.rs`. Jalankan migrasi SQLCipher untuk DROP TABLE `sessions`, `deposit_indexer_state`, `stalled_sessions`, `guardian_shares`.
-- [ ] **Fase 4 (SDK & CLI):** Hapus `nimbus-sdk/src/blind_wasm.rs` dan `src/threshold_wasm.rs`. Hapus `nimbus-cli/src/commands/blind.rs` dan `commands/threshold.rs`, bersihkan subcommands BLS dari `cli.rs` & `main.rs`.
-- [ ] **Fase 5 (Infra & Scripts):** Hapus `scripts/start_cluster.sh` (1 leader + 4 guardian + Vault), ganti dengan `scripts/start_relayer.sh` (single stateless sequencer).
+- [x] **Fase 1 (Core):** Hapus fisik `nimbus-core/src/blind_sign.rs` dan `src/threshold.rs`, bersihkan seluruh BLS point/scalar types dari `types.rs` & `lib.rs`, verifikasi `cargo test -p nimbus-core` 100% pass.
+- [x] **Fase 2 (Contracts):** Bersihkan 11 storage slots sesi lama dari `storage.rs`, hapus precompile `0x0e` (BLS12_G2_MSM) dan konstanta generator EVM, hapus entrypoints `_reveal_mask_key`, `_claim_refund`, `verify_bls_spend`, `_spend`, `_batch_spend`.
+- [x] **Fase 3 (Node):** Hapus `nimbus-node/src/handlers/threshold.rs`, `handlers/deposit.rs`, `circuit_breaker.rs`, dan worker `deposit_indexer.rs`. Jalankan migrasi SQLCipher untuk DROP TABLE `sessions`, `deposit_indexer_state`, `stalled_sessions`, `guardian_shares`.
+- [x] **Fase 4 (SDK & CLI):** Hapus `nimbus-sdk/src/blind_wasm.rs` dan `src/threshold_wasm.rs`. Hapus `nimbus-cli/src/commands/blind.rs` dan `commands/threshold.rs`, bersihkan subcommands BLS dari `cli.rs` & `main.rs`.
+- [x] **Fase 5 (Infra & Scripts):** Hapus `scripts/start_cluster.sh` (1 leader + 4 guardian + Vault), ganti dengan `scripts/start_relayer.sh` (single stateless sequencer).
 
 #### Gate I.B / DEC-038B — Stylus Smart Contract Direct MMR Inflow & Storage Purification
 Ref: [`DEC-038B`](file:///workspaces/Zeltra-Protocol/research/decisions/DEC-038B-contract-direct-mmr-deposit-and-storage-cleanup.md) *(On-Chain Atomic Deposit, Storage Cleanup, & Absolute Solvency)*

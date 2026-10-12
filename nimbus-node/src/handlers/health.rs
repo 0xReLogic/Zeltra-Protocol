@@ -1,9 +1,6 @@
 //! Health check handler & Solvency Observability (DEC-031)
 
-use crate::{
-    dto::HealthResponse, dto::SigningHealthResponse, dto::SolvencyMetricsDto,
-    dto::StalledSessionDto, state::AppState,
-};
+use crate::{dto::HealthResponse, dto::SolvencyMetricsDto, state::AppState};
 use axum::Json;
 
 pub async fn health_check(
@@ -50,7 +47,6 @@ pub async fn health_check(
     let (solvency_metrics, solvency_status) = if let Some(ref evm_client) = state.evm_client {
         let contract_bal_res = evm_client.get_contract_usdc_balance().await;
         let user_liab_res = evm_client.get_user_note_liability().await;
-        let refund_liab_res = evm_client.get_refundable_deposit_liability().await;
         let contract_accrued_res = evm_client.get_accrued_execution_fee_liability().await;
         let db_unclaimed = state
             .db
@@ -59,16 +55,9 @@ pub async fn health_check(
             .map(|(fee, _)| fee)
             .ok();
 
-        match (
-            contract_bal_res,
-            user_liab_res,
-            refund_liab_res,
-            contract_accrued_res,
-        ) {
-            (Ok(contract_balance), Ok(user_note_liab), Ok(refund_liab), Ok(contract_accrued)) => {
-                let total_liabilities = user_note_liab
-                    .saturating_add(refund_liab)
-                    .saturating_add(contract_accrued);
+        match (contract_bal_res, user_liab_res, contract_accrued_res) {
+            (Ok(contract_balance), Ok(user_note_liab), Ok(contract_accrued)) => {
+                let total_liabilities = user_note_liab.saturating_add(contract_accrued);
                 let is_solvent = contract_balance >= total_liabilities;
                 let drift = db_unclaimed.map(|db_fee| contract_accrued as i64 - db_fee as i64);
                 let is_matched = drift.map(|d| d == 0).unwrap_or(true);
@@ -87,7 +76,7 @@ pub async fn health_check(
                         contract_balance_usdc: Some(contract_balance),
                         total_liabilities_usdc: Some(total_liabilities),
                         user_note_liability_usdc: Some(user_note_liab),
-                        refundable_deposit_liability_usdc: Some(refund_liab),
+                        refundable_deposit_liability_usdc: Some(0),
                         contract_accrued_execution_fee_usdc: Some(contract_accrued),
                         db_unclaimed_execution_fee_usdc: db_unclaimed,
                         reconciliation_drift_usdc: drift,
@@ -97,6 +86,7 @@ pub async fn health_check(
                     Some(status),
                 )
             }
+
             _ => (
                 Some(SolvencyMetricsDto {
                     solvency_status: "DEGRADED".to_string(),
@@ -164,62 +154,6 @@ pub async fn health_check(
     })
 }
 
-pub async fn signing_health(
-    axum::extract::State(state): axum::extract::State<AppState>,
-) -> Json<SigningHealthResponse> {
-    // Default threshold: 10 minutes (600 seconds) for signing stall detection
-    let threshold_seconds = std::env::var("NIMBUS_SIGNING_STALL_THRESHOLD")
-        .unwrap_or_else(|_| "600".to_string())
-        .parse()
-        .unwrap_or(600);
-
-    let stalled = match state
-        .db
-        .get_stalled_signing_sessions(threshold_seconds)
-        .await
-    {
-        Ok(s) => s,
-        Err(e) => {
-            eprintln!("Signing health: Failed to get stalled sessions: {}", e);
-            return Json(SigningHealthResponse {
-                stalled_sessions: vec![],
-                stalled_count: 0,
-                check_threshold_seconds: threshold_seconds,
-                message: format!("Error checking stalled sessions: {}", e),
-            });
-        }
-    };
-
-    let stalled_dtos: Vec<StalledSessionDto> = stalled
-        .into_iter()
-        .map(|s| StalledSessionDto {
-            session_id: s.session_id,
-            amount: s.amount as u64,
-            client_address: s.client_address,
-            created_at: s.created_at,
-            deposit_confirmed: s.deposit_confirmed == 1,
-            resolved: s.resolved == 1,
-        })
-        .collect();
-
-    let stalled_count = stalled_dtos.len();
-    let message = if stalled_count == 0 {
-        "No stalled signing sessions detected".to_string()
-    } else {
-        format!(
-            "Warning: {} stalled signing sessions detected (threshold: {}s)",
-            stalled_count, threshold_seconds
-        )
-    };
-
-    Json(SigningHealthResponse {
-        stalled_sessions: stalled_dtos,
-        stalled_count,
-        check_threshold_seconds: threshold_seconds,
-        message,
-    })
-}
-
 /// Lightweight liveness probe (K8s/container liveness check)
 /// Simply verifies the process is responsive and event loop is healthy.
 pub async fn liveness_check() -> (axum::http::StatusCode, &'static str) {
@@ -256,7 +190,6 @@ pub async fn readiness_check(
 mod tests {
     use super::*;
     use crate::database::Database;
-    use std::collections::HashMap;
     use tempfile::TempDir;
 
     #[tokio::test]
@@ -297,15 +230,7 @@ mod tests {
         let db_path = tmp.path().join("health_solvency_test.db");
         let db = Database::new(&db_path).await.unwrap();
 
-        let state = AppState::new(
-            db,
-            nimbus_core::Fr::from(1u64),
-            1,
-            nimbus_core::IssuerPublicKey(nimbus_core::G2Projective::default()),
-            HashMap::new(),
-            None,
-        )
-        .await;
+        let state = AppState::new(db, None).await;
 
         let response = health_check(axum::extract::State(state)).await;
         assert_eq!(response.0.status, "OK");
@@ -368,15 +293,7 @@ mod tests {
         let db_path = tmp.path().join("readiness_test.db");
         let db = Database::new(&db_path).await.unwrap();
 
-        let state = AppState::new(
-            db,
-            nimbus_core::Fr::from(1u64),
-            1,
-            nimbus_core::IssuerPublicKey(nimbus_core::G2Projective::default()),
-            HashMap::new(),
-            None,
-        )
-        .await;
+        let state = AppState::new(db, None).await;
 
         let ready_res = readiness_check(axum::extract::State(state)).await;
         assert!(ready_res.is_ok());

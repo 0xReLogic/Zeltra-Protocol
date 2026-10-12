@@ -1,7 +1,4 @@
-use crate::crypto::hash_to_g1;
-use crate::types::{IssuerPublicKey, UnmaskedSignature};
 use ark_bls12_381::{G1Affine, G2Affine};
-use ark_ec::CurveGroup;
 use ark_serialize::CanonicalSerialize;
 
 /// Helper to serialize a G1 point to EVM Big-Endian format (128 bytes)
@@ -41,26 +38,6 @@ pub fn to_evm_g2(point: &G2Affine) -> Vec<u8> {
         }
     }
     evm_buf
-}
-
-/// Computes the negated unmasked signature (-alpha) in EVM G1 format (128 bytes)
-pub fn get_alpha_neg_evm(alpha: &UnmaskedSignature) -> Vec<u8> {
-    let negated = -alpha.0;
-    let negated_affine = negated.into_affine();
-    to_evm_g1(&negated_affine)
-}
-
-/// Computes the hash of the message H(m) in EVM G1 format (128 bytes)
-pub fn get_hm_evm(message: &[u8]) -> Vec<u8> {
-    let hm = hash_to_g1(message);
-    let hm_affine = hm.into_affine();
-    to_evm_g1(&hm_affine)
-}
-
-/// Computes the issuer public key pk_iss in EVM G2 format (256 bytes)
-pub fn get_pk_iss_evm(pk_iss: &IssuerPublicKey) -> Vec<u8> {
-    let pk_affine = pk_iss.0.into_affine();
-    to_evm_g2(&pk_affine)
 }
 /// Helper to serialize a scalar Fr to EVM Big-Endian format (32 bytes).
 pub fn to_evm_scalar(scalar: &ark_bls12_381::Fr) -> [u8; 32] {

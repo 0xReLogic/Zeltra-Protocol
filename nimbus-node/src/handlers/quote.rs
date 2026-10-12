@@ -241,7 +241,6 @@ fn error_response(
 mod tests {
     use super::*;
     use crate::database::Database;
-    use std::collections::HashMap;
 
     static ENV_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
@@ -255,15 +254,7 @@ mod tests {
         let tmp = tempfile::TempDir::new().unwrap();
         let db_path = tmp.path().join("quote_test.db");
         let db = Database::new(&db_path).await.unwrap();
-        AppState::new(
-            db,
-            nimbus_core::Fr::from(1u64),
-            1,
-            nimbus_core::IssuerPublicKey(nimbus_core::G2Projective::default()),
-            HashMap::new(),
-            None,
-        )
-        .await
+        AppState::new(db, None).await
     }
 
     #[tokio::test]
@@ -367,15 +358,7 @@ mod tests {
         let tmp = tempfile::TempDir::new().unwrap();
         let db_path = tmp.path().join("quote_test_missing_domain.db");
         let db = Database::new(&db_path).await.unwrap();
-        let state = AppState::new(
-            db,
-            nimbus_core::Fr::from(1u64),
-            1,
-            nimbus_core::IssuerPublicKey(nimbus_core::G2Projective::default()),
-            HashMap::new(),
-            None,
-        )
-        .await;
+        let state = AppState::new(db, None).await;
 
         let response = handle_private_spend_quote(
             State(state),
@@ -415,15 +398,7 @@ mod tests {
         let tmp = tempfile::TempDir::new().unwrap();
         let db_path = tmp.path().join("quote_test_invalid_contract.db");
         let db = Database::new(&db_path).await.unwrap();
-        let state = AppState::new(
-            db,
-            nimbus_core::Fr::from(1u64),
-            1,
-            nimbus_core::IssuerPublicKey(nimbus_core::G2Projective::default()),
-            HashMap::new(),
-            None,
-        )
-        .await;
+        let state = AppState::new(db, None).await;
 
         let response = handle_private_spend_quote(
             State(state),

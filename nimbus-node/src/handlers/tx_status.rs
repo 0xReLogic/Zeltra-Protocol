@@ -139,21 +139,12 @@ mod tests {
     use super::*;
     use crate::database::Database;
     use axum::body::to_bytes;
-    use std::collections::HashMap;
 
     async fn test_state() -> (AppState, tempfile::TempDir) {
         let tmp = tempfile::TempDir::new().unwrap();
         let db_path = tmp.path().join("tx_status_test.db");
         let db = Database::new(&db_path).await.unwrap();
-        let state = AppState::new(
-            db,
-            nimbus_core::Fr::from(1u64),
-            1,
-            nimbus_core::IssuerPublicKey(nimbus_core::G2Projective::default()),
-            HashMap::new(),
-            None,
-        )
-        .await;
+        let state = AppState::new(db, None).await;
         (state, tmp)
     }
 

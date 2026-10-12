@@ -123,50 +123,6 @@ pub struct Eip7702Auth {
     pub signature: String,
 }
 
-// Request/Response DTOs
-#[derive(Deserialize)]
-pub struct DepositRequest {
-    pub session_id: String,
-    pub com_k: String,
-    pub amount: u64,
-    /// Client-supplied idempotency key (UUID recommended).
-    #[serde(default)]
-    pub idempotency_key: Option<String>,
-    /// Optional transaction hash of the on-chain deposit for expedited verification.
-    #[serde(default)]
-    pub tx_hash: Option<String>,
-}
-
-#[derive(Clone, Serialize, Deserialize)]
-pub struct DepositResponse {
-    pub status: String,
-    pub message: String,
-}
-
-#[derive(Deserialize)]
-pub struct RevealRequest {
-    pub session_id: String,
-}
-
-#[derive(Serialize)]
-pub struct RevealResponse {
-    pub status: String,
-    pub valid: bool,
-    pub message: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub masking_key_hex: Option<String>,
-}
-
-#[derive(Clone, Serialize, Deserialize)]
-pub struct SpendResponse {
-    pub status: String,
-    pub message: String,
-    pub queue_position: usize,
-    /// Estimated gas charge in USDC (informational, for client-side slippage check)
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub estimated_gas_usdc: Option<f64>,
-}
-
 /// Request DTO for ZK Private Note Spend (DEC-025 Gate F)
 #[derive(Clone, Serialize, Deserialize, Debug)]
 pub struct PrivateNoteSpendRequest {
@@ -554,24 +510,6 @@ pub struct HealthResponse {
     pub ccip_failure_count: Option<i64>,
 }
 
-#[derive(Serialize)]
-pub struct StalledSessionDto {
-    pub session_id: String,
-    pub amount: u64,
-    pub client_address: String,
-    pub created_at: i64,
-    pub deposit_confirmed: bool,
-    pub resolved: bool,
-}
-
-#[derive(Serialize)]
-pub struct SigningHealthResponse {
-    pub stalled_sessions: Vec<StalledSessionDto>,
-    pub stalled_count: usize,
-    pub check_threshold_seconds: i64,
-    pub message: String,
-}
-
 // x402 Protocol DTOs
 #[derive(Deserialize)]
 pub struct X402VerifyRequest {
@@ -612,51 +550,6 @@ pub struct X402VerifyResponse {
     pub success: bool,
     pub tx_hash: Option<String>,
     pub message: String,
-}
-
-#[derive(Clone, Serialize, Deserialize)]
-pub struct SignShareRequest {
-    pub session_id: String,
-    pub amount: u64,
-    pub client_address: String,
-    pub com_k_hex: String,
-    pub blinded_hex: String,
-    pub k_hex: String,
-    pub leader_address: String,
-    pub timestamp: u64,
-    pub signature_hex: String,
-}
-
-#[derive(Serialize, Deserialize)]
-pub struct SignShareResponse {
-    pub status: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub share_index: Option<u32>,
-    pub signature_share_hex: String,
-}
-
-#[derive(Deserialize)]
-pub struct LeaderSignRequest {
-    pub session_id: String,
-    pub amount: u64,
-    pub client_address: String,
-    pub blinded_hex: String,
-    pub guardian_urls: Vec<String>,
-    pub pk_iss_hex: Option<String>,
-}
-
-#[derive(Serialize)]
-pub struct PartialSignatureInfo {
-    pub index: u32,
-    pub signature_hex: String,
-}
-
-#[derive(Serialize)]
-pub struct LeaderSignResponse {
-    pub status: String,
-    pub session_id: String,
-    pub com_k_hex: String,
-    pub partial_signatures: Vec<PartialSignatureInfo>,
 }
 
 // Transaction Status DTOs (DEC-017 / Receipt Finality)

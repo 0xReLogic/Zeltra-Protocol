@@ -16,13 +16,13 @@
 ## Checklist Eksekusi 5-Fase
 
 ### Fase 1: Pembersihan Fondasi Kriptografi (`nimbus-core`)
-- [ ] Hapus fisik file `nimbus-core/src/blind_sign.rs`.
-- [ ] Hapus fisik file `nimbus-core/src/threshold.rs`.
-- [ ] Bersihkan struct/types warisan BLS di `nimbus-core/src/types.rs`:
+- [x] Hapus fisik file `nimbus-core/src/blind_sign.rs`.
+- [x] Hapus fisik file `nimbus-core/src/threshold.rs`.
+- [x] Bersihkan struct/types warisan BLS di `nimbus-core/src/types.rs`:
   - `BlindedMessage`, `BlindingFactor`, `IssuerPublicKey`, `IssuerSecretKey`
   - `MaskedBlindSignature`, `MaskingKey`, `MaskingKeyCommitment`, `PartialBlindSignature`, `UnmaskedSignature`
-- [ ] Bersihkan re-exports dan deklarasi modul di `nimbus-core/src/lib.rs` (buang `pub mod blind_sign;`, `pub mod threshold;`).
-- [ ] **Gate Verifikasi Fase 1:**
+- [x] Bersihkan re-exports dan deklarasi modul di `nimbus-core/src/lib.rs` (buang `pub mod blind_sign;`, `pub mod threshold;`).
+- [x] **Gate Verifikasi Fase 1:**
   ```bash
   cargo check -p nimbus-core
   cargo test -p nimbus-core --lib -- --nocapture
@@ -32,18 +32,18 @@
 ---
 
 ### Fase 2: Pembersihan Smart Contract Stylus (`nimbus-contracts`)
-- [ ] Bersihkan 11 storage slots sesi lama di `nimbus-contracts/src/storage.rs`:
+- [x] Bersihkan 11 storage slots sesi lama di `nimbus-contracts/src/storage.rs`:
   - `session_client`, `session_amount`, `session_resolved`, `session_timestamp`
   - `session_commitment_hash`, `session_exists`, `session_note_commitment`
   - `trusted_issuer_keys`, `refundable_deposit_liability`, `nullifiers` (legacy BLS), `guardian_registry`
-- [ ] Hapus konstanta precompile `0x0e` (BLS12_G2_MSM) dan generator EVM G2 dari kontrak.
-- [ ] Hapus fungsi warisan deposit & reveal di `nimbus-contracts/src/deposit.rs`:
+- [x] Hapus konstanta precompile `0x0e` (BLS12_G2_MSM) dan generator EVM G2 dari kontrak.
+- [x] Hapus fungsi warisan deposit & reveal di `nimbus-contracts/src/deposit.rs`:
   - `_deposit`, `_deposit_with_commitment`, `_reveal_mask_key`, `_claim_refund`
-- [ ] Hapus fungsi verifikasi BLS spend di `nimbus-contracts/src/spend.rs`:
+- [x] Hapus fungsi verifikasi BLS spend di `nimbus-contracts/src/spend.rs`:
   - `verify_bls_spend`, `verify_bls_spend_batch`, `_spend`, `_batch_spend`
-- [ ] Bersihkan entrypoint publik di `nimbus-contracts/src/lib.rs`:
+- [x] Bersihkan entrypoint publik di `nimbus-contracts/src/lib.rs`:
   - Hapus `deposit`, `deposit_with_commitment`, `reveal_mask_key`, `reveal_mask_key_with_memo`, `claim_refund`, `spend`, `batch_spend`.
-- [ ] **Gate Verifikasi Fase 2:**
+- [x] **Gate Verifikasi Fase 2:**
   ```bash
   cargo check -p nimbus-contracts
   cargo test -p nimbus-contracts --lib -- --nocapture
@@ -54,23 +54,23 @@
 ---
 
 ### Fase 3: Pembersihan Relayer Sequencer Node (`nimbus-node`)
-- [ ] Hapus file handler warisan:
+- [x] Hapus file handler warisan:
   - `nimbus-node/src/handlers/threshold.rs`
   - `nimbus-node/src/handlers/deposit.rs`
   - `nimbus-node/src/circuit_breaker.rs`
   - `nimbus-node/src/deposit_indexer.rs` (digantikan murni oleh event listener MMR)
-- [ ] Jalankan migrasi basis data SQLite SQLCipher di `nimbus-node/src/database.rs`:
+- [x] Jalankan migrasi basis data SQLite SQLCipher di `nimbus-node/src/database.rs`:
   ```sql
   DROP TABLE IF EXISTS sessions;
   DROP TABLE IF EXISTS deposit_indexer_state;
   DROP TABLE IF EXISTS stalled_sessions;
   DROP TABLE IF EXISTS guardian_shares;
   ```
-- [ ] Bersihkan konfigurasi environment dari `nimbus-node/.env.test`:
+- [x] Bersihkan konfigurasi environment dari `nimbus-node/.env.test`:
   - Hapus `GUARDIAN_URLS`, `VAULT_ISSUER_KEY`, `THRESHOLD_QUORUM`.
-- [ ] Hapus rute API threshold dari `nimbus-node/src/main.rs`:
+- [x] Hapus rute API threshold dari `nimbus-node/src/main.rs`:
   - `/api/v1/blind-sign`, `/api/v1/sign-share`, `/api/v1/reveal`, `/api/v1/threshold-status`.
-- [ ] **Gate Verifikasi Fase 3:**
+- [x] **Gate Verifikasi Fase 3:**
   ```bash
   cargo check -p nimbus-node
   cargo test -p nimbus-node --lib -- --nocapture
@@ -80,15 +80,15 @@
 ---
 
 ### Fase 4: Pembersihan Client SDK & CLI (`nimbus-sdk` & `nimbus-cli`)
-- [ ] Hapus file WebAssembly warisan di `nimbus-sdk`:
+- [x] Hapus file WebAssembly warisan di `nimbus-sdk`:
   - `nimbus-sdk/src/blind_wasm.rs`
   - `nimbus-sdk/src/threshold_wasm.rs`
-- [ ] Bersihkan logika unmasking BDHKE dan polling Guardian di `nimbus-sdk/src/wallet/note_wallet.rs`.
-- [ ] Hapus file subcommand BLS di `nimbus-cli`:
+- [x] Bersihkan logika unmasking BDHKE dan polling Guardian di `nimbus-sdk/src/wallet/note_wallet.rs`.
+- [x] Hapus file subcommand BLS di `nimbus-cli`:
   - `nimbus-cli/src/commands/blind.rs`
   - `nimbus-cli/src/commands/threshold.rs`
-- [ ] Hapus subcommands `SplitKey`, `Aggregate`, `Blind`, `Sign`, `VerifyMasked`, `Unmask`, `VerifyUnmasked` dari `cli.rs` & `main.rs`.
-- [ ] **Gate Verifikasi Fase 4:**
+- [x] Hapus subcommands `SplitKey`, `Aggregate`, `Blind`, `Sign`, `VerifyMasked`, `Unmask`, `VerifyUnmasked` dari `cli.rs` & `main.rs`.
+- [x] **Gate Verifikasi Fase 4:**
   ```bash
   cargo test -p nimbus-sdk --lib -- --nocapture
   cargo test -p nimbus-cli -- --nocapture
@@ -98,10 +98,10 @@
 ---
 
 ### Fase 5: Decommissioning Infrastruktur & Scripts
-- [ ] Hapus skrip orkestrasi 5-node: `scripts/start_cluster.sh`.
-- [ ] Buat skrip deployment sequencer mandiri: `scripts/start_relayer.sh`.
-- [ ] Bersihkan konfigurasi Vault KMS dan Tailscale mesh dari CI/CD dan workflow pengujian.
-- [ ] **Gate Verifikasi Fase 5:**
+- [x] Hapus skrip orkestrasi 5-node: `scripts/start_cluster.sh`.
+- [x] Buat skrip deployment sequencer mandiri: `scripts/start_relayer.sh`.
+- [x] Bersihkan konfigurasi Vault KMS dan Tailscale mesh dari CI/CD dan workflow pengujian.
+- [x] **Gate Verifikasi Fase 5:**
   ```bash
   bash scripts/start_relayer.sh start
   curl -s http://127.0.0.1:3000/health | grep '"status":"healthy"'

@@ -12,35 +12,38 @@ async fn test_end_to_end_deposit_and_spend_flow() {
         .await
         .unwrap();
 
-    // Test 1: Deposit session
-    let session_id = "test_session_001";
-    let com_k_hex = "0xabcdef1234567890";
-    let amount = 1000u64;
-    let client = "0xclient123";
+    // Test 1: MMR leaf insertion (direct deposit note commitment)
+    let fr = nimbus_core::Fr::from(0xaau64);
+    let commitment = format!("0x{}", hex::encode(nimbus_core::fr_to_be_bytes(&fr)));
+    let tx_hash = "0xtxhash_deposit_001";
+    let block_number = 100u64;
+    let memo = vec![0x7au8; 96];
 
-    let inserted = db
-        .insert_session(session_id, com_k_hex, amount, client)
+    let mut mmr = nimbus_core::MerkleMountainRange::new();
+    mmr.append(fr);
+
+    let leaf = nimbus_node::database::MmrLeafRecord {
+        leaf_index: 0,
+        commitment: commitment.clone(),
+        tx_hash: tx_hash.to_string(),
+        block_number,
+        encrypted_memo: memo,
+        created_at: None,
+    };
+
+    db.atomic_append_mmr_leaves_and_state(&[leaf], &mmr, block_number)
         .await
         .unwrap();
-    assert!(inserted, "First session insert should succeed");
 
-    // Test duplicate session (should be rejected)
-    let duplicate = db
-        .insert_session(session_id, com_k_hex, amount, client)
+    let fetched = db
+        .get_mmr_leaf(0)
         .await
-        .unwrap();
-    assert!(!duplicate, "Duplicate session insert should be rejected");
+        .unwrap()
+        .expect("Leaf should exist");
+    assert_eq!(fetched.leaf_index, 0, "First leaf index should be 0");
+    assert_eq!(fetched.commitment, commitment);
 
-    // Test 2: Reveal masking key
-    let masking_key = "0xmasking_key_xyz";
-    let resolved = db.resolve_session(session_id, masking_key).await.unwrap();
-    assert!(resolved, "First resolve should succeed");
-
-    // Test double resolve (should be rejected)
-    let resolved_again = db.resolve_session(session_id, masking_key).await.unwrap();
-    assert!(!resolved_again, "Double resolve should be rejected");
-
-    // Test 3: Spend with nullifier check
+    // Test 2: Spend with nullifier check
     let nullifier = "0xnullifier_unique_001";
 
     // First spend should succeed
@@ -61,15 +64,11 @@ async fn test_end_to_end_deposit_and_spend_flow() {
         .unwrap();
     assert!(!double_spend, "Double-spend should be rejected");
 
-    // Test 4: Database stats
+    // Test 3: Database stats
     let stats = db.get_stats().await.unwrap();
-    assert_eq!(stats.total_sessions, 1, "Should have 1 session");
-    assert_eq!(stats.resolved_sessions, 1, "Should have 1 resolved session");
     assert_eq!(stats.total_nullifiers, 1, "Should have 1 nullifier");
 
     println!("✅ End-to-end integration test passed!");
-    println!("   - Sessions: {}", stats.total_sessions);
-    println!("   - Resolved: {}", stats.resolved_sessions);
     println!("   - Nullifiers: {}", stats.total_nullifiers);
 }
 
