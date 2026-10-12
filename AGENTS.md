@@ -10,17 +10,77 @@ Product Mantra: **Privacy 9.5/10, Product 10/10.** Apple Pay / QRIS speed with r
 
 Zero-friction inflow (0% deposit fee), volume-over-TVL economic velocity, and absolute mathematical solvency: **one deposit pays out exactly once, no more, no less.**
 
-## Repo Layout
+## Repo Layout & Code Mapping
 
 ```
-nimbus-contracts/  — Stylus WASM smart contract (direct MMR deposit, 1-in-1-out & 2-in-2-out JoinSplit Groth16, Merkle Mountain Range / MMR)
-nimbus-core/       — Crypto primitives (BLS12-381, Groth16 PrivateNoteCircuit & JoinSplitCircuit, Poseidon Grain-128, MMR, viewing keys, fees)
-nimbus-node/       — Stateless single-sequencer relayer node (ZK note & JoinSplit ingress, preflight verifier, direct EVM settlement, MMR sync API)
-nimbus-sdk/        — Client SDK (PrivateNoteWallet, Knapsack coin selection, local Groth16 prover, 2PC encrypted store, viewing key recovery)
-nimbus-cli/        — Pure ZK CLI tool (wallet, direct deposit note, MMR inspection, proof verification)
-scripts/           — Test scripts & cluster automation (scripts/start_relayer.sh)
-research/decisions/ — Design decisions (DEC-001 through DEC-038C)
-docs/              — Modular chapter-based docs
+nimbus-contracts/  — Stylus WASM Smart Contract (Arbitrum Nitro / EIP-2537)
+  ├── src/lib.rs                   — Entrypoint contract Nimbus (deposit_direct_note, spend_private_note, spend_joinsplit, etc.)
+  ├── src/deposit.rs               — Direct MMR note deposit logic (canonical scalar validation, min amount, _mmr_insert)
+  ├── src/spend.rs                 — Note spend & JoinSplit execution logic (nullifier burning, fee transfers, change notes)
+  ├── src/merkle.rs                — On-chain Merkle Mountain Range (MMR) accumulator (_mmr_insert, canonical peak bagging)
+  ├── src/storage.rs               — Stylus sol_storage! Nimbus layout (MMR state, accepted roots, nullifiers, epoch slots)
+  ├── src/groth16_note_verifier.rs — 1-in-1-out Groth16 BLS12-381 verifier over EIP-2537 (16 public inputs)
+  ├── src/groth16_joinsplit_verifier.rs — Universal 2-in-2-out JoinSplit Groth16 verifier over EIP-2537 (19 public inputs)
+  ├── src/poseidon_w5_constants.rs — Precomputed Poseidon width-5 round constants & MDS matrix for on-contract hashing
+  ├── src/events.rs                — Contract events (NoteCommitmentAppended with encrypted memo, PrivateNoteSpent, etc.)
+  ├── src/verification.rs          — EIP-2537 host precompile wrappers (0x0c MSM + 0x0f 4-pairing)
+  ├── src/vault.rs                 — Solvency collateral & yield accounting (total_assets, claim_accumulated_yield)
+  └── src/interfaces.rs, types.rs, constants.rs, helpers.rs — ERC20 & CCIP interfaces, EVM byte conversions
+
+nimbus-core/       — Cryptography Primitives & ZK Circuits
+  ├── src/lib.rs                   — Re-exports Arkworks BLS12-381, Poseidon, EVM, fees, MMR, and circuits
+  ├── src/note_circuit.rs          — 1-in-1-out PrivateNoteCircuit (16 public inputs, Two-Limb quote hash, formal scope binding)
+  ├── src/joinsplit_circuit.rs     — Universal 2-in-2-out JoinSplitCircuit (19 public inputs, constant-arity, 448 range gates)
+  ├── src/note.rs                  — Note primitives (PrivateNoteV1, NotePlaintext, MerkleMountainRange, MMRProof, ViewingKeys)
+  ├── src/poseidon.rs              — Poseidon width-3 & width-5, audited Grain-128 LFSR round constants generator (DEC-021)
+  ├── src/accounting.rs            — Solvency state machine (ContractAccounting) with mathematical invariant checks
+  ├── src/fees.rs                  — Fee calculations (0 bps deposit, flat 45 bps protocol spend fee, relayer markup)
+  ├── src/evm.rs                   — EVM byte & point formatting for BLS12-381 G1, G2, scalars, and proofs
+  ├── src/formal_tests.rs          — Mathematical invariant verification tests
+  └── src/bin/bench.rs             — Cryptographic micro-benchmarks
+
+nimbus-node/       — Stateless Single-Sequencer Relayer Node (Axum 0.8)
+  ├── src/main.rs                  — Server boot, Axum router, background worker orchestration, rate limiter
+  ├── src/handlers/
+  │   ├── health.rs                — Probes (/health, /live, /ready) with macro solvency metrics
+  │   ├── quote.rs                 — Signed execution fee quotes (/api/v1/quote, /api/quote/private-spend)
+  │   ├── spend.rs                 — Spend ingress (/api/v1/spend-private-note, /api/v1/spend-joinsplit)
+  │   ├── mmr.rs                   — MMR sync (/api/v1/mmr/proof/:leaf_index, /api/v1/mmr/leaves, /api/v1/mmr/tip, /api/v1/notes/sync)
+  │   ├── tx_status.rs             — Transaction status lookup (/api/tx-status)
+  │   └── x402.rs                  — HTTP 402 Facilitator endpoint (/api/x402/verify)
+  ├── src/database.rs              — SQLite + SQLCipher AES-256 database, WAL mode, transaction idempotency
+  ├── src/evm_client.rs            — Alloy EVM client for transaction broadcasting, receipt confirmation, gas bumping
+  ├── src/mmr_indexer.rs           — Background worker indexing on-chain NoteCommitmentAppended events & memos
+  ├── src/mempool_watchdog.rs      — Background worker reclaiming stalled leases & checking on-chain nullifiers
+  ├── src/sanctions_sync.rs        — Background worker syncing OFAC sanctions list daily from GitHub
+  ├── src/execution_fee_claimer.rs — Background worker claiming accrued execution fees from Stylus contract
+  ├── src/ccip_monitor.rs          — Background worker tracking CCIP messages & handling refunds (/api/ccip/refund)
+  ├── src/validation.rs            — Preflight validation (canonical scalars, nullifiers, binding, Groth16 check)
+  └── src/dto.rs, config.rs, state.rs — DTOs, network config (.env.test), shared AppState
+
+nimbus-sdk/        — Client SDK & Private Note Wallet
+  ├── src/lib.rs                   — Re-exports, memory security (secure_zeroize, zeroize)
+  ├── src/wallet/note_wallet.rs    — PrivateNoteWallet: direct deposit prep, Groth16 prover, coin selection, 2PC store
+  ├── src/coin_selection.rs        — Tiered stochastic knapsack coin selection algorithm
+  ├── src/storage.rs               — 2PC crash-safe note store with Argon2id + ChaCha20Poly1305 encryption
+  ├── src/client.rs                — HTTP client communicating with relayer endpoints
+  ├── src/eip712.rs                — EIP-712 typed data signer for execution quotes
+  ├── src/zk_wasm.rs, fee_wasm.rs  — WASM bindings for browser & mobile web runners
+  ├── src/wasm_types.rs            — Serializable DTOs for JS/TS bindings
+  ├── src/x402/                    — x402 payment protocol client codec and types
+  └── src/bin/bench_e2e.rs         — End-to-end deposit & spend benchmark binary
+
+nimbus-cli/        — Pure ZK CLI Tool
+  ├── src/main.rs, cli.rs          — Clap subcommands: GenerateWallet, CreateDepositNote, InspectMmr, VerifyProof
+  └── src/commands/zk.rs           — Key generation, direct deposit note creation, MMR inspection, proof verification
+
+scripts/           — Automation & Testing Scripts
+  ├── scripts/start_relayer.sh     — Single sequencer relayer daemon runner (start|status|stop|restart)
+  ├── scripts/deploy_testnet.sh    — Stylus contract deployer to Arbitrum Sepolia
+  └── scripts/check_balance.py, ht01_init_verification.py, ht04_spend_negative_tests.py, ht05_refund_tests.py, ht10_signed_quote_tests.py
+
+research/decisions/ — 50 Architecture Decision Records (DEC-001 through DEC-038C)
+docs/              — Chapter-based modular docs (bisnis.md, analisis/, contract/, core/, relayer/, sdk/, cli/, todos/)
 todo.md            — Master active checklist (pending tasks only)
 ```
 

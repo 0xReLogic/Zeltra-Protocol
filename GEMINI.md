@@ -63,26 +63,85 @@ Mengacu pada master checklist [`todo.md`](file:///workspaces/Zeltra-Protocol/tod
 
 ---
 
-## 4. Peta Struktur Repository & Dokumentasi Modular
+## 4. Peta Struktur Repository & Pemetaan Kode Riil
 
 ```text
 /workspaces/Zeltra-Protocol/
-├── nimbus-contracts/  — Stylus WASM smart contract (lib.rs, storage.rs, spend.rs, deposit.rs)
-├── nimbus-core/       — Crypto primitives, BDHKE, Merkle tree, & PrivateNoteCircuit
-├── nimbus-node/       — Relayer node (Leader, Guardian, queue, DB SQLCipher, Vault KMS)
-├── nimbus-sdk/        — WebAssembly client SDK (JS/TS bindings & EIP-712 quote signer)
-├── nimbus-cli/        — CLI utility untuk simulasi kriptografi lokal
-├── todo.md            — Master active backlog (hanya task pending [ ])
-├── archive/           — Arsip dokumen usang, histori tes lama, & original monolithic docs
+├── nimbus-contracts/         — Smart Contract Arbitrum Stylus WASM (EIP-2537 BLS12-381 Precompiles)
+│   ├── src/lib.rs            — Entrypoint #[entrypoint] contract Nimbus:
+│   │                           • Inflow: deposit_direct_note, deposit
+│   │                           • Outflow: spend_private_note, spend_joinsplit
+│   │                           • Solvensi: check_liability_invariant, user_note_liability, accrued_execution_fee_liability, realized_protocol_fees
+│   │                           • Nullifier: is_nullifier_spent, is_note_nullifier_spent, are_nullifiers_spent, is_generational_nullifier_spent
+│   │                           • MMR Tree: note_tree_root, mmr_leaf_count, mmr_peak, is_accepted_note_root, get_root_history
+│   │                           • Epoch & Admin: get_current_epoch, rotate_epoch, init, propose_owner, claim_ownership, pause, unpause
+│   ├── src/deposit.rs        — Logika deposit direct note (verifikasi skalar kanonikal from_evm_scalar < r, min amount 10 USDC, _mmr_insert)
+│   ├── src/spend.rs          — Logika eksekusi spend private note & JoinSplit (Groth16 verify, nullifier burning, fee accrual, change MMR append)
+│   ├── src/merkle.rs         — Akumulator on-chain Merkle Mountain Range (_mmr_insert, canonical peak bagging, bounded root history ring)
+│   ├── src/storage.rs        — Stylus sol_storage! Nimbus layout (MMR state, accepted roots, nullifiers, epoch slots, governance)
+│   ├── src/groth16_note_verifier.rs — Verifier Groth16 BLS12-381 untuk PrivateNoteCircuit (16 public inputs) via precompile 0x0c & 0x0f
+│   ├── src/groth16_joinsplit_verifier.rs — Verifier Groth16 BLS12-381 untuk JoinSplitCircuit (19 public inputs) via precompile 0x0c & 0x0f
+│   ├── src/poseidon_w5_constants.rs — Konstanta round constants & MDS matrix Poseidon width-5 in-contract
+│   ├── src/events.rs         — Event NoteCommitmentAppended (memo terenkripsi 96-byte), PrivateNoteSpent, DepositFee, dll.
+│   ├── src/verification.rs   — Wrapper pemanggilan host precompile EIP-2537 (call_msm_g1 0x0c, call_pairing 0x0f)
+│   ├── src/vault.rs          — Akuntansi yield & collateral solvensi (total_assets, claim_accumulated_yield)
+│   └── src/interfaces.rs, types.rs, constants.rs, helpers.rs — Interface ERC-20 / CCIP & konversi tipe EVM
 │
-└── docs/              — Dokumentasi modular berbasis bab (Chapter-Based Docs)
-    ├── bisnis.md      — Model bisnis & alur ZK-UTXO yang jujur
-    ├── cli/           — 3 chapters (01-overview, 02-commands, 03-e2e-workflow)
-    ├── contract/      — 4 chapters (01-overview, 02-storage, 03-deposit-refund, 04-spend-batch)
-    ├── core/          — 5 chapters (01-primitives, 02-bdhke, 03-note-utxo, 04-circuit, 05-accounting)
-    ├── relayer/       — 5 chapters (01-cluster, 02-database, 03-settlement, 04-kms, 05-quotes)
-    ├── sdk/           — 3 chapters (01-wasm, 02-integration, 03-agent-wallet)
-    └── todos/         — private-note-balance.md (Gate C0 bible) & receipt-finality.md
+├── nimbus-core/              — Primitif Kriptografi & Sirkuit ZK (Arkworks 0.6.0 ark-bls12-381 / ark-groth16)
+│   ├── src/lib.rs            — Re-export utama BLS12-381, Poseidon, EVM, fees, MMR, dan sirkuit
+│   ├── src/note_circuit.rs   — PrivateNoteCircuit (1-in-1-out Groth16, 16 public inputs, Two-Limb quote hash, formal scope binding DEC-035B)
+│   ├── src/joinsplit_circuit.rs — JoinSplitCircuit (Universal 2-in-2-out Groth16, 19 public inputs, constant topology, 448 range gates)
+│   ├── src/note.rs           — Primitif note (PrivateNoteV1, NotePlaintext, MerkleMountainRange, MMRProof, viewing keys, AEAD memo)
+│   ├── src/poseidon.rs       — Native Poseidon width-3 & width-5, Grain-128 LFSR parameter generator (DEC-021)
+│   ├── src/accounting.rs     — State machine ContractAccounting & validasi invariant matematis
+│   ├── src/fees.rs           — Kalkulasi fee (0 bps deposit, flat 45 bps spend, 15% relayer markup, rollover rules)
+│   ├── src/evm.rs            — Serialisasi & formatting EVM untuk G1, G2, skalar, dan proof BLS12-381
+│   ├── src/formal_tests.rs   — Test suite formal verifikasi integritas matematis sirkuit
+│   └── src/bin/bench.rs      — Binary benchmark mikro-kriptografi
+│
+├── nimbus-node/              — Stateless Single-Sequencer Relayer Node (Axum 0.8)
+│   ├── src/main.rs           — Boot server, router Axum, orkestrator worker background, rate limiter
+│   ├── src/handlers/
+│   │   ├── health.rs         — Endpoint /health, /live, /ready dengan observabilitas solvensi makro
+│   │   ├── quote.rs          — Endpoint penawaran fee eksekusi tertandatangani EIP-712 (/api/v1/quote, /api/quote/private-spend)
+│   │   ├── spend.rs          — Ingress spend ZK (/api/v1/spend-private-note, /api/v1/spend-joinsplit)
+│   │   ├── mmr.rs            — Dynamic MMR sync (/api/v1/mmr/proof/:leaf_index, /api/v1/mmr/leaves, /api/v1/mmr/tip, /api/v1/notes/sync)
+│   │   ├── tx_status.rs      — Query status transaksi (/api/tx-status)
+│   │   └── x402.rs           — Gateway HTTP 402 Facilitator (/api/x402/verify)
+│   ├── src/database.rs       — SQLite + SQLCipher AES-256 database, WAL mode, queue spend, tabel MMR & idempotency
+│   ├── src/evm_client.rs     — Client Alloy untuk broadcast transaksi L2, konfirmasi receipt, nonce lock, dan +15% gas bump
+│   ├── src/mmr_indexer.rs    — Background worker mengindeks event on-chain NoteCommitmentAppended & memo
+│   ├── src/mempool_watchdog.rs — Background worker pemulihan lease mempool stalled & pengecekan status nullifier on-chain
+│   ├── src/sanctions_sync.rs — Background worker sinkronisasi harian daftar sanksi OFAC dari GitHub ke memori
+│   ├── src/execution_fee_claimer.rs — Background worker klaim akumulasi execution fee dari kontrak Stylus
+│   ├── src/ccip_monitor.rs   — Background worker pemantauan pesan CCIP & handler refund (/api/ccip/refund)
+│   ├── src/validation.rs     — Preflight sanitasi (skalar kanonikal < r, nullifier check, verifikasi proof lokal Groth16)
+│   └── src/dto.rs, config.rs, state.rs — Data Transfer Objects, konfigurasi (.env.test), shared AppState
+│
+├── nimbus-sdk/               — Client SDK & Private Note Wallet (WASM + Native)
+│   ├── src/lib.rs            — Re-export SDK, memory security (secure_zeroize, Zeroize)
+│   ├── src/wallet/note_wallet.rs — PrivateNoteWallet: prepare_direct_deposit, Knapsack coin selection, Groth16 prover, 2PC store
+│   ├── src/coin_selection.rs — Algoritma Stochastic Knapsack Coin Selection (1-note & 2-note JoinSplit)
+│   ├── src/storage.rs        — Store note 2PC crash-safe terenkripsi Argon2id + ChaCha20Poly1305
+│   ├── src/client.rs         — HTTP client komunikasi ke relayer node
+│   ├── src/eip712.rs         — Penandatangan EIP-712 typed data untuk quote eksekusi
+│   ├── src/zk_wasm.rs, fee_wasm.rs — Binding WASM untuk eksekusi sirkuit & fee di browser klien
+│   ├── src/wasm_types.rs     — DTO serializable untuk interop JS/TS
+│   ├── src/x402/             — Modul client protokol pembayaran x402 (codec.rs, types.rs)
+│   └── src/bin/bench_e2e.rs  — Binary benchmark performa end-to-end deposit & spend client
+│
+├── nimbus-cli/               — Pure ZK CLI Utility
+│   ├── src/main.rs, cli.rs   — Parser Clap: GenerateWallet, CreateDepositNote, InspectMmr, VerifyProof
+│   └── src/commands/zk.rs    — Implementasi perintah CLI pembuatan wallet, deposit note, inspeksi MMR, dan verifikasi proof
+│
+├── scripts/                  — Script Otomasi, Deployment & Pengujian
+│   ├── scripts/start_relayer.sh  — Daemon runner relayer sequencer tunggal (start|status|stop|restart)
+│   ├── scripts/deploy_testnet.sh — Deployment smart contract Stylus ke Arbitrum Sepolia
+│   └── scripts/check_balance.py, ht01_init_verification.py, ht04_spend_negative_tests.py, ht05_refund_tests.py, ht10_signed_quote_tests.py
+│
+├── research/decisions/       — 50 Dokumen Arsitektur & Keputusan Desain Resmi (DEC-001 s/d DEC-038C)
+├── todo.md                   — Master Active Backlog (murni task pending [ ])
+└── docs/                     — Dokumentasi Analisis & Panduan Modular (bisnis.md, analisis/, contract/, core/, relayer/, sdk/, cli/)
 ```
 
 ---
