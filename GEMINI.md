@@ -119,7 +119,9 @@ Mengacu pada master checklist [`todo.md`](file:///workspaces/Zeltra-Protocol/tod
 ## 6. Tooling & MCP Capabilities
 
 * **CodeGraph MCP (`codegraph_explore`):** Tool utama penelusuran kode sumber nyata, dynamic-dispatch hops, dan verbatim symbol inspection.
-* **Graphify Knowledge Graph (`graphify-out/`):** Graph navigasi arsitektur, god nodes, dependencies cluster, dan shortest-path tracing antar komponen (`graphify query`, `graphify path`, `graphify explain`, `graphify update .`).
+* **Context-Mode MCP (`ctx_execute`, `ctx_search`, `ctx_batch_execute`):** Sandbox-first data processing. Menjalankan filter/analisis kode/log besar (>200 lines) di sandbox tanpa membanjiri konteks token.
+* **RTK (Rust Tooling Kit / Tokless CLI):** Kompresi dan pemangkasan output CLI (cargo, compiler, command traces) untuk efisiensi token dan feedback loop cepat.
+* **Graphify Knowledge Graph & MCP (`graphify-out/`):** Graph navigasi arsitektur, god nodes, dependencies cluster, dan shortest-path tracing antar komponen (`graphify query`, `graphify path`, `graphify explain`, atau via MCP server `graphify`: `query_graph`, `shortest_path`, `god_nodes`, `get_node`). Auto-update via `graphify update .`.
 * **Web Search & Research MCPs (Exa & Tavily Synergy):**
   - **Exa MCP (`web_search_exa`, `web_fetch_exa`):** *Semantic & Deep Technical Search*. Paling bagus saat butuh pemahaman mendalam yang tidak bisa ditemukan lewat keyword biasa: paper kriptografi (2024–2026), audit post-mortem, arsitektur deep tech, dan eksplorasi kode implementasi/crate eksternal. Format query ideal berupa deskripsi halaman ideal, bukan sekadar kata kunci.
   - **Tavily MCP (`tavily_search`, `tavily_extract`, `tavily_crawl`):** *Real-Time Fact, News & Ecosystem Intel*. Paling bagus untuk fact-checking instan, berita ekosistem live, proposal ArbitrumDAO/AIP, status rilis protokol, dan ekstraksi konten halaman spesifik.

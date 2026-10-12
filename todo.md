@@ -107,11 +107,11 @@ Ref: [`DEC-038A`](file:///workspaces/Zeltra-Protocol/research/decisions/DEC-038A
 
 #### Gate I.B / DEC-038B — Stylus Smart Contract Direct MMR Inflow & Storage Purification
 Ref: [`DEC-038B`](file:///workspaces/Zeltra-Protocol/research/decisions/DEC-038B-contract-direct-mmr-deposit-and-storage-cleanup.md) *(On-Chain Atomic Deposit, Storage Cleanup, & Absolute Solvency)*
-- [ ] **Step 1 (Deposit Entrypoint):** Implementasikan `deposit_direct_note(amount, note_commitment, encrypted_memo)` di `nimbus-contracts/src/deposit.rs` & `lib.rs` dengan validasi min 10 USDC, zero-commitment check, dan memo bounds 64..=256 bytes.
-- [ ] **Step 2 (Canonical Scalar Validation):** Terapkan sanitasi kanonikal fail-closed `from_evm_scalar(&note_commitment.0)` untuk mencegah serangan aliasing modulus $x \ge r$ (EIP-2537).
-- [ ] **Step 3 (Direct MMR Insertion):** Sambungkan penyetoran langsung ke `_mmr_insert` di `merkle.rs`, perbarui puncak `mmr_peaks`, daftarkan root ke cincin riwayat `accepted_note_roots` / `root_history` (Bounded History Ring anti-DoS), dan pancarkan event `NoteCommitmentAppended`.
-- [ ] **Step 4 (Simplified Solvency):** Sederhanakan `check_liability_invariant()` menjadi `USDC Balance >= user_note_liability + accrued_execution_fee_liability + realized_protocol_fees`, eliminasi total liabilitas refund mengambang.
-- [ ] **Step 5 (Contract Tests):** Terapkan test suite positif (`POS-1`) dan 6 test negatif terisolasi (`NEG-1` s/d `NEG-6`: non-canonical scalar, zero commitment, nominal kecil, memo salah, paused, transfer fail) untuk membuktikan invariant state tidak bermutasi saat revert.
+- [x] **Step 1 (Deposit Entrypoint):** Implementasikan `deposit_direct_note(amount, note_commitment, encrypted_memo)` di `nimbus-contracts/src/deposit.rs` & `lib.rs` dengan validasi min 10 USDC, zero-commitment check, dan memo bounds 64..=256 bytes.
+- [x] **Step 2 (Canonical Scalar Validation):** Terapkan sanitasi kanonikal fail-closed `from_evm_scalar(&note_commitment.0)` untuk mencegah serangan aliasing modulus $x \ge r$ (EIP-2537).
+- [x] **Step 3 (Direct MMR Insertion):** Sambungkan penyetoran langsung ke `_mmr_insert` di `merkle.rs`, perbarui puncak `mmr_peaks`, daftarkan root ke cincin riwayat `accepted_note_roots` / `root_history` (Bounded History Ring anti-DoS), dan pancarkan event `NoteCommitmentAppended`.
+- [x] **Step 4 (Simplified Solvency):** Sederhanakan `check_liability_invariant()` menjadi `USDC Balance >= user_note_liability + accrued_execution_fee_liability + realized_protocol_fees`, eliminasi total liabilitas refund mengambang.
+- [x] **Step 5 (Contract Tests):** Terapkan test suite positif (`POS-1`) dan 6 test negatif terisolasi (`NEG-1` s/d `NEG-6`: non-canonical scalar, zero commitment, nominal kecil, memo salah, paused, transfer fail) untuk membuktikan invariant state tidak bermutasi saat revert.
 
 #### Gate I.C / DEC-038C — Single Sequencer Relayer, Client SDK Direct Inflow, & Pure ZK CLI
 Ref: [`DEC-038C`](file:///workspaces/Zeltra-Protocol/research/decisions/DEC-038C-relayer-sequencer-sdk-direct-deposit-and-cli.md) *(Stateless Sequencer, 2PC SDK Inflow, & Ephemeral WASM)*

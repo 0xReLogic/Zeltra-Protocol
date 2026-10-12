@@ -5,11 +5,7 @@
 use alloc::vec::Vec;
 use alloy_primitives::{FixedBytes, U256};
 use stylus_sdk::abi::Bytes;
-#[cfg(not(test))]
-use stylus_sdk::prelude::Call;
 
-#[cfg(not(test))]
-use crate::interfaces::IErc20;
 use crate::storage::Nimbus;
 
 impl Nimbus {
@@ -51,23 +47,11 @@ impl Nimbus {
             return Err(b"INVALID_NOTE_COMMITMENT_SCALAR".to_vec());
         }
 
-        #[cfg(not(test))]
-        {
-            let client = self.msg_sender();
-            let this_address = self.env_contract_address();
-            let stablecoin_address = self.stablecoin.get();
-            let erc20 = IErc20::new(stablecoin_address);
-            let host = Self::runtime_host();
-            let success = erc20.transfer_from(
-                &host,
-                Call::new_mutating(self),
-                client,
-                this_address,
-                amount,
-            )?;
-            if !success {
-                return Err(b"TRANSFER_FROM_FAILED".to_vec());
-            }
+        let client = self.msg_sender();
+        let this_address = self.env_contract_address();
+        let success = self.erc20_transfer_from(client, this_address, amount)?;
+        if !success {
+            return Err(b"TRANSFER_FROM_FAILED".to_vec());
         }
 
         // Mutate liabilities and principal

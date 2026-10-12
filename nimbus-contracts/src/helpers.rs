@@ -75,4 +75,35 @@ impl Nimbus {
         }
         Ok(())
     }
+
+    #[inline(always)]
+    pub(crate) fn erc20_transfer_from(
+        &mut self,
+        client: Address,
+        this_address: Address,
+        amount: alloy_primitives::U256,
+    ) -> Result<bool, Vec<u8>> {
+        #[cfg(test)]
+        {
+            let _ = (client, this_address, amount);
+            crate::tests::ERC20_TRANSFER_FROM_RESULT.with(|r| r.borrow().clone())
+        }
+        #[cfg(not(test))]
+        {
+            use crate::interfaces::IErc20;
+            use stylus_sdk::prelude::Call;
+
+            let stablecoin_address = self.stablecoin.get();
+            let erc20 = IErc20::new(stablecoin_address);
+            let host = Self::runtime_host();
+            erc20.transfer_from(
+                &host,
+                Call::new_mutating(self),
+                client,
+                this_address,
+                amount,
+            )
+            .map_err(|_| b"TRANSFER_FROM_FAILED".to_vec())
+        }
+    }
 }

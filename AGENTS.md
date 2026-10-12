@@ -100,9 +100,9 @@ Refund path: if quorum fails or k never released → 24h timelock → user claim
 2. **Check `research/decisions/`** — there might be a relevant decision
 3. **Navigasi Kode & Arsitektur Wajib Graphify-First:**
    - **Refleks Pertama (Graphify):** Sebelum melakukan grep atau membaca file mentah, SELALU jalankan:
-     * `graphify query "<pertanyaan arsitektur atau integrasi>"` untuk melihat subgraph relasi antar file/fungsi.
-     * `graphify explain "<Simbol / Struct / Fungsi>"` untuk melihat posisi node, degree, dan relasi langsungnya.
-     * `graphify path "<A>" "<B>"` untuk melacak rantai pemanggilan antar dua komponen.
+     * `graphify query "<pertanyaan arsitektur atau integrasi>"` (atau via MCP `query_graph`) untuk melihat subgraph relasi antar file/fungsi.
+     * `graphify explain "<Simbol / Struct / Fungsi>"` (atau via MCP `get_node`) untuk melihat posisi node, degree, dan relasi langsungnya.
+     * `graphify path "<A>" "<B>"` (atau via MCP `shortest_path`) untuk melacak rantai pemanggilan antar dua komponen.
      * *Pantangan:* JANGAN membaca langsung file `graphify-out/graph.json` atau seluruh `GRAPH_REPORT.md` ke context window (sangat boros token).
    - **Call Path & Verbatim Code (CodeGraph):** Panggil MCP tool `codegraph_explore` (atau shell `codegraph explore "<query>"`) untuk melihat isi baris implementasi dan dynamic hops setelah lokasinya dipetakan oleh Graphify.
    - **Maintenance:** Setelah melakukan modifikasi file Rust, jalankan `graphify update .` untuk menjaga graf tetap sinkron tanpa memicu LLM cost.
@@ -114,6 +114,8 @@ Refund path: if quorum fails or k never released → 24h timelock → user claim
    - **Tavily MCP (`tavily_search`, `tavily_extract`, `tavily_crawl`) — Real-Time Fact, News & Governance:**
      * *Best for:* Pengecekan status live ekosistem (misal: voting AIP ArbitrumDAO, update rilis ArbOS/Stylus, breaking news), fact-checking cepat, atau crawling halaman web tertentu. Tavily dioptimalkan untuk latency rendah dan akurasi fakta real-time.
    - *Sinergi Alur:* Saat menghadapi problem kritis (finansial, kriptografi, upgrade contract), gunakan Tavily untuk memetakan situasi/status terkini, lalu gunakan Exa untuk menyelami referensi teknis dan paper primernya. Catat temuan kunci di `research/decisions/`.
+6. **Context Tools (Context-Mode):** Prioritaskan `ctx_execute`, `ctx_search`, dan `ctx_batch_execute` saat inspeksi data/log besar (>200 lines) atau multi-sumber agar raw bytes tidak membebani context window LLM.
+7. **Build & Compiler Output (RTK):** Gunakan tooling RTK/tokless untuk memangkas output cargo/compiler dan trace command yang panjang demi efisiensi token dan feedback loop cepat.
 
 ### While Coding
 

@@ -434,9 +434,9 @@ impl Nimbus {
     // --- Liability Invariant Check ---
 
     /// Verifies the invariant: contract_assets >= outstanding_liabilities
-    /// where outstanding_liabilities = user_note_liability + refundable_deposit_liability + accrued_execution_fee_liability (DEC-016 Gate B)
-    /// This ensures the contract can always cover all user notes, unresolved refunds, and accrued relayer fees.
-    fn check_liability_invariant(&self) -> Result<(), Vec<u8>> {
+    /// where outstanding_liabilities = user_note_liability + accrued_execution_fee_liability + realized_protocol_fees (DEC-038B).
+    /// This ensures the contract can always cover all active user notes and accrued fees.
+    pub fn check_liability_invariant(&self) -> Result<(), Vec<u8>> {
         #[cfg(not(test))]
         {
             use stylus_sdk::prelude::Call;
@@ -445,20 +445,20 @@ impl Nimbus {
             let contract_address = self.env_contract_address();
             let erc20 = IErc20::new(stablecoin_address);
             let host = Self::runtime_host();
-            let contract_balance = erc20
+            let balance = erc20
                 .balance_of(&host, Call::new(), contract_address)
                 .map_err(|_| b"INVARIANT_BALANCE_CHECK_FAILED".to_vec())?;
 
-            let user_liab = self.user_note_liability.get();
-            let fee_liab = self.accrued_execution_fee_liability.get();
-            let protocol_fees = self.realized_protocol_fees.get();
-            let total_liabilities = user_liab
-                .checked_add(fee_liab)
-                .and_then(|s| s.checked_add(protocol_fees))
-                .unwrap_or(U256::MAX);
+            let total_liabilities = self
+                .user_note_liability
+                .get()
+                .checked_add(self.accrued_execution_fee_liability.get())
+                .ok_or_else(|| b"OVERFLOW".to_vec())?
+                .checked_add(self.realized_protocol_fees.get())
+                .ok_or_else(|| b"OVERFLOW".to_vec())?;
 
-            if contract_balance < total_liabilities {
-                return Err(b"INVARIANT_VIOLATED_CONTRACT_ASSETS_LESS_THAN_LIABILITIES".to_vec());
+            if balance < total_liabilities {
+                return Err(b"INSOLVENT".to_vec());
             }
         }
 
@@ -695,6 +695,7 @@ mod tests {
         pub(crate) static STORAGE: RefCell<HashMap<[u8; 32], [u8; 32]>> = RefCell::new(HashMap::new());
         pub(crate) static MSG_SENDER: RefCell<Address> = const { RefCell::new(Address::ZERO) };
         pub(crate) static BLOCK_TIMESTAMP: RefCell<u64> = const { RefCell::new(0) };
+        pub(crate) static ERC20_TRANSFER_FROM_RESULT: RefCell<Result<bool, Vec<u8>>> = const { RefCell::new(Ok(true)) };
         static PAIRING_RESULT: RefCell<u8> = const { RefCell::new(1) };
         static LAST_RETURN_DATA_SIZE: RefCell<usize> = const { RefCell::new(32) };
     }
@@ -703,6 +704,7 @@ mod tests {
         STORAGE.with(|s| s.borrow_mut().clear());
         MSG_SENDER.with(|s| *s.borrow_mut() = Address::ZERO);
         BLOCK_TIMESTAMP.with(|t| *t.borrow_mut() = 0);
+        ERC20_TRANSFER_FROM_RESULT.with(|r| *r.borrow_mut() = Ok(true));
         PAIRING_RESULT.with(|result| *result.borrow_mut() = 1);
         LAST_RETURN_DATA_SIZE.with(|s| *s.borrow_mut() = 32);
     }
@@ -713,6 +715,10 @@ mod tests {
 
     fn set_block_timestamp(ts: u64) {
         BLOCK_TIMESTAMP.with(|t| *t.borrow_mut() = ts);
+    }
+
+    fn set_erc20_transfer_from_result(res: Result<bool, Vec<u8>>) {
+        ERC20_TRANSFER_FROM_RESULT.with(|r| *r.borrow_mut() = res);
     }
 
     fn set_pairing_result(result: bool) {
@@ -1112,6 +1118,7 @@ mod tests {
         let owner = Address::repeat_byte(0x01);
         let client = Address::repeat_byte(0x02);
         set_msg_sender(owner);
+        set_block_timestamp(1_700_000_000);
 
         let mut contract = Nimbus::default();
         contract
@@ -1133,6 +1140,13 @@ mod tests {
         assert_eq!(contract.user_note_liability.get(), amount);
         assert_eq!(contract.total_deposited_principal.get(), amount);
         assert_eq!(contract.mmr_leaf_count.get(), U256::from(1));
+
+        let root = contract.note_tree_root.get();
+        assert_ne!(root, FixedBytes::ZERO);
+        assert!(contract._is_accepted_note_root(root));
+        assert_eq!(contract.accepted_note_roots.get(root), U256::from(1_700_000_000));
+        assert_eq!(contract.root_history.get(U256::ZERO), root);
+        assert_eq!(contract.root_history_index.get(), U256::from(1));
     }
 
     #[test]
@@ -1157,6 +1171,9 @@ mod tests {
         );
         assert_eq!(res, Err(b"INVALID_NOTE_COMMITMENT_SCALAR".to_vec()));
         assert_eq!(contract.user_note_liability.get(), U256::ZERO);
+        assert_eq!(contract.total_deposited_principal.get(), U256::ZERO);
+        assert_eq!(contract.mmr_leaf_count.get(), U256::ZERO);
+        assert_eq!(contract.note_tree_root.get(), FixedBytes::ZERO);
     }
 
     #[test]
@@ -1180,6 +1197,9 @@ mod tests {
         );
         assert_eq!(res, Err(b"ZERO_COMMITMENT_REJECTED".to_vec()));
         assert_eq!(contract.user_note_liability.get(), U256::ZERO);
+        assert_eq!(contract.total_deposited_principal.get(), U256::ZERO);
+        assert_eq!(contract.mmr_leaf_count.get(), U256::ZERO);
+        assert_eq!(contract.note_tree_root.get(), FixedBytes::ZERO);
     }
 
     #[test]
@@ -1203,6 +1223,9 @@ mod tests {
         );
         assert_eq!(res, Err(b"AMOUNT_TOO_SMALL".to_vec()));
         assert_eq!(contract.user_note_liability.get(), U256::ZERO);
+        assert_eq!(contract.total_deposited_principal.get(), U256::ZERO);
+        assert_eq!(contract.mmr_leaf_count.get(), U256::ZERO);
+        assert_eq!(contract.note_tree_root.get(), FixedBytes::ZERO);
     }
 
     #[test]
@@ -1225,6 +1248,10 @@ mod tests {
             vec![0xaa; 63].into(),
         );
         assert_eq!(res_short, Err(b"INVALID_MEMO_LENGTH".to_vec()));
+        assert_eq!(contract.user_note_liability.get(), U256::ZERO);
+        assert_eq!(contract.total_deposited_principal.get(), U256::ZERO);
+        assert_eq!(contract.mmr_leaf_count.get(), U256::ZERO);
+        assert_eq!(contract.note_tree_root.get(), FixedBytes::ZERO);
 
         let res_long = contract.deposit_direct_note(
             U256::from(10_000_000),
@@ -1233,6 +1260,9 @@ mod tests {
         );
         assert_eq!(res_long, Err(b"INVALID_MEMO_LENGTH".to_vec()));
         assert_eq!(contract.user_note_liability.get(), U256::ZERO);
+        assert_eq!(contract.total_deposited_principal.get(), U256::ZERO);
+        assert_eq!(contract.mmr_leaf_count.get(), U256::ZERO);
+        assert_eq!(contract.note_tree_root.get(), FixedBytes::ZERO);
     }
 
     #[test]
@@ -1257,6 +1287,49 @@ mod tests {
         );
         assert_eq!(res, Err(b"CONTRACT_PAUSED".to_vec()));
         assert_eq!(contract.user_note_liability.get(), U256::ZERO);
+        assert_eq!(contract.total_deposited_principal.get(), U256::ZERO);
+        assert_eq!(contract.mmr_leaf_count.get(), U256::ZERO);
+        assert_eq!(contract.note_tree_root.get(), FixedBytes::ZERO);
+    }
+
+    #[test]
+    fn test_deposit_direct_note_neg6_erc20_transfer_from_fails() {
+        reset_test_state();
+        let owner = Address::repeat_byte(0x01);
+        let client = Address::repeat_byte(0x02);
+        set_msg_sender(owner);
+
+        let mut contract = Nimbus::default();
+        contract
+            .init(
+                owner,
+                Address::repeat_byte(0x03),
+                Address::repeat_byte(0x04),
+            )
+            .unwrap();
+
+        set_msg_sender(client);
+        let amount = U256::from(10_000_000);
+        let commitment = FixedBytes::repeat_byte(0x01);
+        let memo: Bytes = vec![0xaa; 64].into();
+
+        // Subcase A: transfer_from returns boolean false (silent failure token)
+        set_erc20_transfer_from_result(Ok(false));
+        let res_false = contract.deposit_direct_note(amount, commitment, memo.clone());
+        assert_eq!(res_false, Err(b"TRANSFER_FROM_FAILED".to_vec()));
+        assert_eq!(contract.user_note_liability.get(), U256::ZERO);
+        assert_eq!(contract.total_deposited_principal.get(), U256::ZERO);
+        assert_eq!(contract.mmr_leaf_count.get(), U256::ZERO);
+        assert_eq!(contract.note_tree_root.get(), FixedBytes::ZERO);
+
+        // Subcase B: transfer_from reverts with low-level call failure
+        set_erc20_transfer_from_result(Err(b"TRANSFER_FROM_FAILED".to_vec()));
+        let res_err = contract.deposit_direct_note(amount, commitment, memo);
+        assert_eq!(res_err, Err(b"TRANSFER_FROM_FAILED".to_vec()));
+        assert_eq!(contract.user_note_liability.get(), U256::ZERO);
+        assert_eq!(contract.total_deposited_principal.get(), U256::ZERO);
+        assert_eq!(contract.mmr_leaf_count.get(), U256::ZERO);
+        assert_eq!(contract.note_tree_root.get(), FixedBytes::ZERO);
     }
 
     #[test]
