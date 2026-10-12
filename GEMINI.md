@@ -21,52 +21,44 @@ Dokumen ini adalah memori konteks persisten untuk agen AI saat bekerja di reposi
 
 ## 2. Status Terkini & Keputusan Arsitektur
 
-### A. Yang Sudah Selesai & Teruji di Arbitrum Sepolia (Phase 1 Baseline)
-1. **Smart Contract Stylus (`nimbus-contracts`):** Verifikasi pairing BLS12-381 EIP-2537 (`0x0f`), 13/13 testnet negative tests pass. Rekonstruksi pesan on-chain `NIMBUS_SPEND_V1`.
-2. **Threshold Cluster (`nimbus-node`):** 1 Leader + 4 Guardian (3-of-5 threshold) terhubung via Tailscale private mesh dengan pelepasan atomik masking key $k$.
-3. **Settlement & Batching:** Persistent queue SQLite dengan leasing worker, retry exponential backoff, dan entrypoint `batch_spend()` (2-8 item) terdeploy on-chain.
-4. **CCIP & Finality:** Tracking pesan CCIP dan refund timelock 24 jam.
+### A. Evolusi Arsitektur: Migrasi Penuh ke Pure ZK-UTXO (DEC-038)
+1. **Pemusnahan Total Legacy Threshold BLS (DEC-038A):** Seluruh kode blind signing, guardian network, session storage (11 storage slot kontrak), dan alur refund timelock 24 jam telah dihapus bersih. Arsitektur kini 100% murni ZK-UTXO.
+2. **Direct MMR Deposit (DEC-038B):** Deposit langsung via `deposit_direct_note(...)` menyisipkan komitmen note ke Merkle Mountain Range (`_mmr_insert`), memancarkan event `NoteCommitmentAppended` berisi 96-byte AEAD memo, dan seketika berstatus unspent tanpa perantara kunci $k$.
+3. **Stateless Sequencer Relayer (DEC-038C):** Cluster 1 leader + 4 guardian digantikan oleh single stateless sequencer node (`scripts/start_relayer.sh`), murni melayani ingress ZK spend, preflight verification, dan MMR dynamic sync.
 
-### B. Arsitektur ZK-UTXO & Gates C0, D, E, F
-* **Jalur B (ZK-UTXO Model):** Sesuai `DEC-016`, `DEC-016A`, dan `DEC-016B`.
-* **Gate C0 Security Repair Selesai:**
-  - Bit Merkle path terikat ke `input_leaf_index` (20 bits decomposition gadget).
-  - Boolean constraint pada `has_change` dan zero-change integrity.
-  - 64-bit integer range constraints mencegah overflow / modular wrap-around di $\mathbb{F}_r$.
-  - Poseidon Grain-128 LFSR parameter generator (`DEC-021`, 108/108 tests pass).
-* **Gate D Merkle Tree & Verifier Terintegrasi (Contracts):**
-  - Groth16 BLS12-381 verifier EIP-2537 (`0x0c` MSM + `0x0f` Pairing Check) terdeploy di Stylus WASM.
-  - State Merkle Mountain Range (MMR, DEC-032) (`_mmr_insert`) terdeploy on-chain dengan bounded accepted-root history.
-  - Entrypoint `spend_private_note(...)` teruji 53/53 tests pass.
-* **Gate E SDK Private Note Wallet Selesai:**
-  - `PrivateNoteWallet` di `nimbus-sdk` menggantikan voucher exact-amount dengan saldo gabungan Note UTXO.
-  - Local proof generator Groth16, crash-safe 2PC note store (DEC-024), HMAC-SHA256 backup, dan stochastic coin selection (20/20 tests pass).
-* **Gate F Relayer Settlement Pipeline Selesai (Phase 1):**
-  - Endpoint `POST /api/v1/spend-private-note` dengan pre-flight fail-closed check (`from_evm_scalar < r`), semantic input binding (`DEC-022`), dual-layer nullifier double-spend guard (SQLite & on-chain `is_nullifier_spent`), dan single-item direct settlement dispatcher `broadcast_spend_private_note_transaction` (`DEC-025`, 91/91 tests pass).
-
-### C. Relayer Hardening (DEC-017 s/d DEC-025)
-* **DEC-017 Receipt Finality & Nonce Lock:** Thread-safe atomic nonce manager, mempool watchdog, dan automatic +15% gas-bump transaction replacement.
-* **DEC-018 On-Chain Deposit Indexer & Cryptographic Reveal:**
-  - Event listener on-chain `DepositFee` dengan `com_k_hash` terindeks.
-  - Reorg-safe indexing window dengan ambang batas konfirmasi finalitas dan checkpoint persistent di tabel `indexer_state`.
-  - Verifikasi kriptografis kurva eliptis $k \cdot \text{pk}_{\text{iss}} == \text{com}_k$ enforced *fail-closed* sebelum rilis kunci $k$.
-* **DEC-025 Relayer ZK Note Spend Settlement:** Single-item direct settlement, idempotensi 24h, dan proteksi race-condition status nullifier.
-* **DEC-031 Relayer Three-Way Reconciliation & Solvency Observability:** Three-way reconciliation engine (`reconcile_execution_fees`) mencocokkan akrual kontrak on-chain, DB SQLite (`spend_batches`), dan confirmed receipts (`status == 1`); pemusnahan quote fallback tanpa signing domain (fail-closed EIP-712 domain binding); serta observabilitas solvensi makro pada `/health` tanpa membuka privasi user.
+### B. Pondasi Kriptografi & Sirkuit ZK (Gate C, D, E, F, H, I)
+* **Sirkuit Groth16 (nimbus-core):**
+  - **1-in-1-out (`PrivateNoteCircuit`):** 16 Public Inputs (DEC-035A), 128-bit Two-Limb quote hash, Formal Scope Binding Gadget (DEC-035B), Poseidon Grain-128 LFSR (DEC-021), 64-bit integer range constraints, dan evolusi nullifier 2-Epoch (DEC-033).
+  - **Universal 2-in-2-out (`JoinSplitCircuit`):** 19 Public Inputs (DEC-036A), constant-arity topology, canonical dummy input/output slots, dan 448 quadratic range gates.
+* **Akumulator MMR (DEC-032):** In-memory dan on-chain Merkle Mountain Range dengan canonical peak bagging backward fold (`DOMAIN_MMR_BAG`) dan mitigasi Hyperbridge out-of-bounds ($leaf\_index < leaf\_count$).
+* **Smart Contract Stylus (nimbus-contracts):**
+  - Verifikasi Groth16 BLS12-381 via EIP-2537 (`0x0c` MSM + `0x0f` Pairing Check) di WASM Stylus.
+  - State MMR terintegrasi, history accepted roots bounded ring, dan entrypoints `deposit_direct_note`, `spend_private_note`, serta `spend_joinsplit`.
+  - Invariant solvensi absolut: `USDC Balance >= user_note_liability + accrued_execution_fee_liability + realized_protocol_fees`.
+* **Client SDK & Wallet State (nimbus-sdk):**
+  - `PrivateNoteWallet`: Tiered Stochastic Knapsack Coin Selection (DEC-030/036B), in-pool `consolidate_notes()`, 2PC crash-safe note store (DEC-024), Argon2id + ChaCha20Poly1305 encrypted storage, dan zeroize memory safety.
+  - Viewing Key Recovery Protocol (DEC-037): Derivasi kunci HKDF (`IncomingViewingKey`, `OutcomingViewingKey`), 48-byte `NotePlaintext`, compact 96-byte AEAD memo, dan pemulihan saldo on-chain (`recover_notes`).
+* **Relayer Pipeline (nimbus-node):**
+  - Endpoints `/api/v1/spend-private-note`, `/api/v1/spend-joinsplit`, `/api/v1/mmr/proof/:leaf_index`.
+  - Fail-closed local Groth16 preflight verification (DEC-026 C-01 anti gas-griefing).
+  - Three-Way Reconciliation Engine (`reconcile_execution_fees`) dan solvency observability pada `/health` (DEC-031).
 
 ---
 
 ## 3. Prioritas Aktif Selanjutnya
 
-Mengacu pada master checklist [`todo.md`](file:///workspaces/Zeltra-Protocol/todo.md) & [`docs/todos/private-note-balance.md`](file:///workspaces/Zeltra-Protocol/docs/todos/private-note-balance.md):
+Mengacu pada master checklist [`todo.md`](file:///workspaces/Zeltra-Protocol/todo.md):
 
-1. **Hard-Test E2E Arbitrum Sepolia (Gate G):**
-   * Deposit $\rightarrow$ partial spend $\rightarrow$ change note $\rightarrow$ second spend $\rightarrow$ withdraw-all di testnet.
+1. **Hard-Test E2E Arbitrum Sepolia (Gate G / Gate C1 Step 5):**
+   * Deposit direct $\rightarrow$ partial spend $\rightarrow$ change note $\rightarrow$ second spend $\rightarrow$ withdraw-all di testnet Arbitrum Sepolia.
    * Crash recovery & idempotency boundary testing.
-3. **Cross-Chain CCIP Testing & Verification (Phase 4):**
-   * Testnet E2E Hard-Test di Arbitrum Sepolia (source broadcast $\rightarrow$ router $\rightarrow$ destination execution $\rightarrow$ destination confirmation).
-   * Uji jalur kegagalan destination failure (refund 24h & double payout rejection).
-4. **MPC Ceremony & Circuit Freeze (Gate C):**
+2. **Cross-Chain CCIP Testing & Verification (Phase 4):**
+   * Testnet E2E di Arbitrum Sepolia (source broadcast $\rightarrow$ router $\rightarrow$ destination execution $\rightarrow$ destination confirmation).
+   * Uji jalur kegagalan destination failure.
+3. **MPC Ceremony & Circuit Freeze (Gate C):**
    * Freeze circuit constraints & public ABI sebelum production trusted setup ceremony.
+4. **Credential Rotation & Vault TLS Hardening:**
+   * Rotasi secret historis & auto-renew AppRole Vault tokens.
 
 
 ---

@@ -13,80 +13,78 @@ Zero-friction inflow (0% deposit fee), volume-over-TVL economic velocity, and ab
 ## Repo Layout
 
 ```
-nimbus-contracts/  — Stylus WASM smart contract (deposit, spend, batch, ZK private note Groth16, Merkle Mountain Range / MMR)
-nimbus-core/       — Crypto primitives (BLS12-381, Groth16 PrivateNoteCircuit, Poseidon Grain-128, fees, accounting)
-nimbus-node/       — Relayer node (leader, guardian, spend queue, ZK note ingress & direct settlement, API)
-nimbus-sdk/        — Client SDK (PrivateNoteWallet, coin selection, local Groth16 prover, encrypted store)
-nimbus-cli/        — CLI tool
-scripts/           — Test scripts & cluster automation
-research/decisions/ — Design decisions (DEC-001 s/d DEC-026)
+nimbus-contracts/  — Stylus WASM smart contract (direct MMR deposit, 1-in-1-out & 2-in-2-out JoinSplit Groth16, Merkle Mountain Range / MMR)
+nimbus-core/       — Crypto primitives (BLS12-381, Groth16 PrivateNoteCircuit & JoinSplitCircuit, Poseidon Grain-128, MMR, viewing keys, fees)
+nimbus-node/       — Stateless single-sequencer relayer node (ZK note & JoinSplit ingress, preflight verifier, direct EVM settlement, MMR sync API)
+nimbus-sdk/        — Client SDK (PrivateNoteWallet, Knapsack coin selection, local Groth16 prover, 2PC encrypted store, viewing key recovery)
+nimbus-cli/        — Pure ZK CLI tool (wallet, direct deposit note, MMR inspection, proof verification)
+scripts/           — Test scripts & cluster automation (scripts/start_relayer.sh)
+research/decisions/ — Design decisions (DEC-001 through DEC-038C)
 docs/              — Modular chapter-based docs
 todo.md            — Master active checklist (pending tasks only)
 ```
 
 Stack: Rust (Stylus SDK 0.10.7, Alloy 2.0, Arkworks 0.6.0 `ark-bls12-381` & `ark-groth16`), Axum 0.8, SQLite with SQLCipher AES-256 (`bundled-sqlcipher`), OpenBao/Vault KMS.
 
-## Core Business Flow
+## Core Business Flow (Pure ZK-UTXO Architecture — DEC-038)
 
-### 1. Inflow (Deposit USDC → Private Credential / Note)
+### 1. Inflow: Zero-Friction Direct MMR Deposit (DEC-038B / DEC-038C)
 ```
-User deposits USDC → contract records liability & emits DepositFee event (session_id, com_k_hash, client)
+User SDK derives Note (value, owner_key, rho, r) & computes Poseidon-W5 commitment (<15 us)
   ↓
-Relayer deposit indexer verifies on-chain event with safe-block reorg protection (DEC-018)
+User SDK encrypts 96-byte AEAD ChaCha20Poly1305 memo via Ephemeral X25519 ECDH (DEC-037)
   ↓
-Leader + guardians do threshold BLS blind signing → masked signature + commitment
+User calls deposit_direct_note(amount, note_commitment, encrypted_memo) on Stylus contract
   ↓
-Deposit confirmed on-chain → leader verifies k * pk_iss == com_k → releases masking key k
+Contract validates canonical scalar (< r), min amount, inserts leaf to MMR tree (_mmr_insert),
+emits NoteCommitmentAppended event with memo, and updates user_note_liability. (0 bps deposit fee)
   ↓
-User unmasks → gets final credential / initial Private Note
-```
-
-### 2. Outflow (ZK-UTXO Spend & Change Note)
-```
-User selects Note UTXO via PrivateNoteWallet (SDK, DEC-024)
-  ↓
-User generates local Groth16 proof (PrivateNoteCircuit: value conservation, Poseidon nullifier, Merkle path)
-  ↓
-User submits proof & 12 public inputs to Relayer (/api/v1/spend-private-note, DEC-025)
-  ↓
-Relayer validates scalars (< r), binds semantics (DEC-022), checks nullifiers locally & on-chain
-  ↓
-Relayer broadcasts spend_private_note(...) to Stylus contract
-  ↓
-Contract verifies Groth16 via EIP-2537 precompiles (0x0c MSM + 0x0f Pairing)
-  ↓
-Contract marks note_nullifier spent, inserts change note to MMR tree (_mmr_insert), pays recipient USDC
-  ↓
-Multi-liability reduced, exact value conservation maintained
+Note is immediately unspent & active (Zero threshold ceremony, zero masking key release).
 ```
 
-Refund path: if quorum fails or k never released → 24h timelock → user claims refund → liability reduced.
-
-**Terminal states:** SPENT or REFUNDED. Never both.
+### 2. Outflow: ZK-UTXO Spend & Change Note (1-in-1-out or 2-in-2-out JoinSplit)
+```
+User selects Note UTXO(s) via PrivateNoteWallet Knapsack selector (SDK, DEC-024 / DEC-030 / DEC-036B)
+  ↓
+User generates local Groth16 proof (PrivateNoteCircuit / JoinSplitCircuit: value conservation,
+Poseidon nullifiers, MMR membership proof, 64-bit range constraints, formal scope binding DEC-035B)
+  ↓
+User submits proof & public inputs to Relayer (/api/v1/spend-private-note or /spend-joinsplit)
+  ↓
+Relayer verifies canonical scalars (< r), checks binding, runs local CPU Groth16 preflight check (DEC-026 C-01),
+and verifies dual-layer nullifier protection (SQLite DB & on-chain is_nullifier_spent)
+  ↓
+Relayer broadcasts spend transaction to Stylus contract
+  ↓
+Contract verifies Groth16 via EIP-2537 precompiles (0x0c MSM + 0x0f 4-pairing)
+  ↓
+Contract marks note nullifier(s) spent, inserts change note(s) to MMR tree (_mmr_insert),
+pays recipient USDC, and accrues execution fee to relayer.
+  ↓
+Exact value conservation maintained: Input Note(s) = Payout + Protocol Fee + Execution Fee + Change Note(s)
+```
 
 ## Invariants — Break These and It's a Critical Bug
 
-**Accounting & Value Conservation:**
-- `contract USDC balance >= total_liabilities (user_note_liability + refundable_deposit_liability + accrued_execution_fee_liability)` — checked after every state change, reverts on insolvency
-- `gross_deposit = deposit_fee + net_liability` (deposit fee = 0 bps immutable)
-- `Input Note = Payout + Protocol Fee + Execution Fee + Change Note` (ZK-UTXO value conservation)
-- One session adds liability exactly once (duplicate session_id rejected)
-- One credential/note reduces liability exactly once (nullifier prevents double spend)
+**Accounting & Value Conservation (DEC-038B):**
+- `contract USDC balance >= total_liabilities (user_note_liability + accrued_execution_fee_liability + realized_protocol_fees)` — checked after every state change, reverts on insolvency
+- `gross_deposit = deposit_amount = net_liability` (deposit fee = 0 bps immutable)
+- `Input Note(s) = Payout + Protocol Fee + Execution Fee + Change Note(s)` (ZK-UTXO value conservation)
+- One commitment adds liability exactly once (inserted into MMR accumulator)
+- One nullifier reduces liability exactly once (siloed `note_nullifiers[nullifier] == true` double-spend protection)
 
-**Deposit/Reveal/Refund:**
-- `reveal()` does NOT transfer collateral — it only marks session resolved after verifying `k * pk_iss == com_k`
-- Commitment is bound at deposit time — reveal compares against stored commitment, not caller-supplied
-- Relayer enforces fail-closed cryptographic verification `k * pk_iss == com_k` before releasing `k` (DEC-018)
-- Refund only after 24h timelock, only by depositor, only if session not resolved
-- `SPENT XOR REFUNDED` — a session cannot be both
+**Direct Deposit (DEC-038B):**
+- Direct deposit inserts note commitment directly into Merkle Mountain Range (`_mmr_insert`)
+- Commitment must be canonical scalar (`from_evm_scalar < r`), min 10 USDC, non-zero
+- Emits `NoteCommitmentAppended` with 96-byte AEAD encrypted memo (zero storage bloat, log-only)
+- Pure ZK-UTXO: no sessions, no threshold blind signers, no refund timelocks needed
 
-**Spend (Legacy BLS & ZK-UTXO Private Note):**
-- Legacy BLS pairing check: `e(-alpha, G2) * e(H(m), pk_iss) == 1`
-- ZK-UTXO Private Note Groth16 check via EIP-2537 (`0x0c` MSM + `0x0f` 4-pairing):
+**Spend (ZK-UTXO Private Note & Universal JoinSplit):**
+- ZK-UTXO Groth16 check via EIP-2537 (`0x0c` MSM + `0x0f` 4-pairing):
   `e(-A, B) * e(alpha, beta) * e(L, gamma) * e(C, delta) == 1`
-- Semantic public input binding (DEC-022): exact match of recipient, amount, fees, quote hash, chain_id, contract_address, expiry, has_change
-- Double-spend protection: siloed nullifier (`note_nullifiers[input_nullifier] == true`)
-- Fee rounding: ceiling division, always favors solvency
+- Semantic public input binding (DEC-022 / DEC-035B): exact match of recipient, amount, fees, two-limb quote hash (`quote_hash_hi`, `quote_hash_lo`), chain_id, contract_address, expiry, has_change, and formal scope binding commitment
+- Double-spend protection: siloed nullifier (`note_nullifiers[nullifier] == true`)
+- Fee policy: 0 bps deposit, flat 45 bps protocol spend fee (DEC-028), gas reimbursement + 15% relayer markup (DEC-031)
 
 **CCIP:**
 - Router must be non-zero, source chain + sender allowlisted, message ID replay-protected
@@ -153,7 +151,7 @@ Under DEC-028, holding-time fee discounts are abolished to eliminate root age ga
 - [`todo.md`](file:///workspaces/Zeltra-Protocol/todo.md) — Master active backlog & test status
 - [`VISION.md`](file:///workspaces/Zeltra-Protocol/VISION.md) & [`docs/bisnis.md`](file:///workspaces/Zeltra-Protocol/docs/bisnis.md) — Product vision, business model, & fee architecture
 - [`docs/`](file:///workspaces/Zeltra-Protocol/docs/) — Chapter-based modular docs (`core/`, `contract/`, `relayer/`, `sdk/`, `cli/`)
-- [`research/decisions/`](file:///workspaces/Zeltra-Protocol/research/decisions/) — Architecture ADRs (DEC-001 through DEC-029)
+- [`research/decisions/`](file:///workspaces/Zeltra-Protocol/research/decisions/) — Architecture ADRs (DEC-001 through DEC-038C)
 
 ## Environment, Deployment & Cluster
 
