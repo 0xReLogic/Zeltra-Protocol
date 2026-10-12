@@ -94,15 +94,32 @@ Ref: [`DEC-037`](file:///workspaces/Zeltra-Protocol/research/decisions/DEC-037-n
 - [x] **DEC-037 / Step 3 (SDK):** Integrasi viewing key storage & export pada `PrivateNoteWallet`, fungsi pemulihan `recover_notes` dan standalone `recover_from_viewing_key` dengan pengecekan nullifier on-chain (Faerie Gold mitigation & timing side-channel safety), serta pembuatan otomatis memo kembalian terenkripsi pada `prepare_spend_proof` (47/47 tests pass).
 - [x] **DEC-037 / Step 4 (Relayer Ingress):** Update DTO `SpendRequest` & `PrivateNoteSpendRequest` untuk menerima `change_encrypted_memo`, propagasi calldata ke `spend_private_note` via `evm_client.rs`, dan ekstraksi `encrypted_memo` pada MMR indexer event parser (110/110 node tests pass).
 
-### Gate I / DEC-038 — Pure ZK-UTXO Migration & Direct MMR Inflow (Deprecation of Threshold BLS)
-Ref: [`DEC-038`](file:///workspaces/Zeltra-Protocol/research/decisions/DEC-038-pure-zk-utxo-migration-and-direct-mmr-deposit.md) *(Zero-Guardian Inflow & Full-Stack Simplification Masterplan)*
+### Gate I / DEC-038 — Pure ZK-UTXO Migration & Direct MMR Inflow Masterplan
+Ref: [`DEC-038`](file:///workspaces/Zeltra-Protocol/research/decisions/DEC-038-pure-zk-utxo-migration-and-direct-mmr-deposit.md) *(Master Architecture Blueprint)*
 
-- [ ] **DEC-038 / Step 1 (Contracts):** Implementasi entrypoint `deposit_direct_note(amount, note_commitment, encrypted_memo)` di `deposit.rs` & `lib.rs`, mutasi langsung `user_note_liability`, penegasan invariant solvensi, dan emisi `NoteCommitmentAppended` via `_mmr_insert`.
-- [ ] **DEC-038 / Step 2 (Contracts):** Tandai `_deposit`, `_reveal_mask_key`, dan `_claim_refund` sebagai deprecated dengan unit tests isolasi penuh untuk memastikan backward compatibility.
-- [ ] **DEC-038 / Step 3 (Core):** Tandai modul `blind_sign.rs` dan `threshold.rs` dengan atribut `#[deprecated]`, jadikan Poseidon MMR + Groth16 sebagai standar tunggal protokol.
-- [ ] **DEC-038 / Step 4 (SDK):** Implementasikan `prepare_direct_deposit()` pada `PrivateNoteWallet` untuk pembuatan note lokal instan, pembuatan komitmen Poseidon 74µs, dan pendaftaran otomatis status UNSPENT pasca konfirmasi blok L2 (250ms).
-- [ ] **DEC-038 / Step 5 (Relayer Node):** Nonaktifkan worker `deposit_indexer.rs` dan rute handler `handlers/threshold.rs`, rampingkan binary relayer menjadi sequencer tunggal murni (`mmr_indexer.rs` + spend dispatcher).
-- [ ] **DEC-038 / Step 6 (Integration Tests & Sepolia):** Uji alur E2E baru: `deposit_direct_note` (1 tx L2) $\rightarrow$ note unspent di SDK $\rightarrow$ spend Groth16 $\rightarrow$ change note otomatis terverifikasi di Arbitrum Sepolia.
+#### Gate I.A / DEC-038A — Zero-Legacy Purge & Threshold BLS Elimination
+Ref: [`DEC-038A`](file:///workspaces/Zeltra-Protocol/research/decisions/DEC-038A-zero-legacy-purge-and-threshold-bls-elimination.md) *(Zero Dead Code, Zero Deprecated Shims, Complete Decommissioning)*
+- [ ] **Fase 1 (Core):** Hapus fisik `nimbus-core/src/blind_sign.rs` dan `src/threshold.rs`, bersihkan seluruh BLS point/scalar types dari `types.rs` & `lib.rs`, verifikasi `cargo test -p nimbus-core` 100% pass.
+- [ ] **Fase 2 (Contracts):** Bersihkan 11 storage slots sesi lama dari `storage.rs`, hapus precompile `0x0e` (BLS12_G2_MSM) dan konstanta generator EVM, hapus entrypoints `_reveal_mask_key`, `_claim_refund`, `verify_bls_spend`, `_spend`, `_batch_spend`.
+- [ ] **Fase 3 (Node):** Hapus `nimbus-node/src/handlers/threshold.rs`, `handlers/deposit.rs`, `circuit_breaker.rs`, dan worker `deposit_indexer.rs`. Jalankan migrasi SQLCipher untuk DROP TABLE `sessions`, `deposit_indexer_state`, `stalled_sessions`, `guardian_shares`.
+- [ ] **Fase 4 (SDK & CLI):** Hapus `nimbus-sdk/src/blind_wasm.rs` dan `src/threshold_wasm.rs`. Hapus `nimbus-cli/src/commands/blind.rs` dan `commands/threshold.rs`, bersihkan subcommands BLS dari `cli.rs` & `main.rs`.
+- [ ] **Fase 5 (Infra & Scripts):** Hapus `scripts/start_cluster.sh` (1 leader + 4 guardian + Vault), ganti dengan `scripts/start_relayer.sh` (single stateless sequencer).
+
+#### Gate I.B / DEC-038B — Stylus Smart Contract Direct MMR Inflow & Storage Purification
+Ref: [`DEC-038B`](file:///workspaces/Zeltra-Protocol/research/decisions/DEC-038B-contract-direct-mmr-deposit-and-storage-cleanup.md) *(On-Chain Atomic Deposit, Storage Cleanup, & Absolute Solvency)*
+- [ ] **Step 1 (Deposit Entrypoint):** Implementasikan `deposit_direct_note(amount, note_commitment, encrypted_memo)` di `nimbus-contracts/src/deposit.rs` & `lib.rs` dengan validasi min 10 USDC, zero-commitment check, dan memo bounds 64..=256 bytes.
+- [ ] **Step 2 (Canonical Scalar Validation):** Terapkan sanitasi kanonikal fail-closed `from_evm_scalar(&note_commitment.0)` untuk mencegah serangan aliasing modulus $x \ge r$ (EIP-2537).
+- [ ] **Step 3 (Direct MMR Insertion):** Sambungkan penyetoran langsung ke `_mmr_insert` di `merkle.rs`, perbarui puncak `mmr_peaks`, daftarkan root ke cincin riwayat `accepted_note_roots` / `root_history` (Bounded History Ring anti-DoS), dan pancarkan event `NoteCommitmentAppended`.
+- [ ] **Step 4 (Simplified Solvency):** Sederhanakan `check_liability_invariant()` menjadi `USDC Balance >= user_note_liability + accrued_execution_fee_liability + realized_protocol_fees`, eliminasi total liabilitas refund mengambang.
+- [ ] **Step 5 (Contract Tests):** Terapkan test suite positif (`POS-1`) dan 6 test negatif terisolasi (`NEG-1` s/d `NEG-6`: non-canonical scalar, zero commitment, nominal kecil, memo salah, paused, transfer fail) untuk membuktikan invariant state tidak bermutasi saat revert.
+
+#### Gate I.C / DEC-038C — Single Sequencer Relayer, Client SDK Direct Inflow, & Pure ZK CLI
+Ref: [`DEC-038C`](file:///workspaces/Zeltra-Protocol/research/decisions/DEC-038C-relayer-sequencer-sdk-direct-deposit-and-cli.md) *(Stateless Sequencer, 2PC SDK Inflow, & Ephemeral WASM)*
+- [ ] **Step 1 (Relayer Router & DB):** Konfigurasi Axum 0.8 router di `nimbus-node/src/main.rs` murni untuk `/health`, `/api/v1/quote`, `/api/v1/spend-private-note`, `/api/v1/spend-joinsplit`, dan `/api/v1/mmr/proof/:leaf_index`. Finalisasi skema SQLite SQLCipher dengan mode WAL & normal sync.
+- [ ] **Step 2 (SDK Direct Inflow):** Implementasikan `prepare_direct_deposit()` di `nimbus-sdk/src/wallet/note_wallet.rs` dengan komputasi lokal Poseidon hash ($74.7\ \mu\text{s}$) dan ChaCha20Poly1305 memo encryption ($15\ \mu\text{s}$), staging note ke database lokal (2PC state `PendingDeposit` $\rightarrow$ `Unspent`).
+- [ ] **Step 3 (Ephemeral WASM Lifecycle):** Terapkan arsitektur isolasi memori Web Worker pada browser klien (`worker.terminate()`) untuk menjamin zero memory leak dan mencegah crash OOM linear WebAssembly pada perangkat mobile retail.
+- [ ] **Step 4 (Pure ZK CLI):** Implementasikan subcommands baru di `nimbus-cli`: `GenerateWallet`, `CreateDepositNote`, `InspectMmr`, dan `VerifyProof`.
+- [ ] **Step 5 (E2E & Negative Matrix):** Verifikasi test suite off-chain: relayer crash independence pada saat deposit, resilience terhadap event log memo rusak, penolakan preflight double-spend (HTTP 409), dan pemulihan crash 2PC.
 
 ---
 

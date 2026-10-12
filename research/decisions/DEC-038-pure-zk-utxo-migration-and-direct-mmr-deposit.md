@@ -1,7 +1,19 @@
 # DEC-038: Full Zero-Legacy Elimination of Threshold BLS & Pure ZK-UTXO Architecture (Direct MMR Inflow)
 
-## Status
-ACCEPTED (Definitive Architectural Pivot & Zero-Legacy Elimination Mandate)
+- **Status:** ACCEPTED (Definitive Architectural Pivot & Zero-Legacy Elimination Mandate)
+- **Author:** Zeltra Architecture & Cryptography Team
+- **Date:** 2026-10-12
+- **Child Sub-Specifications:**
+  - [`DEC-038A`](file:///workspaces/Zeltra-Protocol/research/decisions/DEC-038A-zero-legacy-purge-and-threshold-bls-elimination.md) — Zero-Legacy Purge, Complete BDHKE / Threshold BLS Elimination, and Multi-Guardian Cluster Decommissioning
+  - [`DEC-038B`](file:///workspaces/Zeltra-Protocol/research/decisions/DEC-038B-contract-direct-mmr-deposit-and-storage-cleanup.md) — Stylus Smart Contract Direct MMR Inflow, Storage Layout Purification, and Absolute Solvency Invariant
+  - [`DEC-038C`](file:///workspaces/Zeltra-Protocol/research/decisions/DEC-038C-relayer-sequencer-sdk-direct-deposit-and-cli.md) — Single Sequencer Relayer Architecture, Client SDK Direct Inflow Lifecycle, and Pure ZK CLI Tooling
+- **Related DECs:**
+  - [`DEC-016`](file:///workspaces/Zeltra-Protocol/research/decisions/DEC-016-private-note-change-ledger.md) (Private Note Change Ledger Concept)
+  - [`DEC-032`](file:///workspaces/Zeltra-Protocol/research/decisions/DEC-032-merkle-mountain-range-commitment-accumulator.md) (Merkle Mountain Range Commitment Accumulator)
+  - [`DEC-033`](file:///workspaces/Zeltra-Protocol/research/decisions/DEC-033-epoch-windowed-nullifier-pruning-in-flight-rollover.md) (Epoch-Windowed Nullifier Registry & In-Flight Rollover)
+  - [`DEC-035`](file:///workspaces/Zeltra-Protocol/research/decisions/DEC-035-cryptographic-canonicality-public-input-binding-and-mmr.md) (Cryptographic Canonicality Master Blueprint)
+  - [`DEC-036`](file:///workspaces/Zeltra-Protocol/research/decisions/DEC-036-universal-2-in-2-out-joinsplit-full-stack-architecture.md) (Universal 2-in-2-out JoinSplit Architecture)
+  - [`DEC-037`](file:///workspaces/Zeltra-Protocol/research/decisions/DEC-037-note-encryption-memo-and-viewing-key-recovery.md) (Note Encryption Memo & Viewing Key Recovery)
 
 ---
 
