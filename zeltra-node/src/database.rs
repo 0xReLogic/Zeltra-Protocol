@@ -161,11 +161,7 @@ impl Database {
             // Create tables
             conn.execute_batch(
                 "
-                -- Purge legacy BLS tables (DEC-038A)
-                DROP TABLE IF EXISTS sessions;
-                DROP TABLE IF EXISTS deposit_indexer_state;
-                DROP TABLE IF EXISTS stalled_sessions;
-                DROP TABLE IF EXISTS guardian_shares;
+
 
                 -- Indexer state tracking (DEC-018 / On-chain Event Indexer)
                 CREATE TABLE IF NOT EXISTS indexer_state (

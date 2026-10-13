@@ -1464,26 +1464,7 @@ impl EvmClient {
         format!("0x{:x}", self.signer_address)
     }
 
-    #[allow(dead_code)]
-    #[allow(clippy::too_many_arguments)]
-    pub async fn sign_leader_payload(
-        &self,
-        session_id: &str,
-        blinded_hex: &str,
-        k_hex: &str,
-        timestamp: u64,
-        amount: u64,
-        client_address: &str,
-        com_k_hex: &str,
-    ) -> Result<String, anyhow::Error> {
-        use alloy::signers::Signer;
-        let message = format!(
-            "{}:{}:{}:{}:{}:{}:{}",
-            session_id, blinded_hex, k_hex, timestamp, amount, client_address, com_k_hex
-        );
-        let signature = self.signer.sign_message(message.as_bytes()).await?;
-        Ok(hex::encode(signature.as_bytes()))
-    }
+
 
     #[allow(dead_code)]
     pub async fn get_clean_root_timestamp(&self, root_hex: &str) -> Result<u64> {

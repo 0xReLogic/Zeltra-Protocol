@@ -280,29 +280,11 @@ async fn main() {
 
     let network_config = NetworkConfig::from_env();
 
-    // Validate Tailscale requirement if configured
-    if network_config.require_tailscale {
-        if !network_config.is_tailscale_bind() {
-            eprintln!("ERROR: ZELTRA_REQUIRE_TAILSCALE=true but bind_addr is not a Tailscale IP");
-            eprintln!("Current bind_addr: {}", network_config.bind_addr);
-            eprintln!("Tailscale IPs typically start with 100.x.x.x or fd7a:115c:a1::");
-            std::process::exit(1);
-        }
-        println!("Tailscale binding: REQUIRED (security hardening)");
-    } else if network_config.is_tailscale_bind() {
-        println!("Tailscale binding: DETECTED (network security)");
-    } else {
-        println!("Tailscale binding: NOT CONFIGURED (using localhost only)");
-    }
-
     let listener_addr = network_config.listener_addr();
     let listener = tokio::net::TcpListener::bind(&listener_addr)
         .await
         .unwrap_or_else(|e| {
             eprintln!("ERROR: Failed to bind to {}: {}", listener_addr, e);
-            if network_config.is_tailscale_bind() {
-                eprintln!("Make sure Tailscale interface is up and IP is correct");
-            }
             std::process::exit(1);
         });
     println!("------------------------------------------------------------");
@@ -312,22 +294,10 @@ async fn main() {
     println!("Bind interface: {}", network_config.bind_addr);
     println!("Database:     {}", db_path);
     println!("Persistence:  ENABLED (SQLite WAL mode)");
-    println!("Circuit Breaker: guardian-rpc, vault-kms, blockchain-rpc");
-    println!(
-        "Key Rotation: {}",
-        if std::env::var("ZELTRA_KEY_ROTATION")
-            .map(|v| v == "true")
-            .unwrap_or(false)
-        {
-            "ENABLED"
-        } else {
-            "DISABLED (re-mask only)"
-        }
-    );
+    println!("Execution Rail: Pure ZK-UTXO Sequencer (EIP-2537)");
     println!("Idempotency:  ENABLED (24h TTL)");
     println!("Slippage:     ENABLED (min_payout + deadline)");
     println!("Min Balance:  {:.2} ETH", state::MIN_RELAYER_BALANCE_ETH);
-    println!("Gasless EIP-7702 delegation: ACTIVE");
     println!("x402 Facilitator endpoint:   ACTIVE");
     println!("Relayer batch queue interval: 2 seconds");
 

@@ -1,134 +1,55 @@
-version: '3'
+version: '3.8'
 
 services:
-  vault:
-    image: hashicorp/vault:latest
-    container_name: zeltra-vault
-    ports:
-      - "8200:8200"
-    environment:
-      VAULT_DEV_ROOT_TOKEN_ID: test-root-token
-      VAULT_DEV_LISTEN_ADDRESS: 0.0.0.0:8200
-    cap_add:
-      - IPC_LOCK
-
-  leader:
+  zeltra-relayer:
+    build:
+      context: .
+      dockerfile: Dockerfile
     image: zeltra-node:latest
-    container_name: zeltra-leader
+    container_name: zeltra-relayer
+    restart: unless-stopped
     ports:
-      - "8080:8080"
+      - "${PORT:-8080}:8080"
     volumes:
-      - ./test_leader.db:/app/test_leader.db
+      - zeltra_data:/app/data
     environment:
       - PORT=8080
+      - ZELTRA_ENV=${ZELTRA_ENV:-test}
       - ZELTRA_BIND_ADDR=0.0.0.0
-      - ZELTRA_ENV=test
-      - ZELTRA_SHARE_INDEX=1
-      - ZELTRA_VAULT_ADDR=http://vault:8200
-      - ZELTRA_VAULT_TOKEN=test-root-token
-      - ZELTRA_VAULT_PATH=v1/secret/data/zeltra/leader
-      - ZELTRA_THRESHOLD=3
-      - ZELTRA_DB_PATH=/app/test_leader.db
-      - ZELTRA_ISSUER_PUBLIC_KEY=${ZELTRA_ISSUER_PUBLIC_KEY}
-      - ZELTRA_GUARDIAN_PUBLIC_KEYS=${ZELTRA_GUARDIAN_PUBLIC_KEYS_1}
+      - ZELTRA_DB_PATH=/app/data/zeltra-relayer.db
+      - ZELTRA_DB_KEY=${ZELTRA_DB_KEY:-test-db-cipher-key-change-in-production}
       - ZELTRA_RPC_URL=${ZELTRA_RPC_URL}
       - ZELTRA_RPC_FALLBACK_URL=${ZELTRA_RPC_FALLBACK_URL}
+      - ZELTRA_CHAIN_ID=${ZELTRA_CHAIN_ID:-421614}
       - ZELTRA_RELAYER_PRIVATE_KEY=${ZELTRA_RELAYER_PRIVATE_KEY}
+      - ZELTRA_RELAYER_ADDRESS=${ZELTRA_RELAYER_ADDRESS}
       - ZELTRA_CONTRACT_ADDRESS=${ZELTRA_CONTRACT_ADDRESS}
-      - ZELTRA_BATCH_ENABLED=true
+      - ZELTRA_STABLECOIN_ADDRESS=${ZELTRA_STABLECOIN_ADDRESS:-0x75faf114eafb1bdbe2f0316df893fd58ce46aa4d}
+      - ZELTRA_BATCH_ENABLED=${ZELTRA_BATCH_ENABLED:-true}
+      - ZELTRA_RELAYER_MARKUP_BPS=${ZELTRA_RELAYER_MARKUP_BPS:-1500}
+      - ZELTRA_ESTIMATED_GAS_COST_USDC_BASE_UNITS=${ZELTRA_ESTIMATED_GAS_COST_USDC_BASE_UNITS:-150000}
       - ZELTRA_ETH_PRICE_USDC=${ZELTRA_ETH_PRICE_USDC:-3500.0}
       - ZELTRA_CHAINLINK_ETH_FEED=${ZELTRA_CHAINLINK_ETH_FEED:-0xd30e2101a97dcbAeBCBC04F14C3f624E67A35165}
-    depends_on:
-      - vault
+      - ZELTRA_CONFIRMATION_THRESHOLD=${ZELTRA_CONFIRMATION_THRESHOLD:-1}
+      - ZELTRA_TX_TIMEOUT_SECS=${ZELTRA_TX_TIMEOUT_SECS:-30}
+      - ZELTRA_GAS_BUMP_PERCENT=${ZELTRA_GAS_BUMP_PERCENT:-15}
+      - ZELTRA_MAX_GAS_BUMPS=${ZELTRA_MAX_GAS_BUMPS:-3}
+      - ZELTRA_MEMPOOL_LEASE_SECS=${ZELTRA_MEMPOOL_LEASE_SECS:-900}
+      - ZELTRA_WATCHDOG_INTERVAL_SECS=${ZELTRA_WATCHDOG_INTERVAL_SECS:-30}
+      - ZELTRA_MIN_SPEND_USDC=${ZELTRA_MIN_SPEND_USDC:-5000000}
+      - ZELTRA_MAX_SPEND_USDC=${ZELTRA_MAX_SPEND_USDC:-50000000000}
+      - ZELTRA_CCIP_ROUTER=${ZELTRA_CCIP_ROUTER:-0x2a9C5afB0d0e4BAb2BCdaE109EC4b0c4Be15a165}
+      - ZELTRA_CCIP_NETWORK_FEE_USDC=${ZELTRA_CCIP_NETWORK_FEE_USDC:-800000}
+      - ZELTRA_DESTINATION_RPC_URL=${ZELTRA_DESTINATION_RPC_URL}
+      - ZELTRA_CCIP_OFFRAMP=${ZELTRA_CCIP_OFFRAMP}
+      - ZELTRA_CCIP_REFUND_TIMEOUT_SECS=${ZELTRA_CCIP_REFUND_TIMEOUT_SECS:-86400}
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://127.0.0.1:8080/live || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
 
-  guardian-1:
-    image: zeltra-node:latest
-    container_name: zeltra-guardian-1
-    ports:
-      - "8081:8081"
-    volumes:
-      - ./test_guardian_1.db:/app/test_guardian_1.db
-    environment:
-      - PORT=8081
-      - ZELTRA_BIND_ADDR=0.0.0.0
-      - ZELTRA_ENV=test
-      - ZELTRA_SHARE_INDEX=2
-      - ZELTRA_VAULT_ADDR=http://vault:8200
-      - ZELTRA_VAULT_TOKEN=test-root-token
-      - ZELTRA_VAULT_PATH=v1/secret/data/zeltra/guardian-1
-      - ZELTRA_THRESHOLD=3
-      - ZELTRA_DB_PATH=/app/test_guardian_1.db
-      - ZELTRA_ISSUER_PUBLIC_KEY=${ZELTRA_ISSUER_PUBLIC_KEY}
-      - ZELTRA_GUARDIAN_PUBLIC_KEYS=${ZELTRA_GUARDIAN_PUBLIC_KEYS_2}
-      - ZELTRA_TRUSTED_LEADERS=${ZELTRA_TRUSTED_LEADERS}
-    depends_on:
-      - vault
-
-  guardian-2:
-    image: zeltra-node:latest
-    container_name: zeltra-guardian-2
-    ports:
-      - "8082:8082"
-    volumes:
-      - ./test_guardian_2.db:/app/test_guardian_2.db
-    environment:
-      - PORT=8082
-      - ZELTRA_BIND_ADDR=0.0.0.0
-      - ZELTRA_ENV=test
-      - ZELTRA_SHARE_INDEX=3
-      - ZELTRA_VAULT_ADDR=http://vault:8200
-      - ZELTRA_VAULT_TOKEN=test-root-token
-      - ZELTRA_VAULT_PATH=v1/secret/data/zeltra/guardian-2
-      - ZELTRA_THRESHOLD=3
-      - ZELTRA_DB_PATH=/app/test_guardian_2.db
-      - ZELTRA_ISSUER_PUBLIC_KEY=${ZELTRA_ISSUER_PUBLIC_KEY}
-      - ZELTRA_GUARDIAN_PUBLIC_KEYS=${ZELTRA_GUARDIAN_PUBLIC_KEYS_3}
-      - ZELTRA_TRUSTED_LEADERS=${ZELTRA_TRUSTED_LEADERS}
-    depends_on:
-      - vault
-
-  guardian-3:
-    image: zeltra-node:latest
-    container_name: zeltra-guardian-3
-    ports:
-      - "8083:8083"
-    volumes:
-      - ./test_guardian_3.db:/app/test_guardian_3.db
-    environment:
-      - PORT=8083
-      - ZELTRA_BIND_ADDR=0.0.0.0
-      - ZELTRA_ENV=test
-      - ZELTRA_SHARE_INDEX=4
-      - ZELTRA_VAULT_ADDR=http://vault:8200
-      - ZELTRA_VAULT_TOKEN=test-root-token
-      - ZELTRA_VAULT_PATH=v1/secret/data/zeltra/guardian-3
-      - ZELTRA_THRESHOLD=3
-      - ZELTRA_DB_PATH=/app/test_guardian_3.db
-      - ZELTRA_ISSUER_PUBLIC_KEY=${ZELTRA_ISSUER_PUBLIC_KEY}
-      - ZELTRA_GUARDIAN_PUBLIC_KEYS=${ZELTRA_GUARDIAN_PUBLIC_KEYS_4}
-      - ZELTRA_TRUSTED_LEADERS=${ZELTRA_TRUSTED_LEADERS}
-    depends_on:
-      - vault
-
-  guardian-4:
-    image: zeltra-node:latest
-    container_name: zeltra-guardian-4
-    ports:
-      - "8084:8084"
-    volumes:
-      - ./test_guardian_4.db:/app/test_guardian_4.db
-    environment:
-      - PORT=8084
-      - ZELTRA_BIND_ADDR=0.0.0.0
-      - ZELTRA_ENV=test
-      - ZELTRA_SHARE_INDEX=5
-      - ZELTRA_VAULT_ADDR=http://vault:8200
-      - ZELTRA_VAULT_TOKEN=test-root-token
-      - ZELTRA_VAULT_PATH=v1/secret/data/zeltra/guardian-4
-      - ZELTRA_THRESHOLD=3
-      - ZELTRA_DB_PATH=/app/test_guardian_4.db
-      - ZELTRA_ISSUER_PUBLIC_KEY=${ZELTRA_ISSUER_PUBLIC_KEY}
-      - ZELTRA_GUARDIAN_PUBLIC_KEYS=${ZELTRA_GUARDIAN_PUBLIC_KEYS_5}
-      - ZELTRA_TRUSTED_LEADERS=${ZELTRA_TRUSTED_LEADERS}
-    depends_on:
-      - vault
+volumes:
+  zeltra_data:
+    driver: local
