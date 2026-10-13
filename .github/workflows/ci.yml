@@ -40,6 +40,17 @@ jobs:
       - name: Run Clippy linter
         run: cargo clippy --workspace --all-targets -- -D warnings
 
+  machete:
+    name: Unused Dependencies Check
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Run cargo-machete
+        uses: bkoropoff/cargo-machete@v2
+
   test:
     name: Workspace Tests (nextest)
     runs-on: ubuntu-latest
@@ -113,6 +124,28 @@ jobs:
       - name: Run contract unit tests
         run: cargo test -p zeltra_contracts
 
+  feature-check:
+    name: Feature Matrix Check (cargo-hack)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install cargo-hack
+        uses: taiki-e/install-action@cargo-hack
+
+      - name: Cache Cargo dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: "feature-check-cache"
+
+      - name: Verify feature combinations
+        run: cargo hack check --workspace --each-feature --no-dev-deps
+
   security:
     name: Security & License Audit
     runs-on: ubuntu-latest
@@ -127,7 +160,7 @@ jobs:
       - name: Install security auditing tools
         uses: taiki-e/install-action@v2
         with:
-          tool: cargo-audit,cargo-deny
+          tool: cargo-audit,cargo-deny,cargo-geiger
 
       - name: Cache Cargo dependencies
         uses: Swatinem/rust-cache@v2
@@ -140,6 +173,14 @@ jobs:
 
       - name: Check licenses and dependencies (cargo deny)
         run: cargo deny check
+        continue-on-error: true
+
+      - name: Audit unsafe usage (cargo geiger)
+        run: cargo geiger --all-targets --package zeltra-core --package zeltra-sdk
+        continue-on-error: true
+
+      - name: Run Google OSV-Scanner
+        uses: google/osv-scanner-action@v1.9.2
         continue-on-error: true
 
   docker:
