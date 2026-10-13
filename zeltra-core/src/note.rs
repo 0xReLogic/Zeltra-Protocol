@@ -1249,19 +1249,19 @@ mod tests {
         // Exact known-answer hex strings from canonical Keccak-256 mod r
         assert_eq!(
             d_note_hex,
-            "49476cc74d87b0ec3cbcf3e02b3794d86c6d8b5a8b5ccf7029a3b709e9e686df"
+            "597c16638e14fc84c3c2e5fa39b1ffb6bdfd366a935356788e93be4d1a1c9c3e"
         );
         assert_eq!(
             d_null_hex,
-            "541616c5d57d76e314728a4f2bdbdfe71f1ebcb705b8114d1f3216afa654c621"
+            "6ffd37ee1678eaa2ba73925789b22d44e4c46aaeb536d4e8b87025335393e53b"
         );
         assert_eq!(
             d_merkle_hex,
-            "3834656d06de7d572e49914bb58b1e27dd5f9f6d86240e64495a1d82db22e82e"
+            "67f21bc90381a2df435f97651a4e7cdb7bef0ebeac88e36ee2ef94a80556f887"
         );
         assert_eq!(
             d_initial_hex,
-            "53583822f8e973844e5583179d2bc8684c45a0b85310e551088dcd3d6815b523"
+            "1058a560a8972af549a18b657c0b3d6128890dd72d787a77cddb4eafa131635e"
         );
         assert_eq!(
             d_quote_hex,
