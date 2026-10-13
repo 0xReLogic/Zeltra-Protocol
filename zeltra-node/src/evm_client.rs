@@ -1464,8 +1464,6 @@ impl EvmClient {
         format!("0x{:x}", self.signer_address)
     }
 
-
-
     #[allow(dead_code)]
     pub async fn get_clean_root_timestamp(&self, root_hex: &str) -> Result<u64> {
         let root_bytes =

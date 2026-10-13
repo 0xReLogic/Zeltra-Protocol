@@ -1,5 +1,5 @@
-use zeltra_core::*;
 use std::time::Instant;
+use zeltra_core::*;
 
 const ITERATIONS: u32 = 1000;
 

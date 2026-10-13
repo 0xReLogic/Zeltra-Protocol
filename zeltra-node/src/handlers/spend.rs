@@ -2272,8 +2272,8 @@ pub async fn handle_spend_joinsplit(
 mod tests {
     use super::*;
     use axum::extract::State;
-    use zeltra_core::Fr;
     use tempfile::TempDir;
+    use zeltra_core::Fr;
 
     async fn setup_test_state() -> (AppState, TempDir) {
         let tmp = TempDir::new().unwrap();

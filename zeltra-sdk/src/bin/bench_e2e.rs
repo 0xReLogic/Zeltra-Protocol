@@ -1,5 +1,7 @@
 use ark_bls12_381::Fr;
 use ark_ff::UniformRand;
+use rand::rngs::OsRng;
+use std::time::Instant;
 use zeltra_core::note_circuit::{
     extract_public_inputs, generate_note_circuit_keys, generate_note_proof, verify_note_proof,
     PrivateNoteCircuit,
@@ -9,8 +11,6 @@ use zeltra_core::{
     MerkleMountainRange,
 };
 use zeltra_sdk::wallet::note_wallet::PrivateNoteWallet;
-use rand::rngs::OsRng;
-use std::time::Instant;
 
 fn main() {
     println!("\n================================================================================");

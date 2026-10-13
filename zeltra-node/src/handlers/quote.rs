@@ -3,8 +3,8 @@ use crate::state::AppState;
 use alloy_primitives::{Address, U256};
 use axum::extract::{Query, State};
 use axum::Json;
-use zeltra_sdk::eip712::{compute_quote_hashes, ExecutionQuote};
 use std::str::FromStr;
+use zeltra_sdk::eip712::{compute_quote_hashes, ExecutionQuote};
 
 /// Quote expiry time in seconds (5 minutes)
 const QUOTE_EXPIRY_SECS: u64 = 300;

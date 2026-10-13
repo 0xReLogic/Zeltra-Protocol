@@ -1,11 +1,11 @@
 //! ZK-UTXO CLI commands (DEC-038A / DEC-038C)
 
+use rand::Rng;
 use zeltra_core::note::{
     derive_note_randomness, derive_nullifier_key, derive_spending_key, derive_viewing_keys,
     encrypt_note_memo, note_commitment, MerkleMountainRange,
 };
 use zeltra_core::{from_evm_scalar, to_evm_scalar, Fr, UniformRand};
-use rand::Rng;
 
 /// Generate a new random spending secret, full viewing key, and incoming viewing key (DEC-038C)
 pub fn generate_wallet<R: Rng>(out_file: Option<&str>, rng: &mut R) {

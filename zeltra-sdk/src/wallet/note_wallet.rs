@@ -17,6 +17,10 @@ use chacha20poly1305::{
     aead::{Aead, KeyInit},
     ChaCha20Poly1305, Nonce,
 };
+use rand::rngs::OsRng;
+use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
+use std::collections::HashMap;
 use zeltra_core::{
     decrypt_note_memo, derive_joinsplit_dummy_nullifier, derive_joinsplit_nullifier,
     derive_note_randomness, derive_nullifier, derive_nullifier_key, derive_viewing_keys,
@@ -24,10 +28,6 @@ use zeltra_core::{
     generate_joinsplit_proof, generate_note_proof, note_commitment, split_quote_hash_to_limbs,
     to_evm_g1, to_evm_g2, IncomingViewingKey, JoinSplitCircuit, OutcomingViewingKey,
 };
-use rand::rngs::OsRng;
-use serde::{Deserialize, Serialize};
-use sha2::{Digest, Sha256};
-use std::collections::HashMap;
 
 /// Minimum non-dust amount (1000 base units = 0.001 USDC)
 pub const DUST_THRESHOLD: u64 = 1_000;

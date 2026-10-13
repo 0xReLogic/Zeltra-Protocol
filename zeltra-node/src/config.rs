@@ -32,10 +32,7 @@ impl NetworkConfig {
             .parse()
             .unwrap_or(8080);
 
-        Self {
-            bind_addr,
-            port,
-        }
+        Self { bind_addr, port }
     }
 
     pub fn listener_addr(&self) -> String {

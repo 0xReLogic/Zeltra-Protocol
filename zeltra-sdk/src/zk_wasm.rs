@@ -3,9 +3,9 @@
 #![allow(deprecated)]
 
 use crate::wasm_types::ZkComplianceProof;
-use zeltra_core::*;
 use rand::rngs::OsRng;
 use wasm_bindgen::prelude::*;
+use zeltra_core::*;
 
 #[cfg(target_arch = "wasm32")]
 #[wasm_bindgen]

@@ -8,11 +8,11 @@
 
 use ark_bls12_381::Fr;
 use ark_ff::{BigInteger, PrimeField, UniformRand};
+use rand::rngs::OsRng;
+use std::time::Instant;
 use zeltra_sdk::coin_selection::{select_notes_stochastic_knapsack, KnapsackConfig};
 use zeltra_sdk::storage::{DbNoteRecord, DbNoteStatus, SqlCipherNoteStore};
 use zeltra_sdk::wallet::note_wallet::{NoteStatus, PrivateNoteWallet, WalletNote};
-use rand::rngs::OsRng;
-use std::time::Instant;
 
 fn mock_wallet_note(cm: &str, val: u64, epoch: u32) -> WalletNote {
     WalletNote {
