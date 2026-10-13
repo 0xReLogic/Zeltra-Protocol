@@ -1,51 +1,68 @@
 # Roadmap Prioritas Rekayasa Zeltra Protocol (2026)
 
-Dokumen ini adalah kompas urutan pengerjaan tim. **Aturan utama:** Selesaikan fondasi inti (*Core, Contract Stylus, & Relayer Node*) terlebih dahulu sebelum melangkah ke integrasi SDK dan produk komersial.
+Dokumen ini adalah kompas urutan pengerjaan tim.
+
+> 💡 **Prinsip Utama Rekayasa (Anti-Burnout / Zero Gas Waste):**  
+> **"Local Simulation & Off-Chain Verification First, Single-Pass Testnet Last."**  
+> Jangan deploy kontrak ke Arbitrum Sepolia berulang-ulang saat sirkuit, invariant, atau SDK masih terus dimodifikasi. Selesaikan seluruh constraint, verifikasi formal, SDK tooling, dan Trusted Setup secara lokal. Testnet hanya dijalankan **SEKALI SAJA** sebagai gladi bersih sebelum peluncuran mainnet.
+
+## Fase 1: SDK, Browser Prover & Ekosistem Fitur (FOKUS AKTIF SAAT INI)
+Ref: [`docs/todos/private-note-balance.md`](file:///workspaces/Zeltra-Protocol/docs/todos/private-note-balance.md)
+
+*Pengerjaan dan pengujian 100% di lokal/unit-test tanpa deploy ke Sepolia:*
+
+1. **Client SDK & Browser Runner (`zeltra-sdk`):**
+   - In-Browser WebAssembly SDK Prover: Eksekusi Groth16 client-side non-blocking via Web Worker dengan isolasi memori anti-OOM linear (`worker.terminate()`).
+   - Viewing Key Recovery Suite: Ekstraksi dan dekripsi saldo note via HKDF `ovk`/`ivk` dari memo on-chain, tooling export laporan audit kas & SPT pajak B2B.
+   - CEX Helper Tooling: Modul "Export Source of Funds" untuk pembuktian selektif asal-usul dana bersih ke bursa terpusat (Binance/Coinbase).
+2. **Shielded-to-Shielded In-Pool Transfer:**
+   - Transfer note privat langsung antar akun/merchant Zeltra (`output_commitment_1` penerima, `output_commitment_2` kembalian) tanpa konversi ke USDC publik on-chain (Merchant Masking).
+3. **HTTP 402 Shielded Agentic Micro-Pay (x402 Facilitator):**
+   - Streaming payment mikro untuk AI Agent via Prepaid Note Pool dan aggregated session tab.
+4. **Cross-Chain CCIP Simulation:**
+   - Verifikasi isolasi logic CCIP router, mapping message ID, dan skenario penolakan double-spend secara lokal.
 
 ---
 
-## Fase 1: Fondasi Inti & Eliminasi Zero-Legacy (FOKUS UTAMA SAAT INI)
-Ref: [`research/decisions/DEC-038-pure-zk-utxo-migration-and-direct-mmr-deposit.md`](file:///workspaces/Zeltra-Protocol/research/decisions/DEC-038-pure-zk-utxo-migration-and-direct-mmr-deposit.md)
+## Fase 2: Circuit Freeze, Security Audit & Trusted Setup MPC
+Ref: [`research/decisions/DEC-035`](file:///workspaces/Zeltra-Protocol/research/decisions/DEC-035-cryptographic-canonicality-public-input-binding-and-mmr.md) & [`DEC-036`](file:///workspaces/Zeltra-Protocol/research/decisions/DEC-036-universal-2-in-2-out-joinsplit-full-stack-architecture.md)
 
-1. **Smart Contract Stylus (`zeltra-contracts`):**
-   - Hapus seluruh peninggalan BLS/BDHKE (11 storage slot `session_*`, `_reveal_mask_key`, `verify_bls_spend`, dll).
-   - Implementasikan `deposit_direct_note(amount, note_commitment, encrypted_memo)` (1 tx L2, 250ms, gas ~54k).
-   - Uji verifikasi solvensi mutlak (`assets >= liabilities`).
-2. **Kriptografi Inti (`zeltra-core`):**
-   - Hapus fisik file `src/blind_sign.rs` dan `src/threshold.rs`.
-   - Bekukan modul Poseidon Grain-128, MMR Bagging, dan sirkuit Groth16 (`PrivateNoteCircuit` & `JoinSplitCircuit`).
-3. **Relayer Node (`zeltra-node`):**
-   - Hapus klaster Guardian, registri kunci KMS di `kms.rs`, dan worker `deposit_indexer.rs`.
-   - Bersihkan tabel SQLite (`sessions`, `stalled_sessions`, `guardian_shares`).
-   - Sederhanakan relayer menjadi **Single Stateless Sequencer** (hanya melayani MMR proof sync, signed quote, dan broadcast ZK spend).
+*Kunci mati seluruh spesifikasi sebelum menyentuh jaringan publik:*
 
----
-
-## Fase 2: Client SDK & Browser Prover (`zeltra-sdk`)
-
-*Setelah Fase 1 selesai dan lulus testnet, fokus beralih ke SDK:*
-
-1. **Integrasi Direct Inflow:**
-   - Tambahkan `prepare_direct_deposit()` pada `PrivateNoteWallet` (pembuatan komitmen Poseidon 74µs di perangkat pengguna).
-   - Pendaftaran instan status `UNSPENT` begitu blok Arbitrum terkonfirmasi.
-2. **Viewing Key Recovery Engine (DEC-037):**
-   - Pemulihan histori note dari receipt log `NoteCommitmentAppended` via ChaCha20-Poly1305.
-3. **Optimasi Prover Web Worker:**
-   - Bungkus eksekusi Groth16 client-side dalam Web Worker non-blocking dengan animasi checkout Apple Pay (1–2 detik).
+1. **Circuit Constraints & ABI Freeze:**
+   - Kunci constraint R1CS 16 PI (`PrivateNoteCircuit`) dan 19 PI (`JoinSplitCircuit`).
+   - Finalisasi parameter Two-Limb quote hash, Formal Scope Binding Gadget, dan 448 quadratic range gates.
+2. **Independent Circuit & Contract Audit:**
+   - Review formal invariant solvensi matematis (`contract balance >= total_liabilities`).
+   - Analisis keamanan curve BLS12-381 precompile EIP-2537 di Stylus WASM.
+3. **Production MPC Ceremony (Phase 2 Trusted Setup):**
+   - Eksekusi MPC Trusted Setup multi-partai untuk menghasilkan final proving & verifying keys resmi.
+   - Simpan verifying keys resmi sebagai artifact versioned ke dalam smart contract Stylus.
 
 ---
 
-## Fase 3: Tiga Pilar Produk Komersial & Adopsi Pasar
-Ref: [`docs/bisnis.md`](file:///workspaces/Zeltra-Protocol/docs/bisnis.md#12-tiga-pilar-komersial-zeltra-2026-produk-unggulan-pasca-core-fix)
+## Fase 3: Unified Hard-Test Arbitrum Sepolia (GLADI BERSIH AKHIR)
+Ref: Gate G di [`docs/todos/private-note-balance.md`](file:///workspaces/Zeltra-Protocol/docs/todos/private-note-balance.md)
 
-1. **Shielded Cross-Chain Checkout Widget ("Apple Pay Button" untuk Merchant):**
-   - Komponen frontend React/JS 1-baris: `<ZeltraCheckout />`.
-   - Merchant di Base/Polygon/Solana menerima USDC publik bersih via Chainlink CCIP.
-   - Pembeli otomatis menerima **zk-Receipt** (bukti transaksi/pajak selektif via Viewing Key).
-2. **HTTP 402 Shielded Agentic Micro-Pay (x402 Protocol) dengan Anti-Dust Spam:**
-   - **Prinsip Anti-Spam:** Dilarang transaksi sub-sen ($0.002) langsung on-chain (mencegah pemborosan gas dan nullifier bloat).
-   - **Solusi:** AI Agent menggunakan **EIP-7702 Ephemeral Session Keys** dengan anggaran harian terdelegasi, membuka **Aggregated Session Tab (Prepaid Note Pool)** untuk streaming panggilan API, dan penyedia API melakukan settlement on-chain saat mencapai batas ambang minimum (misal tiap $2.00).
-3. **Sovereign Shielded RWA Staking Gateway (Opt-In Lindung Nilai Kas):**
-   - Zeltra murni membuka rel/gateway (bukan alokasi otomatis). Dana kas reguler tetap 100% full-reserve USDC terisolasi.
-   - B2B/Whale secara sukarela (*opt-in*) memilih sendiri instrumen RWA yang diinginkan (Ondo USDY, BlackRock BUIDL, atau Aave v3); biaya gas ditanggung oleh user (bukan subsidi protokol), namun tetap ditalangi di muka oleh Relayer (gasless ETH bagi user) dan dipotong dari saldo USDC note + 15% markup relayer.
-   - Posisi kepemilikan dan bunga terakumulasi secara privat di dalam komitmen ZK Note tanpa membocorkan neraca kas ke kompetitor.
+*Deploy kontrak dan jalankan relayer node **SEKALI SAJA** dengan verifying key resmi hasil MPC:*
+
+1. **Matrix Validasi End-to-End On-Chain:**
+   - Deposit direct (0 bps fee) $\rightarrow$ partial spend $\rightarrow$ change note $\rightarrow$ second spend $\rightarrow$ withdraw-all.
+   - Verifikasi saldo kontrak reconcile exact terhadap total liabilities.
+2. **Crash Recovery & Idempotency Boundary:**
+   - Uji mati paksa relayer node di setiap titik transisi: sebelum broadcast, setelah broadcast, sebelum local output commit.
+   - Uji penolakan mutlak input nullifier replay dan proof invalid.
+3. **Cross-Chain CCIP Testnet Flow:**
+   - Eksekusi source broadcast $\rightarrow$ router CCIP $\rightarrow$ destination execution $\rightarrow$ destination confirmation.
+
+---
+
+## Fase 4: Mainnet Arbitrum One Launch & Adopsi Pasar
+Ref: [`docs/bisnis.md`](file:///workspaces/Zeltra-Protocol/docs/bisnis.md)
+
+1. **Deploy Production Arbitrum One:**
+   - Deployment Stylus contract resmi, registrasi address ke dokumentasi publik, dan peluncuran Bug Bounty.
+2. **Tiga Pilar Produk Komersial:**
+   - **Shielded Checkout Widget:** Komponen 1-baris `<ZeltraCheckout />` untuk merchant global.
+   - **HTTP 402 Facilitator:** Rel pembayaran native untuk autonomous AI Agents.
+   - **Sovereign Shielded RWA Staking Gateway:** Opt-in yield private note (Ondo USDY, BlackRock BUIDL) tanpa bocor ke kompetitor.
