@@ -237,23 +237,22 @@ Untuk mencegah perubahan width Poseidon ke width-6 yang akan merusak round const
 ---
 
 ### C. Sinkronisasi dengan DEC-037: 48-Byte `NotePlaintext` & 96-Byte AEAD Memo
-Pada [`DEC-037`](file:///workspaces/Zeltra-Protocol/research/decisions/DEC-037-note-encryption-memo-and-viewing-key-recovery.md), memo komitmen terenkripsi dipatok tepat **96 byte** (32 byte EPK, 48 byte ciphertext, 16 byte Poly1305 MAC tag).
+Pada [`DEC-037`](file:///workspaces/Zeltra-Protocol/research/decisions/DEC-037-note-encryption-memo-and-viewing-key-recovery.md) dan [`zeltra-core/src/note.rs`](file:///workspaces/Zeltra-Protocol/zeltra-core/src/note.rs#L280-L313), memo komitmen terenkripsi dipatok tepat **96 byte** (32 byte EPK, 48 byte ciphertext, 16 byte Poly1305 MAC tag).
 
-Struktur `NotePlaintext` 48 byte disinkronkan sebagai berikut:
+Struktur `NotePlaintext` 48 byte disinkronkan secara kanonikal dalam format **Big-Endian** (selaras dengan EVM `bytes32` dan EIP-2537):
 ```text
 ┌────────────────────────────────────────────────────────────────────────┐
-│                   DEC-037 48-BYTE NOTE PLAINTEXT LAYOUT                 │
+│             DEC-037 48-BYTE CANONICAL NOTE PLAINTEXT LAYOUT (BE)       │
 ├──────────────┬──────────────┬──────────────┬───────────────────────────┤
 │ Offset (B)   │ Ukuran (B)   │ Tipe         │ Deskripsi                 │
 ├──────────────┼──────────────┼──────────────┼───────────────────────────┤
-│ 00 .. 07     │ 8            │ u64 (LE)     │ Note Value (Gwei / Micro) │
-│ 08 .. 39     │ 32           │ [u8; 32]     │ Note Nullifier Seed (rho) │
-│ 40 .. 43     │ 4            │ u32 (LE)     │ Epoch ID                  │
-│ 44           │ 1            │ u8           │ Asset ID (0: WETH, 1:USDC)│
-│ 45 .. 47     │ 3            │ [u8; 3]      │ Reserved (Zero Padding)   │
+│ 00 .. 07     │ 8            │ u64 (BE)     │ Note Value (Gwei / Micro) │
+│ 08 .. 39     │ 32           │ [u8; 32] (BE)│ Note Nullifier Seed (rho) │
+│ 40 .. 47     │ 8            │ u64 (BE)     │ Asset ID (0: WETH, 1:USDC)│
 └──────────────┴──────────────┴──────────────┴───────────────────────────┘
+Total: 48 bytes serialized
 ```
-**Keunggulan:** Field `flags` 4-byte pada spesifikasi dasar DEC-037 dipetakan secara terstruktur: byte ke-44 menyimpan `asset_id`. Ukuran ciphertext tetap persis 48 byte, sehingga trial decryption Incoming Viewing Key (IVK) langsung mengetahui jenis aset note tanpa mengubah ukuran log on-chain `NoteCommitmentAppended`.
+**Keunggulan:** Deserialisasi memo log on-chain secara deterministik membaca `asset_id` dari byte 40..48 sebagai integer Big-Endian (`u64::from_be_bytes`), tanpa pergeseran offset atau ambiguitas endianness.
 
 ---
 
@@ -273,32 +272,31 @@ Struktur `NotePlaintext` 48 byte disinkronkan sebagai berikut:
 
 ---
 
-### E. Integrasi Public Input Sirkuit ZK (16-PI & 19-PI Preserved)
+### E. Integrasi Public Input Sirkuit ZK (16-PI & 19-PI Preserved Strict Mapping)
 
 Untuk menjaga kompatibilitas verifier on-chain Stylus EIP-2537 (`0x0c` MSM + `0x0f` Pairing) tanpa menambah biaya gas publik input:
 
-1. **Pada `PrivateNoteCircuit` (DEC-035A, 16 Public Inputs):**
-   Elemen ke-15 (`flags_packed`, menggantikan boolean `has_change` dan `is_rollover` sederhana) mengemas:
-   - Bit 0: `has_change` (0 atau 1)
-   - Bit 1: `is_rollover` (0 atau 1)
-   - Bit 2..=9: `asset_id` (0 untuk WETH, 1 untuk USDC)
-2. **Pada `JoinSplitCircuit` (DEC-036A, 19 Public Inputs):**
-   Elemen ke-17 (`flags_packed`) yang telah ada mengemas:
-   - Bit 0: `has_change_1`
-   - Bit 1: `has_change_2`
-   - Bit 2: `is_rollover`
-   - Bit 3..=10: `asset_id`
+1. **Pada `PrivateNoteCircuit` (DEC-035A, Tepat 16 Public Inputs):**
+   - Slot 0..=13: Roots, nullifier, epochs, payment terms, quote hash, chain_id, contract_address, expiry.
+   - Slot 14 (`has_change`): Tetap boolean $0$ atau $1$.
+   - Slot 15 (`flags_packed`): Mengemas `is_rollover` dan `asset_id`:
+     $$\text{flags\_packed} = \text{is\_rollover} + 2 \cdot \text{asset\_id}$$
+2. **Pada `JoinSplitCircuit` (DEC-036A, Tepat 19 Public Inputs):**
+   - Slot 0..=16: Roots, nullifiers, epochs, output commitments, payment terms, quote hash, chain_id, contract_address, expiry.
+   - Slot 17 (`flags_packed`): Mengemas change flags dan `asset_id`:
+     $$\text{flags\_packed} = \text{has\_change\_1} + 2 \cdot \text{has\_change\_2} + 4 \cdot \text{asset\_id}$$
+   - Slot 18 (`is_rollover`): Tetap boolean $0$ atau $1$.
 3. **Konservasi Nilai Intra-Aset Mutlak (Anti-Penumbra Exploit):**
    $$\text{asset\_id}_{in1} == \text{asset\_id}_{in2} == \text{asset\_id}_{out1} == \text{asset\_id}_{out2} == \text{public\_asset\_id}$$
    Tidak ada pertukaran silang aset di dalam sirkuit. Semua nilai input, payout merchant, protocol fee, relayer fee, dan change note terikat pada `asset_id` yang sama.
 
 ---
 
-### F. Inflow Murni ZK-UTXO: Direct MMR Deposit (DEC-038B Compatible)
+### F. Inflow Murni ZK-UTXO: Direct MMR Deposit (DEC-038B & Strict CEI Compliant)
 Tidak ada lagi sesi timelock, tidak ada lagi kunci masking $k$, dan tidak ada lagi registrasi perantara.
 
 ```rust
-// zeltra-contracts/src/deposit.rs (DEC-034 + DEC-038B Direct Inflow)
+// zeltra-contracts/src/deposit.rs (DEC-034 + DEC-038B Direct Inflow - Strict CEI)
 impl Zeltra {
     /// 1. Direct USDC Deposit (Asset ID 1)
     pub fn deposit_direct_note(
@@ -323,13 +321,14 @@ impl Zeltra {
         self._deposit_direct_erc20(0, amount_wei, note_commitment, encrypted_memo)
     }
 
-    /// 3. Direct Native ETH Auto-Wrap Deposit (Payable - Asset ID 0)
+    /// 3. Direct Native ETH Auto-Wrap Deposit (Payable - Asset ID 0 - Strict CEI)
     #[payable]
     pub fn deposit_direct_native_eth(
         &mut self,
         note_commitment: FixedBytes<32>,
         encrypted_memo: Bytes,
     ) -> Result<(), Vec<u8>> {
+        // 1. CHECKS
         self.check_not_paused()?;
         let amount_wei = self.msg_value();
         
@@ -340,22 +339,34 @@ impl Zeltra {
         if amount_wei % U256::from(1_000_000_000) != U256::ZERO {
             return Err(b"ETH_VALUE_NOT_GWEI_ALIGNED".to_vec());
         }
+        if note_commitment == FixedBytes::<32>::ZERO {
+            return Err(b"ZERO_COMMITMENT_REJECTED".to_vec());
+        }
+        if crate::types::from_evm_scalar(&note_commitment.0).is_none() {
+            return Err(b"INVALID_NOTE_COMMITMENT_SCALAR".to_vec());
+        }
 
-        // CEI 1: Wrap ETH ke WETH9 seketika via deposit() payable
+        // 2. EFFECTS (State updates before external call)
+        let gwei_amount = amount_wei / U256::from(1_000_000_000);
+        let current_liab = self.user_note_liabilities.get(U256::ZERO);
+        self.user_note_liabilities.insert(U256::ZERO, current_liab + gwei_amount);
+
+        let current_principal = self.total_deposited_principals.get(U256::ZERO);
+        self.total_deposited_principals.insert(U256::ZERO, current_principal + gwei_amount);
+
+        self._mmr_insert(note_commitment, encrypted_memo.to_vec())?;
+
+        // 3. INTERACTIONS (Wrap ETH ke WETH9 kanonikal)
         let weth_addr = self.weth9_address.get();
+        if weth_addr == Address::ZERO {
+            return Err(b"WETH9_NOT_CONFIGURED".to_vec());
+        }
         let iweth = IWeth9::new(weth_addr);
         let host = Self::runtime_host();
         iweth.deposit(&host, Call::new_mutating(self).value(amount_wei))
             .map_err(|_| b"WETH_WRAP_FAILED".to_vec())?;
 
-        // CEI 2: Effects - Insert ke MMR & mutasi user_note_liabilities[0]
-        let gwei_amount = amount_wei / U256::from(1_000_000_000);
-        self._mmr_insert(note_commitment, encrypted_memo.to_vec())?;
-        
-        let current_liab = self.user_note_liabilities.get(U256::ZERO);
-        self.user_note_liabilities.insert(U256::ZERO, current_liab + gwei_amount);
-
-        // Verifikasi Solvensi Terisolasi
+        // 4. Solvency Invariant Check pada Kolam WETH
         self.check_asset_solvency_invariant(0)?;
         Ok(())
     }

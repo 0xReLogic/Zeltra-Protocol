@@ -40,8 +40,8 @@ Zeltra membatasi ekosistem **hanya pada WETH dan USDC**, yang merupakan mata uan
 
 ## 2. Arsitektur Relayer Node (`zeltra-node`)
 
-### A. Endpoint Kuotasi Fee Dual-Asset (`/api/v1/quote`)
-Relayer menyediakan kuotasi fee eksekusi gas bertanda tangan EIP-712:
+### A. Endpoint Kuotasi Fee Dual-Asset (`/api/v1/quote`) & Volatility Protection
+Relayer menyediakan kuotasi fee eksekusi gas bertanda tangan EIP-712 dengan batas masa berlaku ketat:
 
 ```rust
 // zeltra-node/src/dto.rs
@@ -59,10 +59,14 @@ pub struct ExecutionQuoteResponse {
     pub relayer_markup_fee: u64,    // Flat 15% markup (DEC-031)
     pub total_execution_fee: u64,   // Satuan Gwei (WETH) atau Mikro (USDC)
     pub quote_hash: String,
-    pub expiry: u64,
+    pub expiry: u64,                // Maksimum 20 detik (anti-volatility free option)
     pub relayer_signature: String,  // EIP-712 Signature
 }
 ```
+
+#### Parameter Perlindungan Anti-Arbitrase & Lonjakan Gas (Gas-Spike Guard):
+1. **Short Expiry Duration:** Masa berlaku quote USDC dibatasi maksimal **20 detik** (~80 blok Arbitrum) untuk mencegah pengguna mengeksploitasi quote lama saat gas Arbitrum melonjak.
+2. **Dynamic Gas Spike Guard:** Jika base fee L2 saat broadcast melonjak $> 1.5\times$ dari fee pada quote tertandatangani, relayer secara otomatis menolak transaksi tanpa penalti SLA untuk mencegah *drainage of relayer operational capital*.
 
 ### B. Preflight Validation Guard (Anti-Drain Filter)
 Sebelum membroadcast transaksi ke smart contract Stylus, relayer memeriksa validitas transaksi secara fail-closed:
@@ -95,7 +99,7 @@ pub fn validate_multi_asset_preflight(
 
 ## 3. Client SDK & Private Note Wallet (`zeltra-sdk`)
 
-### A. Penyimpanan Note Terpartisi (Partitioned UTXO Store)
+### A. Penyimpanan Note Terpartisi & Trial Decryption (Big-Endian DEC-037)
 Untuk mencegah kontaminasi saldo, `PrivateNoteWallet` mengisolasi note berdasarkan `asset_id`:
 
 ```rust
@@ -118,6 +122,29 @@ impl PrivateNoteWallet {
         }
     }
 
+    /// Deserialisasi memo on-chain kanonikal Big-Endian (DEC-037)
+    pub fn process_decrypted_plaintext(&mut self, plaintext_bytes: &[u8; 48]) -> Result<(), WalletError> {
+        let value = u64::from_be_bytes(plaintext_bytes[0..8].try_into().unwrap());
+        let rho = crate::from_evm_scalar(&plaintext_bytes[8..40].try_into().unwrap())
+            .ok_or(WalletError::NonCanonicalRhoScalar)?;
+        let asset_id = u64::from_be_bytes(plaintext_bytes[40..48].try_into().unwrap());
+
+        if asset_id > 1 {
+            return Err(WalletError::UnsupportedAssetId(asset_id as u8));
+        }
+
+        let randomness = derive_note_randomness(self.spending_key, rho);
+        let note = PrivateNoteV1::new(value, self.spending_key, rho, randomness);
+
+        if asset_id == 0 {
+            self.weth_notes.push(note);
+        } else {
+            self.usdc_notes.push(note);
+        }
+
+        Ok(())
+    }
+
     /// Helper konversi tampilan ke unit ramah manusia
     pub fn get_human_balance(&self, asset_id: u8) -> Result<String, WalletError> {
         let raw = self.get_balance(asset_id)?;
@@ -133,9 +160,13 @@ impl PrivateNoteWallet {
 ### B. Algoritma Stochastic Knapsack Coin Selection Terpartisi
 Mengikuti invariant strict intra-asset equality, algoritma pemilihan koin Knapsack ([`DEC-036B`](file:///workspaces/Zeltra-Protocol/research/decisions/DEC-036B-client-sdk-knapsack-coin-selection-consolidation-and-bulk-sync.md)) berjalan secara terisolasi pada kolam aset yang relevan:
 
-* Saat pengguna membayar merchant USDC: Algoritma hanya memeriksa dan memilih note dari `usdc_notes`.
-* Saat pengguna mentransfer dana WETH: Algoritma hanya memilih note dari `weth_notes`.
-* **Zero Mixed-Asset Transactions:** Sistem menolak keras pemilihan note campuran (1 WETH + 1 USDC) di tingkat SDK sebelum pembuatan sirkuit ZK dimulai.
+* **Partisi Total:**
+  - Saat membayar merchant USDC: Solver hanya memeriksa dan memilih note dari `usdc_notes`.
+  - Saat mentransfer dana WETH: Solver hanya memilih note dari `weth_notes`.
+  - **Zero Mixed-Asset Transactions:** Sistem menolak pemilihan note campuran (1 WETH + 1 USDC) di tingkat SDK sebelum perakitan sirkuit ZK.
+* **Perhitungan Fee Ceil Division (Anti-Dust Truncation):**
+  Untuk mencegah pembulatan ke bawah yang merugikan solvabilitas protokol, protocol fee 45 bps dihitung dengan pembagian ke atas (*ceiling division*):
+  $$\text{protocol\_fee} = \left\lceil \frac{\text{merchant\_amount} \times 45}{10000} \right\rceil = \frac{\text{merchant\_amount} \times 45 + 9999}{10000}$$
 
 ---
 
@@ -177,6 +208,8 @@ zeltra-cli balance
 ## 5. Matriks Pengujian End-to-End
 
 1. `test_relayer_quote_dual_asset`: Kuotasi fee eksekusi WETH diterbitkan dalam satuan Gwei dan USDC dalam mikro-unit dengan tanda tangan EIP-712 yang valid.
-2. `test_knapsack_rejects_mixed_assets`: Upaya memilih koin gabungan WETH dan USDC ditolak secara instan oleh solver coin selection.
-3. `test_relayer_rejects_cross_asset_quote_tampering`: Permintaan spend note WETH menggunakan quote USDC ditolak pada preflight check (`CrossAssetFeeMismatch`).
-4. `test_sdk_trial_decryption_partitions_notes_correctly`: Deserialisasi memo log on-chain secara otomatis mengelompokkan note masuk ke sub-wallet yang sesuai.
+2. `test_relayer_quote_expiry_strict_window`: Permintaan spend dengan quote yang telah berumur lebih dari 20 detik ditolak seketika oleh relayer.
+3. `test_knapsack_rejects_mixed_assets`: Upaya memilih koin gabungan WETH dan USDC ditolak secara instan oleh solver coin selection.
+4. `test_relayer_rejects_cross_asset_quote_tampering`: Permintaan spend note WETH menggunakan quote USDC ditolak pada preflight check (`CrossAssetFeeMismatch`).
+5. `test_sdk_trial_decryption_partitions_notes_correctly`: Deserialisasi memo log on-chain secara otomatis mengelompokkan note masuk ke sub-wallet yang sesuai via format kanonikal Big-Endian.
+6. `test_knapsack_ceiling_fee_calculation`: Pembayaran dengan pecahan kecil (baik WETH maupun USDC) membuktikan nilai fee protokol tidak pernah terpotong ke nol.

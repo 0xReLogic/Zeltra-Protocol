@@ -126,13 +126,14 @@ impl Zeltra {
         self._execute_direct_erc20_inflow(0, gwei_amount, note_commitment, encrypted_memo)
     }
 
-    /// 3. Direct Native ETH Auto-Wrap Deposit (Payable - Asset ID 0) — Produk 10/10 UX
+    /// 3. Direct Native ETH Auto-Wrap Deposit (Payable - Asset ID 0) — Produk 10/10 UX (Strict CEI Compliant)
     #[payable]
     pub fn deposit_direct_native_eth(
         &mut self,
         note_commitment: FixedBytes<32>,
         encrypted_memo: Bytes,
     ) -> Result<(), Vec<u8>> {
+        // --- 1. CHECKS ---
         self.check_not_paused()?;
         let amount_wei = self.msg_value();
 
@@ -142,22 +143,34 @@ impl Zeltra {
         if amount_wei % U256::from(1_000_000_000) != U256::ZERO {
             return Err(b"ETH_VALUE_NOT_GWEI_ALIGNED".to_vec());
         }
+        if note_commitment == FixedBytes::<32>::ZERO {
+            return Err(b"ZERO_COMMITMENT_REJECTED".to_vec());
+        }
+        if crate::types::from_evm_scalar(&note_commitment.0).is_none() {
+            return Err(b"INVALID_NOTE_COMMITMENT_SCALAR".to_vec());
+        }
 
-        // 1. Interactions: Auto-wrap ETH ke WETH9 kanonikal
+        // --- 2. EFFECTS (State mutations precede external interactions) ---
+        let gwei_amount = amount_wei / U256::from(1_000_000_000);
+        let cur_liab = self.user_note_liabilities.get(U256::ZERO);
+        self.user_note_liabilities.insert(U256::ZERO, cur_liab + gwei_amount);
+
+        let cur_principal = self.total_deposited_principals.get(U256::ZERO);
+        self.total_deposited_principals.insert(U256::ZERO, cur_principal + gwei_amount);
+
+        self._mmr_insert(note_commitment, encrypted_memo.to_vec())?;
+
+        // --- 3. INTERACTIONS (External call to canonical WETH9 wrapper) ---
         let weth_addr = self.weth9_address.get();
+        if weth_addr == Address::ZERO {
+            return Err(b"WETH9_NOT_CONFIGURED".to_vec());
+        }
         let iweth = IWeth9::new(weth_addr);
         let host = Self::runtime_host();
         iweth.deposit(&host, Call::new_mutating(self).value(amount_wei))
             .map_err(|_| b"WETH_WRAP_FAILED".to_vec())?;
 
-        // 2. Effects: Insert komitmen ke MMR & mutasi liabilitas WETH
-        let gwei_amount = amount_wei / U256::from(1_000_000_000);
-        self._mmr_insert(note_commitment, encrypted_memo.to_vec())?;
-
-        let cur_liab = self.user_note_liabilities.get(U256::ZERO);
-        self.user_note_liabilities.insert(U256::ZERO, cur_liab + gwei_amount);
-
-        // 3. Solvency Invariant Check pada Kolam WETH
+        // --- 4. SOLVENCY ASSERTION ---
         self.check_asset_solvency_invariant(0)?;
         Ok(())
     }
@@ -170,11 +183,15 @@ impl Zeltra {
 
 Pada proses `spend_private_note` atau `spend_joinsplit`:
 
-1. **Ekstraksi `asset_id` dari Public Inputs:**
-   Kontrak membaca `flags_packed`:
-   $$\text{asset\_id} = (\text{flags\_packed} \gg 2) \ \& \ 0\text{xFF}$$
-   Kontrak menolak keras jika $\text{asset\_id} \ge 2$ (`UNSUPPORTED_ASSET_ID`).
-2. **Lookup Alamat Token Kanonikal:**
+1. **Ekstraksi Kanonikal `asset_id` dari Public Inputs:**
+   - **Pada Private Note Spend (16-PI):**
+     $$\text{is\_rollover} = \text{flags\_packed} \ \& \ 0\text{x01}, \quad \text{asset\_id} = (\text{flags\_packed} \gg 1) \ \& \ 0\text{xFF}$$
+   - **Pada JoinSplit Spend (19-PI):**
+     $$\text{has\_change\_1} = \text{flags\_packed} \ \& \ 0\text{x01}, \quad \text{has\_change\_2} = (\text{flags\_packed} \gg 1) \ \& \ 0\text{x01}$$
+     $$\text{asset\_id} = (\text{flags\_packed} \gg 2) \ \& \ 0\text{xFF}$$
+   - **Pencegahan Malleability:** Kontrak menolak jika $\text{flags\_packed} \gg 10 \ne 0$ atau $\text{asset\_id} \ge 2$ (`UNSUPPORTED_ASSET_ID`).
+
+2. **Lookup Alamat Token Kanonikal (Anti-TrustedVolumes Exploit):**
    ```rust
    let target_token = self.asset_tokens.get(U256::from(asset_id));
    if target_token == Address::ZERO {
@@ -182,7 +199,7 @@ Pada proses `spend_private_note` atau `spend_joinsplit`:
    }
    ```
 3. **Penyaluran Payout Berdasarkan Skala Satuan:**
-   - Jika $\text{asset\_id} == 1$ (USDC): Nilai `merchant_amount` langsung ditransfer dalam satuan mikro-unit.
+   - Jika $\text{asset\_id} == 1$ (USDC): Nilai `merchant_amount` langsung ditransfer dalam satuan mikro-unit ($10^6$).
    - Jika $\text{asset\_id} == 0$ (WETH): Nilai `merchant_amount` (dalam Gwei) dikalikan $10^9$ untuk mendapatkan Wei sebelum pemanggilan `transfer()`:
      $$\text{wei\_payout} = \text{merchant\_amount} \times 10^9$$
 4. **Mutasi Liabilitas Per-Asset:**
@@ -190,6 +207,11 @@ Pada proses `spend_private_note` atau `spend_joinsplit`:
    let cur_user_liab = self.user_note_liabilities.get(U256::from(asset_id));
    self.user_note_liabilities.insert(U256::from(asset_id), cur_user_liab - total_debit);
    ```
+5. **Akumulasi & Penarikan Execution Fee Relayer Simetris:**
+   - Akumulasi fee (`accumulated_execution_fees[asset_id]`) **selalu disimpan dalam basis unit sirkuit** (Gwei untuk WETH, mikro untuk USDC).
+   - Saat operator relayer mengeklaim fee via `claim_execution_fees(asset_id, amount_in_circuit_units)`:
+     - Jika $\text{asset\_id} == 0$ (WETH): Kontrak mentransfer `amount_in_circuit_units * 10^9` Wei via `IWeth9::transfer()`.
+     - Jika $\text{asset\_id} == 1$ (USDC): Kontrak mentransfer `amount_in_circuit_units` micro-units via `IERC20::transfer()`.
 
 ---
 
@@ -201,7 +223,7 @@ $$\forall a \in \{0, 1\}: \quad \text{Balance}(a) \ge \text{UserNoteLiabilities}
 
 Di mana:
 * Untuk $a = 1$ (USDC): Saldo diukur dari `IERC20(usdc).balanceOf(address(this))`.
-* Untuk $a = 0$ (WETH): Saldo diukur dari `IERC20(weth9).balanceOf(address(this)) / 10^9`.
+* Untuk $a = 0$ (WETH): Saldo diukur dari `IERC20(weth9).balanceOf(address(this)) / 10^9` (integer floor). Saldo native ETH mentah diabaikan demi mencegah manipulasi inflasi cadangan via `selfdestruct`.
 
 ### Teorema Isolasi Kegagalan (Failure Containment Theorem):
 Jika terjadi kondisi di mana penerbit token USDC (Circle) membekukan alamat smart contract Zeltra:
@@ -213,7 +235,9 @@ Jika terjadi kondisi di mana penerbit token USDC (Circle) membekukan alamat smar
 
 ## 6. Matriks Pengujian Formal Smart Contract
 
-1. `test_weth_payable_wrap_success`: Pengguna mengirim native ETH, saldo WETH9 kontrak bertambah, komitmen masuk ke MMR, dan liabilitas WETH terupdate.
+1. `test_weth_payable_wrap_success_cei_order`: Pengguna mengirim native ETH, efek internal tercatat sebelum interaksi eksternal WETH9, saldo WETH9 kontrak bertambah, komitmen masuk ke MMR, dan liabilitas WETH terupdate.
 2. `test_unaligned_gwei_wei_rejection`: Pengiriman nilai ETH yang tidak habis dibagi $10^9$ wei memicu revert `ETH_VALUE_NOT_GWEI_ALIGNED`.
 3. `test_caller_token_injection_impossible`: Pembuktian bahwa pemanggil fungsi spend tidak dapat mengarahkan transfer ke token lain di luar registry internal.
-4. `test_usdc_revert_leaves_weth_solvent`: Simulasi mock revert pada transfer USDC membuktikan kolam WETH tetap dapat memproses transfer tanpa gagal solvensi.
+4. `test_weth_relayer_fee_claim_scaling_exactness`: Klaim fee WETH berdenominasi Gwei mentransfer Wei dalam jumlah tepat ($10^9 \times \text{fee}$) ke relayer tanpa pemotongan presisi.
+5. `test_flags_packed_malleable_bits_rejection`: Pengiriman `flags_packed` dengan bit kotor di atas bit alokasi ditolak on-chain (`FLAGS_PACKED_MALLEABLE_BITS`).
+6. `test_usdc_revert_leaves_weth_solvent`: Simulasi mock revert pada transfer USDC membuktikan kolam WETH tetap dapat memproses transfer tanpa gagal solvensi.
