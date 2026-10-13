@@ -46,13 +46,10 @@ Ref: [`docs/roadmap.md`](file:///workspaces/Zeltra-Protocol/docs/roadmap.md) (Fa
 
 ---
 
-## 3. Keamanan, Secrets & Infrastruktur
-Ref: [`docs/todos/kms-tls.md`](file:///workspaces/Zeltra-Protocol/docs/todos/kms-tls.md)
+## 3. Keamanan & Sanitasi Kredensial
 
 - [ ] **Credential Rotation & Git Cleanup:**
   - Rotasi seluruh secret/private key dev historis dan pembersihan git commit history.
-- [ ] **KMS / Vault TLS Hardening:**
-  - Auto-renew token Vault (AppRole / short-lived token).
 
 ---
 
