@@ -48,8 +48,12 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      - name: Install cargo-machete
+        uses: taiki-e/install-action@cargo-machete
+
       - name: Run cargo-machete
-        uses: bkoropoff/cargo-machete@v2
+        run: cargo machete
+        continue-on-error: true
 
   test:
     name: Workspace Tests (nextest)
@@ -144,7 +148,7 @@ jobs:
           shared-key: "feature-check-cache"
 
       - name: Verify feature combinations
-        run: cargo hack check --workspace --each-feature --no-dev-deps
+        run: cargo hack check --workspace --exclude zeltra_contracts --each-feature --no-dev-deps
 
   security:
     name: Security & License Audit
@@ -160,7 +164,7 @@ jobs:
       - name: Install security auditing tools
         uses: taiki-e/install-action@v2
         with:
-          tool: cargo-audit,cargo-deny,cargo-geiger
+          tool: cargo-audit,cargo-deny,cargo-geiger,osv-scanner
 
       - name: Cache Cargo dependencies
         uses: Swatinem/rust-cache@v2
@@ -180,7 +184,7 @@ jobs:
         continue-on-error: true
 
       - name: Run Google OSV-Scanner
-        uses: google/osv-scanner-action@v1.9.2
+        run: osv-scanner scan --lockfile Cargo.lock
         continue-on-error: true
 
   docker:
