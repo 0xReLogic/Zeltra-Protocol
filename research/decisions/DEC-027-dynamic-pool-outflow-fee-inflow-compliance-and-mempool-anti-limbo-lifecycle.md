@@ -3,7 +3,7 @@
 - **Status:** Fully Implemented & Verified (Production & Testnet Hardened)
 - **Author:** Zeltra Protocol Architecture Team
 - **Date:** 2026-10-05 (Updated & Completed 2026-10-08)
-- **Impact Areas:** `nimbus-core` (fee policy & solvency invariants), `nimbus-node` (deposit ingress screening, dynamic mempool lease watchdog), `nimbus-contracts` (deposit refund invariant guarantees), `research/economics`
+- **Impact Areas:** `zeltra-core` (fee policy & solvency invariants), `zeltra-node` (deposit ingress screening, dynamic mempool lease watchdog), `zeltra-contracts` (deposit refund invariant guarantees), `research/economics`
 - **Architectural Paradigm:** *"Solvency by Mathematics, Predictability for Users, Security at Ingress, Self-Custody at Mempool"*
 
 ---
@@ -71,7 +71,7 @@ Reviewer mengusulkan penambahan sirkuit ZK-Compliance $N$-derajat di sisi klien.
 ## 4. Siklus Hidup Mempool Anti-Limbo (Relayer Dynamic Lease & Smart Contract Invariants)
 
 ### A. Klarifikasi Timelock Kontrak: 24 Jam sebagai Worst-Case Disaster Recovery
-Timelock 24 jam pada smart contract `deposit.rs` (`NIMBUS_REFUND_DELAY = 86400`) **BUKAN waktu tunggu operasional normal**.
+Timelock 24 jam pada smart contract `deposit.rs` (`ZELTRA_REFUND_DELAY = 86400`) **BUKAN waktu tunggu operasional normal**.
 * **Kondisi Normal (Leader + Guardians Aktif):** Proses deposit, quorum blind signature, rilis kunci $k$, dan penerbitan Private Note selesai dalam **1–3 detik** (secepat finalitas blok Arbitrum).
 * **Kondisi Gangguan Sementara (Server Mati 15 Menit):** Begitu relayer menyala kembali, `deposit_indexer` mendeteksi sesi tertunda, menyelesaikan threshold signing, dan merilis kunci $k$. Pengguna menerima note dalam hitungan detik setelah node pulih.
 * **Fungsi 24 Jam:** Merupakan benteng perlindungan absolut jika kluster guardian kolaps permanen / ditinggalkan dev. Smart contract menjamin pengguna dapat menarik 100% dananya secara sepihak tanpa izin relayer.
@@ -153,11 +153,11 @@ Berdasarkan studi empiris atas insiden keamanan DeFi dan audit Account Abstracti
 
 | Komponen | Perubahan Arsitektur | File Terkait | Status |
 | :--- | :--- | :--- | :--- |
-| **`nimbus-core`** | Pemeliharaan formula flat predictable fee (unifikasi flat 45 bps permanen via DEC-028) | `fees.rs` | **COMPLETED & VERIFIED** |
-| **`nimbus-node`** | 2-layer sanctions screening pada ingress (`handle_leader_sign`, `handle_sign_share`, `handle_deposit`, `handle_reveal`) | `validation.rs`, `handlers/threshold.rs`, `handlers/deposit.rs`, `deposit_indexer.rs` | **COMPLETED & VERIFIED** |
-| **`nimbus-node`** | Implementasi periodik `mempool_lease_watchdog` dengan simulasi `is_nullifier_spent` sebelum pelepasan lease | `database.rs`, `evm_client.rs`, `mempool_watchdog.rs`, `main.rs` | **COMPLETED & VERIFIED** |
-| **`nimbus-contracts`**| Mempertahankan `NIMBUS_REFUND_DELAY = 86400` sebagai *fail-closed invariant* tanpa penambahan kode berisiko | `deposit.rs` | **COMPLETED & VERIFIED** |
-| **`nimbus-sdk`** | Sinkronisasi status mempool, pemulihan `reclaim_expired_reservations`, dan `effective_balance` | `wallet/note_wallet.rs` | **COMPLETED & VERIFIED** |
+| **`zeltra-core`** | Pemeliharaan formula flat predictable fee (unifikasi flat 45 bps permanen via DEC-028) | `fees.rs` | **COMPLETED & VERIFIED** |
+| **`zeltra-node`** | 2-layer sanctions screening pada ingress (`handle_leader_sign`, `handle_sign_share`, `handle_deposit`, `handle_reveal`) | `validation.rs`, `handlers/threshold.rs`, `handlers/deposit.rs`, `deposit_indexer.rs` | **COMPLETED & VERIFIED** |
+| **`zeltra-node`** | Implementasi periodik `mempool_lease_watchdog` dengan simulasi `is_nullifier_spent` sebelum pelepasan lease | `database.rs`, `evm_client.rs`, `mempool_watchdog.rs`, `main.rs` | **COMPLETED & VERIFIED** |
+| **`zeltra-contracts`**| Mempertahankan `ZELTRA_REFUND_DELAY = 86400` sebagai *fail-closed invariant* tanpa penambahan kode berisiko | `deposit.rs` | **COMPLETED & VERIFIED** |
+| **`zeltra-sdk`** | Sinkronisasi status mempool, pemulihan `reclaim_expired_reservations`, dan `effective_balance` | `wallet/note_wallet.rs` | **COMPLETED & VERIFIED** |
 
 ---
 

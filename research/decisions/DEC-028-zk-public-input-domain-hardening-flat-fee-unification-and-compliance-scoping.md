@@ -3,7 +3,7 @@
 - **Status:** Proposed & Accepted (Architecture Core Decision)
 - **Author:** Zeltra Protocol Architecture Team
 - **Date:** 2026-10-07
-- **Impact Areas:** `nimbus-node` (strict 12-input preflight, domain binding verification, quote simplification), `nimbus-contracts` (flat 45 bps fee unification, removal of root age branch), `nimbus-core` (pure flat fee policy), `docs/analisi`
+- **Impact Areas:** `zeltra-node` (strict 12-input preflight, domain binding verification, quote simplification), `zeltra-contracts` (flat 45 bps fee unification, removal of root age branch), `zeltra-core` (pure flat fee policy), `docs/analisi`
 - **Architectural Paradigm:** *"Fail-Closed at Ingress, Zero Domain Ambiguity, Pure Flat Predictability, Honest ZK Statements"*
 - **Guiding Epistemological Principle:** *"A relayer must never broadcast a transaction whose validity it has not independently proven against its own execution domain, and a fee rail must never rely on unverified state timestamps."*
 
@@ -14,7 +14,7 @@
 Pada audit konsistensi publik input ZK tanggal 7 Oktober 2026 ([`docs/analisi/zk-public-input-consistency-review.md`](file:///workspaces/Zeltra-Protocol/docs/analisi/zk-public-input-consistency-review.md)), ditemukan empat observasi kritis yang memerlukan tindakan arsitektur:
 
 1. **R4 — Vektor Public Inputs Kosong Melewati Local Proof Preflight:**
-   Di [`nimbus-node/src/handlers/spend.rs`](file:///workspaces/Zeltra-Protocol/nimbus-node/src/handlers/spend.rs), blok validasi kanonikal, semantic binding, dan verifikasi lokal Groth16 (C-01 gas griefing defense) dibungkus oleh klausa `if !payload.public_inputs.is_empty()`. Jika pemanggil mengirim `public_inputs: []` atau tidak menyertakannya, seluruh preflight dilewati dan request langsung masuk ke antrian persistensi SQLite. Saat dispatcher mencoba membroadcast calldata transaksi ke Stylus, transaksi revert di on-chain dan relayer merugi akibat terbakarnya gas eksekusi.
+   Di [`zeltra-node/src/handlers/spend.rs`](file:///workspaces/Zeltra-Protocol/zeltra-node/src/handlers/spend.rs), blok validasi kanonikal, semantic binding, dan verifikasi lokal Groth16 (C-01 gas griefing defense) dibungkus oleh klausa `if !payload.public_inputs.is_empty()`. Jika pemanggil mengirim `public_inputs: []` atau tidak menyertakannya, seluruh preflight dilewati dan request langsung masuk ke antrian persistensi SQLite. Saat dispatcher mencoba membroadcast calldata transaksi ke Stylus, transaksi revert di on-chain dan relayer merugi akibat terbakarnya gas eksekusi.
 2. **R3 — Domain Target Relayer (`chain_id` & `contract_address`) Tidak Divalidasi:**
    Handler memvalidasi kecocokan nilai untuk indeks 0–7, 10, dan 11, tetapi **mengabaikan indeks 8 (`chain_id`) dan 9 (`contract_address`)**. Akibatnya, proof yang dibuat untuk target jaringan lain (misal Ethereum L1 atau mock sandbox) akan lolos verifikasi lokal di node CPU relayer, tetapi pasti **revert** di smart contract Arbitrum Sepolia karena Stylus menyusun input dari runtime (`env_chain_id()` dan `env_contract_address()`).
 3. **R2 — Umur Association Root Bukan Bukti Umur Kepemilikan Dana (Holding Fee Gaming):**
@@ -80,14 +80,14 @@ Terkait temuan R1 pada sirkuit kepatuhan (`ComplianceCircuit`):
 ┌─────────────────────────┬────────────────────────────────────────────────────────────────────────┐
 │ Komponen                │ Tindakan Perubahan                                                     │
 ├─────────────────────────┼────────────────────────────────────────────────────────────────────────┤
-│ nimbus-core/fees.rs     │ - Hapus `spend_fee_bps_for_holding` & `SPEND_FEE_30DAY_BPS`.           │
+│ zeltra-core/fees.rs     │ - Hapus `spend_fee_bps_for_holding` & `SPEND_FEE_30DAY_BPS`.           │
 │                         │ - Satukan `private_spend_fee` menjadi flat 45 bps permanen.             │
-│ nimbus-contracts/       │ - Hapus percabangan `delta_t >= 30 days` di `spend.rs` & `lib.rs`.     │
+│ zeltra-contracts/       │ - Hapus percabangan `delta_t >= 30 days` di `spend.rs` & `lib.rs`.     │
 │                         │ - Setel `fee_bps = U256::from(45)` permanen (hemat SLOAD gas).          │
-│ nimbus-node/spend.rs    │ - Hapus klausa bypass `if !public_inputs.is_empty()`.                  │
+│ zeltra-node/spend.rs    │ - Hapus klausa bypass `if !public_inputs.is_empty()`.                  │
 │                         │ - Wajibkan `public_inputs.len() == 12` (Fix R4).                       │
 │                         │ - Validasi indeks 8 (chain_id) & indeks 9 (contract_addr) (Fix R3).   │
-│ nimbus-node/quote.rs    │ - Hapus fungsi `resolve_fee_tier` & `get_root_timestamp`.              │
+│ zeltra-node/quote.rs    │ - Hapus fungsi `resolve_fee_tier` & `get_root_timestamp`.              │
 │                         │ - Hapus `root_timestamp_cache` dari `AppState`.                        │
 │ docs/analisi/           │ - Catat status mitigasi R1, R2, R3, R4 sebagai SOLVED di DEC-028.      │
 └─────────────────────────┴────────────────────────────────────────────────────────────────────────┘

@@ -4,12 +4,12 @@
 - **Author:** Zeltra Architecture & Cryptography Team
 - **Date:** 2026-10-10
 - **Applies to:**
-  - `nimbus-node/src/mmr_indexer.rs` (Background daemon indexing on-chain commitments)
-  - `nimbus-node/src/routes.rs` & `nimbus-node/src/handlers/mmr.rs` (`GET /api/v1/mmr/proof/{leaf_index}` & `GET /api/v1/mmr/tip`)
-  - `nimbus-node/src/db/schema.rs` (SQLite schema `mmr_leaves` and persistent peak snapshots `mmr_state`)
-  - `nimbus-sdk/src/wallet/note_wallet.rs` (Dynamic MMR inclusion proof sync client & witness builder)
-  - `nimbus-contracts/src/merkle.rs` (Stylus on-chain `NoteCommitmentAppended` event emissions)
-  - `nimbus-core/src/note.rs` (`MerkleMountainRange` accumulator, peak bagging, and proof types)
+  - `zeltra-node/src/mmr_indexer.rs` (Background daemon indexing on-chain commitments)
+  - `zeltra-node/src/routes.rs` & `zeltra-node/src/handlers/mmr.rs` (`GET /api/v1/mmr/proof/{leaf_index}` & `GET /api/v1/mmr/tip`)
+  - `zeltra-node/src/db/schema.rs` (SQLite schema `mmr_leaves` and persistent peak snapshots `mmr_state`)
+  - `zeltra-sdk/src/wallet/note_wallet.rs` (Dynamic MMR inclusion proof sync client & witness builder)
+  - `zeltra-contracts/src/merkle.rs` (Stylus on-chain `NoteCommitmentAppended` event emissions)
+  - `zeltra-core/src/note.rs` (`MerkleMountainRange` accumulator, peak bagging, and proof types)
 - **Parent & Related DECs:**
   - [`DEC-035`](file:///workspaces/Zeltra-Protocol/research/decisions/DEC-035-cryptographic-canonicality-public-input-binding-and-mmr.md) (Master Zero-Tech-Debt Blueprint)
   - [`DEC-032`](file:///workspaces/Zeltra-Protocol/research/decisions/DEC-032-merkle-mountain-range-commitment-accumulator.md) (Merkle Mountain Range Commitment Accumulator)
@@ -20,7 +20,7 @@
 
 ## 1. Executive Summary & Problem Statement
 
-In [`DEC-032`](file:///workspaces/Zeltra-Protocol/research/decisions/DEC-032-merkle-mountain-range-commitment-accumulator.md), Zeltra Protocol successfully eliminated the static $2^{20}$ capacity wall of LeanIMT by designing a **Merkle Mountain Range (MMR)** accumulator in the Stylus WASM contract (`nimbus-contracts/src/merkle.rs`) and circuit constraint system (`nimbus-core/src/note.rs`). However, the cross-agent review in [`DEC-035`](file:///workspaces/Zeltra-Protocol/research/decisions/DEC-035-cryptographic-canonicality-public-input-binding-and-mmr.md) (Issue #5) revealed a critical integration void:
+In [`DEC-032`](file:///workspaces/Zeltra-Protocol/research/decisions/DEC-032-merkle-mountain-range-commitment-accumulator.md), Zeltra Protocol successfully eliminated the static $2^{20}$ capacity wall of LeanIMT by designing a **Merkle Mountain Range (MMR)** accumulator in the Stylus WASM contract (`zeltra-contracts/src/merkle.rs`) and circuit constraint system (`zeltra-core/src/note.rs`). However, the cross-agent review in [`DEC-035`](file:///workspaces/Zeltra-Protocol/research/decisions/DEC-035-cryptographic-canonicality-public-input-binding-and-mmr.md) (Issue #5) revealed a critical integration void:
 
 ```
         THE STATUS-QUO INTEGRATION GAP (RESOLVED BY DEC-035C)
@@ -37,13 +37,13 @@ In [`DEC-032`](file:///workspaces/Zeltra-Protocol/research/decisions/DEC-032-mer
              │                                         │  (Multi-wallet spends
              ▼                                         │   are blocked)
     ┌─────────────────┐                                │
-    │   nimbus-node   │ ═══════════════════════════════╛
+    │   zeltra-node   │ ═══════════════════════════════╛
     │ (Relayer Node)  │  NO MMR INDEXER BACKGROUND WORKER!
     └─────────────────┘
 ```
 
 1. **The Missing Relayer Pipeline:**
-   While the smart contract emits `NoteCommitmentAppended(leaf_index, commitment, bagged_root)`, `nimbus-node` had no background event listener to index these commitments into persistent storage.
+   While the smart contract emits `NoteCommitmentAppended(leaf_index, commitment, bagged_root)`, `zeltra-node` had no background event listener to index these commitments into persistent storage.
 2. **The Client Proof Blocker:**
    A client wallet generating a Groth16 spend proof needs:
    - The mountain peak containing its leaf.
@@ -130,7 +130,7 @@ $$\text{DOMAIN\_MMR\_BAG\_V1} = \texttt{0x5a454c5452415f4d4d525f4241475f5631}$$
 ## 4. Invariants
 
 - **INV-1 (Reorg-Safe Indexing):** The MMR indexer MUST only advance its confirmed peak checkpoint up to the safe finalized block window (`current_block - safe_confirmations`).
-- **INV-2 (Deterministic Tree Mirror & Fail-Closed Integrity):** For every leaf index $N$, the local `MerkleMountainRange` mirror computed in `nimbus-node` MUST produce bit-exact root and peak equality with the on-chain event `bagged_root`. If any discrepancy occurs, the indexer MUST pause and alert immediately.
+- **INV-2 (Deterministic Tree Mirror & Fail-Closed Integrity):** For every leaf index $N$, the local `MerkleMountainRange` mirror computed in `zeltra-node` MUST produce bit-exact root and peak equality with the on-chain event `bagged_root`. If any discrepancy occurs, the indexer MUST pause and alert immediately.
 - **INV-3 (Zero-Knowledge Privacy Preservation):** The client sync endpoint MUST accept only integer positions (`leaf_index`), NEVER note commitments, hashes, or nullifiers.
 - **INV-4 (Strict Boundary Validation):** The sync endpoint MUST reject any query where $\text{leaf\_index} \ge \text{leaf\_count}$ with `404 Not Found` (`LeafIndexOutOfBounds`), preventing out-of-bounds traversal attacks.
 - **INV-5 (Atomic Checkpointing):** Database updates to `mmr_leaves` and `mmr_state` MUST execute within a single atomic SQLite transaction to prevent half-indexed states on unexpected node shutdown.
@@ -139,8 +139,8 @@ $$\text{DOMAIN\_MMR\_BAG\_V1} = \texttt{0x5a454c5452415f4d4d525f4241475f5631}$$
 
 ## 5. Technical Specification
 
-### A. Database Persistence Schema (`nimbus-node`)
-In `nimbus-node/src/db/`:
+### A. Database Persistence Schema (`zeltra-node`)
+In `zeltra-node/src/db/`:
 ```sql
 -- Individual indexed note commitment leaves
 CREATE TABLE IF NOT EXISTS mmr_leaves (
@@ -166,7 +166,7 @@ CREATE TABLE IF NOT EXISTS mmr_state (
 
 ### B. Relayer MMR Indexer Worker (`mmr_indexer.rs`)
 
-The indexer runs as a background task in `nimbus-node`:
+The indexer runs as a background task in `zeltra-node`:
 
 ```rust
 pub struct MmrIndexer {
@@ -266,7 +266,7 @@ impl MmrIndexer {
 
 ### C. Relayer Client Sync REST API
 
-`nimbus-node` exposes two endpoints under `/api/v1/mmr`:
+`zeltra-node` exposes two endpoints under `/api/v1/mmr`:
 
 #### 1. `GET /api/v1/mmr/proof/{leaf_index}`
 Fetches the cryptographic inclusion proof for a specific leaf index.
@@ -311,9 +311,9 @@ Returns current tree capacity and root. Used by wallets for fast synchronization
 }
 ```
 
-### D. SDK Client Proof Fetching & Witness Generation (`nimbus-sdk`)
+### D. SDK Client Proof Fetching & Witness Generation (`zeltra-sdk`)
 
-In `nimbus-sdk/src/wallet/note_wallet.rs`:
+In `zeltra-sdk/src/wallet/note_wallet.rs`:
 ```rust
 impl PrivateNoteWallet {
     pub async fn fetch_mmr_proof(
@@ -391,11 +391,11 @@ impl PrivateNoteWallet {
 
 Prior to Gate G testnet rehearsal, the following test matrix must pass:
 
-### A. Indexer Mirror & Crash Consistency Tests (`nimbus-node`)
+### A. Indexer Mirror & Crash Consistency Tests (`zeltra-node`)
 1. **Sequential Append Test:**
    - Ingest 500 mock events with random commitments.
    - Assert SQLite `leaf_count == 500`.
-   - Assert `mmr_state.bagged_root == nimbus_core::MerkleMountainRange::bagged_root()`.
+   - Assert `mmr_state.bagged_root == zeltra_core::MerkleMountainRange::bagged_root()`.
 2. **Reorg Rollback Test:**
    - Simulate an L2 reorg where blocks $105 \dots 110$ are replaced.
    - Verify indexer rolls back `mmr_leaves` to block $104$ and successfully ingests the replacement branch.
@@ -403,7 +403,7 @@ Prior to Gate G testnet rehearsal, the following test matrix must pass:
    - Inject an event with an intentionally altered `bagged_root`.
    - Assert indexer detects mismatch and halts execution without corrupting database state.
 
-### B. Client Sync REST API Tests (`nimbus-node`)
+### B. Client Sync REST API Tests (`zeltra-node`)
 1. **Valid Proof Query:**
    - Request `GET /api/v1/mmr/proof/0` through `GET /api/v1/mmr/proof/499`.
    - Verify all responses contain valid mountain siblings and peak bagging siblings.
@@ -411,7 +411,7 @@ Prior to Gate G testnet rehearsal, the following test matrix must pass:
    - Query `leaf_index = 500` on a 500-leaf tree.
    - Assert HTTP `404 Not Found` with code `LeafIndexOutOfBounds`.
 
-### C. End-to-End Multi-Wallet Integration (`nimbus-sdk` & `nimbus-contracts`)
+### C. End-to-End Multi-Wallet Integration (`zeltra-sdk` & `zeltra-contracts`)
 1. **Cross-Wallet Spend Rehearsal:**
    - Wallet A deposits Note 1 (`leaf_index = 0`).
    - Wallet B deposits Note 2 (`leaf_index = 1`).

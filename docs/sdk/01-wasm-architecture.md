@@ -1,27 +1,27 @@
-# Nimbus SDK — 01: Arsitektur WebAssembly (WASM)
+# Zeltra SDK — 01: Arsitektur WebAssembly (WASM)
 
-Dokumen ini menjelaskan arsitektur kompilasi WebAssembly, struktur modul internal, dan teknik optimalisasi performa browser pada [`nimbus-sdk`](file:///workspaces/Zeltra-Protocol/nimbus-sdk).
+Dokumen ini menjelaskan arsitektur kompilasi WebAssembly, struktur modul internal, dan teknik optimalisasi performa browser pada [`zeltra-sdk`](file:///workspaces/Zeltra-Protocol/zeltra-sdk).
 
 ---
 
-## 1. Peran Nimbus SDK
+## 1. Peran Zeltra SDK
 
-`nimbus-sdk` mengkompilasi primitif kriptografi Rust dari `nimbus-core` menjadi berkas binary WebAssembly (**WASM**) menggunakan `wasm-pack`:
+`zeltra-sdk` mengkompilasi primitif kriptografi Rust dari `zeltra-core` menjadi berkas binary WebAssembly (**WASM**) menggunakan `wasm-pack`:
 * Memungkinkan aplikasi client (dompet digital Web3, frontend React/Next.js, browser extensions, atau script Node.js) melakukan operasi kriptografi buta dan pembuatan proof ZK secara **lokal di sisi client (*client-side*)** dengan kecepatan mendekati native.
 * Menjaga kerahasiaan privat: Kunci rahasia, *blinding factor* ($r$), dan *spending key* tidak pernah dikirimkan ke server relayer.
 
 ```mermaid
 graph LR
-    JS[JavaScript / TypeScript Client UI] -->|Hex Strings via WASM ABI| SDK[nimbus-sdk.wasm]
-    SDK -->|Eksekusi Kriptografi Lokal| Core[nimbus-core]
+    JS[JavaScript / TypeScript Client UI] -->|Hex Strings via WASM ABI| SDK[zeltra-sdk.wasm]
+    SDK -->|Eksekusi Kriptografi Lokal| Core[zeltra-core]
 ```
 
 ---
 
-## 2. Struktur Modul SDK (`nimbus-sdk/src/`)
+## 2. Struktur Modul SDK (`zeltra-sdk/src/`)
 
 ```text
-nimbus-sdk/src/
+zeltra-sdk/src/
 ├── lib.rs              # Entrypoint WASM, deklarasi modul, & re-export publik
 ├── wasm_types.rs       # Struct wrapper WASM (BlindedOutput, ZkComplianceProof)
 ├── blind_wasm.rs       # Binding WASM protokol BDHKE (blind, unmask, verify masked)
@@ -47,7 +47,7 @@ nimbus-sdk/src/
 Untuk mencapai latensi serendah mungkin di lingkungan browser:
 
 1. **Minimalisasi JS-WASM Boundary Crossing:**
-   Menyeberangi batas memori antara JS Heap dan linier memory WASM adalah operasi yang mahal. Nimbus SDK mengirimkan dan menerima data dalam bentuk **Hex-encoded Strings** sederhana. Seluruh komputasi rumit (blinding, inversi skalar, hashing kurva) dieksekusi di dalam sandbox WASM.
+   Menyeberangi batas memori antara JS Heap dan linier memory WASM adalah operasi yang mahal. Zeltra SDK mengirimkan dan menerima data dalam bentuk **Hex-encoded Strings** sederhana. Seluruh komputasi rumit (blinding, inversi skalar, hashing kurva) dieksekusi di dalam sandbox WASM.
 2. **Optimalisasi SIMD128 (Single Instruction, Multiple Data):**
    Mendukung instruksi vektor 128-bit untuk mempercepat operasi aljabar kurva BLS12-381 dan NTT/MSM di browser:
    ```bash

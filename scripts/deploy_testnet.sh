@@ -1,18 +1,18 @@
 #!/bin/bash
 set -euo pipefail
 
-# Stylus Deployment Helper Script for Nimbus Protocol
+# Stylus Deployment Helper Script for Zeltra Protocol
 # Target: Arbitrum Sepolia Testnet
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
-CONTRACT_DIR="${REPO_ROOT}/nimbus-contracts"
-DEPLOYMENT_DIR="${NIMBUS_DEPLOYMENT_DIR:-${REPO_ROOT}/deployments}"
-CHECK_URL=${RPC_URL:-${NIMBUS_RPC_URL:-"https://sepolia-rollup.arbitrum.io/rpc"}}
-DEPLOY_PRIVATE_KEY="${PRIVATE_KEY:-${NIMBUS_RELAYER_PRIVATE_KEY:-}}"
-STYLUS_FEATURES="${NIMBUS_STYLUS_FEATURES:-}"
-STYLUS_NO_VERIFY="${NIMBUS_STYLUS_NO_VERIFY:-false}"
-STYLUS_MAX_FEE_PER_GAS_GWEI="${NIMBUS_MAX_FEE_PER_GAS_GWEI:-0.1}"
+CONTRACT_DIR="${REPO_ROOT}/zeltra-contracts"
+DEPLOYMENT_DIR="${ZELTRA_DEPLOYMENT_DIR:-${REPO_ROOT}/deployments}"
+CHECK_URL=${RPC_URL:-${ZELTRA_RPC_URL:-"https://sepolia-rollup.arbitrum.io/rpc"}}
+DEPLOY_PRIVATE_KEY="${PRIVATE_KEY:-${ZELTRA_RELAYER_PRIVATE_KEY:-}}"
+STYLUS_FEATURES="${ZELTRA_STYLUS_FEATURES:-}"
+STYLUS_NO_VERIFY="${ZELTRA_STYLUS_NO_VERIFY:-false}"
+STYLUS_MAX_FEE_PER_GAS_GWEI="${ZELTRA_MAX_FEE_PER_GAS_GWEI:-0.1}"
 CHAIN_ID_HINT="${CHAIN_ID:-421614}"
 TIMESTAMP_UTC="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
 TIMESTAMP_FILE="$(date -u +"%Y%m%dT%H%M%SZ")"
@@ -45,7 +45,7 @@ write_manifest() {
     mkdir -p "$(dirname "${manifest_path}")"
     cat > "${manifest_path}" <<EOF_MANIFEST
 {
-  "schema": "nimbus.deployment-manifest.v1",
+  "schema": "zeltra.deployment-manifest.v1",
   "created_at": "${TIMESTAMP_UTC}",
   "phase": "${phase}",
   "status": "${status}",
@@ -80,7 +80,7 @@ EOF_MANIFEST
 
 echo "=========================================================="
 # No emoji as per system constraints
-echo "NIMBUS SMART CONTRACT STYLUS DEPLOYMENT HELPERS"
+echo "ZELTRA SMART CONTRACT STYLUS DEPLOYMENT HELPERS"
 echo "=========================================================="
 
 STYLUS_CHECK_ARGS=(
@@ -89,7 +89,7 @@ STYLUS_CHECK_ARGS=(
 )
 STYLUS_DEPLOY_ARGS=(
     --endpoint="$CHECK_URL"
-    --source-files-for-project-hash="/source/nimbus-contracts"
+    --source-files-for-project-hash="/source/zeltra-contracts"
     --max-fee-per-gas-gwei="$STYLUS_MAX_FEE_PER_GAS_GWEI"
 )
 if [ -n "$STYLUS_FEATURES" ]; then
@@ -146,7 +146,7 @@ echo "  --private-key='YOUR_PRIVATE_KEY'"
 echo ""
 echo "Or configure the following environment variables and run this script as:"
 echo "RPC_URL=https://sepolia-rollup.arbitrum.io/rpc PRIVATE_KEY=0x... ./deploy_testnet.sh"
-echo "or source nimbus-node/.env.test and run ./scripts/deploy_testnet.sh"
+echo "or source zeltra-node/.env.test and run ./scripts/deploy_testnet.sh"
 echo "=========================================================="
 
 if [ -n "${DEPLOY_PRIVATE_KEY}" ]; then

@@ -1,12 +1,12 @@
-# Nimbus Core — 02: BDHKE & Threshold Signatures
+# Zeltra Core — 02: BDHKE & Threshold Signatures
 
-Dokumen ini menjelaskan alur matematika **Blind Diffie-Hellman Key Exchange (BDHKE)** dan pembagian kunci ambang batas (*Shamir Secret Sharing*) yang diimplementasikan pada [`nimbus-core/src/blind_sign.rs`](file:///workspaces/Zeltra-Protocol/nimbus-core/src/blind_sign.rs) dan [`nimbus-core/src/threshold.rs`](file:///workspaces/Zeltra-Protocol/nimbus-core/src/threshold.rs).
+Dokumen ini menjelaskan alur matematika **Blind Diffie-Hellman Key Exchange (BDHKE)** dan pembagian kunci ambang batas (*Shamir Secret Sharing*) yang diimplementasikan pada [`zeltra-core/src/blind_sign.rs`](file:///workspaces/Zeltra-Protocol/zeltra-core/src/blind_sign.rs) dan [`zeltra-core/src/threshold.rs`](file:///workspaces/Zeltra-Protocol/zeltra-core/src/threshold.rs).
 
 ---
 
 ## 1. Alur Matematika Protokol BDHKE
 
-Nimbus menggunakan varian Chaumian Blind Signature di atas kurva BLS12-381 untuk memutus hubungan pelacakan on-chain antara depositor dan pembayar (*spender*).
+Zeltra menggunakan varian Chaumian Blind Signature di atas kurva BLS12-381 untuk memutus hubungan pelacakan on-chain antara depositor dan pembayar (*spender*).
 
 ```text
 Client                                  Issuer / Leader
@@ -54,7 +54,7 @@ Client                                  Issuer / Leader
    * *Pembuktian:*
      $$e(\tilde{\sigma}, G_2) = e((k \cdot sk_{iss}) \cdot (r \cdot H(m)), G_2) = e(r \cdot H(m), k \cdot sk_{iss} \cdot G_2) = e(X, com_k)$$
 3b. **Masking Key Verification (Relayer Node - DEC-018):**
-   * Sebelum kunci masking $k$ dirilis ke client pada endpoint `/api/reveal`, relayer membuktikan keaslian $k$ terhadap komitmen $com_k$ yang tersimpan menggunakan [`verify_masking_key_commitment`](file:///workspaces/Zeltra-Protocol/nimbus-core/src/blind_sign.rs):
+   * Sebelum kunci masking $k$ dirilis ke client pada endpoint `/api/reveal`, relayer membuktikan keaslian $k$ terhadap komitmen $com_k$ yang tersimpan menggunakan [`verify_masking_key_commitment`](file:///workspaces/Zeltra-Protocol/zeltra-core/src/blind_sign.rs):
      $$k \cdot pk_{iss} == com_k \in G_2$$
    * Menjamin *fail-closed*: jika nilai $k$ rusak di basis data atau dimanipulasi, rilis kunci ditolak (`REJECTED`) sehingga client terlindungi dari unmasking dengan kunci korup.
 4. **Unmasking (Client):**
@@ -71,7 +71,7 @@ Client                                  Issuer / Leader
 
 ## 2. Threshold Cryptography (Shamir Secret Sharing)
 
-File referensi: [`nimbus-core/src/threshold.rs`](file:///workspaces/Zeltra-Protocol/nimbus-core/src/threshold.rs)
+File referensi: [`zeltra-core/src/threshold.rs`](file:///workspaces/Zeltra-Protocol/zeltra-core/src/threshold.rs)
 
 Untuk menghindari *single point of failure*, kunci rahasia issuer $sk_{iss}$ dipecah ke jaringan **Guardian** menggunakan skema $(t, n)$-threshold (default: 3-of-5).
 

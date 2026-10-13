@@ -2,13 +2,13 @@
 
 > **"The Stripe of Web3 with Absolute Privacy."**  
 > *Engine: Pure ZK-UTXO on Arbitrum Stylus (Rust WASM + EIP-2537 BLS12-381)*  
-> *Transition Codebase: Nimbus*
+> *Transition Codebase: Zeltra*
 
 ---
 
 ## 1. Identitas & DNA Protokol
 
-* **Nama Resmi:** **Zeltra Protocol** *(codebase transisi: Nimbus)*.
+* **Nama Resmi:** **Zeltra Protocol** *(codebase transisi: Zeltra)*.
 * **Kategori:** *Universal Shielded Payment & Settlement Rail* (Human & Autonomous AI Economy).
 * **Visi Inti:** Menjadi infrastruktur pembayaran universal di era Web3 dan agen AI otonom. Aliran likuiditas bergerak secepat dan semudah Apple Pay / QRIS, dilindungi benteng matematika privasi zero-knowledge mutlak tanpa celah doxxing.
 * **Mantra Produk:** **Privasi 9.5/10, Produk 10/10.**
@@ -82,7 +82,7 @@ Seluruh sistem Zeltra beroperasi di atas arsitektur ZK-UTXO murni performa tingg
    * **Langsung Aktif Tanpa Menunggu:** Tidak ada penundaan, tidak ada perantara admin, dan tidak ada masa tunggu (timelock). Saldo kas privat Anda seketika aktif dan siap dibelanjakan.
    * **Catatan Kas Terenkripsi (96-Byte Memo):** Data kembalian dan bukti kepemilikan dienkripsi militer (ChaCha20-Poly1305) dan disiarkan via log blockchain. Hanya pemilik kunci yang bisa membacanya—bahkan pihak validator dan relayer pun buta.
 
-4. **Mesin Pembelanjaan Kas & Kembalian Fleksibel (ZK Circuits - nimbus-core):**
+4. **Mesin Pembelanjaan Kas & Kembalian Fleksibel (ZK Circuits - zeltra-core):**
    * **Belanja Tunggal Presisi (PrivateNoteCircuit - DEC-035A/B):**
      * Membayar transaksi belanja 1 note secara instan dengan kembalian privat.
      * **Kunci Pengaman Anti-Pembajakan (Scope Binding - DEC-035B):** Nilai belanja, alamat merchant, dan batas waktu kadaluarsa dikunci mati di dalam bukti matematika ZK. Tidak ada perantara atau pihak jahat yang bisa membelokkan dana Anda ke alamat lain.

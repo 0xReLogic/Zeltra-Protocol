@@ -1,0 +1,3152 @@
+//! Spend handler and batch processing logic
+//!
+//! Security features:
+//! - Slippage protection (min_payout, deadline) -- Finding #9
+//! - Minimum balance checks before batch processing -- Finding #10
+//! - Idempotency key support for request deduplication -- Finding #16
+
+use crate::database::QueuedSpend;
+use crate::evm_client::BatchSpendItem;
+use crate::{dto::*, state::AppState};
+use alloy::primitives::Address;
+use axum::Json;
+use std::str::FromStr;
+
+/// Gas limit estimates for different transaction types
+const GAS_LIMIT_PRIVATE_NOTE: f64 = 2_500_000.0;
+const GAS_LIMIT_CROSS_CHAIN: f64 = 1_200_000.0;
+const GAS_LIMIT_STANDARD: f64 = 1_500_000.0;
+
+/// Handler for ZK Private Note Spend (DEC-025 Gate F)
+///
+/// POST /api/v1/spend-private-note
+pub use handle_private_note_spend as spend_private_note;
+pub use handle_spend_joinsplit as spend_joinsplit;
+
+pub async fn handle_private_note_spend(
+    axum::extract::State(state): axum::extract::State<AppState>,
+    Json(payload): Json<PrivateNoteSpendRequest>,
+) -> Json<PrivateNoteSpendResponse> {
+    // 1. Idempotency check
+    if let Some(ref idem_key) = payload.idempotency_key {
+        match state
+            .db
+            .check_idempotency(idem_key, "private_note_spend")
+            .await
+        {
+            Ok(Some(cached_json)) => {
+                if let Ok(cached_resp) =
+                    serde_json::from_str::<PrivateNoteSpendResponse>(&cached_json)
+                {
+                    println!(
+                        "IDEMPOTENCY: Returning cached response for private note spend key {}...",
+                        &idem_key[..8.min(idem_key.len())]
+                    );
+                    return Json(cached_resp);
+                }
+            }
+            Ok(None) => {}
+            Err(e) => {
+                eprintln!("RELAYER WARNING: Idempotency check failed: {}", e);
+            }
+        }
+    }
+
+    // 2. Expiry check
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+    if let Some(expiry) = payload.expiry {
+        if expiry > 0 && now > expiry {
+            let response = PrivateNoteSpendResponse {
+                status: "REJECTED".to_string(),
+                message: format!("Transaction expired. Expiry: {}, Current: {}", expiry, now),
+                queue_position: 0,
+                estimated_gas_usdc: None,
+            };
+            if let Some(ref idem_key) = payload.idempotency_key {
+                if let Ok(json) = serde_json::to_string(&response) {
+                    let _ = state
+                        .db
+                        .store_idempotency(idem_key, "private_note_spend", &json)
+                        .await;
+                }
+            }
+            return Json(response);
+        }
+    }
+
+    // 3. Amount and fee invariant checks
+    let is_rollover_req = payload.is_rollover == Some(1);
+    if payload.merchant_amount == 0 && !is_rollover_req {
+        return Json(PrivateNoteSpendResponse {
+            status: "REJECTED".to_string(),
+            message: "merchant_amount must be greater than zero".to_string(),
+            queue_position: 0,
+            estimated_gas_usdc: None,
+        });
+    }
+
+    if payload.execution_fee > payload.max_execution_fee {
+        return Json(PrivateNoteSpendResponse {
+            status: "REJECTED".to_string(),
+            message: format!(
+                "Execution fee ({}) exceeds max execution fee ({})",
+                payload.execution_fee, payload.max_execution_fee
+            ),
+            queue_position: 0,
+            estimated_gas_usdc: None,
+        });
+    }
+
+    // 4. has_change and commitment validation
+    let has_change_u64 = match payload.has_change {
+        Some(serde_json::Value::Bool(b)) => {
+            if b {
+                1u64
+            } else {
+                0u64
+            }
+        }
+        Some(serde_json::Value::Number(ref n)) => n.as_u64().unwrap_or(0),
+        _ => 0u64,
+    };
+    if has_change_u64 > 1 {
+        return Json(PrivateNoteSpendResponse {
+            status: "REJECTED".to_string(),
+            message: "invalid has_change flag (must be 0 or 1)".to_string(),
+            queue_position: 0,
+            estimated_gas_usdc: None,
+        });
+    }
+
+    if has_change_u64 == 0 {
+        if let Some(ref comm) = payload.output_commitment {
+            let clean = comm.trim_start_matches("0x");
+            if !clean.is_empty() && clean.chars().any(|c| c != '0') {
+                return Json(PrivateNoteSpendResponse {
+                    status: "REJECTED".to_string(),
+                    message: "nonzero output_commitment with zero change".to_string(),
+                    queue_position: 0,
+                    estimated_gas_usdc: None,
+                });
+            }
+        }
+    }
+
+    // 5. Recipient address validation
+    use alloy_primitives::{Address, U256};
+    use std::str::FromStr;
+
+    let recipient_addr = match Address::from_str(&payload.recipient) {
+        Ok(addr) if payload.recipient.trim_start_matches("0x").len() == 40 => addr,
+        _ => {
+            return Json(PrivateNoteSpendResponse {
+                status: "REJECTED".to_string(),
+                message: format!("Invalid recipient address: {}", payload.recipient),
+                queue_position: 0,
+                estimated_gas_usdc: None,
+            });
+        }
+    };
+
+    // Sanctions screening (DEC-026 Layer 3: Relayer Operational Policy)
+    // 1. Fast-path: Offline in-memory dataset
+    let limits = crate::validation::SafetyLimits::default();
+    if limits.is_sanctioned(&recipient_addr) {
+        return Json(PrivateNoteSpendResponse {
+            status: "REJECTED".to_string(),
+            message: format!(
+                "Recipient address {} is restricted under public sanctions policy (DEC-026)",
+                payload.recipient
+            ),
+            queue_position: 0,
+            estimated_gas_usdc: None,
+        });
+    }
+
+    // 2. Dynamic-path: Live Chainalysis Sanctions Oracle query (Arbitrum on-chain)
+    if let Some(ref client) = state.evm_client {
+        match client.is_sanctioned_on_chain(&recipient_addr).await {
+            Ok(true) => {
+                return Json(PrivateNoteSpendResponse {
+                    status: "REJECTED".to_string(),
+                    message: format!(
+                        "Recipient address {} is sanctioned per on-chain Chainalysis Oracle (DEC-026)",
+                        payload.recipient
+                    ),
+                    queue_position: 0,
+                    estimated_gas_usdc: None,
+                });
+            }
+            Ok(false) => {}
+            Err(e) => {
+                eprintln!(
+                    "RELAYER WARNING: On-chain sanctions oracle check failed: {}",
+                    e
+                );
+            }
+        }
+    }
+
+    // 6. Note root and nullifier format check
+    let note_root_bytes = match hex::decode(payload.note_root.trim_start_matches("0x")) {
+        Ok(b) if b.len() == 32 => b,
+        _ => {
+            return Json(PrivateNoteSpendResponse {
+                status: "REJECTED".to_string(),
+                message: "note_root must be a 32-byte hex string".to_string(),
+                queue_position: 0,
+                estimated_gas_usdc: None,
+            });
+        }
+    };
+    let nullifier_bytes = match hex::decode(payload.input_nullifier.trim_start_matches("0x")) {
+        Ok(b) if b.len() == 32 => b,
+        _ => {
+            return Json(PrivateNoteSpendResponse {
+                status: "REJECTED".to_string(),
+                message: "input_nullifier must be a 32-byte hex string".to_string(),
+                queue_position: 0,
+                estimated_gas_usdc: None,
+            });
+        }
+    };
+
+    // 7. Proof byte lengths validation (EIP-2537: G1=128 bytes, G2=256 bytes)
+    match hex::decode(payload.proof_a_neg.trim_start_matches("0x")) {
+        Ok(b) if b.len() == 128 => {}
+        _ => {
+            return Json(PrivateNoteSpendResponse {
+                status: "REJECTED".to_string(),
+                message: "proof_a_neg must be a 128-byte hex string".to_string(),
+                queue_position: 0,
+                estimated_gas_usdc: None,
+            });
+        }
+    }
+    match hex::decode(payload.proof_b.trim_start_matches("0x")) {
+        Ok(b) if b.len() == 256 => {}
+        _ => {
+            return Json(PrivateNoteSpendResponse {
+                status: "REJECTED".to_string(),
+                message: "proof_b must be a 256-byte hex string".to_string(),
+                queue_position: 0,
+                estimated_gas_usdc: None,
+            });
+        }
+    }
+    match hex::decode(payload.proof_c.trim_start_matches("0x")) {
+        Ok(b) if b.len() == 128 => {}
+        _ => {
+            return Json(PrivateNoteSpendResponse {
+                status: "REJECTED".to_string(),
+                message: "proof_c must be a 128-byte hex string".to_string(),
+                queue_position: 0,
+                estimated_gas_usdc: None,
+            });
+        }
+    }
+
+    // 8. Public inputs canonical scalar check, semantic binding & target domain verification (DEC-022, DEC-025, DEC-032, DEC-033, DEC-035A)
+    // DEC-035A: public_inputs is strictly required to have exactly 16 scalars (quote_hash_hi at index 9, quote_hash_lo at index 10, is_rollover at index 15).
+    // Empty or omitted inputs are rejected fail-closed to prevent preflight bypass.
+    if payload.public_inputs.len() != 16 {
+        return Json(PrivateNoteSpendResponse {
+            status: "REJECTED".to_string(),
+            message: format!(
+                "Expected 16 public inputs for PrivateNoteCircuit, got {}",
+                payload.public_inputs.len()
+            ),
+            queue_position: 0,
+            estimated_gas_usdc: None,
+        });
+    }
+
+    let mut parsed_inputs = Vec::with_capacity(16);
+    for (idx, pi_hex) in payload.public_inputs.iter().enumerate() {
+        let bytes = match hex::decode(pi_hex.trim_start_matches("0x")) {
+            Ok(b) if b.len() == 32 => b,
+            _ => {
+                return Json(PrivateNoteSpendResponse {
+                    status: "REJECTED".to_string(),
+                    message: format!("public_inputs[{}] must be a 32-byte hex scalar", idx),
+                    queue_position: 0,
+                    estimated_gas_usdc: None,
+                });
+            }
+        };
+        let mut fixed = [0u8; 32];
+        fixed.copy_from_slice(&bytes);
+
+        // Canonical scalar check: Fr < r
+        if zeltra_core::from_evm_scalar(&fixed).is_none() {
+            return Json(PrivateNoteSpendResponse {
+                status: "REJECTED".to_string(),
+                message: format!("public_inputs[{}] is a non-canonical scalar (>= r)", idx),
+                queue_position: 0,
+                estimated_gas_usdc: None,
+            });
+        }
+        parsed_inputs.push(fixed);
+    }
+
+    // Semantic public input binding (DEC-022, DEC-032, DEC-033)
+    // Index 0: note_root
+    if parsed_inputs[0] != note_root_bytes[..] {
+        return Json(PrivateNoteSpendResponse {
+            status: "REJECTED".to_string(),
+            message: "public_inputs[0] does not match note_root".to_string(),
+            queue_position: 0,
+            estimated_gas_usdc: None,
+        });
+    }
+
+    // Index 1: leaf_count (DEC-032 strictly positive)
+    let leaf_count_u64 = U256::from_be_bytes(parsed_inputs[1]).to::<u64>();
+    if leaf_count_u64 == 0 {
+        return Json(PrivateNoteSpendResponse {
+            status: "REJECTED".to_string(),
+            message: "leaf_count in public_inputs[1] must be greater than zero".to_string(),
+            queue_position: 0,
+            estimated_gas_usdc: None,
+        });
+    }
+    if let Some(expected_lc) = payload.leaf_count {
+        if leaf_count_u64 != expected_lc {
+            return Json(PrivateNoteSpendResponse {
+                status: "REJECTED".to_string(),
+                message: "public_inputs[1] does not match leaf_count".to_string(),
+                queue_position: 0,
+                estimated_gas_usdc: None,
+            });
+        }
+    }
+
+    // Index 2: input_nullifier
+    if parsed_inputs[2] != nullifier_bytes[..] {
+        return Json(PrivateNoteSpendResponse {
+            status: "REJECTED".to_string(),
+            message: "public_inputs[2] does not match input_nullifier".to_string(),
+            queue_position: 0,
+            estimated_gas_usdc: None,
+        });
+    }
+
+    // Index 3: note_epoch_id (DEC-033)
+    let note_epoch_id = U256::from_be_bytes(parsed_inputs[3]).to::<u32>();
+    if let Some(expected_epoch) = payload.note_epoch_id {
+        if note_epoch_id != expected_epoch {
+            return Json(PrivateNoteSpendResponse {
+                status: "REJECTED".to_string(),
+                message: "public_inputs[3] does not match note_epoch_id".to_string(),
+                queue_position: 0,
+                estimated_gas_usdc: None,
+            });
+        }
+    }
+
+    // Index 4: output_commitment
+    let mut expected_comm = [0u8; 32];
+    if let Some(ref comm) = payload.output_commitment {
+        if let Ok(b) = hex::decode(comm.trim_start_matches("0x")) {
+            if b.len() == 32 {
+                expected_comm.copy_from_slice(&b);
+            }
+        }
+    }
+    if parsed_inputs[4] != expected_comm {
+        return Json(PrivateNoteSpendResponse {
+            status: "REJECTED".to_string(),
+            message: "public_inputs[4] does not match output_commitment".to_string(),
+            queue_position: 0,
+            estimated_gas_usdc: None,
+        });
+    }
+
+    // Index 5: recipient address
+    let mut expected_recipient = [0u8; 32];
+    expected_recipient[12..].copy_from_slice(recipient_addr.as_slice());
+    if parsed_inputs[5] != expected_recipient {
+        return Json(PrivateNoteSpendResponse {
+            status: "REJECTED".to_string(),
+            message: "public_inputs[5] does not match recipient address".to_string(),
+            queue_position: 0,
+            estimated_gas_usdc: None,
+        });
+    }
+
+    // Index 6: merchant_amount
+    let expected_merchant = U256::from(payload.merchant_amount).to_be_bytes::<32>();
+    if parsed_inputs[6] != expected_merchant {
+        return Json(PrivateNoteSpendResponse {
+            status: "REJECTED".to_string(),
+            message: "public_inputs[6] does not match merchant_amount".to_string(),
+            queue_position: 0,
+            estimated_gas_usdc: None,
+        });
+    }
+
+    // Index 7: protocol_fee
+    let expected_proto = U256::from(payload.protocol_fee).to_be_bytes::<32>();
+    if parsed_inputs[7] != expected_proto {
+        return Json(PrivateNoteSpendResponse {
+            status: "REJECTED".to_string(),
+            message: "public_inputs[7] does not match protocol_fee".to_string(),
+            queue_position: 0,
+            estimated_gas_usdc: None,
+        });
+    }
+
+    // Index 8: execution_fee
+    let expected_exec = U256::from(payload.execution_fee).to_be_bytes::<32>();
+    if parsed_inputs[8] != expected_exec {
+        return Json(PrivateNoteSpendResponse {
+            status: "REJECTED".to_string(),
+            message: "public_inputs[8] does not match execution_fee".to_string(),
+            queue_position: 0,
+            estimated_gas_usdc: None,
+        });
+    }
+
+    // Index 9 & 10: quote_hash_hi & quote_hash_lo (DEC-035A Two-Limb Representation)
+    // Preflight check: both limbs must strictly satisfy < 2^128 (upper 16 bytes must be 0)
+    if parsed_inputs[9][0..16] != [0u8; 16] {
+        return Json(PrivateNoteSpendResponse {
+            status: "REJECTED".to_string(),
+            message: "public_inputs[9] (quote_hash_hi) exceeds 128-bit range (>= 2^128)"
+                .to_string(),
+            queue_position: 0,
+            estimated_gas_usdc: None,
+        });
+    }
+    if parsed_inputs[10][0..16] != [0u8; 16] {
+        return Json(PrivateNoteSpendResponse {
+            status: "REJECTED".to_string(),
+            message: "public_inputs[10] (quote_hash_lo) exceeds 128-bit range (>= 2^128)"
+                .to_string(),
+            queue_position: 0,
+            estimated_gas_usdc: None,
+        });
+    }
+
+    // Semantic match against payload.quote_hash if provided
+    let mut expected_qh = [0u8; 32];
+    if let Some(ref qh) = payload.quote_hash {
+        if let Ok(b) = hex::decode(qh.trim_start_matches("0x")) {
+            if b.len() == 32 {
+                expected_qh.copy_from_slice(&b);
+            }
+        }
+    }
+    let mut expected_hi = [0u8; 32];
+    expected_hi[16..32].copy_from_slice(&expected_qh[0..16]);
+    let mut expected_lo = [0u8; 32];
+    expected_lo[16..32].copy_from_slice(&expected_qh[16..32]);
+
+    if parsed_inputs[9] != expected_hi {
+        return Json(PrivateNoteSpendResponse {
+            status: "REJECTED".to_string(),
+            message: "public_inputs[9] does not match quote_hash_hi".to_string(),
+            queue_position: 0,
+            estimated_gas_usdc: None,
+        });
+    }
+    if parsed_inputs[10] != expected_lo {
+        return Json(PrivateNoteSpendResponse {
+            status: "REJECTED".to_string(),
+            message: "public_inputs[10] does not match quote_hash_lo".to_string(),
+            queue_position: 0,
+            estimated_gas_usdc: None,
+        });
+    }
+
+    // Strict target domain verification for chain_id (index 11) and contract_address (index 12)
+    let (expected_chain_bytes, expected_contract_bytes_opt) =
+        if let Some(client) = state.evm_client.as_ref() {
+            let target_chain_id = match client.chain_id().await {
+                Ok(id) => id,
+                Err(_) => {
+                    return Json(PrivateNoteSpendResponse {
+                        status: "ERROR".to_string(),
+                        message: "Failed to query target chain ID from EVM client".to_string(),
+                        queue_position: 0,
+                        estimated_gas_usdc: None,
+                    });
+                }
+            };
+            let mut contract_bytes = [0u8; 32];
+            contract_bytes[12..].copy_from_slice(client.contract_address_raw().as_slice());
+            (
+                U256::from(target_chain_id).to_be_bytes::<32>(),
+                Some(contract_bytes),
+            )
+        } else {
+            let chain_id = std::env::var("ZELTRA_CHAIN_ID")
+                .ok()
+                .and_then(|s| s.parse::<u64>().ok())
+                .unwrap_or(421614);
+            let contract_opt = std::env::var("ZELTRA_CONTRACT_ADDRESS")
+                .ok()
+                .and_then(|addr_str| parse_contract_address_to_32bytes(&addr_str));
+            (U256::from(chain_id).to_be_bytes::<32>(), contract_opt)
+        };
+
+    // Index 11: chain_id
+    if parsed_inputs[11] != expected_chain_bytes {
+        return Json(PrivateNoteSpendResponse {
+            status: "REJECTED".to_string(),
+            message: "public_inputs[11] does not match target chain_id".to_string(),
+            queue_position: 0,
+            estimated_gas_usdc: None,
+        });
+    }
+
+    // Index 12: contract_address
+    if let Some(expected_contract) = expected_contract_bytes_opt {
+        if parsed_inputs[12] != expected_contract {
+            return Json(PrivateNoteSpendResponse {
+                status: "REJECTED".to_string(),
+                message: "public_inputs[12] does not match target contract_address".to_string(),
+                queue_position: 0,
+                estimated_gas_usdc: None,
+            });
+        }
+    }
+
+    // Index 13: expiry
+    let expected_exp = U256::from(payload.expiry.unwrap_or(0)).to_be_bytes::<32>();
+    if parsed_inputs[13] != expected_exp {
+        return Json(PrivateNoteSpendResponse {
+            status: "REJECTED".to_string(),
+            message: "public_inputs[13] does not match expiry".to_string(),
+            queue_position: 0,
+            estimated_gas_usdc: None,
+        });
+    }
+
+    // Index 14: has_change flag
+    let expected_hc = U256::from(has_change_u64).to_be_bytes::<32>();
+    if parsed_inputs[14] != expected_hc {
+        return Json(PrivateNoteSpendResponse {
+            status: "REJECTED".to_string(),
+            message: "public_inputs[14] does not match has_change flag".to_string(),
+            queue_position: 0,
+            estimated_gas_usdc: None,
+        });
+    }
+
+    // Index 15: is_rollover flag (DEC-033)
+    let is_rollover_u64 = U256::from_be_bytes(parsed_inputs[15]).to::<u64>();
+    if is_rollover_u64 != 0 && is_rollover_u64 != 1 {
+        return Json(PrivateNoteSpendResponse {
+            status: "REJECTED".to_string(),
+            message: "public_inputs[15] (is_rollover) must be 0 or 1".to_string(),
+            queue_position: 0,
+            estimated_gas_usdc: None,
+        });
+    }
+    if let Some(expected_ro) = payload.is_rollover {
+        if is_rollover_u64 != expected_ro {
+            return Json(PrivateNoteSpendResponse {
+                status: "REJECTED".to_string(),
+                message: "public_inputs[15] does not match is_rollover flag".to_string(),
+                queue_position: 0,
+                estimated_gas_usdc: None,
+            });
+        }
+    }
+
+    // Pre-flight check: On-chain Epoch Active Window validation (DEC-033)
+    let current_epoch = if let Some(client) = state.evm_client.as_ref() {
+        client.get_current_epoch().await.unwrap_or(0)
+    } else {
+        std::env::var("ZELTRA_CURRENT_EPOCH")
+            .ok()
+            .and_then(|s| s.parse::<u32>().ok())
+            .unwrap_or(0)
+    };
+
+    if note_epoch_id > current_epoch {
+        return Json(PrivateNoteSpendResponse {
+            status: "REJECTED".to_string(),
+            message: "EPOCH_IN_FUTURE: note_epoch_id is in the future".to_string(),
+            queue_position: 0,
+            estimated_gas_usdc: None,
+        });
+    }
+
+    if note_epoch_id < current_epoch.saturating_sub(1) {
+        return Json(PrivateNoteSpendResponse {
+            status: "REJECTED".to_string(),
+            message:
+                "EPOCH_EXPIRED_REQUIRE_ROLLOVER: note_epoch_id is older than active window (E-1)"
+                    .to_string(),
+            queue_position: 0,
+            estimated_gas_usdc: None,
+        });
+    }
+
+    // Pre-flight check: Rollover constraints & Dust Elimination (DEC-033)
+    if is_rollover_u64 == 1 {
+        if payload.merchant_amount != 0 {
+            return Json(PrivateNoteSpendResponse {
+                status: "REJECTED".to_string(),
+                message: "merchant_amount must be 0 for standalone rollover".to_string(),
+                queue_position: 0,
+                estimated_gas_usdc: None,
+            });
+        }
+        if payload.protocol_fee != 0 {
+            return Json(PrivateNoteSpendResponse {
+                status: "REJECTED".to_string(),
+                message: "protocol_fee must be 0 for standalone rollover".to_string(),
+                queue_position: 0,
+                estimated_gas_usdc: None,
+            });
+        }
+        if has_change_u64 != 1 {
+            return Json(PrivateNoteSpendResponse {
+                status: "REJECTED".to_string(),
+                message: "has_change must be 1 for standalone rollover (refreshed note)"
+                    .to_string(),
+                queue_position: 0,
+                estimated_gas_usdc: None,
+            });
+        }
+        if let Some(input_val) = payload.input_value {
+            if input_val < zeltra_core::fees::MIN_STANDALONE_ROLLOVER_THRESHOLD_USDC {
+                return Json(PrivateNoteSpendResponse {
+                    status: "REJECTED".to_string(),
+                    message: "DUST_NOTE_ROLLOVER_REJECTED: Note value is below $2.00 USDC minimum threshold".to_string(),
+                    queue_position: 0,
+                    estimated_gas_usdc: None,
+                });
+            }
+            if input_val < payload.execution_fee {
+                return Json(PrivateNoteSpendResponse {
+                    status: "REJECTED".to_string(),
+                    message: "Note value insufficient to pay relayer execution fee".to_string(),
+                    queue_position: 0,
+                    estimated_gas_usdc: None,
+                });
+            }
+        }
+    }
+
+    // 8.5. Local Groth16 Proof Preflight Verification (DEC-026 Mitigasi C-01)
+    // Defends the relayer against gas-griefing attacks by verifying the Groth16 proof
+    // on node CPU before enqueuing or spending gas for on-chain broadcast.
+    let mut proof_a_bytes = [0u8; 128];
+    if let Ok(b) = hex::decode(payload.proof_a_neg.trim_start_matches("0x")) {
+        if b.len() == 128 {
+            proof_a_bytes.copy_from_slice(&b);
+        }
+    }
+    let mut proof_b_bytes = [0u8; 256];
+    if let Ok(b) = hex::decode(payload.proof_b.trim_start_matches("0x")) {
+        if b.len() == 256 {
+            proof_b_bytes.copy_from_slice(&b);
+        }
+    }
+    let mut proof_c_bytes = [0u8; 128];
+    if let Ok(b) = hex::decode(payload.proof_c.trim_start_matches("0x")) {
+        if b.len() == 128 {
+            proof_c_bytes.copy_from_slice(&b);
+        }
+    }
+
+    let mut fr_public_inputs = [zeltra_core::Fr::default(); 16];
+    for (idx, pi) in parsed_inputs.iter().enumerate().take(16) {
+        if let Some(fr) = zeltra_core::from_evm_scalar(pi) {
+            fr_public_inputs[idx] = fr;
+        }
+    }
+
+    if !zeltra_core::verify_evm_note_proof(
+        &proof_a_bytes,
+        &proof_b_bytes,
+        &proof_c_bytes,
+        &fr_public_inputs,
+    ) {
+        return Json(PrivateNoteSpendResponse {
+            status: "REJECTED".to_string(),
+            message: "Invalid Groth16 proof: preflight verification failed (C-01 defense)"
+                .to_string(),
+            queue_position: 0,
+            estimated_gas_usdc: None,
+        });
+    }
+
+    // 9. EIP-712 Quote Verification (if signed quote provided)
+    if let (Some(quote_id), Some(quote_sig), Some(user_addr)) = (
+        payload.quote_id.as_ref(),
+        payload.quote_signature.as_ref(),
+        payload.user_address.as_ref(),
+    ) {
+        match state
+            .db
+            .check_and_insert_quote_id(quote_id, user_addr)
+            .await
+        {
+            Ok(true) => {}
+            Ok(false) => {
+                return Json(PrivateNoteSpendResponse {
+                    status: "REJECTED".to_string(),
+                    message: "Quote ID already used".to_string(),
+                    queue_position: 0,
+                    estimated_gas_usdc: None,
+                });
+            }
+            Err(e) => {
+                eprintln!("RELAYER ERROR: Quote ID check failed: {}", e);
+                return Json(PrivateNoteSpendResponse {
+                    status: "ERROR".to_string(),
+                    message: "Database error".to_string(),
+                    queue_position: 0,
+                    estimated_gas_usdc: None,
+                });
+            }
+        }
+
+        use zeltra_sdk::eip712::{verify_quote_signature, ExecutionQuote};
+        let (contract_address, chain_id) = match state.evm_client.as_ref() {
+            Some(client) => {
+                let chain_id = match client.chain_id().await {
+                    Ok(id) => id,
+                    Err(_) => {
+                        return Json(PrivateNoteSpendResponse {
+                            status: "ERROR".to_string(),
+                            message: "Failed to get chain ID".to_string(),
+                            queue_position: 0,
+                            estimated_gas_usdc: None,
+                        });
+                    }
+                };
+                (client.contract_address(), chain_id)
+            }
+            None => {
+                let chain_id = std::env::var("ZELTRA_CHAIN_ID")
+                    .ok()
+                    .and_then(|s| s.parse::<u64>().ok())
+                    .unwrap_or(421614);
+                let contract_addr = std::env::var("ZELTRA_CONTRACT_ADDRESS")
+                    .unwrap_or_else(|_| "0x000000000000000000000000000000000000012c".to_string());
+                (contract_addr, chain_id)
+            }
+        };
+
+        let contract_addr = Address::from_str(&contract_address).unwrap_or(Address::ZERO);
+        let user_addr_parsed = Address::from_str(user_addr).unwrap_or(Address::ZERO);
+        let relayer_addr = Address::from_str(&state.relayer_address).unwrap_or(Address::ZERO);
+
+        let execution_quote = ExecutionQuote {
+            quoteId: U256::from_str(quote_id).unwrap_or(U256::ZERO),
+            maxExecutionFee: U256::from(payload.max_execution_fee),
+            merchantAmount: U256::from(payload.merchant_amount),
+            quoteExpiry: U256::from(payload.expiry.unwrap_or(0)),
+            relayerAddress: relayer_addr,
+        };
+
+        let sig_bytes = match hex::decode(quote_sig.trim_start_matches("0x")) {
+            Ok(bytes) if bytes.len() == 65 => bytes,
+            _ => {
+                return Json(PrivateNoteSpendResponse {
+                    status: "REJECTED".to_string(),
+                    message: "Invalid signature format (expected 65 bytes)".to_string(),
+                    queue_position: 0,
+                    estimated_gas_usdc: None,
+                });
+            }
+        };
+
+        let v = sig_bytes[64];
+        let mut r = [0u8; 32];
+        let mut s = [0u8; 32];
+        r.copy_from_slice(&sig_bytes[0..32]);
+        s.copy_from_slice(&sig_bytes[32..64]);
+
+        match verify_quote_signature(
+            &execution_quote,
+            chain_id,
+            contract_addr,
+            (v, r, s),
+            user_addr_parsed,
+        ) {
+            Ok(true) => {}
+            Ok(false) => {
+                return Json(PrivateNoteSpendResponse {
+                    status: "REJECTED".to_string(),
+                    message: "Invalid quote signature".to_string(),
+                    queue_position: 0,
+                    estimated_gas_usdc: None,
+                });
+            }
+            Err(e) => {
+                return Json(PrivateNoteSpendResponse {
+                    status: "ERROR".to_string(),
+                    message: format!("Signature verification failed: {}", e),
+                    queue_position: 0,
+                    estimated_gas_usdc: None,
+                });
+            }
+        }
+
+        // Relayer Ingress Equality Guard (DEC-035B Gate B / Task B3)
+        // B3.1 — Reconstruct Signing Digest in Handler from verified ExecutionQuote:
+        let expected_hash_bytes =
+            zeltra_sdk::eip712::compute_quote_hash(&execution_quote, chain_id, contract_addr);
+        let (expected_hi_fr, expected_lo_fr) =
+            zeltra_core::split_quote_hash_to_limbs(&expected_hash_bytes.0);
+        let expected_hi_bytes = zeltra_core::fr_to_be_bytes(&expected_hi_fr);
+        let expected_lo_bytes = zeltra_core::fr_to_be_bytes(&expected_lo_fr);
+
+        // B3.2 & B3.3 — Bit-Exact Public Inputs Equality Assertion & Fail-Closed Rejection:
+        let input_quote_hi = parsed_inputs[9];
+        let input_quote_lo = parsed_inputs[10];
+
+        if input_quote_hi != expected_hi_bytes || input_quote_lo != expected_lo_bytes {
+            eprintln!(
+                "RELAYER SECURITY WARNING: Public inputs quote_hash mismatch: expected (hi: 0x{}, lo: 0x{}), got (hi: 0x{}, lo: 0x{})",
+                hex::encode(expected_hi_bytes),
+                hex::encode(expected_lo_bytes),
+                hex::encode(input_quote_hi),
+                hex::encode(input_quote_lo),
+            );
+            return Json(PrivateNoteSpendResponse {
+                status: "REJECTED".to_string(),
+                message: "MismatchedQuoteHash: Public inputs quote_hash limbs do not match verified ExecutionQuote"
+                    .to_string(),
+                queue_position: 0,
+                estimated_gas_usdc: None,
+            });
+        }
+    }
+
+    // 10. Double-spend check against local DB
+    match state.db.is_nullifier_spent(&payload.input_nullifier).await {
+        Ok(true) => {
+            return Json(PrivateNoteSpendResponse {
+                status: "REJECTED".to_string(),
+                message: "Double-spending detected. Nullifier already exists in local database."
+                    .to_string(),
+                queue_position: 0,
+                estimated_gas_usdc: None,
+            });
+        }
+        Ok(false) => {}
+        Err(e) => {
+            eprintln!("RELAYER ERROR: Database nullifier check failed: {}", e);
+            return Json(PrivateNoteSpendResponse {
+                status: "ERROR".to_string(),
+                message: "Database error".to_string(),
+                queue_position: 0,
+                estimated_gas_usdc: None,
+            });
+        }
+    }
+
+    // 11. Double-spend check against on-chain contract (fail-closed if spent)
+    if let Some(ref client) = state.evm_client {
+        match client.is_nullifier_spent(&payload.input_nullifier).await {
+            Ok(true) => {
+                return Json(PrivateNoteSpendResponse {
+                    status: "REJECTED".to_string(),
+                    message: "Double-spending detected. Nullifier already spent on-chain."
+                        .to_string(),
+                    queue_position: 0,
+                    estimated_gas_usdc: None,
+                });
+            }
+            Ok(false) => {}
+            Err(e) => {
+                eprintln!("RELAYER WARNING: On-chain nullifier check failed: {}", e);
+            }
+        }
+    }
+
+    // 12. Enqueue into database
+    let spend_req = SpendRequest::from(payload.clone());
+    let queue_id = match state.db.enqueue_spend(&spend_req).await {
+        Ok(Some(id)) => id,
+        Ok(None) => {
+            return Json(PrivateNoteSpendResponse {
+                status: "REJECTED".to_string(),
+                message: "Nullifier already queued, submitted, or confirmed.".to_string(),
+                queue_position: 0,
+                estimated_gas_usdc: None,
+            });
+        }
+        Err(e) => {
+            eprintln!("RELAYER ERROR: Failed to persist private note spend: {}", e);
+            return Json(PrivateNoteSpendResponse {
+                status: "ERROR".to_string(),
+                message: "Failed to persist settlement request".to_string(),
+                queue_position: 0,
+                estimated_gas_usdc: None,
+            });
+        }
+    };
+
+    let position = state.db.queued_spend_count().await.unwrap_or(1);
+    println!(
+        "RELAYER: Received private note spend request (Queued id={})",
+        queue_id
+    );
+
+    let response = PrivateNoteSpendResponse {
+        status: "QUEUED".to_string(),
+        message: format!(
+            "Private note spend persisted with settlement id {}",
+            queue_id
+        ),
+        queue_position: position,
+        estimated_gas_usdc: None,
+    };
+
+    if let Some(ref idem_key) = payload.idempotency_key {
+        if let Ok(json) = serde_json::to_string(&response) {
+            let _ = state
+                .db
+                .store_idempotency(idem_key, "private_note_spend", &json)
+                .await;
+        }
+    }
+
+    Json(response)
+}
+
+// Background batching logic with slippage protection and balance checks
+pub const DEFAULT_MEMPOOL_LEASE_SECS: i64 = 900; // 15 minutes default (DEC-027)
+
+pub async fn process_spend_batch(state: &AppState) {
+    let lease_seconds = std::env::var("ZELTRA_MEMPOOL_LEASE_SECS")
+        .ok()
+        .and_then(|v| v.parse::<i64>().ok())
+        .unwrap_or(DEFAULT_MEMPOOL_LEASE_SECS);
+
+    let items = match state.db.claim_spends(50, lease_seconds).await {
+        Ok(items) => items,
+        Err(e) => {
+            eprintln!("SETTLEMENT: failed to claim persistent queue: {}", e);
+            return;
+        }
+    };
+    if items.is_empty() {
+        return;
+    }
+
+    let mut same_chain = Vec::new();
+    let mut direct = Vec::new();
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+
+    for item in items {
+        let is_expired = item.request.deadline.is_some_and(|deadline| now > deadline)
+            || item
+                .request
+                .expiry
+                .is_some_and(|expiry| expiry > 0 && now > expiry);
+
+        if is_expired {
+            let _ = state
+                .db
+                .fail_spend(item.id, None, "deadline or expiry expired before broadcast")
+                .await;
+        } else if item.request.cross_chain.is_some() || item.request.is_private_note() {
+            direct.push(item);
+        } else {
+            // Check if deadline/expiry is approaching (near is defined as <= 30 seconds remaining)
+            let is_near = item
+                .request
+                .deadline
+                .is_some_and(|d| d.saturating_sub(now) <= 30)
+                || item
+                    .request
+                    .expiry
+                    .is_some_and(|e| e > 0 && e.saturating_sub(now) <= 30);
+
+            if is_near {
+                println!(
+                    "RELAYER: Deadline/expiry is near for item {}. Bypassing batching.",
+                    item.id
+                );
+                direct.push(item);
+            } else {
+                same_chain.push(item);
+            }
+        }
+    }
+
+    let batch_enabled = std::env::var("ZELTRA_BATCH_ENABLED")
+        .map(|value| value == "true" || value == "1")
+        .unwrap_or(false);
+    if batch_enabled {
+        while same_chain.len() >= 2 {
+            let take = same_chain.len().min(8);
+            let batch: Vec<_> = same_chain.drain(..take).collect();
+            process_same_chain_batch(state, batch).await;
+        }
+    }
+    direct.extend(same_chain);
+    for item in direct {
+        process_single_spend(state, item).await;
+    }
+}
+
+fn batch_item(item: &QueuedSpend) -> BatchSpendItem {
+    const ZERO_WORD: &str = "0x0000000000000000000000000000000000000000000000000000000000000000";
+    BatchSpendItem {
+        root_hex: item
+            .request
+            .association_root_hex
+            .clone()
+            .unwrap_or_else(|| ZERO_WORD.to_string()),
+        nullifier: item.request.nullifier.clone(),
+        alpha_neg_hex: item.request.alpha_neg_hex.clone(),
+        pk_iss_hex: item.request.pk_iss_hex.clone(),
+        recipient: item.request.recipient.clone(),
+        amount: item.request.amount,
+        recipient_or_intent_hash_hex: item
+            .request
+            .recipient_or_intent_hash_hex
+            .clone()
+            .unwrap_or_else(|| ZERO_WORD.to_string()),
+        expiry: item.request.expiry.unwrap_or(0),
+        nonce_hex: item
+            .request
+            .nonce_hex
+            .clone()
+            .unwrap_or_else(|| ZERO_WORD.to_string()),
+    }
+}
+
+async fn process_same_chain_batch(state: &AppState, items: Vec<QueuedSpend>) {
+    let Some(ref evm_client) = state.evm_client else {
+        for item in &items {
+            let _ = state
+                .db
+                .retry_spend(item.id, "EVM client unavailable", item.retry_count)
+                .await;
+        }
+        return;
+    };
+
+    // --- ETH balance validation ---
+    let current_bal = evm_client.get_relayer_balance_eth().await.unwrap_or(0.0);
+    *state.relayer_wallet_balance_eth.lock().await = current_bal;
+
+    let gas_price = evm_client.get_gas_price().await.unwrap_or(20_000_000);
+    let gas_limit = 250_000f64 + 850_000f64 * items.len() as f64;
+    let estimated_cost_eth = (gas_limit * gas_price as f64) / 1_000_000_000_000_000_000.0;
+
+    if let Err(msg) = state.check_balance_for_batch(estimated_cost_eth).await {
+        eprintln!("SETTLEMENT BATCH REJECTED: {}", msg);
+        for item in &items {
+            let _ = state.db.retry_spend(item.id, &msg, item.retry_count).await;
+        }
+        return;
+    }
+
+    let payload: Vec<_> = items.iter().map(batch_item).collect();
+    match evm_client.broadcast_spend_batch(&payload).await {
+        Ok(outcome) if outcome.success => {
+            // Atomic DB confirmation
+            let confirm_items: Vec<_> = items
+                .iter()
+                .map(|item| (item.id, item.request.nullifier.clone()))
+                .collect();
+            if let Err(e) = state
+                .db
+                .mark_batch_spend_confirmed(confirm_items, &outcome.tx_hash, outcome.block_number)
+                .await
+            {
+                eprintln!("SETTLEMENT: failed to confirm batch in DB: {}", e);
+            }
+
+            // Storing batch metadata & margin calculation (Finding #10)
+            let mut total_revenue_usdc = 0.0;
+            let mut total_execution_fee_usdc = 0u64;
+            for item in &items {
+                let amount_usdc = item.request.amount as f64 / 1_000_000.0;
+                let fee_usdc = amount_usdc * 0.0025; // 0.25% standard fee
+                total_revenue_usdc += fee_usdc;
+                // Sum execution fees from signed quotes
+                if let Some(max_fee) = item.request.max_execution_fee {
+                    total_execution_fee_usdc += max_fee;
+                }
+            }
+
+            let total_cost_eth = (outcome.gas_used as f64 * outcome.effective_gas_price as f64)
+                / 1_000_000_000_000_000_000.0;
+            let eth_price = state.get_eth_price().await;
+            let actual_gas_cost_usdc = total_cost_eth * eth_price;
+            let margin_usdc = total_revenue_usdc - actual_gas_cost_usdc;
+
+            if let Err(e) = state
+                .db
+                .store_batch_metadata(
+                    &outcome.tx_hash,
+                    items.len(),
+                    &outcome.tx_hash,
+                    outcome.gas_used,
+                    outcome.effective_gas_price,
+                    total_cost_eth,
+                    margin_usdc,
+                    total_execution_fee_usdc,
+                )
+                .await
+            {
+                eprintln!("SETTLEMENT: failed to store batch metadata: {}", e);
+            }
+        }
+        Ok(outcome) => {
+            // Batch transaction reverted on-chain. Splitting batch for individual execution
+            println!("RELAYER WARNING: Batch reverted on-chain (tx: {}). Splitting batch to process items individually...", outcome.tx_hash);
+            for item in items {
+                let _ = state
+                    .db
+                    .mark_spend_submitted(item.id, &outcome.tx_hash)
+                    .await;
+                // Retry individual execution
+                process_single_spend(state, item).await;
+            }
+        }
+        Err(error) => {
+            // Broadcast error. Splitting batch for individual execution
+            let message = error.to_string();
+            println!("RELAYER WARNING: Batch broadcast failed: {}. Splitting batch to process items individually...", message);
+            for item in items {
+                if item.retry_count >= 7 {
+                    let _ = state.db.fail_spend(item.id, None, &message).await;
+                } else {
+                    let _ = state
+                        .db
+                        .retry_spend(item.id, &message, item.retry_count)
+                        .await;
+                }
+            }
+        }
+    }
+}
+
+async fn process_single_spend(state: &AppState, item: QueuedSpend) {
+    const ZERO_WORD: &str = "0x0000000000000000000000000000000000000000000000000000000000000000";
+    let Some(ref evm_client) = state.evm_client else {
+        let _ = state
+            .db
+            .retry_spend(item.id, "EVM client unavailable", item.retry_count)
+            .await;
+        return;
+    };
+    let request = &item.request;
+
+    // --- ETH balance validation ---
+    let current_bal = evm_client.get_relayer_balance_eth().await.unwrap_or(0.0);
+    *state.relayer_wallet_balance_eth.lock().await = current_bal;
+
+    let gas_price = evm_client.get_gas_price().await.unwrap_or(20_000_000);
+    let gas_limit = if request.is_private_note() {
+        GAS_LIMIT_PRIVATE_NOTE
+    } else if request.cross_chain.is_some() {
+        GAS_LIMIT_CROSS_CHAIN
+    } else {
+        GAS_LIMIT_STANDARD
+    };
+    let estimated_cost_eth = (gas_limit * gas_price as f64) / 1_000_000_000_000_000_000.0;
+
+    if let Err(msg) = state.check_balance_for_batch(estimated_cost_eth).await {
+        eprintln!("SETTLEMENT SINGLE REJECTED: {}", msg);
+        let _ = state.db.retry_spend(item.id, &msg, item.retry_count).await;
+        return;
+    }
+
+    let result = if request.is_private_note() {
+        let (Some(note_root), Some(proof_a), Some(proof_b), Some(proof_c)) = (
+            request.note_root_hex.as_deref(),
+            request.proof_a_neg_hex.as_deref(),
+            request.proof_b_hex.as_deref(),
+            request.proof_c_hex.as_deref(),
+        ) else {
+            let _ = state
+                .db
+                .fail_spend(item.id, None, "Missing private note proof parameters")
+                .await;
+            return;
+        };
+
+        let leaf_count = request.leaf_count.unwrap_or(1);
+        let note_epoch_id = request.note_epoch_id.unwrap_or(0);
+        let is_rollover = request.is_rollover.unwrap_or(0);
+        let quote_hash_repacked = if let Some(ref qh) = request.quote_hash_hex {
+            qh.clone()
+        } else if let Some(ref pis) = request.public_inputs_hex {
+            if pis.len() >= 16 {
+                let hi_res = hex::decode(pis[9].trim_start_matches("0x"));
+                let lo_res = hex::decode(pis[10].trim_start_matches("0x"));
+                if let (Ok(hi), Ok(lo)) = (hi_res, lo_res) {
+                    if hi.len() == 32 && lo.len() == 32 {
+                        let mut full = [0u8; 32];
+                        full[0..16].copy_from_slice(&hi[16..32]);
+                        full[16..32].copy_from_slice(&lo[16..32]);
+                        format!("0x{}", hex::encode(full))
+                    } else {
+                        ZERO_WORD.to_string()
+                    }
+                } else {
+                    ZERO_WORD.to_string()
+                }
+            } else {
+                ZERO_WORD.to_string()
+            }
+        } else {
+            ZERO_WORD.to_string()
+        };
+
+        evm_client
+            .broadcast_spend_private_note_transaction(
+                note_root,
+                leaf_count,
+                &request.nullifier,
+                note_epoch_id,
+                request
+                    .output_commitment_hex
+                    .as_deref()
+                    .unwrap_or(ZERO_WORD),
+                &request.recipient,
+                request.merchant_amount.unwrap_or(request.amount),
+                request.protocol_fee.unwrap_or(0),
+                request.execution_fee.unwrap_or(0),
+                request.max_execution_fee.unwrap_or(0),
+                &quote_hash_repacked,
+                request.expiry.unwrap_or(0),
+                request.has_change.unwrap_or(0),
+                is_rollover,
+                proof_a,
+                proof_b,
+                proof_c,
+                request.change_encrypted_memo.as_deref(),
+            )
+            .await
+    } else if let Some(cc) = &request.cross_chain {
+        let stablecoin_addr = std::env::var("ZELTRA_STABLECOIN_ADDRESS")
+            .unwrap_or_else(|_| "0x75faf114eafb1bdbe2f0316df893fd58ce46aa4d".to_string());
+        evm_client
+            .broadcast_ccip_transaction(
+                cc.destination_chain_selector,
+                &cc.destination_contract,
+                &request.nullifier,
+                &request.alpha_neg_hex,
+                &request.pk_iss_hex,
+                &request.recipient,
+                &stablecoin_addr,
+                None,
+                request.amount,
+                request.expiry.unwrap_or(0),
+                request.nonce_hex.as_deref().unwrap_or(ZERO_WORD),
+            )
+            .await
+    } else {
+        let root = request.association_root_hex.as_deref().unwrap_or(ZERO_WORD);
+        evm_client
+            .broadcast_spend_transaction(
+                root,
+                &request.nullifier,
+                &request.alpha_neg_hex,
+                &request.pk_iss_hex,
+                &request.recipient,
+                request.amount,
+                request
+                    .recipient_or_intent_hash_hex
+                    .as_deref()
+                    .unwrap_or(ZERO_WORD),
+                request.expiry.unwrap_or(0),
+                request.nonce_hex.as_deref().unwrap_or(ZERO_WORD),
+                request.max_execution_fee.unwrap_or(0),
+                request.execution_fee.unwrap_or(0),
+            )
+            .await
+    };
+
+    let is_ccip = request.cross_chain.is_some();
+    let ccip_chain_selector = request
+        .cross_chain
+        .as_ref()
+        .map(|cc| cc.destination_chain_selector);
+
+    match result {
+        Ok(outcome) if outcome.success => {
+            let _ = state
+                .db
+                .mark_spend_submitted(item.id, &outcome.tx_hash)
+                .await;
+
+            if is_ccip {
+                // CCIP cross-chain: track destination, don't mark confirmed yet
+                if let Some(message_id) = &outcome.ccip_message_id {
+                    let chain_sel = ccip_chain_selector.unwrap_or(0);
+                    if let Err(e) = state
+                        .db
+                        .set_ccip_tracking(item.id, message_id, chain_sel)
+                        .await
+                    {
+                        eprintln!(
+                            "CCIP_TRACKING: Failed to set tracking for id={}: {}",
+                            item.id, e
+                        );
+                    }
+                    // Also insert nullifier to prevent double-spend while awaiting destination
+                    let _ = state
+                        .db
+                        .mark_spend_confirmed(
+                            item.id,
+                            &request.nullifier,
+                            &outcome.tx_hash,
+                            outcome.block_number,
+                        )
+                        .await;
+                    println!(
+                        "CCIP: Spend {} queued for destination tracking (msg_id={})",
+                        item.id, message_id
+                    );
+                } else {
+                    // No message ID parsed — fall back to immediate confirm (graceful degradation)
+                    let _ = state
+                        .db
+                        .mark_spend_confirmed(
+                            item.id,
+                            &request.nullifier,
+                            &outcome.tx_hash,
+                            outcome.block_number,
+                        )
+                        .await;
+                }
+            } else {
+                // Same-chain: mark confirmed immediately
+                let _ = state
+                    .db
+                    .mark_spend_confirmed(
+                        item.id,
+                        &request.nullifier,
+                        &outcome.tx_hash,
+                        outcome.block_number,
+                    )
+                    .await;
+
+                // Track single spend execution fee in spend_batches for three-way reconciliation (DEC-031)
+                let execution_fee_usdc = request
+                    .execution_fee
+                    .or(request.max_execution_fee)
+                    .unwrap_or(0);
+                if execution_fee_usdc > 0 {
+                    let total_cost_eth = (outcome.gas_used as f64
+                        * outcome.effective_gas_price as f64)
+                        / 1_000_000_000_000_000_000.0;
+                    let eth_price = state.get_eth_price().await;
+                    let actual_gas_cost_usdc = total_cost_eth * eth_price;
+                    let margin_usdc =
+                        (execution_fee_usdc as f64 / 1_000_000.0) - actual_gas_cost_usdc;
+
+                    if let Err(e) = state
+                        .db
+                        .store_batch_metadata(
+                            &outcome.tx_hash,
+                            1,
+                            &outcome.tx_hash,
+                            outcome.gas_used,
+                            outcome.effective_gas_price,
+                            total_cost_eth,
+                            margin_usdc,
+                            execution_fee_usdc,
+                        )
+                        .await
+                    {
+                        eprintln!("SETTLEMENT: failed to store single spend metadata: {}", e);
+                    }
+                }
+            }
+        }
+        Ok(outcome) => {
+            let _ = state
+                .db
+                .mark_spend_submitted(item.id, &outcome.tx_hash)
+                .await;
+            let _ = state
+                .db
+                .fail_spend(
+                    item.id,
+                    Some(&outcome.tx_hash),
+                    "transaction receipt status was reverted",
+                )
+                .await;
+        }
+        Err(error) if item.retry_count >= 7 => {
+            let _ = state.db.fail_spend(item.id, None, &error.to_string()).await;
+        }
+        Err(error) => {
+            let _ = state
+                .db
+                .retry_spend(item.id, &error.to_string(), item.retry_count)
+                .await;
+        }
+    }
+}
+
+/// CCIP refund endpoint.
+///
+/// POST /api/ccip/refund
+/// Body: { "nullifier": "0x..." }
+///
+/// Authorizes a refund for a failed CCIP cross-chain spend by freeing the nullifier
+/// so the user can re-submit the spend. Only allowed if:
+/// 1. destination_status = 'failed' (confirmed by CCIP monitor)
+/// 2. Refund timeout has elapsed (default 24h, prevents manual execution race)
+#[derive(serde::Deserialize)]
+pub struct CcipRefundRequest {
+    pub nullifier: String,
+}
+
+#[derive(serde::Serialize)]
+pub struct CcipRefundResponse {
+    pub status: String,
+    pub nullifier: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+}
+
+pub async fn handle_ccip_refund(
+    axum::extract::State(state): axum::extract::State<AppState>,
+    Json(payload): Json<CcipRefundRequest>,
+) -> Json<CcipRefundResponse> {
+    let refund_timeout = crate::config::CcipDestinationConfig::from_env().refund_timeout_secs;
+
+    match state
+        .db
+        .authorize_ccip_refund(&payload.nullifier, refund_timeout)
+        .await
+    {
+        Ok(true) => {
+            println!(
+                "CCIP_REFUND: Nullifier freed for re-spend: {}...",
+                &payload.nullifier[..8.min(payload.nullifier.len())]
+            );
+            Json(CcipRefundResponse {
+                status: "refund_authorized".to_string(),
+                nullifier: payload.nullifier,
+                error: None,
+            })
+        }
+        Ok(false) => Json(CcipRefundResponse {
+            status: "refund_denied".to_string(),
+            nullifier: payload.nullifier,
+            error: Some(
+                "Not eligible: destination not failed, or refund timeout not yet elapsed"
+                    .to_string(),
+            ),
+        }),
+        Err(e) => Json(CcipRefundResponse {
+            status: "error".to_string(),
+            nullifier: payload.nullifier,
+            error: Some(e.to_string()),
+        }),
+    }
+}
+
+fn parse_contract_address_to_32bytes(addr_str: &str) -> Option<[u8; 32]> {
+    let clean = addr_str.trim_start_matches("0x");
+    if clean.len() == 40 {
+        if let Ok(b) = hex::decode(clean) {
+            let mut out = [0u8; 32];
+            out[12..].copy_from_slice(&b);
+            return Some(out);
+        }
+    } else if clean.len() == 64 {
+        if let Ok(b) = hex::decode(clean) {
+            let mut out = [0u8; 32];
+            out.copy_from_slice(&b);
+            return Some(out);
+        }
+    }
+    None
+}
+
+/// Handler for Universal 2-in-2-out JoinSplit Spend (DEC-036 / DEC-036C)
+///
+/// POST /api/v1/spend-joinsplit
+pub async fn handle_spend_joinsplit(
+    axum::extract::State(state): axum::extract::State<AppState>,
+    Json(payload): Json<JoinSplitSpendRequest>,
+) -> Json<JoinSplitSpendResponse> {
+    // 1. Idempotency check
+    if let Some(ref idem_key) = payload.idempotency_key {
+        match state
+            .db
+            .check_idempotency(idem_key, "joinsplit_spend")
+            .await
+        {
+            Ok(Some(cached_json)) => {
+                if let Ok(cached_resp) =
+                    serde_json::from_str::<JoinSplitSpendResponse>(&cached_json)
+                {
+                    println!(
+                        "IDEMPOTENCY: Returning cached response for joinsplit spend key {}...",
+                        &idem_key[..8.min(idem_key.len())]
+                    );
+                    return Json(cached_resp);
+                }
+            }
+            Ok(None) => {}
+            Err(e) => {
+                eprintln!("RELAYER WARNING: Idempotency check failed: {}", e);
+            }
+        }
+    }
+
+    // 2. Anti-Aliasing Guard (Zellic 2024 / Singularity Defense)
+    if payload.input_nullifier_1 == payload.input_nullifier_2 {
+        let response = JoinSplitSpendResponse {
+            status: "REJECTED".to_string(),
+            message: "DuplicateNullifierInSameTx: input_nullifier_1 and input_nullifier_2 must not be identical".to_string(),
+            tx_hash: None,
+            queue_position: 0,
+            estimated_gas_usdc: None,
+        };
+        return Json(response);
+    }
+
+    // 3. Expiry check
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+    if let Some(expiry) = payload.expiry {
+        if expiry > 0 && now > expiry {
+            let response = JoinSplitSpendResponse {
+                status: "REJECTED".to_string(),
+                message: format!("Transaction expired. Expiry: {}, Current: {}", expiry, now),
+                tx_hash: None,
+                queue_position: 0,
+                estimated_gas_usdc: None,
+            };
+            if let Some(ref idem_key) = payload.idempotency_key {
+                if let Ok(json) = serde_json::to_string(&response) {
+                    let _ = state
+                        .db
+                        .store_idempotency(idem_key, "joinsplit_spend", &json)
+                        .await;
+                }
+            }
+            return Json(response);
+        }
+    }
+
+    // 4. Amount and fee invariant checks
+    let is_rollover_req = payload.is_rollover == Some(1);
+    if payload.merchant_amount == 0 && !is_rollover_req {
+        return Json(JoinSplitSpendResponse {
+            status: "REJECTED".to_string(),
+            message: "merchant_amount must be greater than zero for normal spend".to_string(),
+            tx_hash: None,
+            queue_position: 0,
+            estimated_gas_usdc: None,
+        });
+    }
+
+    if payload.execution_fee > payload.max_execution_fee {
+        return Json(JoinSplitSpendResponse {
+            status: "REJECTED".to_string(),
+            message: format!(
+                "Execution fee ({}) exceeds max execution fee ({})",
+                payload.execution_fee, payload.max_execution_fee
+            ),
+            tx_hash: None,
+            queue_position: 0,
+            estimated_gas_usdc: None,
+        });
+    }
+
+    // 5. Change flags and flags_packed validation
+    let hc1 = match payload.has_change_1 {
+        Some(serde_json::Value::Bool(b)) => {
+            if b {
+                1u8
+            } else {
+                0u8
+            }
+        }
+        Some(serde_json::Value::Number(ref n)) => n.as_u64().unwrap_or(0) as u8,
+        _ => 0u8,
+    };
+    let hc2 = match payload.has_change_2 {
+        Some(serde_json::Value::Bool(b)) => {
+            if b {
+                1u8
+            } else {
+                0u8
+            }
+        }
+        Some(serde_json::Value::Number(ref n)) => n.as_u64().unwrap_or(0) as u8,
+        _ => 0u8,
+    };
+    let expected_flags = hc1 + 2 * hc2;
+    let flags_packed = payload.flags_packed.unwrap_or(expected_flags);
+    if flags_packed != expected_flags {
+        return Json(JoinSplitSpendResponse {
+            status: "REJECTED".to_string(),
+            message: format!(
+                "flags_packed ({}) does not match decomposed change flags (has_change_1: {}, has_change_2: {})",
+                flags_packed, hc1, hc2
+            ),
+            tx_hash: None,
+            queue_position: 0,
+            estimated_gas_usdc: None,
+        });
+    }
+
+    // 6. Recipient address validation & Sanctions screening (DEC-026)
+    use alloy_primitives::U256;
+    let recipient_addr = match Address::from_str(&payload.recipient) {
+        Ok(addr) if payload.recipient.trim_start_matches("0x").len() == 40 => addr,
+        _ => {
+            return Json(JoinSplitSpendResponse {
+                status: "REJECTED".to_string(),
+                message: format!("Invalid recipient address: {}", payload.recipient),
+                tx_hash: None,
+                queue_position: 0,
+                estimated_gas_usdc: None,
+            });
+        }
+    };
+
+    let limits = crate::validation::SafetyLimits::default();
+    if limits.is_sanctioned(&recipient_addr) {
+        return Json(JoinSplitSpendResponse {
+            status: "REJECTED".to_string(),
+            message: format!(
+                "Recipient address {} is restricted under public sanctions policy (DEC-026)",
+                payload.recipient
+            ),
+            tx_hash: None,
+            queue_position: 0,
+            estimated_gas_usdc: None,
+        });
+    }
+
+    if let Some(ref client) = state.evm_client {
+        if client
+            .is_sanctioned_on_chain(&recipient_addr)
+            .await
+            .unwrap_or(false)
+        {
+            return Json(JoinSplitSpendResponse {
+                status: "REJECTED".to_string(),
+                message: format!(
+                    "Recipient address {} is sanctioned per on-chain Chainalysis Oracle (DEC-026)",
+                    payload.recipient
+                ),
+                tx_hash: None,
+                queue_position: 0,
+                estimated_gas_usdc: None,
+            });
+        }
+    }
+
+    // 7. Note root and nullifier format check
+    let note_root_bytes = match hex::decode(payload.note_root.trim_start_matches("0x")) {
+        Ok(b) if b.len() == 32 => b,
+        _ => {
+            return Json(JoinSplitSpendResponse {
+                status: "REJECTED".to_string(),
+                message: "note_root must be a 32-byte hex string".to_string(),
+                tx_hash: None,
+                queue_position: 0,
+                estimated_gas_usdc: None,
+            });
+        }
+    };
+
+    let nf1_bytes = match hex::decode(payload.input_nullifier_1.trim_start_matches("0x")) {
+        Ok(b) if b.len() == 32 => b,
+        _ => {
+            return Json(JoinSplitSpendResponse {
+                status: "REJECTED".to_string(),
+                message: "input_nullifier_1 must be a 32-byte hex string".to_string(),
+                tx_hash: None,
+                queue_position: 0,
+                estimated_gas_usdc: None,
+            });
+        }
+    };
+
+    let nf2_bytes = match hex::decode(payload.input_nullifier_2.trim_start_matches("0x")) {
+        Ok(b) if b.len() == 32 => b,
+        _ => {
+            return Json(JoinSplitSpendResponse {
+                status: "REJECTED".to_string(),
+                message: "input_nullifier_2 must be a 32-byte hex string".to_string(),
+                tx_hash: None,
+                queue_position: 0,
+                estimated_gas_usdc: None,
+            });
+        }
+    };
+
+    // 8. Proof byte lengths validation (EIP-2537: G1=128 bytes, G2=256 bytes)
+    let proof_a_vec = match hex::decode(payload.proof_a_neg.trim_start_matches("0x")) {
+        Ok(b) if b.len() == 128 => b,
+        _ => {
+            return Json(JoinSplitSpendResponse {
+                status: "REJECTED".to_string(),
+                message: "proof_a_neg must be a 128-byte hex string".to_string(),
+                tx_hash: None,
+                queue_position: 0,
+                estimated_gas_usdc: None,
+            });
+        }
+    };
+    let proof_b_vec = match hex::decode(payload.proof_b.trim_start_matches("0x")) {
+        Ok(b) if b.len() == 256 => b,
+        _ => {
+            return Json(JoinSplitSpendResponse {
+                status: "REJECTED".to_string(),
+                message: "proof_b must be a 256-byte hex string".to_string(),
+                tx_hash: None,
+                queue_position: 0,
+                estimated_gas_usdc: None,
+            });
+        }
+    };
+    let proof_c_vec = match hex::decode(payload.proof_c.trim_start_matches("0x")) {
+        Ok(b) if b.len() == 128 => b,
+        _ => {
+            return Json(JoinSplitSpendResponse {
+                status: "REJECTED".to_string(),
+                message: "proof_c must be a 128-byte hex string".to_string(),
+                tx_hash: None,
+                queue_position: 0,
+                estimated_gas_usdc: None,
+            });
+        }
+    };
+
+    // 9. Public inputs canonical scalar check & semantic binding (19 public inputs)
+    if payload.public_inputs.len() != 19 {
+        return Json(JoinSplitSpendResponse {
+            status: "REJECTED".to_string(),
+            message: format!(
+                "Expected 19 public inputs for JoinSplitCircuit, got {}",
+                payload.public_inputs.len()
+            ),
+            tx_hash: None,
+            queue_position: 0,
+            estimated_gas_usdc: None,
+        });
+    }
+
+    let mut parsed_inputs = Vec::with_capacity(19);
+    for (idx, pi_hex) in payload.public_inputs.iter().enumerate() {
+        let bytes = match hex::decode(pi_hex.trim_start_matches("0x")) {
+            Ok(b) if b.len() == 32 => b,
+            _ => {
+                return Json(JoinSplitSpendResponse {
+                    status: "REJECTED".to_string(),
+                    message: format!("public_inputs[{}] must be a 32-byte hex scalar", idx),
+                    tx_hash: None,
+                    queue_position: 0,
+                    estimated_gas_usdc: None,
+                });
+            }
+        };
+        let mut fixed = [0u8; 32];
+        fixed.copy_from_slice(&bytes);
+
+        // Canonical scalar check: Fr < r
+        if zeltra_core::from_evm_scalar(&fixed).is_none() {
+            return Json(JoinSplitSpendResponse {
+                status: "REJECTED".to_string(),
+                message: format!("public_inputs[{}] is a non-canonical scalar (>= r)", idx),
+                tx_hash: None,
+                queue_position: 0,
+                estimated_gas_usdc: None,
+            });
+        }
+        parsed_inputs.push(fixed);
+    }
+
+    // Semantic public input binding (DEC-036A, DEC-036C)
+    // Index 0: note_root
+    if parsed_inputs[0] != note_root_bytes[..] {
+        return Json(JoinSplitSpendResponse {
+            status: "REJECTED".to_string(),
+            message: "public_inputs[0] does not match note_root".to_string(),
+            tx_hash: None,
+            queue_position: 0,
+            estimated_gas_usdc: None,
+        });
+    }
+
+    // Index 1: leaf_count (> 0)
+    let leaf_count_u64 = U256::from_be_bytes(parsed_inputs[1]).to::<u64>();
+    if leaf_count_u64 == 0 {
+        return Json(JoinSplitSpendResponse {
+            status: "REJECTED".to_string(),
+            message: "leaf_count in public_inputs[1] must be greater than zero".to_string(),
+            tx_hash: None,
+            queue_position: 0,
+            estimated_gas_usdc: None,
+        });
+    }
+    if let Some(expected_lc) = payload.leaf_count {
+        if leaf_count_u64 != expected_lc {
+            return Json(JoinSplitSpendResponse {
+                status: "REJECTED".to_string(),
+                message: "public_inputs[1] does not match leaf_count".to_string(),
+                tx_hash: None,
+                queue_position: 0,
+                estimated_gas_usdc: None,
+            });
+        }
+    }
+
+    // Index 2: input_nullifier_1
+    if parsed_inputs[2] != nf1_bytes[..] {
+        return Json(JoinSplitSpendResponse {
+            status: "REJECTED".to_string(),
+            message: "public_inputs[2] does not match input_nullifier_1".to_string(),
+            tx_hash: None,
+            queue_position: 0,
+            estimated_gas_usdc: None,
+        });
+    }
+
+    // Index 3: input_nullifier_2
+    if parsed_inputs[3] != nf2_bytes[..] {
+        return Json(JoinSplitSpendResponse {
+            status: "REJECTED".to_string(),
+            message: "public_inputs[3] does not match input_nullifier_2".to_string(),
+            tx_hash: None,
+            queue_position: 0,
+            estimated_gas_usdc: None,
+        });
+    }
+
+    // Index 4 & 5: epoch_id_1 & epoch_id_2
+    if let Some(ep1) = payload.epoch_id_1 {
+        let actual_ep1 = U256::from_be_bytes(parsed_inputs[4]).to::<u32>();
+        if actual_ep1 != ep1 {
+            return Json(JoinSplitSpendResponse {
+                status: "REJECTED".to_string(),
+                message: "public_inputs[4] does not match epoch_id_1".to_string(),
+                tx_hash: None,
+                queue_position: 0,
+                estimated_gas_usdc: None,
+            });
+        }
+    }
+    if let Some(ep2) = payload.epoch_id_2 {
+        let actual_ep2 = U256::from_be_bytes(parsed_inputs[5]).to::<u32>();
+        if actual_ep2 != ep2 {
+            return Json(JoinSplitSpendResponse {
+                status: "REJECTED".to_string(),
+                message: "public_inputs[5] does not match epoch_id_2".to_string(),
+                tx_hash: None,
+                queue_position: 0,
+                estimated_gas_usdc: None,
+            });
+        }
+    }
+
+    // Index 6 & 7: output_commitment_1 & output_commitment_2
+    let mut expected_cm1 = [0u8; 32];
+    if let Ok(b) = hex::decode(payload.output_commitment_1.trim_start_matches("0x")) {
+        if b.len() == 32 {
+            expected_cm1.copy_from_slice(&b);
+        }
+    }
+    if parsed_inputs[6] != expected_cm1 {
+        return Json(JoinSplitSpendResponse {
+            status: "REJECTED".to_string(),
+            message: "public_inputs[6] does not match output_commitment_1".to_string(),
+            tx_hash: None,
+            queue_position: 0,
+            estimated_gas_usdc: None,
+        });
+    }
+
+    let mut expected_cm2 = [0u8; 32];
+    if let Ok(b) = hex::decode(payload.output_commitment_2.trim_start_matches("0x")) {
+        if b.len() == 32 {
+            expected_cm2.copy_from_slice(&b);
+        }
+    }
+    if parsed_inputs[7] != expected_cm2 {
+        return Json(JoinSplitSpendResponse {
+            status: "REJECTED".to_string(),
+            message: "public_inputs[7] does not match output_commitment_2".to_string(),
+            tx_hash: None,
+            queue_position: 0,
+            estimated_gas_usdc: None,
+        });
+    }
+
+    // Index 8: recipient address
+    let mut expected_recipient = [0u8; 32];
+    expected_recipient[12..].copy_from_slice(recipient_addr.as_slice());
+    if parsed_inputs[8] != expected_recipient {
+        return Json(JoinSplitSpendResponse {
+            status: "REJECTED".to_string(),
+            message: "public_inputs[8] does not match recipient address".to_string(),
+            tx_hash: None,
+            queue_position: 0,
+            estimated_gas_usdc: None,
+        });
+    }
+
+    // Index 9: merchant_amount
+    let expected_merchant = U256::from(payload.merchant_amount).to_be_bytes::<32>();
+    if parsed_inputs[9] != expected_merchant {
+        return Json(JoinSplitSpendResponse {
+            status: "REJECTED".to_string(),
+            message: "public_inputs[9] does not match merchant_amount".to_string(),
+            tx_hash: None,
+            queue_position: 0,
+            estimated_gas_usdc: None,
+        });
+    }
+
+    // Index 10: protocol_fee
+    let expected_proto = U256::from(payload.protocol_fee).to_be_bytes::<32>();
+    if parsed_inputs[10] != expected_proto {
+        return Json(JoinSplitSpendResponse {
+            status: "REJECTED".to_string(),
+            message: "public_inputs[10] does not match protocol_fee".to_string(),
+            tx_hash: None,
+            queue_position: 0,
+            estimated_gas_usdc: None,
+        });
+    }
+
+    // Index 11: execution_fee
+    let expected_exec = U256::from(payload.execution_fee).to_be_bytes::<32>();
+    if parsed_inputs[11] != expected_exec {
+        return Json(JoinSplitSpendResponse {
+            status: "REJECTED".to_string(),
+            message: "public_inputs[11] does not match execution_fee".to_string(),
+            tx_hash: None,
+            queue_position: 0,
+            estimated_gas_usdc: None,
+        });
+    }
+
+    // Index 12 & 13: quote_hash_hi & quote_hash_lo (Two-Limb Representation)
+    if parsed_inputs[12][0..16] != [0u8; 16] {
+        return Json(JoinSplitSpendResponse {
+            status: "REJECTED".to_string(),
+            message: "public_inputs[12] (quote_hash_hi) exceeds 128-bit range (>= 2^128)"
+                .to_string(),
+            tx_hash: None,
+            queue_position: 0,
+            estimated_gas_usdc: None,
+        });
+    }
+    if parsed_inputs[13][0..16] != [0u8; 16] {
+        return Json(JoinSplitSpendResponse {
+            status: "REJECTED".to_string(),
+            message: "public_inputs[13] (quote_hash_lo) exceeds 128-bit range (>= 2^128)"
+                .to_string(),
+            tx_hash: None,
+            queue_position: 0,
+            estimated_gas_usdc: None,
+        });
+    }
+
+    if let Some(ref qh) = payload.quote_hash {
+        if let Ok(b) = hex::decode(qh.trim_start_matches("0x")) {
+            if b.len() == 32 {
+                let mut expected_hi = [0u8; 32];
+                expected_hi[16..32].copy_from_slice(&b[0..16]);
+                let mut expected_lo = [0u8; 32];
+                expected_lo[16..32].copy_from_slice(&b[16..32]);
+
+                if parsed_inputs[12] != expected_hi {
+                    return Json(JoinSplitSpendResponse {
+                        status: "REJECTED".to_string(),
+                        message: "public_inputs[12] does not match quote_hash_hi".to_string(),
+                        tx_hash: None,
+                        queue_position: 0,
+                        estimated_gas_usdc: None,
+                    });
+                }
+                if parsed_inputs[13] != expected_lo {
+                    return Json(JoinSplitSpendResponse {
+                        status: "REJECTED".to_string(),
+                        message: "public_inputs[13] does not match quote_hash_lo".to_string(),
+                        tx_hash: None,
+                        queue_position: 0,
+                        estimated_gas_usdc: None,
+                    });
+                }
+            }
+        }
+    }
+
+    // Index 14: chain_id
+    if let Some(expected_cid) = payload.chain_id {
+        let actual_cid = U256::from_be_bytes(parsed_inputs[14]).to::<u64>();
+        if actual_cid != expected_cid {
+            return Json(JoinSplitSpendResponse {
+                status: "REJECTED".to_string(),
+                message: "public_inputs[14] does not match chain_id".to_string(),
+                tx_hash: None,
+                queue_position: 0,
+                estimated_gas_usdc: None,
+            });
+        }
+    }
+
+    // Index 15: contract_address
+    if let Some(ref caddr_str) = payload.contract_address {
+        if let Some(expected_caddr) = parse_contract_address_to_32bytes(caddr_str) {
+            if parsed_inputs[15] != expected_caddr {
+                return Json(JoinSplitSpendResponse {
+                    status: "REJECTED".to_string(),
+                    message: "public_inputs[15] does not match contract_address".to_string(),
+                    tx_hash: None,
+                    queue_position: 0,
+                    estimated_gas_usdc: None,
+                });
+            }
+        }
+    }
+
+    // Index 16: expiry
+    let expected_exp = U256::from(payload.expiry.unwrap_or(0)).to_be_bytes::<32>();
+    if parsed_inputs[16] != expected_exp {
+        return Json(JoinSplitSpendResponse {
+            status: "REJECTED".to_string(),
+            message: "public_inputs[16] does not match expiry".to_string(),
+            tx_hash: None,
+            queue_position: 0,
+            estimated_gas_usdc: None,
+        });
+    }
+
+    // Index 17: flags_packed
+    let expected_fp = U256::from(flags_packed).to_be_bytes::<32>();
+    if parsed_inputs[17] != expected_fp {
+        return Json(JoinSplitSpendResponse {
+            status: "REJECTED".to_string(),
+            message: "public_inputs[17] does not match flags_packed".to_string(),
+            tx_hash: None,
+            queue_position: 0,
+            estimated_gas_usdc: None,
+        });
+    }
+
+    // Index 18: is_rollover
+    let is_rollover_u64 = U256::from_be_bytes(parsed_inputs[18]).to::<u64>();
+    if is_rollover_u64 != 0 && is_rollover_u64 != 1 {
+        return Json(JoinSplitSpendResponse {
+            status: "REJECTED".to_string(),
+            message: "public_inputs[18] (is_rollover) must be 0 or 1".to_string(),
+            tx_hash: None,
+            queue_position: 0,
+            estimated_gas_usdc: None,
+        });
+    }
+    if let Some(expected_ro) = payload.is_rollover {
+        if is_rollover_u64 != expected_ro {
+            return Json(JoinSplitSpendResponse {
+                status: "REJECTED".to_string(),
+                message: "public_inputs[18] does not match is_rollover flag".to_string(),
+                tx_hash: None,
+                queue_position: 0,
+                estimated_gas_usdc: None,
+            });
+        }
+    }
+
+    // 10. Local CPU Groth16 Preflight Verifier (Phase 3: Gas Griefing Defense against EIP-2537)
+    let mut proof_a_bytes = [0u8; 128];
+    proof_a_bytes.copy_from_slice(&proof_a_vec);
+    let mut proof_b_bytes = [0u8; 256];
+    proof_b_bytes.copy_from_slice(&proof_b_vec);
+    let mut proof_c_bytes = [0u8; 128];
+    proof_c_bytes.copy_from_slice(&proof_c_vec);
+
+    let mut fr_public_inputs = [zeltra_core::Fr::default(); 19];
+    for (idx, pi) in parsed_inputs.iter().enumerate().take(19) {
+        if let Some(fr) = zeltra_core::from_evm_scalar(pi) {
+            fr_public_inputs[idx] = fr;
+        }
+    }
+
+    let Some(proof) = zeltra_core::from_evm_proof(&proof_a_bytes, &proof_b_bytes, &proof_c_bytes)
+    else {
+        return Json(JoinSplitSpendResponse {
+            status: "REJECTED".to_string(),
+            message: "Failed to deserialize Groth16 proof points".to_string(),
+            tx_hash: None,
+            queue_position: 0,
+            estimated_gas_usdc: None,
+        });
+    };
+
+    let keys = zeltra_core::joinsplit_circuit::get_or_init_joinsplit_circuit_keys();
+    let is_valid = zeltra_core::joinsplit_circuit::verify_joinsplit_proof(
+        &keys.verifying_key,
+        &proof,
+        &fr_public_inputs,
+    )
+    .unwrap_or(false);
+
+    if !is_valid {
+        return Json(JoinSplitSpendResponse {
+            status: "REJECTED".to_string(),
+            message: "Invalid Groth16 proof: preflight verification failed (gas griefing defense)"
+                .to_string(),
+            tx_hash: None,
+            queue_position: 0,
+            estimated_gas_usdc: None,
+        });
+    }
+
+    // 11. SQLite Atomic Dual Nullifier Reservation (Phase 2: C2.1)
+    let reserved = match state
+        .db
+        .check_and_insert_dual_nullifiers(
+            &payload.input_nullifier_1,
+            &payload.input_nullifier_2,
+            None,
+        )
+        .await
+    {
+        Ok(res) => res,
+        Err(e) => {
+            eprintln!("Database error checking nullifiers: {}", e);
+            return Json(JoinSplitSpendResponse {
+                status: "ERROR".to_string(),
+                message: "Database error during nullifier check".to_string(),
+                tx_hash: None,
+                queue_position: 0,
+                estimated_gas_usdc: None,
+            });
+        }
+    };
+    if !reserved {
+        return Json(JoinSplitSpendResponse {
+            status: "REJECTED".to_string(),
+            message: "Nullifier already spent in relayer database".to_string(),
+            tx_hash: None,
+            queue_position: 0,
+            estimated_gas_usdc: None,
+        });
+    }
+
+    // 12. On-Chain Simulation Verification (Phase 2: C2.2)
+    if let Some(ref client) = state.evm_client {
+        let is_spent_1 = client
+            .is_nullifier_spent(&payload.input_nullifier_1)
+            .await
+            .unwrap_or(false);
+        let is_spent_2 = client
+            .is_nullifier_spent(&payload.input_nullifier_2)
+            .await
+            .unwrap_or(false);
+        if is_spent_1 || is_spent_2 {
+            let _ = state
+                .db
+                .release_nullifiers(&payload.input_nullifier_1, &payload.input_nullifier_2)
+                .await;
+            return Json(JoinSplitSpendResponse {
+                status: "REJECTED".to_string(),
+                message: "Nullifier already spent on-chain".to_string(),
+                tx_hash: None,
+                queue_position: 0,
+                estimated_gas_usdc: None,
+            });
+        }
+    }
+
+    // 13. Broadcast transaction to chain or enqueue
+    if let Some(ref client) = state.evm_client {
+        let epoch_1 = payload
+            .epoch_id_1
+            .unwrap_or_else(|| U256::from_be_bytes(parsed_inputs[4]).to::<u32>());
+        let epoch_2 = payload
+            .epoch_id_2
+            .unwrap_or_else(|| U256::from_be_bytes(parsed_inputs[5]).to::<u32>());
+        let quote_hash_hex = payload.quote_hash.as_deref().unwrap_or("0x00");
+
+        match client
+            .broadcast_spend_joinsplit_transaction(
+                &payload.proof_a_neg,
+                &payload.proof_b,
+                &payload.proof_c,
+                &payload.note_root,
+                leaf_count_u64,
+                &payload.input_nullifier_1,
+                &payload.input_nullifier_2,
+                epoch_1,
+                epoch_2,
+                &payload.output_commitment_1,
+                &payload.output_commitment_2,
+                &payload.recipient,
+                payload.merchant_amount,
+                payload.protocol_fee,
+                payload.execution_fee,
+                payload.max_execution_fee,
+                quote_hash_hex,
+                payload.expiry.unwrap_or(0),
+                flags_packed,
+                is_rollover_u64,
+            )
+            .await
+        {
+            Ok(outcome) => {
+                let resp = JoinSplitSpendResponse {
+                    status: "CONFIRMED".to_string(),
+                    message: format!(
+                        "JoinSplit transaction confirmed in block {}",
+                        outcome.block_number
+                    ),
+                    tx_hash: Some(outcome.tx_hash),
+                    queue_position: 0,
+                    estimated_gas_usdc: None,
+                };
+                if let Some(ref idem) = payload.idempotency_key {
+                    let _ = state
+                        .db
+                        .store_idempotency(
+                            idem,
+                            "joinsplit_spend",
+                            &serde_json::to_string(&resp).unwrap_or_default(),
+                        )
+                        .await;
+                }
+                Json(resp)
+            }
+            Err(e) => {
+                let _ = state
+                    .db
+                    .release_nullifiers(&payload.input_nullifier_1, &payload.input_nullifier_2)
+                    .await;
+                Json(JoinSplitSpendResponse {
+                    status: "ERROR".to_string(),
+                    message: format!("Broadcast transaction failed: {}", e),
+                    tx_hash: None,
+                    queue_position: 0,
+                    estimated_gas_usdc: None,
+                })
+            }
+        }
+    } else {
+        let resp = JoinSplitSpendResponse {
+            status: "ACCEPTED".to_string(),
+            message: "JoinSplit transaction accepted and verified by relayer preflight".to_string(),
+            tx_hash: Some(format!(
+                "0xmockjoinsplit_{}",
+                hex::encode(&parsed_inputs[2][0..8])
+            )),
+            queue_position: 1,
+            estimated_gas_usdc: None,
+        };
+        if let Some(ref idem) = payload.idempotency_key {
+            let _ = state
+                .db
+                .store_idempotency(
+                    idem,
+                    "joinsplit_spend",
+                    &serde_json::to_string(&resp).unwrap_or_default(),
+                )
+                .await;
+        }
+        Json(resp)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use axum::extract::State;
+    use zeltra_core::Fr;
+    use tempfile::TempDir;
+
+    async fn setup_test_state() -> (AppState, TempDir) {
+        let tmp = TempDir::new().unwrap();
+        let db_path = tmp.path().join("spend_test.db");
+        let db = crate::database::Database::new(&db_path).await.unwrap();
+
+        let state = AppState::new(db, None).await;
+
+        (state, tmp)
+    }
+
+    fn sample_valid_private_note_request() -> PrivateNoteSpendRequest {
+        use zeltra_core::{
+            create_dummy_circuit, extract_public_inputs, fr_to_be_bytes, generate_note_proof,
+            get_or_init_note_circuit_keys, to_evm_g1, to_evm_g2,
+        };
+
+        static CACHED_REQ: std::sync::OnceLock<PrivateNoteSpendRequest> =
+            std::sync::OnceLock::new();
+        CACHED_REQ
+            .get_or_init(|| {
+                let keys = get_or_init_note_circuit_keys();
+                let circuit = create_dummy_circuit();
+                let pis = extract_public_inputs(&circuit);
+                let proof = generate_note_proof(circuit, &keys.proving_key).expect("prove");
+
+                let mut a_neg = [0u8; 128];
+                a_neg.copy_from_slice(&to_evm_g1(&-proof.a));
+                let mut b = [0u8; 256];
+                b.copy_from_slice(&to_evm_g2(&proof.b));
+                let mut c = [0u8; 128];
+                c.copy_from_slice(&to_evm_g1(&proof.c));
+
+                let note_root = format!("0x{}", hex::encode(fr_to_be_bytes(&pis[0])));
+                let leaf_count = 1u64;
+                let input_nullifier = format!("0x{}", hex::encode(fr_to_be_bytes(&pis[2])));
+                let output_commitment = format!("0x{}", hex::encode(fr_to_be_bytes(&pis[4])));
+                let recipient = "0x0000000000000000000000000000000000000064".to_string();
+
+                let public_inputs: Vec<String> = pis
+                    .iter()
+                    .map(|fr| format!("0x{}", hex::encode(fr_to_be_bytes(fr))))
+                    .collect();
+
+                PrivateNoteSpendRequest {
+                    session_id: Some("session_1".to_string()),
+                    note_root,
+                    leaf_count: Some(leaf_count),
+                    note_epoch_id: Some(0),
+                    is_rollover: Some(0),
+                    input_value: Some(10_000_000),
+                    input_nullifier,
+                    output_commitment: Some(output_commitment),
+                    recipient,
+                    merchant_amount: 5_000_000,
+                    protocol_fee: 12_500,
+                    execution_fee: 23_000,
+                    max_execution_fee: 25_000,
+                    quote_hash: Some(format!(
+                        "0x{}",
+                        hex::encode(zeltra_core::combine_limbs_to_quote_hash(&pis[9], &pis[10]))
+                    )),
+                    quote_signature: None,
+                    quote_id: None,
+                    user_address: None,
+                    expiry: Some(0),
+                    has_change: Some(serde_json::Value::Number(1.into())),
+                    proof_a_neg: format!("0x{}", hex::encode(a_neg)),
+                    proof_b: format!("0x{}", hex::encode(b)),
+                    proof_c: format!("0x{}", hex::encode(c)),
+                    public_inputs,
+                    idempotency_key: Some("idem_valid_1".to_string()),
+                    change_encrypted_memo: None,
+                }
+            })
+            .clone()
+    }
+
+    #[tokio::test]
+    async fn test_handle_private_note_spend_success() {
+        let (state, _tmp) = setup_test_state().await;
+        let req = sample_valid_private_note_request();
+
+        let resp = handle_private_note_spend(State(state.clone()), Json(req.clone())).await;
+        assert_eq!(resp.0.status, "QUEUED");
+        assert!(resp.0.message.contains("settlement id"));
+
+        // Test idempotency returns cached response
+        let resp_cached = handle_private_note_spend(State(state.clone()), Json(req)).await;
+        assert_eq!(resp_cached.0.status, "QUEUED");
+    }
+
+    #[tokio::test]
+    async fn test_handle_private_note_spend_reject_non_canonical_public_input() {
+        let (state, _tmp) = setup_test_state().await;
+        let mut req = sample_valid_private_note_request();
+        // Replace public input at index 0 with field overflow >= r
+        req.public_inputs[0] =
+            "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff".to_string();
+
+        let resp = handle_private_note_spend(State(state), Json(req)).await;
+        assert_eq!(resp.0.status, "REJECTED");
+        assert!(resp.0.message.contains("non-canonical scalar"));
+    }
+
+    #[tokio::test]
+    async fn test_handle_private_note_spend_reject_semantic_mismatch() {
+        let (state, _tmp) = setup_test_state().await;
+        let mut req = sample_valid_private_note_request();
+        // Tamper with merchant_amount in payload (5M vs 6M in public input)
+        req.merchant_amount = 6_000_000;
+
+        let resp = handle_private_note_spend(State(state), Json(req)).await;
+        assert_eq!(resp.0.status, "REJECTED");
+        assert!(resp.0.message.contains("does not match merchant_amount"));
+    }
+
+    #[tokio::test]
+    async fn test_handle_private_note_spend_reject_execution_fee_exceeds_max() {
+        let (state, _tmp) = setup_test_state().await;
+        let mut req = sample_valid_private_note_request();
+        req.execution_fee = 30_000;
+        req.max_execution_fee = 25_000;
+
+        let resp = handle_private_note_spend(State(state), Json(req)).await;
+        assert_eq!(resp.0.status, "REJECTED");
+        assert!(resp.0.message.contains("exceeds max execution fee"));
+    }
+
+    #[tokio::test]
+    async fn test_handle_private_note_spend_reject_nonzero_commitment_with_zero_change() {
+        let (state, _tmp) = setup_test_state().await;
+        let mut req = sample_valid_private_note_request();
+        req.has_change = Some(serde_json::Value::Number(0.into()));
+        req.output_commitment =
+            Some("0x0000000000000000000000000000000000000000000000000000000000000001".to_string());
+
+        let resp = handle_private_note_spend(State(state), Json(req)).await;
+        assert_eq!(resp.0.status, "REJECTED");
+        assert!(resp.0.message.contains("nonzero output_commitment"));
+    }
+
+    #[tokio::test]
+    async fn test_handle_private_note_spend_reject_double_spend() {
+        let (state, _tmp) = setup_test_state().await;
+        let req = sample_valid_private_note_request();
+
+        // Mark nullifier as spent in DB first
+        state
+            .db
+            .check_and_insert_nullifier(&req.input_nullifier, Some("0xtx"))
+            .await
+            .unwrap();
+
+        let resp = handle_private_note_spend(State(state), Json(req)).await;
+        assert_eq!(resp.0.status, "REJECTED");
+        assert!(resp.0.message.contains("Double-spending detected"));
+    }
+
+    #[tokio::test]
+    async fn test_handle_private_note_spend_reject_invalid_proof() {
+        let (state, _tmp) = setup_test_state().await;
+        let mut req = sample_valid_private_note_request();
+        // Replace with fake proof (DEC-026 C-01 griefing attempt)
+        req.proof_a_neg = format!("0x{}", "11".repeat(128));
+
+        let resp = handle_private_note_spend(State(state), Json(req)).await;
+        assert_eq!(resp.0.status, "REJECTED");
+        assert!(resp.0.message.contains("Invalid Groth16 proof"));
+    }
+
+    #[tokio::test]
+    async fn test_handle_private_note_spend_reject_sanctioned_recipient() {
+        let (state, _tmp) = setup_test_state().await;
+        let mut req = sample_valid_private_note_request();
+        // Tornado Cash router address
+        req.recipient = crate::validation::sanctioned_evm_addresses()
+            .iter()
+            .next()
+            .unwrap()
+            .to_string();
+
+        let resp = handle_private_note_spend(State(state), Json(req)).await;
+        assert_eq!(resp.0.status, "REJECTED");
+        assert!(resp
+            .0
+            .message
+            .contains("restricted under public sanctions policy"));
+    }
+
+    #[tokio::test]
+    async fn test_handle_private_note_spend_reject_empty_public_inputs() {
+        let (state, _tmp) = setup_test_state().await;
+        let mut req = sample_valid_private_note_request();
+        // DEC-035A: empty public inputs must be rejected immediately, not bypass preflight
+        req.public_inputs = vec![];
+
+        let resp = handle_private_note_spend(State(state), Json(req)).await;
+        assert_eq!(resp.0.status, "REJECTED");
+        assert!(resp.0.message.contains("Expected 16 public inputs"));
+    }
+
+    #[tokio::test]
+    async fn test_handle_private_note_spend_reject_wrong_public_inputs_count() {
+        let (state, _tmp) = setup_test_state().await;
+        let mut req = sample_valid_private_note_request();
+        req.public_inputs.truncate(15);
+
+        let resp = handle_private_note_spend(State(state), Json(req)).await;
+        assert_eq!(resp.0.status, "REJECTED");
+        assert!(resp
+            .0
+            .message
+            .contains("Expected 16 public inputs for PrivateNoteCircuit, got 15"));
+    }
+
+    #[tokio::test]
+    async fn test_handle_private_note_spend_reject_leaf_count_zero() {
+        let (state, _tmp) = setup_test_state().await;
+        let mut req = sample_valid_private_note_request();
+        req.public_inputs[1] = format!("0x{:064x}", 0);
+
+        let resp = handle_private_note_spend(State(state), Json(req)).await;
+        assert_eq!(resp.0.status, "REJECTED");
+        assert!(resp
+            .0
+            .message
+            .contains("leaf_count in public_inputs[1] must be greater than zero"));
+    }
+
+    #[tokio::test]
+    async fn test_handle_private_note_spend_reject_leaf_count_mismatch() {
+        let (state, _tmp) = setup_test_state().await;
+        let mut req = sample_valid_private_note_request();
+        req.leaf_count = Some(999);
+
+        let resp = handle_private_note_spend(State(state), Json(req)).await;
+        assert_eq!(resp.0.status, "REJECTED");
+        assert!(resp
+            .0
+            .message
+            .contains("public_inputs[1] does not match leaf_count"));
+    }
+
+    #[tokio::test]
+    async fn test_handle_private_note_spend_reject_domain_mismatch_chain_id() {
+        let (state, _tmp) = setup_test_state().await;
+        let mut req = sample_valid_private_note_request();
+        // DEC-035A: chain_id is at index 11
+        req.public_inputs[11] = format!("0x{:064x}", 1);
+
+        let resp = handle_private_note_spend(State(state), Json(req)).await;
+        assert_eq!(resp.0.status, "REJECTED");
+        assert!(resp
+            .0
+            .message
+            .contains("public_inputs[11] does not match target chain_id"));
+    }
+
+    #[tokio::test]
+    async fn test_handle_private_note_spend_reject_domain_mismatch_contract_address() {
+        let (state, _tmp) = setup_test_state().await;
+        let mut req = sample_valid_private_note_request();
+        // DEC-035A: contract_address is at index 12
+        std::env::set_var(
+            "ZELTRA_CONTRACT_ADDRESS",
+            "0x000000000000000000000000000000000000012c",
+        );
+        req.public_inputs[12] = format!("0x{:064x}", 999);
+
+        let resp = handle_private_note_spend(State(state), Json(req)).await;
+        std::env::remove_var("ZELTRA_CONTRACT_ADDRESS");
+        assert_eq!(resp.0.status, "REJECTED");
+        assert!(resp
+            .0
+            .message
+            .contains("public_inputs[12] does not match target contract_address"));
+    }
+
+    #[tokio::test]
+    async fn test_handle_private_note_spend_reject_quote_hash_hi_out_of_range() {
+        let (state, _tmp) = setup_test_state().await;
+        let mut req = sample_valid_private_note_request();
+        // DEC-035A: quote_hash_hi at index 9 >= 2^128 (high 16 bytes nonzero)
+        req.public_inputs[9] = format!("0x{:032x}{:032x}", 1u64, 0u64);
+
+        let resp = handle_private_note_spend(State(state), Json(req)).await;
+        assert_eq!(resp.0.status, "REJECTED");
+        assert!(resp
+            .0
+            .message
+            .contains("public_inputs[9] (quote_hash_hi) exceeds 128-bit range"));
+    }
+
+    #[tokio::test]
+    async fn test_handle_private_note_spend_reject_quote_hash_lo_out_of_range() {
+        let (state, _tmp) = setup_test_state().await;
+        let mut req = sample_valid_private_note_request();
+        // DEC-035A: quote_hash_lo at index 10 >= 2^128 (high 16 bytes nonzero)
+        req.public_inputs[10] = format!("0x{:032x}{:032x}", 1u64, 0u64);
+
+        let resp = handle_private_note_spend(State(state), Json(req)).await;
+        assert_eq!(resp.0.status, "REJECTED");
+        assert!(resp
+            .0
+            .message
+            .contains("public_inputs[10] (quote_hash_lo) exceeds 128-bit range"));
+    }
+
+    #[tokio::test]
+    async fn test_handle_private_note_spend_reject_quote_hash_hi_mismatch() {
+        let (state, _tmp) = setup_test_state().await;
+        let mut req = sample_valid_private_note_request();
+        // Tamper with quote_hash_hi at index 9
+        req.public_inputs[9] = format!("0x{:064x}", 99999u64);
+
+        let resp = handle_private_note_spend(State(state), Json(req)).await;
+        assert_eq!(resp.0.status, "REJECTED");
+        assert!(resp
+            .0
+            .message
+            .contains("public_inputs[9] does not match quote_hash_hi"));
+    }
+
+    #[tokio::test]
+    async fn test_handle_private_note_spend_reject_quote_hash_lo_mismatch() {
+        let (state, _tmp) = setup_test_state().await;
+        let mut req = sample_valid_private_note_request();
+        // Tamper with quote_hash_lo at index 10
+        req.public_inputs[10] = format!("0x{:064x}", 99999u64);
+
+        let resp = handle_private_note_spend(State(state), Json(req)).await;
+        assert_eq!(resp.0.status, "REJECTED");
+        assert!(resp
+            .0
+            .message
+            .contains("public_inputs[10] does not match quote_hash_lo"));
+    }
+
+    #[tokio::test]
+    async fn test_handle_private_note_spend_reject_dust_rollover() {
+        let (state, _tmp) = setup_test_state().await;
+        let mut req = sample_valid_private_note_request();
+        req.idempotency_key = Some("idem_dust_rollover".to_string());
+        // DEC-033: Standalone rollover with dust input value (< $2.00 USDC)
+        req.is_rollover = Some(1);
+        req.public_inputs[15] = format!("0x{:064x}", 1);
+        req.merchant_amount = 0;
+        req.public_inputs[6] = format!("0x{:064x}", 0);
+        req.protocol_fee = 0;
+        req.public_inputs[7] = format!("0x{:064x}", 0);
+        req.input_value = Some(1_500_000); // 1.50 USDC < 2.00 USDC
+
+        let resp = handle_private_note_spend(State(state), Json(req)).await;
+        assert_eq!(resp.0.status, "REJECTED");
+        assert!(resp.0.message.contains("DUST_NOTE_ROLLOVER_REJECTED"));
+    }
+
+    #[tokio::test]
+    async fn test_handle_private_note_spend_reject_rollover_with_merchant_amount() {
+        let (state, _tmp) = setup_test_state().await;
+        let mut req = sample_valid_private_note_request();
+        req.idempotency_key = Some("idem_rollover_merchant".to_string());
+        // DEC-033: Standalone rollover must have merchant_amount == 0
+        req.is_rollover = Some(1);
+        req.public_inputs[15] = format!("0x{:064x}", 1);
+        req.merchant_amount = 5_000_000;
+        req.public_inputs[6] = format!("0x{:064x}", 5_000_000);
+
+        let resp = handle_private_note_spend(State(state), Json(req)).await;
+        assert_eq!(resp.0.status, "REJECTED");
+        assert!(resp
+            .0
+            .message
+            .contains("merchant_amount must be 0 for standalone rollover"));
+    }
+
+    #[tokio::test]
+    async fn test_handle_private_note_spend_reject_future_epoch() {
+        let (state, _tmp) = setup_test_state().await;
+        let mut req = sample_valid_private_note_request();
+        req.idempotency_key = Some("idem_future_epoch".to_string());
+        // DEC-033: Note epoch in the future
+        req.note_epoch_id = Some(10);
+        req.public_inputs[3] = format!("0x{:064x}", 10);
+
+        let resp = handle_private_note_spend(State(state), Json(req)).await;
+        assert_eq!(resp.0.status, "REJECTED");
+        assert!(resp.0.message.contains("EPOCH_IN_FUTURE"));
+    }
+
+    #[tokio::test]
+    async fn test_handle_private_note_spend_reject_insufficient_balance_for_gas() {
+        let (state, _tmp) = setup_test_state().await;
+        let mut req = sample_valid_private_note_request();
+        req.idempotency_key = Some("idem_insufficient_gas".to_string());
+        // DEC-033: Standalone rollover where input_value < execution_fee
+        req.is_rollover = Some(1);
+        req.public_inputs[15] = format!("0x{:064x}", 1);
+        req.merchant_amount = 0;
+        req.public_inputs[6] = format!("0x{:064x}", 0);
+        req.protocol_fee = 0;
+        req.public_inputs[7] = format!("0x{:064x}", 0);
+        req.execution_fee = 2_500_000;
+        req.max_execution_fee = 3_000_000;
+        req.public_inputs[8] = format!("0x{:064x}", 2_500_000);
+        req.input_value = Some(2_000_000); // 2.00 USDC < 2.50 USDC fee
+
+        let resp = handle_private_note_spend(State(state), Json(req)).await;
+        assert_eq!(resp.0.status, "REJECTED");
+        assert!(resp
+            .0
+            .message
+            .contains("insufficient to pay relayer execution fee"));
+    }
+
+    #[tokio::test]
+    async fn test_handle_private_note_spend_reject_mismatched_signed_quote_hash() {
+        // B6.4: Submit valid proof for Quote A with signature for Quote B -> MUST return 400 MismatchedQuoteHash
+        use alloy_primitives::{Address, U256};
+        use zeltra_sdk::eip712::{sign_quote, ExecutionQuote};
+
+        let (state, _tmp) = setup_test_state().await;
+        let mut req = sample_valid_private_note_request();
+        req.idempotency_key = Some("idem_quote_mismatch".to_string());
+
+        // Create a valid signed ExecutionQuote for Quote B (different quoteId, maxExecutionFee, etc.)
+        let user_pk: [u8; 32] = [42u8; 32];
+        let signer = alloy::signers::local::PrivateKeySigner::from_bytes(
+            &alloy_primitives::B256::from(user_pk),
+        )
+        .unwrap();
+        let user_address = format!("{:?}", signer.address());
+        let relayer_addr =
+            std::str::FromStr::from_str(&state.relayer_address).unwrap_or(Address::ZERO);
+
+        let quote_b = ExecutionQuote {
+            quoteId: U256::from(999999u64),
+            maxExecutionFee: U256::from(50_000u64),
+            merchantAmount: U256::from(5_000_000u64),
+            quoteExpiry: U256::from(0u64),
+            relayerAddress: relayer_addr,
+        };
+
+        let chain_id = 421614u64;
+        let contract_addr =
+            std::str::FromStr::from_str("0x000000000000000000000000000000000000012c").unwrap();
+        let (v, r, s) =
+            sign_quote(&quote_b, chain_id, contract_addr, &user_pk).expect("sign quote B");
+        let mut sig_bytes = Vec::with_capacity(65);
+        sig_bytes.extend_from_slice(&r);
+        sig_bytes.extend_from_slice(&s);
+        sig_bytes.push(v);
+        let sig_hex = format!("0x{}", hex::encode(sig_bytes));
+
+        // Submit req with valid signature for Quote B, but whose proof & public_inputs are bound to Quote A
+        req.quote_id = Some("999999".to_string());
+        req.quote_signature = Some(sig_hex);
+        req.user_address = Some(user_address.to_string());
+        req.max_execution_fee = 50_000;
+
+        let resp = handle_private_note_spend(State(state.clone()), Json(req.clone())).await;
+        assert_eq!(resp.0.status, "REJECTED");
+        assert!(
+            resp.0.message.contains("MismatchedQuoteHash"),
+            "Expected MismatchedQuoteHash error, got: {}",
+            resp.0.message
+        );
+
+        // Prove database state remains unchanged: nullifier is not spent
+        let is_spent = state
+            .db
+            .is_nullifier_spent(&req.input_nullifier)
+            .await
+            .unwrap();
+        assert!(
+            !is_spent,
+            "Negative test proof: nullifier MUST NOT be marked spent upon rejection!"
+        );
+    }
+
+    fn create_test_joinsplit_circuit_with_expiry(
+        exp_val: u64,
+    ) -> zeltra_core::joinsplit_circuit::JoinSplitCircuit {
+        use zeltra_core::{
+            compute_binding_commitment, compute_scope_hash, derive_joinsplit_dummy_nullifier,
+            derive_joinsplit_nullifier, derive_nullifier_key, note_commitment, MerkleMountainRange,
+        };
+
+        let sk = Fr::from(100u64);
+        let nk = derive_nullifier_key(sk);
+        let rho1 = Fr::from(200u64);
+        let rand1 = Fr::from(300u64);
+        let v_in1 = 10_000_000u64; // 10 USDC
+
+        let cm1 = note_commitment(v_in1, sk, rho1, rand1);
+
+        let mut mmr = MerkleMountainRange::new();
+        let (leaf_idx1, root) = mmr.append(cm1);
+        let proof1 = mmr.generate_proof(leaf_idx1);
+
+        let mut in1_sibs = [Fr::from(0u64); 32];
+        for (i, sib) in proof1.mountain_siblings.iter().enumerate() {
+            in1_sibs[i] = *sib;
+        }
+
+        let mut peaks = [Fr::from(0u64); 32];
+        let all_peaks = mmr.get_peaks();
+        for (i, p) in all_peaks.iter().enumerate() {
+            peaks[i] = *p;
+        }
+
+        let epoch1 = 10u64;
+        let nf1 = derive_joinsplit_nullifier(nk, rho1, epoch1);
+
+        let nonce = Fr::from(999u64);
+        let nf2 = derive_joinsplit_dummy_nullifier(nk, nonce);
+
+        let rho_out1 = Fr::from(401u64);
+        let rand_out1 = Fr::from(402u64);
+        let cm_out1 = note_commitment(0, sk, rho_out1, rand_out1);
+
+        let rho_out2 = Fr::from(501u64);
+        let rand_out2 = Fr::from(502u64);
+        let cm_out2 = note_commitment(0, sk, rho_out2, rand_out2);
+
+        let merch_amt = 9_900_000u64;
+        let proto_fee = (merch_amt * 45).div_ceil(10_000); // 44_550
+        let exec_fee = v_in1 - merch_amt - proto_fee; // 55_450
+
+        let rec = Fr::from(0x1234u64);
+        let cid = Fr::from(421614u64);
+        let caddr = Fr::from(0x5678u64);
+        let exp = Fr::from(exp_val);
+        let q_hi = Fr::from(0x1111u64);
+        let q_lo = Fr::from(0x2222u64);
+
+        let scope_hash = compute_scope_hash(rec, cid, caddr, exp);
+        let binding = compute_binding_commitment(q_hi, q_lo, scope_hash);
+
+        zeltra_core::joinsplit_circuit::JoinSplitCircuit {
+            note_root: Some(root),
+            leaf_count: Some(Fr::from(mmr.leaf_count())),
+            input_nullifier_1: Some(nf1),
+            input_nullifier_2: Some(nf2),
+            epoch_id_1: Some(Fr::from(epoch1)),
+            epoch_id_2: Some(Fr::from(epoch1)),
+            output_commitment_1: Some(cm_out1),
+            output_commitment_2: Some(cm_out2),
+            recipient: Some(rec),
+            merchant_amount: Some(Fr::from(merch_amt)),
+            protocol_fee: Some(Fr::from(proto_fee)),
+            execution_fee: Some(Fr::from(exec_fee)),
+            quote_hash_hi: Some(q_hi),
+            quote_hash_lo: Some(q_lo),
+            chain_id: Some(cid),
+            contract_address: Some(caddr),
+            expiry: Some(exp),
+            flags_packed: Some(Fr::from(0u64)),
+            is_rollover: Some(Fr::from(0u64)),
+
+            in1_value: Some(Fr::from(v_in1)),
+            in1_owner_key: Some(sk),
+            in1_rho: Some(rho1),
+            in1_randomness: Some(rand1),
+            in1_leaf_index: Some(Fr::from(leaf_idx1 as u64)),
+            in1_mountain_height: Some(proof1.mountain_height as u8),
+            in1_mountain_siblings: Some(in1_sibs),
+
+            in2_value: Some(Fr::from(0u64)),
+            in2_owner_key: Some(sk),
+            in2_rho: Some(Fr::from(0u64)),
+            in2_randomness: Some(Fr::from(0u64)),
+            in2_leaf_index: Some(Fr::from(0u64)),
+            in2_mountain_height: Some(0),
+            in2_mountain_siblings: Some([Fr::from(0u64); 32]),
+            in2_is_dummy: Some(Fr::from(1u64)),
+            in2_session_nonce: Some(nonce),
+
+            mmr_peaks: Some(peaks),
+
+            out1_value: Some(Fr::from(0u64)),
+            out1_owner_key: Some(sk),
+            out1_rho: Some(rho_out1),
+            out1_randomness: Some(rand_out1),
+
+            out2_value: Some(Fr::from(0u64)),
+            out2_owner_key: Some(sk),
+            out2_rho: Some(rho_out2),
+            out2_randomness: Some(rand_out2),
+
+            has_change_1: Some(Fr::from(0u64)),
+            has_change_2: Some(Fr::from(0u64)),
+            expected_binding: Some(binding),
+        }
+    }
+
+    fn sample_valid_joinsplit_request() -> JoinSplitSpendRequest {
+        use zeltra_core::joinsplit_circuit::{
+            extract_joinsplit_public_inputs, generate_joinsplit_proof,
+            get_or_init_joinsplit_circuit_keys,
+        };
+        use zeltra_core::{fr_to_be_bytes, to_evm_g1, to_evm_g2};
+
+        static CACHED_JS_REQ: std::sync::OnceLock<JoinSplitSpendRequest> =
+            std::sync::OnceLock::new();
+        CACHED_JS_REQ
+            .get_or_init(|| {
+                let keys = get_or_init_joinsplit_circuit_keys();
+                let circuit = create_test_joinsplit_circuit_with_expiry(0);
+                let pis = extract_joinsplit_public_inputs(&circuit);
+                let proof = generate_joinsplit_proof(circuit, &keys.proving_key).expect("prove");
+
+                let mut a_neg = [0u8; 128];
+                a_neg.copy_from_slice(&to_evm_g1(&-proof.a));
+                let mut b = [0u8; 256];
+                b.copy_from_slice(&to_evm_g2(&proof.b));
+                let mut c = [0u8; 128];
+                c.copy_from_slice(&to_evm_g1(&proof.c));
+
+                let note_root = format!("0x{}", hex::encode(fr_to_be_bytes(&pis[0])));
+                let leaf_count = 1u64;
+                let input_nullifier_1 = format!("0x{}", hex::encode(fr_to_be_bytes(&pis[2])));
+                let input_nullifier_2 = format!("0x{}", hex::encode(fr_to_be_bytes(&pis[3])));
+                let epoch_id_1 = 10u32;
+                let epoch_id_2 = 10u32;
+                let output_commitment_1 = format!("0x{}", hex::encode(fr_to_be_bytes(&pis[6])));
+                let output_commitment_2 = format!("0x{}", hex::encode(fr_to_be_bytes(&pis[7])));
+                let recipient = "0x0000000000000000000000000000000000001234".to_string();
+                let merchant_amount = 9_900_000u64;
+                let protocol_fee = 44_550u64;
+                let execution_fee = 55_450u64;
+                let max_execution_fee = 60_000u64;
+                let quote_hash = format!(
+                    "0x{}",
+                    hex::encode(zeltra_core::combine_limbs_to_quote_hash(&pis[12], &pis[13]))
+                );
+                let chain_id = 421614u64;
+                let contract_address = "0x0000000000000000000000000000000000005678".to_string();
+                let expiry = 0u64;
+                let flags_packed = 0u8;
+                let is_rollover = 0u64;
+
+                let public_inputs: Vec<String> = pis
+                    .iter()
+                    .map(|fr| format!("0x{}", hex::encode(fr_to_be_bytes(fr))))
+                    .collect();
+
+                JoinSplitSpendRequest {
+                    session_id: None,
+                    input_commitment_1: None,
+                    input_commitment_2: None,
+                    note_root,
+                    leaf_count: Some(leaf_count),
+                    input_nullifier_1,
+                    input_nullifier_2,
+                    epoch_id_1: Some(epoch_id_1),
+                    epoch_id_2: Some(epoch_id_2),
+                    output_commitment_1,
+                    output_commitment_2,
+                    recipient,
+                    merchant_amount,
+                    protocol_fee,
+                    execution_fee,
+                    max_execution_fee,
+                    quote_hash: Some(quote_hash),
+                    quote_signature: None,
+                    quote_id: None,
+                    user_address: None,
+                    chain_id: Some(chain_id),
+                    contract_address: Some(contract_address),
+                    expiry: Some(expiry),
+                    has_change_1: Some(serde_json::Value::Number(0.into())),
+                    has_change_2: Some(serde_json::Value::Number(0.into())),
+                    flags_packed: Some(flags_packed),
+                    is_rollover: Some(is_rollover),
+                    proof_a_neg: format!("0x{}", hex::encode(a_neg)),
+                    proof_b: format!("0x{}", hex::encode(b)),
+                    proof_c: format!("0x{}", hex::encode(c)),
+                    public_inputs,
+                    idempotency_key: Some("idem_js_valid_1".to_string()),
+                }
+            })
+            .clone()
+    }
+
+    #[tokio::test]
+    async fn test_handle_spend_joinsplit_success() {
+        let (state, _tmp) = setup_test_state().await;
+        let req = sample_valid_joinsplit_request();
+
+        let resp = handle_spend_joinsplit(State(state.clone()), Json(req.clone())).await;
+        assert_eq!(resp.0.status, "ACCEPTED");
+        assert!(resp.0.message.contains("JoinSplit transaction accepted"));
+
+        // Verify nullifiers are reserved in DB
+        let is_spent_1 = state
+            .db
+            .is_nullifier_spent(&req.input_nullifier_1)
+            .await
+            .unwrap();
+        let is_spent_2 = state
+            .db
+            .is_nullifier_spent(&req.input_nullifier_2)
+            .await
+            .unwrap();
+        assert!(is_spent_1, "input_nullifier_1 must be marked spent");
+        assert!(is_spent_2, "input_nullifier_2 must be marked spent");
+
+        // Verify idempotency cache return
+        let resp_cached = handle_spend_joinsplit(State(state), Json(req)).await;
+        assert_eq!(resp_cached.0.status, "ACCEPTED");
+    }
+
+    #[tokio::test]
+    async fn test_handle_spend_joinsplit_aliasing_rejected() {
+        // Singularity Defense (Zellic 2024): input_nullifier_1 == input_nullifier_2 must be rejected
+        let (state, _tmp) = setup_test_state().await;
+        let mut req = sample_valid_joinsplit_request();
+        req.input_nullifier_2 = req.input_nullifier_1.clone();
+
+        let resp = handle_spend_joinsplit(State(state.clone()), Json(req.clone())).await;
+        assert_eq!(resp.0.status, "REJECTED");
+        assert!(resp.0.message.contains("DuplicateNullifierInSameTx"));
+
+        // Verify neither nullifier is spent
+        let is_spent = state
+            .db
+            .is_nullifier_spent(&req.input_nullifier_1)
+            .await
+            .unwrap();
+        assert!(
+            !is_spent,
+            "Nullifier must not be marked spent on aliasing failure"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_handle_spend_joinsplit_invalid_proof_preflight_rejected() {
+        // Gas griefing defense against EIP-2537: valid curve points that fail Groth16 pairing
+        let (state, _tmp) = setup_test_state().await;
+        let mut req = sample_valid_joinsplit_request();
+        // Replace proof_c with proof_a_neg: valid G1 point on curve, but invalidates pairing equation
+        req.proof_c = req.proof_a_neg.clone();
+
+        let resp = handle_spend_joinsplit(State(state.clone()), Json(req.clone())).await;
+        assert_eq!(resp.0.status, "REJECTED");
+        assert!(resp
+            .0
+            .message
+            .contains("Invalid Groth16 proof: preflight verification failed"));
+
+        // Verify nullifiers are NOT reserved
+        let is_spent_1 = state
+            .db
+            .is_nullifier_spent(&req.input_nullifier_1)
+            .await
+            .unwrap();
+        let is_spent_2 = state
+            .db
+            .is_nullifier_spent(&req.input_nullifier_2)
+            .await
+            .unwrap();
+        assert!(
+            !is_spent_1,
+            "nullifier 1 must not be spent on invalid proof"
+        );
+        assert!(
+            !is_spent_2,
+            "nullifier 2 must not be spent on invalid proof"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_handle_spend_joinsplit_malformed_proof_deserialization_rejected() {
+        let (state, _tmp) = setup_test_state().await;
+        let mut req = sample_valid_joinsplit_request();
+        req.proof_a_neg = format!("0x{}", "11".repeat(128));
+
+        let resp = handle_spend_joinsplit(State(state.clone()), Json(req.clone())).await;
+        assert_eq!(resp.0.status, "REJECTED");
+        assert!(resp
+            .0
+            .message
+            .contains("Failed to deserialize Groth16 proof points"));
+
+        // Verify nullifiers are NOT reserved
+        let is_spent_1 = state
+            .db
+            .is_nullifier_spent(&req.input_nullifier_1)
+            .await
+            .unwrap();
+        assert!(
+            !is_spent_1,
+            "nullifier must not be spent on malformed proof"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_handle_spend_joinsplit_double_spend_rejected() {
+        let (state, _tmp) = setup_test_state().await;
+        let req = sample_valid_joinsplit_request();
+
+        // Mark nullifier 1 as already spent in DB
+        state
+            .db
+            .check_and_insert_nullifier(&req.input_nullifier_1, Some("0xexisting_tx"))
+            .await
+            .unwrap();
+
+        let resp = handle_spend_joinsplit(State(state), Json(req)).await;
+        assert_eq!(resp.0.status, "REJECTED");
+        assert!(resp
+            .0
+            .message
+            .contains("Nullifier already spent in relayer database"));
+    }
+
+    #[tokio::test]
+    async fn test_handle_spend_joinsplit_non_canonical_scalar_rejected() {
+        let (state, _tmp) = setup_test_state().await;
+        let mut req = sample_valid_joinsplit_request();
+        // Replace public input at index 0 with field overflow >= r
+        req.public_inputs[0] =
+            "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff".to_string();
+
+        let resp = handle_spend_joinsplit(State(state), Json(req)).await;
+        assert_eq!(resp.0.status, "REJECTED");
+        assert!(resp.0.message.contains("non-canonical scalar"));
+    }
+
+    #[tokio::test]
+    async fn test_handle_spend_joinsplit_semantic_mismatch_rejected() {
+        let (state, _tmp) = setup_test_state().await;
+        let mut req = sample_valid_joinsplit_request();
+        // Tamper with merchant_amount in payload
+        req.merchant_amount = 5_000_000;
+
+        let resp = handle_spend_joinsplit(State(state), Json(req)).await;
+        assert_eq!(resp.0.status, "REJECTED");
+        assert!(resp.0.message.contains("does not match merchant_amount"));
+    }
+
+    #[tokio::test]
+    async fn test_handle_spend_joinsplit_flags_packed_mismatch_rejected() {
+        let (state, _tmp) = setup_test_state().await;
+        let mut req = sample_valid_joinsplit_request();
+        // Change flags_packed from 0 to 3 while has_change is 0
+        req.flags_packed = Some(3);
+
+        let resp = handle_spend_joinsplit(State(state), Json(req)).await;
+        assert_eq!(resp.0.status, "REJECTED");
+        assert!(resp
+            .0
+            .message
+            .contains("does not match decomposed change flags"));
+    }
+
+    #[tokio::test]
+    async fn test_handle_spend_joinsplit_sanctioned_recipient_rejected() {
+        let (state, _tmp) = setup_test_state().await;
+        let mut req = sample_valid_joinsplit_request();
+        req.recipient = crate::validation::sanctioned_evm_addresses()
+            .iter()
+            .next()
+            .unwrap()
+            .to_string();
+
+        let resp = handle_spend_joinsplit(State(state), Json(req)).await;
+        assert_eq!(resp.0.status, "REJECTED");
+        assert!(resp
+            .0
+            .message
+            .contains("restricted under public sanctions policy"));
+    }
+}

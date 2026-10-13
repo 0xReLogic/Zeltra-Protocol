@@ -9,4 +9,4 @@ Adam Vozda, Martin Peresini, Juraj Mariani, Ivan Homoliak
 
 Several decentralized applications and blockchains, such as blockchain-based voting systems or Proof-of-Social-Capital, require a strict one-account-per-person policy, yet public identity records often expose sensitive attributes or enable offline attribution. This work presents a Proof-of-Uniqueness blockchain-based registry that composes an issuer-signed verifiable credential, two zero-knowledge proofs, a threshold verifiable oblivious pseudorandom function (vOPRF), and a smart contract....
 
-**Relevance to Nimbus:** **HIGH** - Threshold-OPRF untuk guardian identity verification, Sybil-resistance untuk cluster
+**Relevance to Zeltra:** **HIGH** - Threshold-OPRF untuk guardian identity verification, Sybil-resistance untuk cluster

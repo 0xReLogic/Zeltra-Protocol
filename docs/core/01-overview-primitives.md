@@ -1,12 +1,12 @@
-# Nimbus Core — 01: Primitives & Kurva Kriptografi
+# Zeltra Core — 01: Primitives & Kurva Kriptografi
 
-Dokumen ini menjelaskan fondasi kriptografi, kurva pairing, dan pemetaan hash yang diimplementasikan pada crate [`nimbus-core`](file:///workspaces/Zeltra-Protocol/nimbus-core).
+Dokumen ini menjelaskan fondasi kriptografi, kurva pairing, dan pemetaan hash yang diimplementasikan pada crate [`zeltra-core`](file:///workspaces/Zeltra-Protocol/zeltra-core).
 
 ---
 
-## 1. Peran `nimbus-core`
+## 1. Peran `zeltra-core`
 
-`nimbus-core` adalah mesin kriptografi sentral yang menyediakan:
+`zeltra-core` adalah mesin kriptografi sentral yang menyediakan:
 1. Primitif **BLS12-381** untuk tanda tangan terbutakan (Blind Signatures) dan Threshold Signatures.
 2. Formatter calldata untuk precompile EVM **EIP-2537** di Arbitrum Stylus.
 3. Struktur **Private Note V1 (UTXO)** dan Poseidon Merkle Tree (kedalaman 20).
@@ -17,9 +17,9 @@ Dokumen ini menjelaskan fondasi kriptografi, kurva pairing, dan pemetaan hash ya
 
 ## 2. Kurva Eliptik: BLS12-381
 
-Nimbus menggunakan kurva pairing-friendly **BLS12-381** yang didukung oleh ekosistem **Arkworks 0.6.0** (`ark-bls12-381`):
+Zeltra menggunakan kurva pairing-friendly **BLS12-381** yang didukung oleh ekosistem **Arkworks 0.6.0** (`ark-bls12-381`):
 
-| Grup Kurva | Tipe Data Arkworks | Ukuran Terkompresi | Peruntukan di Nimbus |
+| Grup Kurva | Tipe Data Arkworks | Ukuran Terkompresi | Peruntukan di Zeltra |
 |---|---|---|---|
 | **$G_1$** | `G1Projective` / `G1Affine` | 48 bytes (128 bytes EVM) | Blinded Message ($X$), Masked Signature ($\tilde{\sigma}$), Final Signature ($\alpha$) |
 | **$G_2$** | `G2Projective` / `G2Affine` | 96 bytes (256 bytes EVM) | Issuer Public Key ($pk_{iss}$), Masking Key Commitment ($com_k$) |
@@ -34,9 +34,9 @@ Nimbus menggunakan kurva pairing-friendly **BLS12-381** yang didukung oleh ekosi
 
 ## 3. Hash-to-Curve $G_1$ (RFC 9380)
 
-File referensi: [`nimbus-core/src/crypto.rs`](file:///workspaces/Zeltra-Protocol/nimbus-core/src/crypto.rs)
+File referensi: [`zeltra-core/src/crypto.rs`](file:///workspaces/Zeltra-Protocol/zeltra-core/src/crypto.rs)
 
-Untuk memverifikasi tanda tangan BLS, pesan plaintext harus dipetakan ke titik sah pada grup kurva $G_1$. Nimbus mengimplementasikan **RFC 9380 standar** menggunakan ciphersuite:
+Untuk memverifikasi tanda tangan BLS, pesan plaintext harus dipetakan ke titik sah pada grup kurva $G_1$. Zeltra mengimplementasikan **RFC 9380 standar** menggunakan ciphersuite:
 ```text
 BLS_SIG_BLS12381G1_XMD:SHA-256_SSWU_RO_NUL_
 ```
@@ -48,7 +48,7 @@ BLS_SIG_BLS12381G1_XMD:SHA-256_SSWU_RO_NUL_
 
 ## 4. EVM Precompile Data Transport (EIP-2537)
 
-File referensi: [`nimbus-core/src/evm.rs`](file:///workspaces/Zeltra-Protocol/nimbus-core/src/evm.rs)
+File referensi: [`zeltra-core/src/evm.rs`](file:///workspaces/Zeltra-Protocol/zeltra-core/src/evm.rs)
 
 Precompile EIP-2537 pada Ethereum/Stylus membutuhkan koordinat uncompressed Big-Endian field elements:
 * Titik $G_1 = (x, y)$ membutuhkan **128 bytes** (masing-masing koordinat $x, y \in \mathbb{F}_q$ berukuran 64 bytes zero-padded dari 48 bytes sebenarnya).
@@ -64,9 +64,9 @@ Helper fungsi di `evm.rs`:
 
 ## 5. Poseidon Hash & Grain-128 LFSR Parameter Generator (DEC-021)
 
-File referensi: [`nimbus-core/src/poseidon.rs`](file:///workspaces/Zeltra-Protocol/nimbus-core/src/poseidon.rs)
+File referensi: [`zeltra-core/src/poseidon.rs`](file:///workspaces/Zeltra-Protocol/zeltra-core/src/poseidon.rs)
 
-Poseidon adalah fungsi hash ramah ZK (*arithmetization-oriented*) yang digunakan secara intensif di Nimbus:
+Poseidon adalah fungsi hash ramah ZK (*arithmetization-oriented*) yang digunakan secara intensif di Zeltra:
 * **Width $t=3$:** Digunakan untuk hashing 2 input (misal derivasi `nullifier_key` dan sirkuit compliance).
 * **Width $t=5$:** Digunakan untuk komitmen note (`value, owner_key, rho, randomness`), derivasi nullifier berindeks (`nullifier_key, commitment, leaf_index`), dan parent hash pohon LeanIMT Merkle tree.
 * **Standard Grain-128 LFSR (`GrainLfsr`):** Menggantikan generator PRNG ad-hoc dengan generator resmi standar Grassi et al. dan Aztec Barretenberg. Generator ini membentengi cipher dari celah *invariant subspace trails* dan serangan aljabar basis Gröbner sesuai riset *Ethereum Foundation Poseidon Cryptanalysis 2024–2026* ([`DEC-021`](file:///workspaces/Zeltra-Protocol/research/decisions/DEC-021-audited-poseidon-parameters-grain-lfsr-defense.md)).

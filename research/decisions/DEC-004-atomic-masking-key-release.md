@@ -24,16 +24,16 @@ Sebelumnya, endpoint `/api/leader/sign` langsung mengembalikan masking key `k_he
    - **Tahap 3: Reveal Request**: Client memanggil `/api/reveal` dengan mengirimkan `session_id`. Relayer memeriksa apakah `deposit_confirmed = 1` dan `resolved = 0`. Jika ya, relayer mengubah `resolved = 1` secara atomik dan merilis `k_hex` kepada client.
 
 3. **Keamanan Storage**:
-   Kunci masking `k` disimpan dalam SQLite database yang dilindungi oleh enkripsi SQLCipher (`NIMBUS_DB_KEY`) dan dilindungi dengan izin file 600 di tingkat sistem operasi.
+   Kunci masking `k` disimpan dalam SQLite database yang dilindungi oleh enkripsi SQLCipher (`ZELTRA_DB_KEY`) dan dilindungi dengan izin file 600 di tingkat sistem operasi.
 
 ## Sumber primer
 
-- Nimbus Protocol TODO: `Terapkan Atomic Release untuk Masking Key k`
+- Zeltra Protocol TODO: `Terapkan Atomic Release untuk Masking Key k`
 - DEC-001: Deposit-Reveal Collateral Lifecycle
 
 ## Versi
 
-- `nimbus-node = "0.1.0"`
+- `zeltra-node = "0.1.0"`
 
 ## Test
 

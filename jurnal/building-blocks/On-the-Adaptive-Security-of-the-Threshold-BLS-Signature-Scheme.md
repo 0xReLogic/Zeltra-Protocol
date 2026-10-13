@@ -40,17 +40,17 @@ Dalam karya ini, penulis menunjukkan bahwa limitasi ini bersifat inherent — de
 
 3. **Efisiensi**: Scheme yang diusulkan mempertahankan keringkasan scheme Boldyreva asli dengan hanya penambahan overhead faktor konstan
 
-## Relevansi dengan Nimbus
+## Relevansi dengan Zeltra
 
-Paper ini sangat relevan dengan mekanisme threshold BLS signing Nimbus. Protokol ini menggunakan threshold BLS scheme (t, n) di mana:
+Paper ini sangat relevan dengan mekanisme threshold BLS signing Zeltra. Protokol ini menggunakan threshold BLS scheme (t, n) di mana:
 - Leader + guardian (3 dari 5) harus berkolaborasi untuk menghasilkan BLS signature yang valid
 - Signature tersebut digunakan sebagai kredensial untuk private withdrawal
 
-Impossibility result menunjukkan bahwa implementasi Nimbus sebaiknya:
+Impossibility result menunjukkan bahwa implementasi Zeltra sebaiknya:
 - Menggunakan random oracle model (via hash function) untuk adaptive security, ATAU
 - Menerima asumsi static security (adversary melakukan corrupt sebelum protokol dimulai)
 
-Ini merupakan pertimbangan penting untuk security model dari Nimbus relayer cluster.
+Ini merupakan pertimbangan penting untuk security model dari Zeltra relayer cluster.
 
 ## Referensi
 

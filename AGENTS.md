@@ -2,7 +2,7 @@
 
 ## What This Is
 
-**Zeltra Protocol** (codebase transition name: Nimbus) = **"The Stripe of Web3 with Absolute Privacy."** A high-throughput, shielded payment and settlement rail on Arbitrum Stylus for AI Agents, retail, whales, B2B corporates, and global merchants.
+**Zeltra Protocol** (codebase transition name: Zeltra) = **"The Stripe of Web3 with Absolute Privacy."** A high-throughput, shielded payment and settlement rail on Arbitrum Stylus for AI Agents, retail, whales, B2B corporates, and global merchants.
 
 Full vision manifesto: [`VISION.md`](file:///workspaces/Zeltra-Protocol/VISION.md).
 
@@ -13,12 +13,12 @@ Zero-friction inflow (0% deposit fee), volume-over-TVL economic velocity, and ab
 ## Repo Layout & Code Mapping
 
 ```
-nimbus-contracts/  — Stylus WASM Smart Contract (Arbitrum Nitro / EIP-2537)
-  ├── src/lib.rs                   — Entrypoint contract Nimbus (deposit_direct_note, spend_private_note, spend_joinsplit, etc.)
+zeltra-contracts/  — Stylus WASM Smart Contract (Arbitrum Nitro / EIP-2537)
+  ├── src/lib.rs                   — Entrypoint contract Zeltra (deposit_direct_note, spend_private_note, spend_joinsplit, etc.)
   ├── src/deposit.rs               — Direct MMR note deposit logic (canonical scalar validation, min amount, _mmr_insert)
   ├── src/spend.rs                 — Note spend & JoinSplit execution logic (nullifier burning, fee transfers, change notes)
   ├── src/merkle.rs                — On-chain Merkle Mountain Range (MMR) accumulator (_mmr_insert, canonical peak bagging)
-  ├── src/storage.rs               — Stylus sol_storage! Nimbus layout (MMR state, accepted roots, nullifiers, epoch slots)
+  ├── src/storage.rs               — Stylus sol_storage! Zeltra layout (MMR state, accepted roots, nullifiers, epoch slots)
   ├── src/groth16_note_verifier.rs — 1-in-1-out Groth16 BLS12-381 verifier over EIP-2537 (16 public inputs)
   ├── src/groth16_joinsplit_verifier.rs — Universal 2-in-2-out JoinSplit Groth16 verifier over EIP-2537 (19 public inputs)
   ├── src/poseidon_w5_constants.rs — Precomputed Poseidon width-5 round constants & MDS matrix for on-contract hashing
@@ -27,7 +27,7 @@ nimbus-contracts/  — Stylus WASM Smart Contract (Arbitrum Nitro / EIP-2537)
   ├── src/vault.rs                 — Solvency collateral & yield accounting (total_assets, claim_accumulated_yield)
   └── src/interfaces.rs, types.rs, constants.rs, helpers.rs — ERC20 & CCIP interfaces, EVM byte conversions
 
-nimbus-core/       — Cryptography Primitives & ZK Circuits
+zeltra-core/       — Cryptography Primitives & ZK Circuits
   ├── src/lib.rs                   — Re-exports Arkworks BLS12-381, Poseidon, EVM, fees, MMR, and circuits
   ├── src/note_circuit.rs          — 1-in-1-out PrivateNoteCircuit (16 public inputs, Two-Limb quote hash, formal scope binding)
   ├── src/joinsplit_circuit.rs     — Universal 2-in-2-out JoinSplitCircuit (19 public inputs, constant-arity, 448 range gates)
@@ -39,7 +39,7 @@ nimbus-core/       — Cryptography Primitives & ZK Circuits
   ├── src/formal_tests.rs          — Mathematical invariant verification tests
   └── src/bin/bench.rs             — Cryptographic micro-benchmarks
 
-nimbus-node/       — Stateless Single-Sequencer Relayer Node (Axum 0.8)
+zeltra-node/       — Stateless Single-Sequencer Relayer Node (Axum 0.8)
   ├── src/main.rs                  — Server boot, Axum router, background worker orchestration, rate limiter
   ├── src/handlers/
   │   ├── health.rs                — Probes (/health, /live, /ready) with macro solvency metrics
@@ -58,7 +58,7 @@ nimbus-node/       — Stateless Single-Sequencer Relayer Node (Axum 0.8)
   ├── src/validation.rs            — Preflight validation (canonical scalars, nullifiers, binding, Groth16 check)
   └── src/dto.rs, config.rs, state.rs — DTOs, network config (.env.test), shared AppState
 
-nimbus-sdk/        — Client SDK & Private Note Wallet
+zeltra-sdk/        — Client SDK & Private Note Wallet
   ├── src/lib.rs                   — Re-exports, memory security (secure_zeroize, zeroize)
   ├── src/wallet/note_wallet.rs    — PrivateNoteWallet: direct deposit prep, Groth16 prover, coin selection, 2PC store
   ├── src/coin_selection.rs        — Tiered stochastic knapsack coin selection algorithm
@@ -70,7 +70,7 @@ nimbus-sdk/        — Client SDK & Private Note Wallet
   ├── src/x402/                    — x402 payment protocol client codec and types
   └── src/bin/bench_e2e.rs         — End-to-end deposit & spend benchmark binary
 
-nimbus-cli/        — Pure ZK CLI Tool
+zeltra-cli/        — Pure ZK CLI Tool
   ├── src/main.rs, cli.rs          — Clap subcommands: GenerateWallet, CreateDepositNote, InspectMmr, VerifyProof
   └── src/commands/zk.rs           — Key generation, direct deposit note creation, MMR inspection, proof verification
 
@@ -215,11 +215,11 @@ Under DEC-028, holding-time fee discounts are abolished to eliminate root age ga
 
 ## Environment, Deployment & Cluster
 
-- **Runtime Config:** `nimbus-node/.env.test` is the single source of truth (RPC URLs, keys, contract addresses, DB cipher keys, Vault/KMS settings). Always run `source nimbus-node/.env.test` before executing nodes or deployment tools.
-- **Stylus Contract Deployment:** `cargo stylus check` / `cargo stylus deploy` from `nimbus-contracts/`.
+- **Runtime Config:** `zeltra-node/.env.test` is the single source of truth (RPC URLs, keys, contract addresses, DB cipher keys, Vault/KMS settings). Always run `source zeltra-node/.env.test` before executing nodes or deployment tools.
+- **Stylus Contract Deployment:** `cargo stylus check` / `cargo stylus deploy` from `zeltra-contracts/`.
 - **Relayer Sequencer Automation (DEC-038A):**
   ```bash
   bash scripts/start_relayer.sh {start|status|stop|restart}  # Single sequencer relayer node
   ```
 
-Auto-loads `nimbus-node/.env.test` for RPC/contract/key. Health check endpoint `/health` & `/live`.
+Auto-loads `zeltra-node/.env.test` for RPC/contract/key. Health check endpoint `/health` & `/live`.

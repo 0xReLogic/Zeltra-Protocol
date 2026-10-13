@@ -1,8 +1,8 @@
-# x402 Integration Strategy for Nimbus Protocol
+# x402 Integration Strategy for Zeltra Protocol
 
 **Research Date:** June 5, 2026  
 **Researcher:** Cascade  
-**Scope:** x402 protocol analysis, competitive landscape, and integration strategy for Nimbus
+**Scope:** x402 protocol analysis, competitive landscape, and integration strategy for Zeltra
 
 ---
 
@@ -10,7 +10,7 @@
 
 x402 is an open payment standard developed by Coinbase that enables AI agents to autonomously pay for API access, data, and digital services using stablecoins over HTTP. The protocol leverages the long-reserved HTTP 402 "Payment Required" status code to enable machine-to-machine (M2M) payments without API keys or subscriptions.
 
-**Key Finding:** Nimbus has a unique opportunity to differentiate itself by integrating x402 with its blind signature protocol, providing **privacy-preserving x402 payments** that hide the payer's on-chain identity - a critical gap in the current x402 ecosystem.
+**Key Finding:** Zeltra has a unique opportunity to differentiate itself by integrating x402 with its blind signature protocol, providing **privacy-preserving x402 payments** that hide the payer's on-chain identity - a critical gap in the current x402 ecosystem.
 
 ---
 
@@ -103,22 +103,22 @@ x402 is an open payment standard developed by Coinbase that enables AI agents to
 
 ---
 
-## Current Nimbus x402 Implementation Analysis
+## Current Zeltra x402 Implementation Analysis
 
 ### Architecture Overview
 
-**Location:** `nimbus-sdk/src/x402/` and `nimbus-node/src/handlers/x402.rs`
+**Location:** `zeltra-sdk/src/x402/` and `zeltra-node/src/handlers/x402.rs`
 
 **Components:**
 1. **types.rs** - x402 v2 data structures
    - `X402PaymentRequired`, `X402PaymentOption`, `X402Price`
-   - `NimbusPaymentPayload` - Custom payload using BLS blind signatures
+   - `ZeltraPaymentPayload` - Custom payload using BLS blind signatures
    - `X402PaymentSignature`, `X402PaymentResponse`
 
 2. **codec.rs** - Base64 <-> JSON conversion
    - `decode_payment_required`, `encode_payment_signature`
    - `decode_payment_response`, `encode_payment_required`
-   - `build_nimbus_payment_signature` - Primary entry point for AI agents
+   - `build_zeltra_payment_signature` - Primary entry point for AI agents
 
 3. **pool.rs** - Agent Token Pool management
    - `AgentTokenPool` - WASM-compatible token pool
@@ -135,7 +135,7 @@ x402 is an open payment standard developed by Coinbase that enables AI agents to
 ### Key Features
 
 **Privacy-Preserving Payments:**
-- Uses Nimbus BLS blind signatures instead of standard EIP-3009
+- Uses Zeltra BLS blind signatures instead of standard EIP-3009
 - Hides payer's on-chain identity through nullifiers
 - AgentTokenPool for non-interactive token management
 
@@ -165,7 +165,7 @@ x402 is an open payment standard developed by Coinbase that enables AI agents to
 
 ### Phase 1: Privacy-First x402 Differentiation (Immediate)
 
-**Objective:** Position Nimbus as the privacy-preserving x402 implementation
+**Objective:** Position Zeltra as the privacy-preserving x402 implementation
 
 **Actions:**
 1. **Enhance Privacy Adapter**
@@ -183,7 +183,7 @@ x402 is an open payment standard developed by Coinbase that enables AI agents to
    - Support three receipt variants: Stwo Circle STARK, hybrid ES256K + ML-DSA-65, classical ES256K
    - Add Starknet on-chain anchor format for audit compliance
 
-**Expected Outcome:** Nimbus becomes the go-to solution for privacy-preserving x402 payments
+**Expected Outcome:** Zeltra becomes the go-to solution for privacy-preserving x402 payments
 
 ### Phase 2: Advanced Scheme Support (Short-term)
 
@@ -205,7 +205,7 @@ x402 is an open payment standard developed by Coinbase that enables AI agents to
    - Integrate with AuthCaptureEscrow protocol
    - Add arbiter support for dispute resolution
 
-**Expected Outcome:** Nimbus supports the full range of x402 payment models
+**Expected Outcome:** Zeltra supports the full range of x402 payment models
 
 ### Phase 3: ERC-4337 Integration (Medium-term)
 
@@ -227,7 +227,7 @@ x402 is an open payment standard developed by Coinbase that enables AI agents to
    - Enable recovery mechanisms and guardians
    - Add multi-sig support for institutional agents
 
-**Expected Outcome:** Nimbus supports modern wallet infrastructure and gasless payments
+**Expected Outcome:** Zeltra supports modern wallet infrastructure and gasless payments
 
 ### Phase 4: Agent Identity & Reputation (Long-term)
 
@@ -249,7 +249,7 @@ x402 is an open payment standard developed by Coinbase that enables AI agents to
    - Implement fee splitting and revenue attribution
    - Add delegation billing authority
 
-**Expected Outcome:** Nimbus provides trust and authorization layer for agentic commerce
+**Expected Outcome:** Zeltra provides trust and authorization layer for agentic commerce
 
 ### Phase 5: Post-Quantum Migration (Long-term)
 
@@ -266,7 +266,7 @@ x402 is an open payment standard developed by Coinbase that enables AI agents to
    - Add hash-based proving for post-quantum security
    - Optimize proof generation for production use
 
-**Expected Outcome:** Nimbus is ready for post-quantum security requirements
+**Expected Outcome:** Zeltra is ready for post-quantum security requirements
 
 ---
 
@@ -286,7 +286,7 @@ x402 is an open payment standard developed by Coinbase that enables AI agents to
 | **Receipts** | Off-chain | On-chain NFT proofs |
 | **Privacy** | None | Built-in privacy primitives |
 
-**Nimbus Positioning:** Nimbus can bridge the gap by adding privacy to x402 while maintaining compatibility with the Coinbase ecosystem
+**Zeltra Positioning:** Zeltra can bridge the gap by adding privacy to x402 while maintaining compatibility with the Coinbase ecosystem
 
 ### Privacy Coins Comparison
 
@@ -294,9 +294,9 @@ x402 is an open payment standard developed by Coinbase that enables AI agents to
 | --- | --- | --- | --- |
 | **Monero (XMR)** | Privacy without extra decisions | Private by default | Harder exchange access, weaker audit story |
 | **Zcash (ZEC)** | Strong privacy + selective disclosure | Optional shielded mode | Must use shielded wallets to avoid transparent rails |
-| **Nimbus + x402** | Privacy-preserving M2M payments | Blind signatures + nullifiers | Compliance-friendly with viewing keys |
+| **Zeltra + x402** | Privacy-preserving M2M payments | Blind signatures + nullifiers | Compliance-friendly with viewing keys |
 
-**Nimbus Advantage:** Combines Zcash-style selective disclosure with x402's M2M payment focus
+**Zeltra Advantage:** Combines Zcash-style selective disclosure with x402's M2M payment focus
 
 ---
 
@@ -383,9 +383,9 @@ x402 is an open payment standard developed by Coinbase that enables AI agents to
 ## Success Metrics
 
 ### Adoption Metrics
-- Number of x402 payments processed via Nimbus
-- Number of AI agents using Nimbus x402 SDK
-- Number of merchants accepting Nimbus x402 payments
+- Number of x402 payments processed via Zeltra
+- Number of AI agents using Zeltra x402 SDK
+- Number of merchants accepting Zeltra x402 payments
 - Privacy adapter usage rate
 
 ### Technical Metrics
@@ -404,7 +404,7 @@ x402 is an open payment standard developed by Coinbase that enables AI agents to
 
 ## Conclusion
 
-Nimbus has a unique opportunity to differentiate itself in the x402 ecosystem by focusing on **privacy-preserving M2M payments**. The current implementation provides a solid foundation with blind signature integration, but significant enhancements are needed to compete with emerging alternatives like s402 and PrivateX402.
+Zeltra has a unique opportunity to differentiate itself in the x402 ecosystem by focusing on **privacy-preserving M2M payments**. The current implementation provides a solid foundation with blind signature integration, but significant enhancements are needed to compete with emerging alternatives like s402 and PrivateX402.
 
 **Key Strategic Priorities:**
 1. **Privacy-First Differentiation** - Implement ZK note spends and cryptographic receipts
@@ -413,4 +413,4 @@ Nimbus has a unique opportunity to differentiate itself in the x402 ecosystem by
 4. **Agent Identity** - Add reputation scoring and rate limiting
 5. **Post-Quantum Readiness** - Implement hybrid signatures and STARK proofs
 
-By executing this roadmap, Nimbus can become the leading privacy-preserving x402 implementation for agentic commerce.
+By executing this roadmap, Zeltra can become the leading privacy-preserving x402 implementation for agentic commerce.

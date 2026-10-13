@@ -9,4 +9,4 @@ Ignacio Amores-Sesar, Christian Cachin, Rohit Chatterjee, Luiza Soezima, Franço
 
 Privacy-preserving payment systems are well understood, yet concerns about their misuse for financial crime have led to only limited adoption in regulated settings such as central bank digital currencies (CBDCs) and institutional stablecoins. Tracing is one tool for addressing these concerns: acting on external evidence implicating a user, law enforcement follows the suspect's funds through the ledger to uncover laundering routes and accomplices. Existing coin-tracing schemes, however,...
 
-**Relevance to Nimbus:** **MEDIUM** - Ephemeral coins concept, balancing privacy dengan traceability untuk compliance
+**Relevance to Zeltra:** **MEDIUM** - Ephemeral coins concept, balancing privacy dengan traceability untuk compliance

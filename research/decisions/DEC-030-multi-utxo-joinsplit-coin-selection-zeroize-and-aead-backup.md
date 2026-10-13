@@ -3,7 +3,7 @@
 - **Status:** Proposed & Accepted (Architecture Core Decision)
 - **Author:** Zeltra Protocol Architecture & Cryptography Team
 - **Date:** 2026-10-08
-- **Applies to:** `nimbus-core/src/note_circuit.rs`, `nimbus-sdk/src/wallet/note_wallet.rs`, `nimbus-sdk/src/lib.rs`, `nimbus-contracts/src/spend.rs`, `nimbus-node/src/handlers/spend.rs`
+- **Applies to:** `zeltra-core/src/note_circuit.rs`, `zeltra-sdk/src/wallet/note_wallet.rs`, `zeltra-sdk/src/lib.rs`, `zeltra-contracts/src/spend.rs`, `zeltra-node/src/handlers/spend.rs`
 - **Related DECs:** DEC-016 (ZK-UTXO Change Ledger), DEC-016A (Spec Freeze), DEC-016B (MVP Circuit Shortcuts), DEC-024 (Client Wallet 2PC), DEC-025 (Relayer Settlement), DEC-028 (Public Input Domain Hardening)
 - **Architectural Paradigm:** *"Constant-Topology Privacy, Non-Fragmented Balances, Zero-Heap Leakage, Formally Authenticated Storage"*
 - **Guiding Principle:** *"A privacy protocol must never force users to manage fragmented UTXOs through manual on-chain leaks, must never roll its own cryptographic cipher, and must guarantee that destroyed secrets leave zero trace in physical memory."*
@@ -12,10 +12,10 @@
 
 ## 1. Executive Summary & Audit Context
 
-Menindaklanjuti audit independen terhadap implementasi Private Note Wallet (`nimbus-sdk`) dan evaluasi arsitektur sirkuit ZK MVP (`DEC-016B`), ditemukan empat area kritis yang memerlukan perombakan arsitektural sebelum MPC Trusted Setup Ceremony dibekukan (*Circuit Freeze*):
+Menindaklanjuti audit independen terhadap implementasi Private Note Wallet (`zeltra-sdk`) dan evaluasi arsitektur sirkuit ZK MVP (`DEC-016B`), ditemukan empat area kritis yang memerlukan perombakan arsitektural sebelum MPC Trusted Setup Ceremony dibekukan (*Circuit Freeze*):
 
 1. **Keterbatasan Fundamental Single-UTXO Model (Saldo Terpecah / UX Lockout):**
-   Pada implementasi `select_note_for_spend` saat ini ([`note_wallet.rs` L373-384](file:///workspaces/Zeltra-Protocol/nimbus-sdk/src/wallet/note_wallet.rs#L373-L384)), sistem hanya dapat memilih **1 note tunggal** dengan nilai $\ge \text{total\_required}$. Jika seorang pengguna memiliki total saldo 100 USDC yang terpecah dalam sepuluh note @10 USDC, pembayaran sebesar 15 USDC gagal dengan error `InsufficientBalance { requested: 15_000_000, available: 100_000_000 }`. Masalah ini sudah dicatat sebagai utang teknis pada [`DEC-016B` Seksi 1](file:///workspaces/Zeltra-Protocol/research/decisions/DEC-016B-mvp-circuit-shortcuts.md#L9-L26).
+   Pada implementasi `select_note_for_spend` saat ini ([`note_wallet.rs` L373-384](file:///workspaces/Zeltra-Protocol/zeltra-sdk/src/wallet/note_wallet.rs#L373-L384)), sistem hanya dapat memilih **1 note tunggal** dengan nilai $\ge \text{total\_required}$. Jika seorang pengguna memiliki total saldo 100 USDC yang terpecah dalam sepuluh note @10 USDC, pembayaran sebesar 15 USDC gagal dengan error `InsufficientBalance { requested: 15_000_000, available: 100_000_000 }`. Masalah ini sudah dicatat sebagai utang teknis pada [`DEC-016B` Seksi 1](file:///workspaces/Zeltra-Protocol/research/decisions/DEC-016B-mvp-circuit-shortcuts.md#L9-L26).
 2. **Kelemahan Kriptografis pada Enkripsi Backup (*Hand-Rolled Crypto* & Lemahnya KDF):**
    Fungsi `export_backup` dan `import_backup` menggunakan KDF HMAC-SHA256 tunggal tanpa dynamic salt dan tanpa work-factor, dipadukan dengan stream cipher XOR non-standar berbasis chained SHA-256 dan verifikasi MAC post-decryption. Ini melanggar standar pengamanan data rahasia dan rentan terhadap serangan brute-force GPU berkecepatan tinggi.
 3. **Kebocoran Kunci Rahasia di Heap (*Zeroize Ineffective* akibat `Clone` String):**
@@ -126,7 +126,7 @@ Index 13: flags_packed               (32 bytes) - Bit 0: has_change_1, Bit 1: ha
 
 ## 4. Algoritma Privacy-Preserving Stochastic Coin Selection
 
-Untuk mengeliminasi kegagalan `InsufficientBalance` saat saldo terpecah, modul [`note_wallet.rs`](file:///workspaces/Zeltra-Protocol/nimbus-sdk/src/wallet/note_wallet.rs) diperbarui dengan algoritma seleksi koin bertingkat (Tiered Privacy-Preserving Coin Selection):
+Untuk mengeliminasi kegagalan `InsufficientBalance` saat saldo terpecah, modul [`note_wallet.rs`](file:///workspaces/Zeltra-Protocol/zeltra-sdk/src/wallet/note_wallet.rs) diperbarui dengan algoritma seleksi koin bertingkat (Tiered Privacy-Preserving Coin Selection):
 
 ```mermaid
 flowchart TD
@@ -173,11 +173,11 @@ flowchart TD
 ### A. Evaluasi Celah pada Status Quo
 - Menggunakan `String` hex (`owner_key_hex`, `rho_hex`, `randomness_hex`) berarti memori dialokasikan melalui heap global.
 - Trait `Clone` menduplikasi string ke chunk heap baru. Ketika struct lama di-drop, allocator tidak membersihkan buffer lama.
-- Fungsi `secure_zeroize_string` yang menulis volatile pointer secara manual di [`lib.rs`](file:///workspaces/Zeltra-Protocol/nimbus-sdk/src/lib.rs) rentan terhadap reordering optimasi compiler tanpa memory fence eksplisit.
+- Fungsi `secure_zeroize_string` yang menulis volatile pointer secara manual di [`lib.rs`](file:///workspaces/Zeltra-Protocol/zeltra-sdk/src/lib.rs) rentan terhadap reordering optimasi compiler tanpa memory fence eksplisit.
 
 ### B. Keputusan Arsitektur: Adopsi Crate `zeroize` & Binary Secret Types
 1. **Tambahkan Crate `zeroize`:**
-   Tambahkan dependensi `zeroize = { version = "1.8", default-features = false, features = ["alloc", "zeroize_derive", "serde"] }` ke `nimbus-sdk/Cargo.toml` agar tipe `Zeroizing<T>` dapat langsung di-serialize/deserialize secara aman oleh `serde`.
+   Tambahkan dependensi `zeroize = { version = "1.8", default-features = false, features = ["alloc", "zeroize_derive", "serde"] }` ke `zeltra-sdk/Cargo.toml` agar tipe `Zeroizing<T>` dapat langsung di-serialize/deserialize secara aman oleh `serde`.
 2. **Ganti String Hex dengan `Zeroizing<[u8; 32]>`:**
    Field kunci rahasia pada `WalletNote` dan `PrivateNoteWallet` diubah dari tipe `String` menjadi tipe biner terisolasi:
    ```rust
@@ -207,7 +207,7 @@ flowchart TD
 ## 6. Enkripsi Backup Terotentikasi (Argon2id + ChaCha20-Poly1305 AEAD)
 
 ### A. Evaluasi Celah Status Quo
-Fungsi `export_backup` di [`note_wallet.rs` L979-1013](file:///workspaces/Zeltra-Protocol/nimbus-sdk/src/wallet/note_wallet.rs#L979-L1013) menerapkan KDF statis dan XOR PRG chained SHA-256 buatan sendiri. Ini melanggar standar pengamanan data rahasia dan rentan brute-force GPU.
+Fungsi `export_backup` di [`note_wallet.rs` L979-1013](file:///workspaces/Zeltra-Protocol/zeltra-sdk/src/wallet/note_wallet.rs#L979-L1013) menerapkan KDF statis dan XOR PRG chained SHA-256 buatan sendiri. Ini melanggar standar pengamanan data rahasia dan rentan brute-force GPU.
 
 ### B. Keputusan Arsitektur: Standar Industri RFC 9106 + RFC 8439
 Modul backup direstrukturisasi menggunakan algoritma standar teruji:
@@ -287,7 +287,7 @@ Dengan method ini:
 
 ## 8. Refactoring Rust Idioms: Eliminasi Boilerplate Hex Decoding
 
-Seluruh decoding hex scalar 32-byte disatukan ke dalam helper kanonikal di `nimbus-sdk/src/wallet/note_wallet.rs` dan `nimbus-core`:
+Seluruh decoding hex scalar 32-byte disatukan ke dalam helper kanonikal di `zeltra-sdk/src/wallet/note_wallet.rs` dan `zeltra-core`:
 
 ```rust
 /// Safely parses an arkworks Fr scalar from a 0x-prefixed or raw hex string.
@@ -319,7 +319,7 @@ Helper ini memangkas lebih dari 60 baris duplikasi boilerplate pada parsing spen
 ├─────────────────────────┼────────────────────────────────────────────────────────────────────────┤
 │ Fase 2: 2-in-2-out      │ 1. Implementasikan Universal 2-in-2-out di `note_circuit.rs`.           │
 │ Circuit Synthesis       │ 2. Implementasikan canonical dummy note & boolean dummy constraint.    │
-│                         │ 3. Update public inputs ke 14 elemen di `nimbus-contracts/src/spend.rs`│
+│                         │ 3. Update public inputs ke 14 elemen di `zeltra-contracts/src/spend.rs`│
 │                         │ 4. Update coin selection SDK ke 2-Note Knapsack.                       │
 ├─────────────────────────┼────────────────────────────────────────────────────────────────────────┤
 │ Fase 3: Ceremony Freeze │ 1. Validasi 100% sound constraints via `ConstraintSystem::is_satisfied`│

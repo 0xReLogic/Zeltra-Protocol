@@ -1,6 +1,6 @@
-# Nimbus CLI — 03: End-to-End Workflow
+# Zeltra CLI — 03: End-to-End Workflow
 
-Panduan eksekusi simulasi kriptografi lengkap dari awal sampai akhir menggunakan `./target/debug/nimbus-cli`.
+Panduan eksekusi simulasi kriptografi lengkap dari awal sampai akhir menggunakan `./target/debug/zeltra-cli`.
 
 ---
 
@@ -47,7 +47,7 @@ Panduan eksekusi simulasi kriptografi lengkap dari awal sampai akhir menggunakan
 
 ### Step 1: Pembuatan Kunci Issuer
 ```bash
-./target/debug/nimbus-cli generate-keys
+./target/debug/zeltra-cli generate-keys
 ```
 *Catat `Secret Key` ($sk_{iss}$) dan `Public Key` ($pk_{iss}$).*
 
@@ -56,7 +56,7 @@ Panduan eksekusi simulasi kriptografi lengkap dari awal sampai akhir menggunakan
 ### Step 2: Blinding Pesan (Client)
 Pesan dapat berupa address, hash intent, atau ephemeral public key:
 ```bash
-./target/debug/nimbus-cli blind --message "ephemeral_wallet_intent_001"
+./target/debug/zeltra-cli blind --message "ephemeral_wallet_intent_001"
 ```
 *Catat output:*
 * `Blinded Message (X)`
@@ -67,7 +67,7 @@ Pesan dapat berupa address, hash intent, atau ephemeral public key:
 ### Step 3: Masked Signing (Issuer)
 Issuer menandatangani pesan tanpa dapat melihat isi pesan asli di dalamnya:
 ```bash
-./target/debug/nimbus-cli sign \
+./target/debug/zeltra-cli sign \
   --blinded <BLINDED_MESSAGE_HEX> \
   --sk <SECRET_KEY_HEX>
 ```
@@ -81,7 +81,7 @@ Issuer menandatangani pesan tanpa dapat melihat isi pesan asli di dalamnya:
 ### Step 4: Verifikasi Masked Signature Off-Chain (Client)
 Sebelum menyetor uang ke contract, client memastikan issuer tidak menipu:
 ```bash
-./target/debug/nimbus-cli verify-masked \
+./target/debug/zeltra-cli verify-masked \
   --blinded <BLINDED_MESSAGE_HEX> \
   --com-k <COMMITMENT_HEX> \
   --masked-sig <MASKED_SIG_HEX>
@@ -96,7 +96,7 @@ VALID: Masked signature matches blinded message and commitment!
 ### Step 5: Unmasking (Client)
 Setelah deposit USDC terkonfirmasi di smart contract dan $k$ dirilis:
 ```bash
-./target/debug/nimbus-cli unmask \
+./target/debug/zeltra-cli unmask \
   --masked-sig <MASKED_SIG_HEX> \
   -r <BLINDING_FACTOR_HEX> \
   -k <MASKING_KEY_HEX>
@@ -109,7 +109,7 @@ Setelah deposit USDC terkonfirmasi di smart contract dan $k$ dirilis:
 ### Step 6: Verifikasi Tanda Tangan Bersih (Merchant / Verifier)
 Pihak penerima atau smart contract memverifikasi keaslian signature terhadap pesan asli dan public key issuer:
 ```bash
-./target/debug/nimbus-cli verify \
+./target/debug/zeltra-cli verify \
   --message "ephemeral_wallet_intent_001" \
   --sig <UNMASKED_SIG_HEX> \
   --pk <PUBLIC_KEY_HEX>
@@ -126,17 +126,17 @@ VALID: The signature is verified and authentic under the Issuer's Public Key!
 Jika menggunakan cluster 3-of-5 guardian:
 1. Split secret key issuer menjadi 5 shares:
    ```bash
-   ./target/debug/nimbus-cli split-key --sk <SECRET_KEY_HEX> -t 3 -n 5
+   ./target/debug/zeltra-cli split-key --sk <SECRET_KEY_HEX> -t 3 -n 5
    ```
 2. Masing-masing guardian (misal guardian 1, 2, 3) menandatangani `Blinded Message`:
    ```bash
-   ./target/debug/nimbus-cli sign --blinded <BLINDED_HEX> --sk <SHARE_1_HEX>
-   ./target/debug/nimbus-cli sign --blinded <BLINDED_HEX> --sk <SHARE_2_HEX>
-   ./target/debug/nimbus-cli sign --blinded <BLINDED_HEX> --sk <SHARE_3_HEX>
+   ./target/debug/zeltra-cli sign --blinded <BLINDED_HEX> --sk <SHARE_1_HEX>
+   ./target/debug/zeltra-cli sign --blinded <BLINDED_HEX> --sk <SHARE_2_HEX>
+   ./target/debug/zeltra-cli sign --blinded <BLINDED_HEX> --sk <SHARE_3_HEX>
    ```
 3. Leader menggabungkan partial signatures:
    ```bash
-   ./target/debug/nimbus-cli aggregate \
+   ./target/debug/zeltra-cli aggregate \
      --indices "1,2,3" \
      --signatures "<SIG_1_HEX>,<SIG_2_HEX>,<SIG_3_HEX>"
    ```

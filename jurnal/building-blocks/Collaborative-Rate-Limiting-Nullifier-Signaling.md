@@ -9,4 +9,4 @@ Yağmur Gürel, Uğur Şen, Oğuz Yayla
 
 Rate Limiting Nullifier (RLN) is a privacy-preserving and decentralized spam-prevention mechanism for anonymous broadcast networks: each member can emit at most $r$ signals per epoch, and any violation reveals a secret that enables the member's stake to be slashed. The standard construction binds each membership to a single secret key $\mathsf{sk}_G$, so the unit of identity, the unit of authorization, and the unit of slashing all coincide with one party. This rules out settings in which a...
 
-**Relevance to Nimbus:** HIGH - RLN variant untuk spam prevention, complements existing RLN di filter 01
+**Relevance to Zeltra:** HIGH - RLN variant untuk spam prevention, complements existing RLN di filter 01

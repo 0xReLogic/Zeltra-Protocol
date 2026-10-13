@@ -10,14 +10,14 @@ Jalur verification harus membuktikan secara kriptografis bahwa signature yang di
 
 ## Invariant bisnis/security
 
-- Signature hanya berlaku untuk kontrak Nimbus spesifik di rantai (chain) tujuan tertentu (Domain Separation).
+- Signature hanya berlaku untuk kontrak Zeltra spesifik di rantai (chain) tujuan tertentu (Domain Separation).
 - Signature hanya berlaku untuk `amount`, `recipient`, `expiry`, dan `nonce` yang disetujui.
 - Tidak boleh ada bypass verifikasi dengan mengirimkan data `hm_bytes` secara langsung.
 - Perubahan apa pun pada parameter spend wajib menggagalkan proses verifikasi BLS.
 
 ## Keputusan
 
-1. **Format Canonical Message (`NIMBUS_SPEND_V1`)**:
+1. **Format Canonical Message (`ZELTRA_SPEND_V1`)**:
    Pesan spend dikonstruksi secara byte-packed:
    ```text
    "SPEND" (5 bytes) ||
@@ -41,8 +41,8 @@ Jalur verification harus membuktikan secara kriptografis bahwa signature yang di
    Payload Chainlink CCIP direduksi dari 648 byte menjadi **584 byte** dengan membuang parameter `hm_bytes` (128 byte) dan menambahkan parameter domain & transaction protection (`expiry` 32 byte, `nonce` 32 byte).
 
 4. **SDK & Node Broadcaster Alignment**:
-   - `nimbus-sdk` menghasilkan `PAYMENT-SIGNATURE` yang memuat parameter `recipient_or_intent_hash_hex`, `expiry`, dan `nonce_hex` secara opsional agar kompatibel dengan flow refilling non-interaktif.
-   - `nimbus-node` membaca parameter tersebut dan meneruskannya secara transparan ke pemanggilan on-chain.
+   - `zeltra-sdk` menghasilkan `PAYMENT-SIGNATURE` yang memuat parameter `recipient_or_intent_hash_hex`, `expiry`, dan `nonce_hex` secara opsional agar kompatibel dengan flow refilling non-interaktif.
+   - `zeltra-node` membaca parameter tersebut dan meneruskannya secara transparan ke pemanggilan on-chain.
 
 ## Sumber primer
 
@@ -52,9 +52,9 @@ Jalur verification harus membuktikan secara kriptografis bahwa signature yang di
 ## Versi
 
 - `sha2 = { version = "0.10.8", default-features = false }` (no_std)
-- `nimbus_contracts = "0.1.0"`
-- `nimbus-sdk = "0.1.0"`
-- `nimbus-node = "0.1.0"`
+- `zeltra_contracts = "0.1.0"`
+- `zeltra-sdk = "0.1.0"`
+- `zeltra-node = "0.1.0"`
 
 ## Test
 

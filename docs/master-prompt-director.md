@@ -1,6 +1,6 @@
 # Master Prompt Director
 
-File ini adalah konteks dan playbook untuk Qwen Code saat bertindak sebagai **Director** — yaitu saat merancang prompt berkualitas tinggi untuk AI agent lain yang akan mengeksekusi pekerjaan di repo Nimbus.
+File ini adalah konteks dan playbook untuk Qwen Code saat bertindak sebagai **Director** — yaitu saat merancang prompt berkualitas tinggi untuk AI agent lain yang akan mengeksekusi pekerjaan di repo Zeltra.
 
 ---
 
@@ -159,7 +159,7 @@ bro kerjain HT-05
 
 ### Yang Qwen lakukan:
 1. Baca `todo.md` → cari section HT-05 → pahami scope refund & timelock
-2. Baca kode → `nimbus-contracts/src/refund.rs` atau setara
+2. Baca kode → `zeltra-contracts/src/refund.rs` atau setara
 3. Cari research decision terkait refund
 4. Rancang prompt lengkap dengan security gate, logic guard, dan acceptance criteria
 5. Output prompt siap copas

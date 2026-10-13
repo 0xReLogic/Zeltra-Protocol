@@ -4,15 +4,15 @@
 - **Author:** Zeltra Architecture & Cryptography Team
 - **Date:** 2026-10-10
 - **Applies to:**
-  - `nimbus-core/src/joinsplit_circuit.rs` (Universal 2-in-2-out JoinSplit R1CS circuit, MMR bagging, dual-epoch nullifier PRF, two-limb quote hash)
-  - `nimbus-sdk/src/wallet/note_wallet.rs` (Multi-note coin selection, dual-witness generation, MMR proof sync, JoinSplit spend API)
-  - `nimbus-node/src/handlers/spend.rs` (Relayer `/api/v1/spend-joinsplit` endpoint, dual-nullifier double-spend guard, preflight verifier)
-  - `nimbus-contracts/src/spend.rs` (Stylus on-chain `spend_joinsplit` entrypoint, dual-nullifier state update, Direction B dual-output MMR insertion)
-  - `nimbus-contracts/src/groth16_joinsplit_verifier.rs` (EIP-2537 MSM and Pairing verifier routines for JoinSplit)
+  - `zeltra-core/src/joinsplit_circuit.rs` (Universal 2-in-2-out JoinSplit R1CS circuit, MMR bagging, dual-epoch nullifier PRF, two-limb quote hash)
+  - `zeltra-sdk/src/wallet/note_wallet.rs` (Multi-note coin selection, dual-witness generation, MMR proof sync, JoinSplit spend API)
+  - `zeltra-node/src/handlers/spend.rs` (Relayer `/api/v1/spend-joinsplit` endpoint, dual-nullifier double-spend guard, preflight verifier)
+  - `zeltra-contracts/src/spend.rs` (Stylus on-chain `spend_joinsplit` entrypoint, dual-nullifier state update, Direction B dual-output MMR insertion)
+  - `zeltra-contracts/src/groth16_joinsplit_verifier.rs` (EIP-2537 MSM and Pairing verifier routines for JoinSplit)
 - **Child Sub-Specifications:**
-  - [`DEC-036A`](file:///workspaces/Zeltra-Protocol/research/decisions/DEC-036A-universal-2-in-2-out-joinsplit-r1cs-circuit-specification.md) — Universal 2-in-2-out JoinSplit R1CS Circuit, Strict Constant-Arity Topology, and 19-Public-Input Soundness Specification (`nimbus-core`)
-  - [`DEC-036B`](file:///workspaces/Zeltra-Protocol/research/decisions/DEC-036B-client-sdk-knapsack-coin-selection-consolidation-and-bulk-sync.md) — Client SDK Multi-UTXO Knapsack Coin Selection, In-Pool Progressive Consolidation, and Anti-Snooping MMR Tree Sync (`nimbus-sdk`)
-  - [`DEC-036C`](file:///workspaces/Zeltra-Protocol/research/decisions/DEC-036C-relayer-ingress-guard-and-stylus-joinsplit-settlement.md) — Relayer Ingress Pipeline, Dual-Nullifier Guard, and Stylus Smart Contract 2-in-2-out Settlement with EIP-2537 (`nimbus-node` & `nimbus-contracts`)
+  - [`DEC-036A`](file:///workspaces/Zeltra-Protocol/research/decisions/DEC-036A-universal-2-in-2-out-joinsplit-r1cs-circuit-specification.md) — Universal 2-in-2-out JoinSplit R1CS Circuit, Strict Constant-Arity Topology, and 19-Public-Input Soundness Specification (`zeltra-core`)
+  - [`DEC-036B`](file:///workspaces/Zeltra-Protocol/research/decisions/DEC-036B-client-sdk-knapsack-coin-selection-consolidation-and-bulk-sync.md) — Client SDK Multi-UTXO Knapsack Coin Selection, In-Pool Progressive Consolidation, and Anti-Snooping MMR Tree Sync (`zeltra-sdk`)
+  - [`DEC-036C`](file:///workspaces/Zeltra-Protocol/research/decisions/DEC-036C-relayer-ingress-guard-and-stylus-joinsplit-settlement.md) — Relayer Ingress Pipeline, Dual-Nullifier Guard, and Stylus Smart Contract 2-in-2-out Settlement with EIP-2537 (`zeltra-node` & `zeltra-contracts`)
 - **Related DECs:**
   - [`DEC-016`](file:///workspaces/Zeltra-Protocol/research/decisions/DEC-016-private-note-change-ledger.md) (Private Note Change Ledger Concept)
   - [`DEC-030`](file:///workspaces/Zeltra-Protocol/research/decisions/DEC-030-multi-utxo-joinsplit-coin-selection-zeroize-and-aead-backup.md) (Multi-UTXO JoinSplit Prototype & Knapsack Coin Selection)
@@ -110,11 +110,11 @@ Kondisi implementasi JoinSplit di dalam codebase Zeltra saat ini:
 
 | Layer | Komponen Codebase | Status Aktual | Gap / Masalah yang Wajib Diselesaikan |
 |---|---|---|---|
-| **Layer 1: Circuit** | `nimbus-core/src/joinsplit_circuit.rs` | **Prototipe Parsial (40%)** | 1. Implementasikan MMR bagging gadget (DEC-032 / DEC-036A).<br>2. Ikat `epoch_id_1` dan `epoch_id_2` ke derivasi nullifier (DEC-033).<br>3. Terapkan Two-Limb 128-bit quote hash & scope binding (DEC-035 / DEC-036A).<br>4. Terapkan Direction B Canonical Dummy Output gadget. |
-| **Layer 2: SDK / Wallet** | `nimbus-sdk/src/wallet/note_wallet.rs` | **Prototipe Parsial (50%)** | 1. Implementasikan `consolidate_notes` untuk $N > 2$ (DEC-036B).<br>2. Integrasikan bulk leaf downloader anti-snooping (`/api/v1/mmr/leaves`).<br>3. Tambahkan dual-epoch witness synthesis.<br>4. Sediakan HTTP client dispatcher untuk JoinSplit spend. |
-| **Layer 3: Relayer** | `nimbus-node/src/handlers/spend.rs` | **0% (Kosong Total)** | 1. Buat endpoint `POST /api/v1/spend-joinsplit` (DEC-036C).<br>2. Implementasikan dual-nullifier double-spend check di SQLite & on-chain.<br>3. Tambahkan local CPU Groth16 preflight verification.<br>4. Implementasikan broadcast transaction dispatcher JoinSplit. |
-| **Layer 4: Smart Contract** | `nimbus-contracts/src/spend.rs` | **0% (Kosong Total)** | 1. Buat entrypoint `spend_joinsplit` di Stylus WASM (DEC-036C).<br>2. Implementasikan verifier Groth16 EIP-2537 20-titik MSM & 4-pairing.<br>3. Terapkan Direction B dual-leaf MMR insertion konstan.<br>4. Terapkan dual-nullifier burning dan invariant check. |
-| **Layer 5: MMR Accumulator** | `nimbus-core` & `nimbus-contracts` | **Parsial (Sisi Circuit Bolong)** | Smart contract sudah memiliki `_mmr_insert`, hubungkan dengan sirkuit `JoinSplitCircuit` melalui in-circuit MMR peak bagging gadget. |
+| **Layer 1: Circuit** | `zeltra-core/src/joinsplit_circuit.rs` | **Prototipe Parsial (40%)** | 1. Implementasikan MMR bagging gadget (DEC-032 / DEC-036A).<br>2. Ikat `epoch_id_1` dan `epoch_id_2` ke derivasi nullifier (DEC-033).<br>3. Terapkan Two-Limb 128-bit quote hash & scope binding (DEC-035 / DEC-036A).<br>4. Terapkan Direction B Canonical Dummy Output gadget. |
+| **Layer 2: SDK / Wallet** | `zeltra-sdk/src/wallet/note_wallet.rs` | **Prototipe Parsial (50%)** | 1. Implementasikan `consolidate_notes` untuk $N > 2$ (DEC-036B).<br>2. Integrasikan bulk leaf downloader anti-snooping (`/api/v1/mmr/leaves`).<br>3. Tambahkan dual-epoch witness synthesis.<br>4. Sediakan HTTP client dispatcher untuk JoinSplit spend. |
+| **Layer 3: Relayer** | `zeltra-node/src/handlers/spend.rs` | **0% (Kosong Total)** | 1. Buat endpoint `POST /api/v1/spend-joinsplit` (DEC-036C).<br>2. Implementasikan dual-nullifier double-spend check di SQLite & on-chain.<br>3. Tambahkan local CPU Groth16 preflight verification.<br>4. Implementasikan broadcast transaction dispatcher JoinSplit. |
+| **Layer 4: Smart Contract** | `zeltra-contracts/src/spend.rs` | **0% (Kosong Total)** | 1. Buat entrypoint `spend_joinsplit` di Stylus WASM (DEC-036C).<br>2. Implementasikan verifier Groth16 EIP-2537 20-titik MSM & 4-pairing.<br>3. Terapkan Direction B dual-leaf MMR insertion konstan.<br>4. Terapkan dual-nullifier burning dan invariant check. |
+| **Layer 5: MMR Accumulator** | `zeltra-core` & `zeltra-contracts` | **Parsial (Sisi Circuit Bolong)** | Smart contract sudah memiliki `_mmr_insert`, hubungkan dengan sirkuit `JoinSplitCircuit` melalui in-circuit MMR peak bagging gadget. |
 
 ---
 

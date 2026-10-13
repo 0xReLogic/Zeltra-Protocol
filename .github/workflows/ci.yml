@@ -89,11 +89,11 @@ jobs:
           shared-key: "stylus-cache"
 
       - name: Compile Stylus WASM smart contract
-        run: cargo build -p nimbus_contracts --target wasm32-unknown-unknown --release
+        run: cargo build -p zeltra_contracts --target wasm32-unknown-unknown --release
 
       - name: Verify WASM size and binary existence
         run: |
-          WASM_FILE="target/wasm32-unknown-unknown/release/nimbus_contracts.wasm"
+          WASM_FILE="target/wasm32-unknown-unknown/release/zeltra_contracts.wasm"
           if [ -f "$WASM_FILE" ]; then
             SIZE_BYTES=$(stat -c%s "$WASM_FILE")
             SIZE_KB=$((SIZE_BYTES / 1024))
@@ -105,13 +105,13 @@ jobs:
           fi
 
       - name: Check ABI export feature
-        run: cargo check -p nimbus_contracts --features export-abi
+        run: cargo check -p zeltra_contracts --features export-abi
 
-      - name: Verify nimbus-sdk wasm32 target
-        run: cargo check -p nimbus-sdk --target wasm32-unknown-unknown
+      - name: Verify zeltra-sdk wasm32 target
+        run: cargo check -p zeltra-sdk --target wasm32-unknown-unknown
 
       - name: Run contract unit tests
-        run: cargo test -p nimbus_contracts
+        run: cargo test -p zeltra_contracts
 
   security:
     name: Security & License Audit
@@ -164,11 +164,11 @@ jobs:
         with:
           shared-key: "docker-build-cache"
 
-      - name: Build nimbus-node release binary
+      - name: Build zeltra-node release binary
         run: |
-          cargo build --release -p nimbus-node
-          cp target/release/nimbus-node ./nimbus-node-bin
-          chmod +x ./nimbus-node-bin
+          cargo build --release -p zeltra-node
+          cp target/release/zeltra-node ./zeltra-node-bin
+          chmod +x ./zeltra-node-bin
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -178,10 +178,10 @@ jobs:
         with:
           context: .
           load: true
-          tags: zeltra-protocol/nimbus-node:ci-test
+          tags: zeltra-protocol/zeltra-node:ci-test
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
       - name: Smoke test Docker container
         run: |
-          docker run --rm zeltra-protocol/nimbus-node:ci-test --help || true
+          docker run --rm zeltra-protocol/zeltra-node:ci-test --help || true

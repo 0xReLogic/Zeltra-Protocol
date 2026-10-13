@@ -1,6 +1,6 @@
-# Inovasi Jurnal untuk Relayer & Settlement Node (`nimbus-node`)
+# Inovasi Jurnal untuk Relayer & Settlement Node (`zeltra-node`)
 
-Dokumen ini memetakan paper terpilih untuk lapisan relayer dan cluster konsensus Nimbus ([`nimbus-node`](file:///workspaces/Zeltra-Protocol/nimbus-node/)), mencakup manajemen antrian persisten SQLite, batching transaksi, koordinasi threshold guardian, dan mitigasi front-running/MEV.
+Dokumen ini memetakan paper terpilih untuk lapisan relayer dan cluster konsensus Zeltra ([`zeltra-node`](file:///workspaces/Zeltra-Protocol/zeltra-node/)), mencakup manajemen antrian persisten SQLite, batching transaksi, koordinasi threshold guardian, dan mitigasi front-running/MEV.
 
 ---
 
@@ -11,8 +11,8 @@ Dokumen ini memetakan paper terpilih untuk lapisan relayer dan cluster konsensus
   Mixer dan relayer tanpa kontrol rentan terhadap sanksi hukum internasional (OFAC), sedangkan sistem dengan backdoor viewing key rentan terhadap penyalahgunaan pengintaian massal (*mass surveillance*).
 * **Inovasi Paper:**
   *Auditing Budget*: Relayer mengizinkan entitas pengawas (auditor berkekuatan hukum) untuk memverifikasi maksimum $K$ transaksi per epoch secara anonim. Kontrak cerdas dan ZK circuit membatasi kuota inspeksi secara matematis. Permintaan di luar kuota otomatis *fail-closed*.
-* **Implementasi di Nimbus Node:**
-  * Modul endpoint baru: `/api/compliance/audit-claim` di [`nimbus-node/src/api/`](file:///workspaces/Zeltra-Protocol/nimbus-node/src/api/).
+* **Implementasi di Zeltra Node:**
+  * Modul endpoint baru: `/api/compliance/audit-claim` di [`zeltra-node/src/api/`](file:///workspaces/Zeltra-Protocol/zeltra-node/src/api/).
   * Memungkinkan Zeltra Protocol beroperasi legal di Arbitrum tanpa pernah bisa dipaksa membuka semua transaksi pengguna sekaligus.
 
 ---
@@ -37,7 +37,7 @@ Dokumen ini memetakan paper terpilih untuk lapisan relayer dan cluster konsensus
 * **Inovasi Paper:**
   Merumuskan model desain AMM dan mekanisme lelang/bundling yang tahan MEV secara terbukti (*provably MEV-resilient*) melalui *Surplus Redistribution*. Surplus efisiensi eksekusi dari batching secara otomatis diredistribusikan secara proporsional kepada para partisipan transaksi, memitigasi ekstraksi nilai gelap oleh intermediary.
 * **Implementasi di Zeltra Node:**
-  * Komponen: Adaptive batch worker di [`nimbus-node/src/main.rs`](file:///workspaces/Zeltra-Protocol/nimbus-node/src/main.rs).
+  * Komponen: Adaptive batch worker di [`zeltra-node/src/main.rs`](file:///workspaces/Zeltra-Protocol/zeltra-node/src/main.rs).
   * Memastikan penghematan gas dari batch settlement (2-8 spend) secara adil menekan beban biaya eksekusi aktual bagi pengguna, membatasi keuntungan relayer hanya pada markup transparan 15% tanpa ekstraksi MEV tersembunyi.
 
 

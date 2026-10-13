@@ -4,12 +4,12 @@
 - **Author:** Zeltra Architecture & Cryptography Team
 - **Date:** 2026-10-10
 - **Applies to:**
-  - `nimbus-core/src/note_circuit.rs` (`PrivateNoteCircuit` input layout, 128-bit bit-decomposition range gadget)
-  - `nimbus-contracts/src/spend.rs` (`_spend_private_note` ABI preservation, unpacking `bytes32` into high/low limbs)
-  - `nimbus-contracts/src/groth16_note_verifier.rs` (Public inputs expansion from 15 to 16, verifying key $IC$ update)
-  - `nimbus-sdk/src/wallet/note_wallet.rs` (Witness generation and public input array construction)
-  - `nimbus-sdk/src/eip712.rs` (Canonical EVM Keccak-256 digest computation)
-  - `nimbus-node/src/handlers/spend.rs` (Relayer ingress public input validation and limb parsing)
+  - `zeltra-core/src/note_circuit.rs` (`PrivateNoteCircuit` input layout, 128-bit bit-decomposition range gadget)
+  - `zeltra-contracts/src/spend.rs` (`_spend_private_note` ABI preservation, unpacking `bytes32` into high/low limbs)
+  - `zeltra-contracts/src/groth16_note_verifier.rs` (Public inputs expansion from 15 to 16, verifying key $IC$ update)
+  - `zeltra-sdk/src/wallet/note_wallet.rs` (Witness generation and public input array construction)
+  - `zeltra-sdk/src/eip712.rs` (Canonical EVM Keccak-256 digest computation)
+  - `zeltra-node/src/handlers/spend.rs` (Relayer ingress public input validation and limb parsing)
 - **Parent & Related DECs:**
   - [`DEC-035`](file:///workspaces/Zeltra-Protocol/research/decisions/DEC-035-cryptographic-canonicality-public-input-binding-and-mmr.md) (Master Zero-Tech-Debt Blueprint)
   - [`DEC-035B`](file:///workspaces/Zeltra-Protocol/research/decisions/DEC-035B-formal-scope-binding-gadget-and-groth16-statement-integrity.md) (Formal Scope Binding Gadget & Statement Integrity)
@@ -130,9 +130,9 @@ $$H_{\text{lo}} = \sum_{i=16}^{31} b_i \cdot 256^{31-i} = \sum_{j=0}^{127} 2^j \
 
 Where $\beta_j \in \{0, 1\}$ are individual bits.
 
-### B. In-Circuit R1CS Range Constraint Gadget (`nimbus-core`)
+### B. In-Circuit R1CS Range Constraint Gadget (`zeltra-core`)
 
-In `nimbus-core/src/note_circuit.rs`, the circuit allocates two public input variables and enforces strict 128-bit range checks.
+In `zeltra-core/src/note_circuit.rs`, the circuit allocates two public input variables and enforces strict 128-bit range checks.
 
 ```
                   ┌────────────────────────────────────────┐
@@ -213,9 +213,9 @@ fn enforce_u128_range<CS: ConstraintSystem<Fr>>(
 }
 ```
 
-### C. Smart Contract Unpacking & Calldata Preservation (`nimbus-contracts`)
+### C. Smart Contract Unpacking & Calldata Preservation (`zeltra-contracts`)
 
-In `nimbus-contracts/src/spend.rs`, the external Stylus ABI is strictly preserved to prevent breaking changes for existing integrators and merchant frontends:
+In `zeltra-contracts/src/spend.rs`, the external Stylus ABI is strictly preserved to prevent breaking changes for existing integrators and merchant frontends:
 
 ```rust
 pub fn spend_private_note(
@@ -314,7 +314,7 @@ $$e(A, B) = e(\alpha, \beta) + e\left( \sum_{i=0}^{\ell} x_i \cdot IC[i], \gamma
 
 The implementation must pass the following multi-tier verification suite prior to Gate G testnet deployment:
 
-### A. Core Mathematical & Circuit Tests (`nimbus-core`)
+### A. Core Mathematical & Circuit Tests (`zeltra-core`)
 1. **Canonical Decomposition Completeness:**
    - Test vectors: $0$, $1$, $2^{128}-1$, $2^{128}$, $2^{256}-1$, and pseudo-random Keccak-256 digests.
    - Verify: $\text{recombine}(H_{\text{hi}}, H_{\text{lo}}) == \text{original\_hash}$.
@@ -323,7 +323,7 @@ The implementation must pass the following multi-tier verification suite prior t
    - Swap $H_{\text{hi}}$ and $H_{\text{lo}}$ in public inputs: assert `verify_proof() == false`.
    - Modify any single bit in $H_{\text{hi}}$: assert Groth16 pairing check fails.
 
-### B. Smart Contract & Precompile Integration (`nimbus-contracts`)
+### B. Smart Contract & Precompile Integration (`zeltra-contracts`)
 1. **Calldata Slicing Integrity:**
    - Send `quote_hash = 0xffffffffffffffffffffffffffffffff00000000000000000000000000000001`.
    - Verify `quote_hi = 0x00...00ffffffffffffffffffffffffffffffff` and `quote_lo = 0x00...00000000000000000000000000000001`.
@@ -331,7 +331,7 @@ The implementation must pass the following multi-tier verification suite prior t
    - Execute test proofs against Arbitrum Sepolia Stylus test harness.
    - Confirm precompile `0x0c` consumes unpacked limbs without reverting.
 
-### C. End-to-End Relayer Ingress Validation (`nimbus-node`)
+### C. End-to-End Relayer Ingress Validation (`zeltra-node`)
 1. **Quote Equality Guard:**
    - Submit a valid proof where $H_{\text{hi}}$ and $H_{\text{lo}}$ match Quote A, but relayer execution quote is Quote B.
    - Assert relayer responds with `400 Bad Request` (`MismatchedQuoteHash`).

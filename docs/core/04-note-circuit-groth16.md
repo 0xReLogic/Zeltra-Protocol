@@ -1,6 +1,6 @@
-# Nimbus Core — 04: Private Note Circuit (Groth16 ZK-SNARK)
+# Zeltra Core — 04: Private Note Circuit (Groth16 ZK-SNARK)
 
-Dokumen ini menjelaskan desain sirkuit ZK-SNARK **Groth16** pada [`nimbus-core/src/note_circuit.rs`](file:///workspaces/Zeltra-Protocol/nimbus-core/src/note_circuit.rs), format 12 public inputs yang dibinding ke smart contract Stylus, serta ekstraksi Verifying Key EVM.
+Dokumen ini menjelaskan desain sirkuit ZK-SNARK **Groth16** pada [`zeltra-core/src/note_circuit.rs`](file:///workspaces/Zeltra-Protocol/zeltra-core/src/note_circuit.rs), format 12 public inputs yang dibinding ke smart contract Stylus, serta ekstraksi Verifying Key EVM.
 
 ---
 
@@ -52,11 +52,11 @@ Sirkuit mengeksekusi dan membuktikan constraint R1CS berikut:
 ## 3. Ekstraksi Verifying Key untuk Precompile EIP-2537
 
 Untuk memverifikasi proof on-chain tanpa overhead memori arkworks, verifier on-chain mengekspor verifying key dalam format big-endian EVM uncompressed:
-* Generator fungsi: `generate_note_circuit_evm_vk` pada [`nimbus-core/src/note_circuit.rs`](file:///workspaces/Zeltra-Protocol/nimbus-core/src/note_circuit.rs).
+* Generator fungsi: `generate_note_circuit_evm_vk` pada [`zeltra-core/src/note_circuit.rs`](file:///workspaces/Zeltra-Protocol/zeltra-core/src/note_circuit.rs).
 * **Komponen Konstanta Kunci:**
   - $\alpha \in \mathbb{G}_1$ (128 bytes)
   - $\beta, \gamma, \delta \in \mathbb{G}_2$ (masing-masing 256 bytes)
   - $\text{IC}_0 \dots \text{IC}_{12} \in \mathbb{G}_1$ (13 titik, masing-masing 128 bytes)
-* Di-embed langsung sebagai byte arrays di [`nimbus-contracts/src/groth16_note_verifier.rs`](file:///workspaces/Zeltra-Protocol/nimbus-contracts/src/groth16_note_verifier.rs), siap diproses oleh precompile host Stylus `0x0c` (MSM) dan `0x0f` (Pairing Check).
+* Di-embed langsung sebagai byte arrays di [`zeltra-contracts/src/groth16_note_verifier.rs`](file:///workspaces/Zeltra-Protocol/zeltra-contracts/src/groth16_note_verifier.rs), siap diproses oleh precompile host Stylus `0x0c` (MSM) dan `0x0f` (Pairing Check).
 
 

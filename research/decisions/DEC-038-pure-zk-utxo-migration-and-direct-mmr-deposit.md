@@ -43,7 +43,7 @@ Berikut adalah pemetaan menyeluruh dari setiap baris, struct, fungsi, dan tabel 
 ├─────────────────────┬──────────────────────────────────────────────────────────────────┤
 │ Crate / Modul       │ Elemen yang Dihapus Total Tanpa Jejak                            │
 ├─────────────────────┼──────────────────────────────────────────────────────────────────┤
-│ nimbus-contracts    │ • Storage: session_client, session_amount, session_resolved,    │
+│ zeltra-contracts    │ • Storage: session_client, session_amount, session_resolved,    │
 │                     │   session_timestamp, session_commitment_hash, session_exists,    │
 │                     │   session_note_commitment, trusted_issuer_keys,                  │
 │                     │   refundable_deposit_liability, nullifiers (BLS legacy).         │
@@ -55,14 +55,14 @@ Berikut adalah pemetaan menyeluruh dari setiap baris, struct, fungsi, dan tabel 
 │                     │   reveal_mask_key, reveal_mask_key_with_memo, claim_refund,      │
 │                     │   spend, batch_spend.                                            │
 ├─────────────────────┼──────────────────────────────────────────────────────────────────┤
-│ nimbus-core         │ • File HAPUS: src/blind_sign.rs                                  │
+│ zeltra-core         │ • File HAPUS: src/blind_sign.rs                                  │
 │                     │ • File HAPUS: src/threshold.rs                                   │
 │                     │ • Types Hapus: BlindedMessage, BlindingFactor, IssuerPublicKey,  │
 │                     │   IssuerSecretKey, MaskedBlindSignature, MaskingKey,             │
 │                     │   MaskingKeyCommitment, PartialBlindSignature, UnmaskedSignature. │
 │                     │ • Re-exports lib.rs: semua simbol blind_sign & threshold.        │
 ├─────────────────────┼──────────────────────────────────────────────────────────────────┤
-│ nimbus-node         │ • File HAPUS: src/handlers/threshold.rs                          │
+│ zeltra-node         │ • File HAPUS: src/handlers/threshold.rs                          │
 │                     │ • File HAPUS: src/deposit_indexer.rs                             │
 │                     │ • File HAPUS: src/handlers/deposit.rs                            │
 │                     │ • File HAPUS: src/circuit_breaker.rs                             │
@@ -71,11 +71,11 @@ Berikut adalah pemetaan menyeluruh dari setiap baris, struct, fungsi, dan tabel 
 │                     │ • Structs Hapus: StalledSessionInfo, SessionForReveal.           │
 │                     │ • Config Hapus: GUARDIAN_URLS, VAULT_ISSUER_KEY, THRESHOLD_QUORUM│
 ├─────────────────────┼──────────────────────────────────────────────────────────────────┤
-│ nimbus-sdk          │ • File HAPUS: src/blind_wasm.rs, src/threshold_wasm.rs           │
+│ zeltra-sdk          │ • File HAPUS: src/blind_wasm.rs, src/threshold_wasm.rs           │
 │                     │ • Hapus: Semua logika unmasking BDHKE, voucher splitting, dan    │
 │                     │   polling tanda tangan Guardian di note_wallet.rs.               │
 ├─────────────────────┼──────────────────────────────────────────────────────────────────┤
-│ nimbus-cli          │ • File HAPUS: src/commands/blind.rs, src/commands/threshold.rs   │
+│ zeltra-cli          │ • File HAPUS: src/commands/blind.rs, src/commands/threshold.rs   │
 │                     │ • Subcommands Hapus: SplitKey, Aggregate, Blind, Sign,           │
 │                     │   VerifyMasked, Unmask, VerifyUnmasked dari cli.rs & main.rs.    │
 │                     │ • Fitur Baru: CLI Wallet murni ZK (GenerateWallet,               │
@@ -137,14 +137,14 @@ Stylus.spend_private_note(...)
 
 ## 4. Rincian Teknis Per Komponen
 
-### A. Smart Contract (`nimbus-contracts`)
+### A. Smart Contract (`zeltra-contracts`)
 
 #### 1. Pembersihan Storage (`storage.rs`):
 Struktur storage dibersihkan dari 11 field peninggalan BLS:
 ```rust
 sol_storage! {
     #[entrypoint]
-    pub struct Nimbus {
+    pub struct Zeltra {
         // --- Core Governance & Security ---
         address owner;
         bool paused;
@@ -185,7 +185,7 @@ sol_storage! {
 
 #### 2. Entrypoint Tunggal Penyetoran (`deposit.rs`):
 ```rust
-impl Nimbus {
+impl Zeltra {
     pub fn deposit_direct_note(
         &mut self,
         amount: U256,
@@ -255,7 +255,7 @@ Tidak ada lagi `refundable_deposit_liability` karena tidak ada lagi sesi deposit
 
 ---
 
-### B. Primitives Kriptografi (`nimbus-core`)
+### B. Primitives Kriptografi (`zeltra-core`)
 
 1. **Penghapusan File:** Hapus fisik file `src/blind_sign.rs` dan `src/threshold.rs`.
 2. **Pembersihan `types.rs`:** Hapus semua struct pembungkus BLS point/scalar (`BlindedMessage`, `IssuerPublicKey`, dsb).
@@ -269,7 +269,7 @@ Tidak ada lagi `refundable_deposit_liability` karena tidak ada lagi sesi deposit
 
 ---
 
-### C. Relayer Node & Database (`nimbus-node`)
+### C. Relayer Node & Database (`zeltra-node`)
 
 1. **Pembersihan Database SQLite (`database.rs`):**
    - Hapus tabel:
@@ -294,7 +294,7 @@ Tidak ada lagi `refundable_deposit_liability` karena tidak ada lagi sesi deposit
 
 ---
 
-### D. Client SDK (`nimbus-sdk`)
+### D. Client SDK (`zeltra-sdk`)
 
 1. **Metode Penyetoran Mandiri (`prepare_direct_deposit`):**
    ```rust
@@ -326,7 +326,7 @@ Tidak ada lagi `refundable_deposit_liability` karena tidak ada lagi sesi deposit
    - Konfirmasi blok Arbitrum (~250 milidetik).
    - SDK menangkap event `NoteCommitmentAppended` $\rightarrow$ saldo $100 langsung berstatus **UNSPENT** dan siap dibelanjakan.
 
-### E. CLI Wallet & Cryptography Utility (`nimbus-cli`)
+### E. CLI Wallet & Cryptography Utility (`zeltra-cli`)
 
 1. **File yang Dihapus Total:**
    - `src/commands/blind.rs` (seluruh alur blind signing, unblinding, verify masked).
@@ -339,7 +339,7 @@ Tidak ada lagi `refundable_deposit_liability` karena tidak ada lagi sesi deposit
    - `VerifyProof`: Memverifikasi Groth16 proof secara lokal di command-line.
    - `InspectMmr`: Memeriksa root MMR dan bagging siblings dari node relayer.
 
-### F. SDK WASM Bindings (`nimbus-sdk`)
+### F. SDK WASM Bindings (`zeltra-sdk`)
 
 1. **File yang Dihapus Total:**
    - `src/blind_wasm.rs`: Seluruh binding WebAssembly untuk BLS client blinding.
@@ -361,18 +361,18 @@ Untuk memastikan kompilasi dan pengujian tidak hancur saat pembersihan dilakukan
 ├─────────┬──────────────────────────────────────────────────────────────┤
 │ LANGKAH │ TINDAKAN DETAIL                                              │
 ├─────────┼──────────────────────────────────────────────────────────────┤
-│ FASE 1  │ nimbus-core: Hapus blind_sign.rs, threshold.rs, dan BLS      │
+│ FASE 1  │ zeltra-core: Hapus blind_sign.rs, threshold.rs, dan BLS      │
 │         │ types di types.rs & lib.rs. Pastikan `cargo test -p          │
-│         │ nimbus-core` lolos 100% untuk modul note & circuits.        │
+│         │ zeltra-core` lolos 100% untuk modul note & circuits.        │
 ├─────────┼──────────────────────────────────────────────────────────────┤
-│ FASE 2  │ nimbus-contracts: Tambah deposit_direct_note, bersihkan      │
+│ FASE 2  │ zeltra-contracts: Tambah deposit_direct_note, bersihkan      │
 │         │ storage.rs dari session_*, hapus _reveal_mask_key,          │
 │         │ _claim_refund, dan verify_bls_spend. Jalankan `cargo test`.  │
 ├─────────┼──────────────────────────────────────────────────────────────┤
-│ FASE 3  │ nimbus-node: Hapus handlers/threshold.rs, deposit_indexer.rs,│
+│ FASE 3  │ zeltra-node: Hapus handlers/threshold.rs, deposit_indexer.rs,│
 │         │ bersihkan schema SQLite, dan sederhanakan routes di main.rs. │
 ├─────────┼──────────────────────────────────────────────────────────────┤
-│ FASE 4  │ nimbus-sdk: Integrasi prepare_direct_deposit dan bersihkan   │
+│ FASE 4  │ zeltra-sdk: Integrasi prepare_direct_deposit dan bersihkan   │
 │         │ sisa pemanggilan BDHKE di note_wallet.rs.                    │
 ├─────────┼──────────────────────────────────────────────────────────────┤
 │ FASE 5  │ Scripts & Docs: Hapus scripts/start_cluster.sh, perbarui     │

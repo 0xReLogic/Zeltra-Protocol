@@ -1,6 +1,6 @@
-# Nimbus Relayer — 03: Settlement Queue & Adaptive Batching
+# Zeltra Relayer — 03: Settlement Queue & Adaptive Batching
 
-Dokumen ini menjelaskan mesin antrian persisten, mekanisme *leasing worker*, siklus hidup transaksi, dan logika penggabungan batch pada [`nimbus-node/src/handlers/spend.rs`](file:///workspaces/Zeltra-Protocol/nimbus-node/src/handlers/spend.rs) (mengacu pada spesifikasi [`DEC-005`](file:///workspaces/Zeltra-Protocol/research/decisions/DEC-005-persistent-spend-settlement-queue.md) & [`DEC-006`](file:///workspaces/Zeltra-Protocol/research/decisions/DEC-006-adaptive-private-spend-batching.md)).
+Dokumen ini menjelaskan mesin antrian persisten, mekanisme *leasing worker*, siklus hidup transaksi, dan logika penggabungan batch pada [`zeltra-node/src/handlers/spend.rs`](file:///workspaces/Zeltra-Protocol/zeltra-node/src/handlers/spend.rs) (mengacu pada spesifikasi [`DEC-005`](file:///workspaces/Zeltra-Protocol/research/decisions/DEC-005-persistent-spend-settlement-queue.md) & [`DEC-006`](file:///workspaces/Zeltra-Protocol/research/decisions/DEC-006-adaptive-private-spend-batching.md)).
 
 ---
 
@@ -51,9 +51,9 @@ Untuk mencegah kondisi balapan (*race condition*) di mana dua worker background 
 
 ## 3. Mesin Adaptive Batching (2 s/d 8 Transaksi)
 
-File referensi: [`nimbus-node/src/handlers/spend.rs`](file:///workspaces/Zeltra-Protocol/nimbus-node/src/handlers/spend.rs)
+File referensi: [`zeltra-node/src/handlers/spend.rs`](file:///workspaces/Zeltra-Protocol/zeltra-node/src/handlers/spend.rs)
 
-Jika variabel `NIMBUS_BATCH_ENABLED=true` aktif, relayer tidak mengirimkan transaksi satu per satu:
+Jika variabel `ZELTRA_BATCH_ENABLED=true` aktif, relayer tidak mengirimkan transaksi satu per satu:
 
 1. **Jendela Adaptif (*Adaptive Window*):**
    * Target jeda kumpul: **1 detik**.
@@ -80,14 +80,14 @@ Jika sebuah transaksi batch mengalami revert di on-chain:
 Mengacu pada spesifikasi [`DEC-017`](file:///workspaces/Zeltra-Protocol/research/decisions/DEC-017-relayer-receipt-finality-and-nonce-management.md), relayer mencegah kegagalan nonce dan transaksi tersangkut di mempool melalui dua mekanisme:
 
 1. **Alokasi Nonce Atomik (*Thread-Safe Lock*):**
-   * Di dalam [`nimbus-node/src/evm_client.rs`](file:///workspaces/Zeltra-Protocol/nimbus-node/src/evm_client.rs), pengiriman transaksi diamankan oleh `nonce_lock: Arc<Mutex<Option<u64>>>`.
+   * Di dalam [`zeltra-node/src/evm_client.rs`](file:///workspaces/Zeltra-Protocol/zeltra-node/src/evm_client.rs), pengiriman transaksi diamankan oleh `nonce_lock: Arc<Mutex<Option<u64>>>`.
    * Mencegah dua worker konkuren mengambil nonce yang sama atau melompati nonce (*nonce gap*) yang memicu penolakan sequencer Arbitrum Nitro.
    * **Pemulihan Otomatis (*Auto-Resync*):** Jika RPC merespons error `nonce too low`, `nonce too high`, atau `already known`, relayer seketika melakukan query ulang ke pending count on-chain dan menyiarkan ulang transaksi secara transparan.
 
 2. **Watchdog Mempool & Eskalasi Gas (+15%):**
-   * Jika transaksi belum terinklusi dalam blok setelah batas waktu `NIMBUS_TX_TIMEOUT_SECS` (default: 30 detik), sistem secara otomatis membuat transaksi pengganti (*replacement transaction*).
+   * Jika transaksi belum terinklusi dalam blok setelah batas waktu `ZELTRA_TX_TIMEOUT_SECS` (default: 30 detik), sistem secara otomatis membuat transaksi pengganti (*replacement transaction*).
    * **Aturan Penggantian:** Transaksi pengganti menggunakan **nonce yang sama persis** dengan parameter gas dinaikkan minimal **+15%** (`maxFeePerGas` dan `maxPriorityFeePerGas`) sesuai standar EIP-1559.
-   * Transaksi pengganti dapat dieskalasi hingga batas `NIMBUS_MAX_GAS_BUMPS` (default: 3 kali).
+   * Transaksi pengganti dapat dieskalasi hingga batas `ZELTRA_MAX_GAS_BUMPS` (default: 3 kali).
 
 ---
 
@@ -97,7 +97,7 @@ Untuk melindungi relayer dari risiko chain reorganization:
 * Status transaksi tidak ditandai `confirmed` hanya berdasarkan ketersediaan receipt awal.
 * Relayer memverifikasi kedalaman blok konfirmasi:
   $$\text{current\_block} - \text{receipt\_block} + 1 \ge \text{confirmation\_threshold}$$
-* Nilai ambang batas dapat dikonfigurasi melalui `NIMBUS_CONFIRMATION_THRESHOLD`:
+* Nilai ambang batas dapat dikonfigurasi melalui `ZELTRA_CONFIRMATION_THRESHOLD`:
   * **Arbitrum:** 1 blok (fast-finality L2).
   * **Ethereum L1:** 12 blok (~2.5 menit untuk PoS Casper finality).
 
@@ -182,7 +182,7 @@ Mengacu pada spesifikasi [`DEC-020`](file:///workspaces/Zeltra-Protocol/research
 Mengacu pada spesifikasi [`DEC-025`](file:///workspaces/Zeltra-Protocol/research/decisions/DEC-025-relayer-zk-note-spend-settlement-atomic-batching-and-reconciliation.md):
 
 ### A. Endpoint Ingress (`POST /api/v1/spend-private-note`)
-Node mengekspos endpoint khusus untuk menerima pembelanjaan saldo privat ZK-UTXO ([`nimbus-node/src/handlers/spend.rs`](file:///workspaces/Zeltra-Protocol/nimbus-node/src/handlers/spend.rs)). Format request payload berupa [`PrivateNoteSpendRequest`](file:///workspaces/Zeltra-Protocol/nimbus-node/src/dto.rs#L162).
+Node mengekspos endpoint khusus untuk menerima pembelanjaan saldo privat ZK-UTXO ([`zeltra-node/src/handlers/spend.rs`](file:///workspaces/Zeltra-Protocol/zeltra-node/src/handlers/spend.rs)). Format request payload berupa [`PrivateNoteSpendRequest`](file:///workspaces/Zeltra-Protocol/zeltra-node/src/dto.rs#L162).
 
 ### B. Pipeline Validasi Pre-Flight (Fail-Closed)
 Sebelum transaksi di-enqueue ke database, node menjalankan serangkaian verifikasi invariant:
@@ -209,7 +209,7 @@ Jika seluruh validasi lolos:
 Pada proses batching background (`process_spend_batch`):
 * Transaksi `is_private_note() == true` **tidak digabungkan ke antrean batch BLS**, melainkan langsung dialirkan ke antrean `direct`.
 * Hal ini karena transaksi ZK-UTXO memanggil fungsi Stylus khusus `spend_private_note(...)` yang memverifikasi Groth16 via precompile EIP-2537 (`0x0c` MSM dan `0x0f` 4-pairing check) dengan alokasi gas limit **2.500.000 gas**.
-* [`EvmClient::broadcast_spend_private_note_transaction`](file:///workspaces/Zeltra-Protocol/nimbus-node/src/evm_client.rs#L810) meng-ABI encode calldata Sol! secara tipe-aman dan menyiarkannya dengan watchdog penggantian gas otomatis (+15% bump) jika tersangkut di mempool.
+* [`EvmClient::broadcast_spend_private_note_transaction`](file:///workspaces/Zeltra-Protocol/zeltra-node/src/evm_client.rs#L810) meng-ABI encode calldata Sol! secara tipe-aman dan menyiarkannya dengan watchdog penggantian gas otomatis (+15% bump) jika tersangkut di mempool.
 * Saat receipt on-chain terkonfirmasi sukses, database secara atomik menandai spend sebagai `confirmed`, merekam `tx_hash` dan `block_number`, serta mencatat nullifier ke tabel `nullifiers`.
 
 

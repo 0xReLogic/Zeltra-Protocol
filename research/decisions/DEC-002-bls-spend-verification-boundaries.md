@@ -39,7 +39,7 @@ domain separation diimplementasikan end-to-end.
 Canonical message yang harus diteliti:
 
 ```text
-NIMBUS_SPEND_V1 ||
+ZELTRA_SPEND_V1 ||
 chain_id ||
 contract_address ||
 action ||
@@ -66,7 +66,7 @@ Accessed: 2026-06-06.
 ## Versi
 
 - `stylus-sdk = 0.6.x`
-- `ark-bls12-381 = 0.5.x` in `nimbus-core`
+- `ark-bls12-381 = 0.5.x` in `zeltra-core`
 - Target pairing precompile: `0x0f`
 
 ## Test

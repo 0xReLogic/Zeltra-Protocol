@@ -8,10 +8,10 @@ Folder `jurnal/filter/` berisi hasil kurasi dan ekstraksi analitis dari jurnal k
 
 | File Kurasi | Lapisan Zeltra | Komponen Terkait | Fokus Utama Inovasi |
 |---|---|---|---|
-| [`01-contract-innovations.md`](file:///workspaces/Zeltra-Protocol/jurnal/filter/01-contract-innovations.md) | **`nimbus-contracts`** (Stylus WASM) | `spend.rs`, `deposit.rs`, `storage.rs`, EIP-2537 | Merkle Mountain Range accumulator, gasless rate-limiting, EIP-2537 batch verification, ring buffer pruning. |
-| [`02-core-innovations.md`](file:///workspaces/Zeltra-Protocol/jurnal/filter/02-core-innovations.md) | **`nimbus-core`** (Rust Crypto) | `note_circuit.rs`, `joinsplit_circuit.rs`, `poseidon.rs` | Sanitasi subgroup Groth16 (Argo), Jacobian circuit diagnostics, Cryptographic Erasure, Decoy dummy slots. |
-| [`03-relayer-innovations.md`](file:///workspaces/Zeltra-Protocol/jurnal/filter/03-relayer-innovations.md) | **`nimbus-node`** (Stateless Sequencer) | `validation.rs`, `database.rs`, `evm_client.rs` | Preflight CPU verification, Auditing Budget (AuditPay), fair batch sequencing anti-MEV, WabiSabi decomposition. |
-| [`04-sdk-innovations.md`](file:///workspaces/Zeltra-Protocol/jurnal/filter/04-sdk-innovations.md) | **`nimbus-sdk`** (Client & Wallet) | `note_wallet.rs`, `zk_wasm.rs`, Viewing Keys | Oblivious note synchronization, Auditable stealth addresses (zkBSA), zero-leakage scanning, MinMandate agentic workflows. |
+| [`01-contract-innovations.md`](file:///workspaces/Zeltra-Protocol/jurnal/filter/01-contract-innovations.md) | **`zeltra-contracts`** (Stylus WASM) | `spend.rs`, `deposit.rs`, `storage.rs`, EIP-2537 | Merkle Mountain Range accumulator, gasless rate-limiting, EIP-2537 batch verification, ring buffer pruning. |
+| [`02-core-innovations.md`](file:///workspaces/Zeltra-Protocol/jurnal/filter/02-core-innovations.md) | **`zeltra-core`** (Rust Crypto) | `note_circuit.rs`, `joinsplit_circuit.rs`, `poseidon.rs` | Sanitasi subgroup Groth16 (Argo), Jacobian circuit diagnostics, Cryptographic Erasure, Decoy dummy slots. |
+| [`03-relayer-innovations.md`](file:///workspaces/Zeltra-Protocol/jurnal/filter/03-relayer-innovations.md) | **`zeltra-node`** (Stateless Sequencer) | `validation.rs`, `database.rs`, `evm_client.rs` | Preflight CPU verification, Auditing Budget (AuditPay), fair batch sequencing anti-MEV, WabiSabi decomposition. |
+| [`04-sdk-innovations.md`](file:///workspaces/Zeltra-Protocol/jurnal/filter/04-sdk-innovations.md) | **`zeltra-sdk`** (Client & Wallet) | `note_wallet.rs`, `zk_wasm.rs`, Viewing Keys | Oblivious note synchronization, Auditable stealth addresses (zkBSA), zero-leakage scanning, MinMandate agentic workflows. |
 
 ---
 

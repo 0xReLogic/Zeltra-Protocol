@@ -1,6 +1,6 @@
-# Nimbus Contract — 03: Deposit, Reveal & Refund Lifecycle
+# Zeltra Contract — 03: Deposit, Reveal & Refund Lifecycle
 
-Dokumen ini menjelaskan alur deposit kolateral, pembuktian kunci masking (*reveal*), dan penarikan refund darurat bertimelock pada [`nimbus-contracts/src/deposit.rs`](file:///workspaces/Zeltra-Protocol/nimbus-contracts/src/deposit.rs).
+Dokumen ini menjelaskan alur deposit kolateral, pembuktian kunci masking (*reveal*), dan penarikan refund darurat bertimelock pada [`zeltra-contracts/src/deposit.rs`](file:///workspaces/Zeltra-Protocol/zeltra-contracts/src/deposit.rs).
 
 ---
 

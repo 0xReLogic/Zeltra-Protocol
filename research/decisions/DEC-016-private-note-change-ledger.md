@@ -6,7 +6,7 @@ Frozen spec: DEC-016A (research/decisions/DEC-016A-private-note-spec-freeze.md)
 
 ## Masalah
 
-Kontrak Nimbus saat ini menyimpan deposit sebagai liability global
+Kontrak Zeltra saat ini menyimpan deposit sebagai liability global
 `total_deposited_principal`, lalu membolehkan satu BLS credential membayar satu
 nominal yang sudah terikat pada message. Model ini belum mempunyai representasi
 on-chain yang membuktikan hak pengguna atas sisa deposit setelah partial spend.
@@ -43,7 +43,7 @@ sepenuhnya oleh kontrak. Jalur batch juga tidak membawa execution fee per item.
 
 ## Product Invariant
 
-Nimbus adalah private payment account, bukan voucher yang menyita remainder.
+Zeltra adalah private payment account, bukan voucher yang menyita remainder.
 
 Setiap unit stablecoin setelah fee harus selalu berada tepat di salah satu state:
 
@@ -149,7 +149,7 @@ notes sebagai satu saldo sehingga user tidak melihat kompleksitas UTXO.
 
 ## Keputusan
 
-Nimbus mengadopsi **private note ledger minimal**:
+Zeltra mengadopsi **private note ledger minimal**:
 
 ```text
 deposit -> mint private note commitment
@@ -303,7 +303,7 @@ diam-diam diberi semantic baru pada deployment yang sudah ada.
 
 ## Privacy Boundary
 
-Nimbus membayar recipient EVM publik, sehingga recipient, payout amount, dan
+Zeltra membayar recipient EVM publik, sehingga recipient, payout amount, dan
 settlement time tetap terlihat. Yang disembunyikan dan diputus korelasinya:
 
 - owner dan nilai change note;

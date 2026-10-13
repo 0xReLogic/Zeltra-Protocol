@@ -21,10 +21,10 @@
 /todo.md
 
 # Inside allowed crates, ignore non-Rust/non-Cargo/non-Docker files
-nimbus-*/**/*.sol
-nimbus-*/**/*.md
-nimbus-*/**/*.json
-nimbus-*/**/*.sql
-nimbus-*/**/*.sh
-nimbus-*/**/*.txt
-nimbus-*/**/*.env*
+zeltra-*/**/*.sol
+zeltra-*/**/*.md
+zeltra-*/**/*.json
+zeltra-*/**/*.sql
+zeltra-*/**/*.sh
+zeltra-*/**/*.txt
+zeltra-*/**/*.env*

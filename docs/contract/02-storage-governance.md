@@ -1,6 +1,6 @@
-# Nimbus Contract — 02: Storage Layout & Tata Kelola
+# Zeltra Contract — 02: Storage Layout & Tata Kelola
 
-Dokumen ini menjelaskan tata letak storage on-chain pada [`nimbus-contracts/src/storage.rs`](file:///workspaces/Zeltra-Protocol/nimbus-contracts/src/storage.rs) dan mekanisme tata kelola (governance) bertimelock pada [`nimbus-contracts/src/lib.rs`](file:///workspaces/Zeltra-Protocol/nimbus-contracts/src/lib.rs).
+Dokumen ini menjelaskan tata letak storage on-chain pada [`zeltra-contracts/src/storage.rs`](file:///workspaces/Zeltra-Protocol/zeltra-contracts/src/storage.rs) dan mekanisme tata kelola (governance) bertimelock pada [`zeltra-contracts/src/lib.rs`](file:///workspaces/Zeltra-Protocol/zeltra-contracts/src/lib.rs).
 
 ---
 
@@ -11,7 +11,7 @@ Smart contract Stylus menggunakan makro `sol_storage!` untuk memetakan slot peny
 ```rust
 sol_storage! {
     #[entrypoint]
-    pub struct Nimbus {
+    pub struct Zeltra {
         // --- Escrow & Deposit Sessions ---
         mapping(bytes32 => uint256) collateral;
         mapping(bytes32 => address) session_client;

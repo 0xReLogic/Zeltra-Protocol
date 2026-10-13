@@ -6,10 +6,10 @@ set -e
 PORT="${PORT:-8080}"
 PID_FILE="relayer.pid"
 LOG_FILE="relayer.log"
-BIN="./target/debug/nimbus-node"
+BIN="./target/debug/zeltra-node"
 
 # Load .env.test if available
-ENV_FILE="nimbus-node/.env.test"
+ENV_FILE="zeltra-node/.env.test"
 if [ -f "$ENV_FILE" ]; then
   # shellcheck disable=SC1090
   source "$ENV_FILE"
@@ -19,11 +19,11 @@ else
 fi
 
 export PORT="$PORT"
-export NIMBUS_ENV="${NIMBUS_ENV:-test}"
-export NIMBUS_DB_KEY="${NIMBUS_DB_KEY:-my-hard-test-secure-db-key-12345}"
-export NIMBUS_DATABASE_PATH="${NIMBUS_DATABASE_PATH:-relayer.db}"
-export NIMBUS_RPC_URL="${NIMBUS_RPC_URL:-https://arbitrum-sepolia.core.chainstack.com/d18e11a2327c1a17c030975e3e0c8e24}"
-export NIMBUS_RPC_FALLBACK_URL="${NIMBUS_RPC_FALLBACK_URL:-https://arbitrum-sepolia.infura.io/v3/e0442523234742288f49543cb9e16da9}"
+export ZELTRA_ENV="${ZELTRA_ENV:-test}"
+export ZELTRA_DB_KEY="${ZELTRA_DB_KEY:-my-hard-test-secure-db-key-12345}"
+export ZELTRA_DATABASE_PATH="${ZELTRA_DATABASE_PATH:-relayer.db}"
+export ZELTRA_RPC_URL="${ZELTRA_RPC_URL:-https://arbitrum-sepolia.core.chainstack.com/d18e11a2327c1a17c030975e3e0c8e24}"
+export ZELTRA_RPC_FALLBACK_URL="${ZELTRA_RPC_FALLBACK_URL:-https://arbitrum-sepolia.infura.io/v3/e0442523234742288f49543cb9e16da9}"
 
 start() {
   echo "=========================================="
@@ -36,13 +36,13 @@ start() {
   fi
 
   if [ ! -f "$BIN" ]; then
-    echo "[1/2] Building nimbus-node binary..."
-    cargo build -p nimbus-node
+    echo "[1/2] Building zeltra-node binary..."
+    cargo build -p zeltra-node
   else
     echo "[1/2] Binary found: $BIN"
   fi
 
-  echo "[2/2] Starting nimbus-node on port $PORT..."
+  echo "[2/2] Starting zeltra-node on port $PORT..."
   nohup "$BIN" > "$LOG_FILE" 2>&1 &
   RELAYER_PID=$!
   echo "$RELAYER_PID" > "$PID_FILE"
@@ -85,8 +85,8 @@ stop() {
     fi
     rm -f "$PID_FILE"
   else
-    pkill -f nimbus-node 2>/dev/null || true
-    echo "Killed any lingering nimbus-node processes."
+    pkill -f zeltra-node 2>/dev/null || true
+    echo "Killed any lingering zeltra-node processes."
   fi
 }
 

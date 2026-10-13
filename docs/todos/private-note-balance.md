@@ -47,7 +47,7 @@ Seluruh gap fatal legacy berikut telah **dituntaskan 100%**:
 
 ## Gate A - Model dan Encoding ZK-UTXO
 
-> **Status Gate A Primitives:** **SELESAI (100%)** — Model Rust, domain separation (Poseidon Grain-128 W3/W5, DEC-021), note commitment, nullifier derivation, dan Merkle Mountain Range (MMR, DEC-032) telah teruji dan diverifikasi secara identik di `nimbus-core` dan `nimbus-contracts`.
+> **Status Gate A Primitives:** **SELESAI (100%)** — Model Rust, domain separation (Poseidon Grain-128 W3/W5, DEC-021), note commitment, nullifier derivation, dan Merkle Mountain Range (MMR, DEC-032) telah teruji dan diverifikasi secara identik di `zeltra-core` dan `zeltra-contracts`.
 
 ---
 
@@ -76,7 +76,7 @@ Seluruh gap fatal legacy berikut telah **dituntaskan 100%**:
 
 ## Gate D - Stylus Contract Note Ledger & Verifiers
 
-> **Status Gate D:** **SELESAI (100%)** — Verifier Groth16 BLS12-381 via EIP-2537 (`0x0c` MSM + `0x0f` Pairing Check) untuk `PrivateNoteCircuit` (16 public inputs) dan `JoinSplitCircuit` (19 public inputs) telah terpasang di Stylus (`nimbus-contracts`). Didukung dengan on-chain Merkle Mountain Range (`_mmr_insert`), namespaced note nullifiers, generational nullifier slots, dan multi-liability solvency invariant.
+> **Status Gate D:** **SELESAI (100%)** — Verifier Groth16 BLS12-381 via EIP-2537 (`0x0c` MSM + `0x0f` Pairing Check) untuk `PrivateNoteCircuit` (16 public inputs) dan `JoinSplitCircuit` (19 public inputs) telah terpasang di Stylus (`zeltra-contracts`). Didukung dengan on-chain Merkle Mountain Range (`_mmr_insert`), namespaced note nullifiers, generational nullifier slots, dan multi-liability solvency invariant.
 
 ### Pipeline Verifikasi Groth16 BLS12-381 On-Chain:
 - **Proof format (512 bytes):**
@@ -95,7 +95,7 @@ Seluruh gap fatal legacy berikut telah **dituntaskan 100%**:
 
 ## Gate E - SDK Private Wallet State
 
-> **Status Gate E:** **SELESAI (100%)** — `PrivateNoteWallet` (`nimbus-sdk/src/wallet/note_wallet.rs`) mendukung direct deposit prep (Poseidon + AEAD memo), encrypted note store (DEC-024), versioned backup dengan HMAC-SHA256, siklus hidup note 4-tahap (`PendingDeposit -> Unspent -> Reserved -> Spent`), crash-safe two-phase commit, local Groth16 proof generation (`prepare_spend_proof`, `prepare_joinsplit_proof`), stochastic knapsack coin selection, autonomous note consolidation (`consolidate_notes`), dan viewing key trial decryption (`recover_notes`).
+> **Status Gate E:** **SELESAI (100%)** — `PrivateNoteWallet` (`zeltra-sdk/src/wallet/note_wallet.rs`) mendukung direct deposit prep (Poseidon + AEAD memo), encrypted note store (DEC-024), versioned backup dengan HMAC-SHA256, siklus hidup note 4-tahap (`PendingDeposit -> Unspent -> Reserved -> Spent`), crash-safe two-phase commit, local Groth16 proof generation (`prepare_spend_proof`, `prepare_joinsplit_proof`), stochastic knapsack coin selection, autonomous note consolidation (`consolidate_notes`), dan viewing key trial decryption (`recover_notes`).
 
 ### Fitur Ekosistem Lanjutan (Fase 3):
 - [ ] **Shielded-to-Shielded In-Pool Transfer:** Pengiriman private note langsung antar akun/merchant Zeltra (menggunakan `output_commitment_1` untuk penerima dan `output_commitment_2` untuk change note) tanpa penarikan USDC publik on-chain, menjaga omset merchant 100% terlindungi (Merchant Masking).
@@ -104,7 +104,7 @@ Seluruh gap fatal legacy berikut telah **dituntaskan 100%**:
 
 ## Gate F - Node, Quote, dan Settlement
 
-> **Status Gate F:** **SELESAI (100% Full Pipeline & Solvency Observability)** — Stateless sequencer relayer (`nimbus-node`) dengan validasi fail-closed, endpoint `/api/v1/spend-private-note`, `/api/v1/spend-joinsplit`, MMR dynamic sync (`/api/v1/mmr/proof/:leaf_index`), preflight Groth16 verifier lokal (DEC-026 C-01), dual-layer double-spend guard (`is_nullifier_spent`), direct settlement dispatcher, three-way reconciliation engine (`reconcile_execution_fees`), zero-leakage solvency observability di endpoint `/health`, mempool lease watchdog worker, MMR event indexer worker, serta dedicated `/live` dan `/ready` health probes.
+> **Status Gate F:** **SELESAI (100% Full Pipeline & Solvency Observability)** — Stateless sequencer relayer (`zeltra-node`) dengan validasi fail-closed, endpoint `/api/v1/spend-private-note`, `/api/v1/spend-joinsplit`, MMR dynamic sync (`/api/v1/mmr/proof/:leaf_index`), preflight Groth16 verifier lokal (DEC-026 C-01), dual-layer double-spend guard (`is_nullifier_spent`), direct settlement dispatcher, three-way reconciliation engine (`reconcile_execution_fees`), zero-leakage solvency observability di endpoint `/health`, mempool lease watchdog worker, MMR event indexer worker, serta dedicated `/live` dan `/ready` health probes.
 
 ---
 

@@ -4,11 +4,11 @@
 - **Author:** Zeltra Architecture & Cryptography Team
 - **Date:** 2026-10-12
 - **Applies to:**
-  - `nimbus-core` (`src/blind_sign.rs`, `src/threshold.rs`, `src/types.rs`, `src/lib.rs`)
-  - `nimbus-contracts` (`src/deposit.rs`, `src/spend.rs`, `src/storage.rs`, `src/lib.rs`)
-  - `nimbus-node` (`src/handlers/threshold.rs`, `src/deposit_indexer.rs`, `src/circuit_breaker.rs`, `src/database.rs`, `src/main.rs`)
-  - `nimbus-sdk` (`src/blind_wasm.rs`, `src/threshold_wasm.rs`, `src/wallet/note_wallet.rs`)
-  - `nimbus-cli` (`src/commands/blind.rs`, `src/commands/threshold.rs`, `src/cli.rs`, `src/main.rs`)
+  - `zeltra-core` (`src/blind_sign.rs`, `src/threshold.rs`, `src/types.rs`, `src/lib.rs`)
+  - `zeltra-contracts` (`src/deposit.rs`, `src/spend.rs`, `src/storage.rs`, `src/lib.rs`)
+  - `zeltra-node` (`src/handlers/threshold.rs`, `src/deposit_indexer.rs`, `src/circuit_breaker.rs`, `src/database.rs`, `src/main.rs`)
+  - `zeltra-sdk` (`src/blind_wasm.rs`, `src/threshold_wasm.rs`, `src/wallet/note_wallet.rs`)
+  - `zeltra-cli` (`src/commands/blind.rs`, `src/commands/threshold.rs`, `src/cli.rs`, `src/main.rs`)
   - `scripts` (`scripts/start_cluster.sh`, `scripts/start_relayer.sh`)
 - **Parent & Related DECs:**
   - [`DEC-038`](file:///workspaces/Zeltra-Protocol/research/decisions/DEC-038-pure-zk-utxo-migration-and-direct-mmr-deposit.md) (Master Pure ZK-UTXO Architecture Blueprint)
@@ -179,7 +179,7 @@ Tabel berikut menetapkan seluruh file, struct, fungsi, storage field, dan rute y
 ├─────────────────────┬──────────────────────────────────────────────────────────────────┤
 │ Crate / Modul       │ Elemen yang Dihapus Total Tanpa Jejak                            │
 ├─────────────────────┼──────────────────────────────────────────────────────────────────┤
-│ nimbus-contracts    │ • Storage: session_client, session_amount, session_resolved,    │
+│ zeltra-contracts    │ • Storage: session_client, session_amount, session_resolved,    │
 │                     │   session_timestamp, session_commitment_hash, session_exists,    │
 │                     │   session_note_commitment, trusted_issuer_keys,                  │
 │                     │   refundable_deposit_liability, nullifiers (BLS legacy).         │
@@ -191,14 +191,14 @@ Tabel berikut menetapkan seluruh file, struct, fungsi, storage field, dan rute y
 │                     │   reveal_mask_key, reveal_mask_key_with_memo, claim_refund,      │
 │                     │   spend, batch_spend.                                            │
 ├─────────────────────┼──────────────────────────────────────────────────────────────────┤
-│ nimbus-core         │ • File HAPUS: src/blind_sign.rs                                  │
+│ zeltra-core         │ • File HAPUS: src/blind_sign.rs                                  │
 │                     │ • File HAPUS: src/threshold.rs                                   │
 │                     │ • Types Hapus: BlindedMessage, BlindingFactor, IssuerPublicKey,  │
 │                     │   IssuerSecretKey, MaskedBlindSignature, MaskingKey,             │
 │                     │   MaskingKeyCommitment, PartialBlindSignature, UnmaskedSignature. │
 │                     │ • Re-exports lib.rs: semua simbol blind_sign & threshold.        │
 ├─────────────────────┼──────────────────────────────────────────────────────────────────┤
-│ nimbus-node         │ • File HAPUS: src/handlers/threshold.rs                          │
+│ zeltra-node         │ • File HAPUS: src/handlers/threshold.rs                          │
 │                     │ • File HAPUS: src/deposit_indexer.rs                             │
 │                     │ • File HAPUS: src/handlers/deposit.rs                            │
 │                     │ • File HAPUS: src/circuit_breaker.rs                             │
@@ -207,11 +207,11 @@ Tabel berikut menetapkan seluruh file, struct, fungsi, storage field, dan rute y
 │                     │ • Structs Hapus: StalledSessionInfo, SessionForReveal.           │
 │                     │ • Config Hapus: GUARDIAN_URLS, VAULT_ISSUER_KEY, THRESHOLD_QUORUM│
 ├─────────────────────┼──────────────────────────────────────────────────────────────────┤
-│ nimbus-sdk          │ • File HAPUS: src/blind_wasm.rs, src/threshold_wasm.rs           │
+│ zeltra-sdk          │ • File HAPUS: src/blind_wasm.rs, src/threshold_wasm.rs           │
 │                     │ • Hapus: Semua logika unmasking BDHKE, voucher splitting, dan    │
 │                     │   polling tanda tangan Guardian di note_wallet.rs.               │
 ├─────────────────────┼──────────────────────────────────────────────────────────────────┤
-│ nimbus-cli          │ • File HAPUS: src/commands/blind.rs, src/commands/threshold.rs   │
+│ zeltra-cli          │ • File HAPUS: src/commands/blind.rs, src/commands/threshold.rs   │
 │                     │ • Subcommands Hapus: SplitKey, Aggregate, Blind, Sign,           │
 │                     │   VerifyMasked, Unmask, VerifyUnmasked dari cli.rs & main.rs.    │
 ├─────────────────────┼──────────────────────────────────────────────────────────────────┤
@@ -224,17 +224,17 @@ Tabel berikut menetapkan seluruh file, struct, fungsi, storage field, dan rute y
 
 ## 5. Rincian Teknis Per Crate
 
-### A. Fondasi Kriptografi (`nimbus-core`)
+### A. Fondasi Kriptografi (`zeltra-core`)
 1. **Penghapusan File Fisik:**
-   - `rm nimbus-core/src/blind_sign.rs`
-   - `rm nimbus-core/src/threshold.rs`
-2. **Pembersihan `nimbus-core/src/types.rs`:**
+   - `rm zeltra-core/src/blind_sign.rs`
+   - `rm zeltra-core/src/threshold.rs`
+2. **Pembersihan `zeltra-core/src/types.rs`:**
    Hapus semua struct pembungkus kurva BLS G1/G2 legacy:
    - `BlindedMessage`, `BlindingFactor`, `IssuerPublicKey`, `IssuerSecretKey`
    - `MaskedBlindSignature`, `MaskingKey`, `MaskingKeyCommitment`, `PartialBlindSignature`, `UnmaskedSignature`
-3. **Pembersihan `nimbus-core/src/lib.rs`:**
+3. **Pembersihan `zeltra-core/src/lib.rs`:**
    Hapus modul deklarasi `pub mod blind_sign;` dan `pub mod threshold;`.
-4. **State Akhir API `nimbus-core`:**
+4. **State Akhir API `zeltra-core`:**
    Murni mengekspor modul ZK-UTXO:
    - `poseidon`: Grain-128 LFSR Poseidon Hash W5 & Domain Separation.
    - `note`: Struktur `PrivateNote`, Merkle Mountain Range (`MerkleMountainRange`), Bagging Gadgets.
@@ -245,7 +245,7 @@ Tabel berikut menetapkan seluruh file, struct, fungsi, storage field, dan rute y
 
 ---
 
-### B. Smart Contract Stylus WASM (`nimbus-contracts`)
+### B. Smart Contract Stylus WASM (`zeltra-contracts`)
 1. **Pembersihan Storage (`storage.rs`):**
    Hapus 11 field peninggalan BLS (`session_*`, `refundable_deposit_liability`, `trusted_issuer_keys`, `nullifiers`).
 2. **Eliminasi Precompile BLS MSM:**
@@ -259,12 +259,12 @@ Tabel berikut menetapkan seluruh file, struct, fungsi, storage field, dan rute y
 
 ---
 
-### C. Relayer Sequencer Node (`nimbus-node`)
+### C. Relayer Sequencer Node (`zeltra-node`)
 1. **Pembersihan File Handler & Worker:**
-   - `rm nimbus-node/src/handlers/threshold.rs`
-   - `rm nimbus-node/src/handlers/deposit.rs`
-   - `rm nimbus-node/src/circuit_breaker.rs`
-   - `rm nimbus-node/src/deposit_indexer.rs` (digantikan oleh MMR listener)
+   - `rm zeltra-node/src/handlers/threshold.rs`
+   - `rm zeltra-node/src/handlers/deposit.rs`
+   - `rm zeltra-node/src/circuit_breaker.rs`
+   - `rm zeltra-node/src/deposit_indexer.rs` (digantikan oleh MMR listener)
 2. **Pembersihan Database SQLite (`database.rs`):**
    Jalankan query DDL pemusnahan tabel:
    ```sql
@@ -278,15 +278,15 @@ Tabel berikut menetapkan seluruh file, struct, fungsi, storage field, dan rute y
 
 ---
 
-### D. Client SDK & CLI (`nimbus-sdk` & `nimbus-cli`)
-1. **Pembersihan WASM (`nimbus-sdk`):**
-   - `rm nimbus-sdk/src/blind_wasm.rs`
-   - `rm nimbus-sdk/src/threshold_wasm.rs`
-2. **Penyederhanaan Wallet (`nimbus-sdk/src/wallet/note_wallet.rs`):**
+### D. Client SDK & CLI (`zeltra-sdk` & `zeltra-cli`)
+1. **Pembersihan WASM (`zeltra-sdk`):**
+   - `rm zeltra-sdk/src/blind_wasm.rs`
+   - `rm zeltra-sdk/src/threshold_wasm.rs`
+2. **Penyederhanaan Wallet (`zeltra-sdk/src/wallet/note_wallet.rs`):**
    Hapus pemanggilan relayer HTTP untuk penandatanganan voucher. Tambahkan `prepare_direct_deposit`.
-3. **Pembersihan CLI (`nimbus-cli`):**
-   - `rm nimbus-cli/src/commands/blind.rs`
-   - `rm nimbus-cli/src/commands/threshold.rs`
+3. **Pembersihan CLI (`zeltra-cli`):**
+   - `rm zeltra-cli/src/commands/blind.rs`
+   - `rm zeltra-cli/src/commands/threshold.rs`
    - Hapus subcommands `SplitKey`, `Aggregate`, `Blind`, `Sign`, `VerifyMasked`, `Unmask`, `VerifyUnmasked`.
    - Tambahkan subcommand ZK murni: `GenerateWallet`, `CreateDepositNote`, `InspectMmr`, `VerifyProof`.
 
@@ -300,18 +300,18 @@ Untuk menjamin kompilasi tidak rusak (*zero broken build cascade*), eksekusi ref
 ┌────────────────────────────────────────────────────────────────────────┐
 │                    URUTAN EKSEKUSI PEMBERSIHAN KODE                    │
 ├─────────┬──────────────────────────────────────────────────────────────┤
-│ FASE 1  │ nimbus-core: Hapus blind_sign.rs, threshold.rs, dan BLS      │
+│ FASE 1  │ zeltra-core: Hapus blind_sign.rs, threshold.rs, dan BLS      │
 │         │ types di types.rs & lib.rs. Pastikan `cargo test -p          │
-│         │ nimbus-core` lolos 100% untuk modul note & circuits.        │
+│         │ zeltra-core` lolos 100% untuk modul note & circuits.        │
 ├─────────┼──────────────────────────────────────────────────────────────┤
-│ FASE 2  │ nimbus-contracts: Tambah deposit_direct_note, bersihkan      │
+│ FASE 2  │ zeltra-contracts: Tambah deposit_direct_note, bersihkan      │
 │         │ storage.rs dari session_*, hapus _reveal_mask_key,          │
 │         │ _claim_refund, dan verify_bls_spend. Jalankan `cargo test`.  │
 ├─────────┼──────────────────────────────────────────────────────────────┤
-│ FASE 3  │ nimbus-node: Hapus handlers/threshold.rs, deposit_indexer.rs,│
+│ FASE 3  │ zeltra-node: Hapus handlers/threshold.rs, deposit_indexer.rs,│
 │         │ bersihkan schema SQLite, dan sederhanakan routes di main.rs. │
 ├─────────┼──────────────────────────────────────────────────────────────┤
-│ FASE 4  │ nimbus-sdk & cli: Bersihkan WASM bindings BDHKE, hapus       │
+│ FASE 4  │ zeltra-sdk & cli: Bersihkan WASM bindings BDHKE, hapus       │
 │         │ subcommands BLS di CLI, tambahkan tooling wallet murni ZK.   │
 ├─────────┼──────────────────────────────────────────────────────────────┤
 │ FASE 5  │ Scripts & CI: Ganti start_cluster.sh dengan start_relayer.sh,│
@@ -321,32 +321,32 @@ Untuk menjamin kompilasi tidak rusak (*zero broken build cascade*), eksekusi ref
 
 ### Rincian Gerbang Verifikasi (Verification Gates):
 
-#### Gerbang Fase 1: `nimbus-core`
+#### Gerbang Fase 1: `zeltra-core`
 ```bash
-cargo check -p nimbus-core
-cargo test -p nimbus-core --lib -- --nocapture
+cargo check -p zeltra-core
+cargo test -p zeltra-core --lib -- --nocapture
 # Target: 100% pass (Poseidon Grain-128, MMR Bagging, PrivateNoteCircuit, JoinSplitCircuit)
 ```
 
-#### Gerbang Fase 2: `nimbus-contracts`
+#### Gerbang Fase 2: `zeltra-contracts`
 ```bash
-cargo check -p nimbus-contracts
-cargo test -p nimbus-contracts --lib -- --nocapture
-cargo stylus check -p nimbus-contracts
+cargo check -p zeltra-contracts
+cargo test -p zeltra-contracts --lib -- --nocapture
+cargo stylus check -p zeltra-contracts
 # Target: 100% pass, kompilasi Stylus WASM clean tanpa dependensi precompile 0x0e
 ```
 
-#### Gerbang Fase 3: `nimbus-node`
+#### Gerbang Fase 3: `zeltra-node`
 ```bash
-cargo check -p nimbus-node
-cargo test -p nimbus-node --lib -- --nocapture
+cargo check -p zeltra-node
+cargo test -p zeltra-node --lib -- --nocapture
 # Target: Seluruh endpoint ZK spend, quote EIP-712, dan migrasi SQLite pass
 ```
 
-#### Gerbang Fase 4: `nimbus-sdk` & `nimbus-cli`
+#### Gerbang Fase 4: `zeltra-sdk` & `zeltra-cli`
 ```bash
-cargo test -p nimbus-sdk --lib -- --nocapture
-cargo test -p nimbus-cli -- --nocapture
+cargo test -p zeltra-sdk --lib -- --nocapture
+cargo test -p zeltra-cli -- --nocapture
 # Target: Note wallet multi-UTXO, coin selection, dan direct deposit staging pass
 ```
 

@@ -36,16 +36,16 @@ jobs:
 
       - name: Build release binaries
         run: |
-          cargo build --release -p nimbus-node
-          cargo build --release -p nimbus-cli
+          cargo build --release -p zeltra-node
+          cargo build --release -p zeltra-cli
 
       - name: Package binaries with checksums
         run: |
           TAG_NAME="${{ github.ref_name }}"
           PKG_NAME="zeltra-protocol-${TAG_NAME}-x86_64-unknown-linux-gnu"
           mkdir -p "$PKG_NAME"
-          cp target/release/nimbus-node "$PKG_NAME/"
-          cp target/release/nimbus-cli "$PKG_NAME/"
+          cp target/release/zeltra-node "$PKG_NAME/"
+          cp target/release/zeltra-cli "$PKG_NAME/"
           cp README.md "$PKG_NAME/" 2>/dev/null || true
           tar -czvf "${PKG_NAME}.tar.gz" "$PKG_NAME"
           sha256sum "${PKG_NAME}.tar.gz" > "${PKG_NAME}.tar.gz.sha256"
@@ -81,11 +81,11 @@ jobs:
         with:
           shared-key: "release-docker-cache"
 
-      - name: Build nimbus-node binary
+      - name: Build zeltra-node binary
         run: |
-          cargo build --release -p nimbus-node
-          cp target/release/nimbus-node ./nimbus-node-bin
-          chmod +x ./nimbus-node-bin
+          cargo build --release -p zeltra-node
+          cp target/release/zeltra-node ./zeltra-node-bin
+          chmod +x ./zeltra-node-bin
 
       - name: Log in to GitHub Container Registry
         uses: docker/login-action@v3
@@ -98,7 +98,7 @@ jobs:
         id: meta
         uses: docker/metadata-action@v5
         with:
-          images: ghcr.io/${{ github.repository }}/nimbus-node
+          images: ghcr.io/${{ github.repository }}/zeltra-node
           tags: |
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}

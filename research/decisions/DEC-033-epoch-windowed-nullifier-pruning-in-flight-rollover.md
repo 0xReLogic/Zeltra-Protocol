@@ -4,13 +4,13 @@
 - **Author:** Zeltra Protocol Architecture, Cryptography & Financial Security Team
 - **Date:** 2026-10-09
 - **Applies to:**
-  - `nimbus-contracts/src/storage.rs` (Contract epoch & generational nullifier storage layout)
-  - `nimbus-contracts/src/spend.rs` (Epoch-aware nullifier verification & in-flight change minting)
-  - `nimbus-core/src/note.rs` (Epoch-bound evolving nullifier PRF derivation)
-  - `nimbus-core/src/note_circuit.rs` (`PrivateNoteCircuit` epoch validation constraints)
-  - `nimbus-core/src/fees.rs` (Rollover execution fee quoting & dust threshold)
-  - `nimbus-sdk/src/wallet/note_wallet.rs` (In-wallet epoch tracking, transparent UX disclosure, and auto-rollover)
-  - `nimbus-node/src/handlers/spend.rs` (Relayer epoch validation, anti-griefing sanitization & solvency check)
+  - `zeltra-contracts/src/storage.rs` (Contract epoch & generational nullifier storage layout)
+  - `zeltra-contracts/src/spend.rs` (Epoch-aware nullifier verification & in-flight change minting)
+  - `zeltra-core/src/note.rs` (Epoch-bound evolving nullifier PRF derivation)
+  - `zeltra-core/src/note_circuit.rs` (`PrivateNoteCircuit` epoch validation constraints)
+  - `zeltra-core/src/fees.rs` (Rollover execution fee quoting & dust threshold)
+  - `zeltra-sdk/src/wallet/note_wallet.rs` (In-wallet epoch tracking, transparent UX disclosure, and auto-rollover)
+  - `zeltra-node/src/handlers/spend.rs` (Relayer epoch validation, anti-griefing sanitization & solvency check)
 - **Related DECs:**
   - [`DEC-016`](file:///workspaces/Zeltra-Protocol/research/decisions/DEC-016-private-note-change-ledger.md) (Private Note Change Ledger & LeanIMT Depth 20 Baseline)
   - [`DEC-022`](file:///workspaces/Zeltra-Protocol/research/decisions/DEC-022-defense-against-proof-settlement-mismatch-boundary-gaps.md) (Proof Settlement Mismatch Boundary Gaps)
@@ -27,7 +27,7 @@
 ## 1. Executive Summary & Kajian Postmortem (2024–2026)
 
 ### A. Masalah Fundamental Status Quo: Dosa Asal Nullifier Memory Bloat
-Pada arsitektur ZK-UTXO klasik (Zerocash 2014 hingga Zeltra Phase 1), setiap kali pengguna membelanjakan koin (*note*), kontrak pintar Stylus menandai nullifier unik sebagai terpakai di [`nimbus-contracts/src/spend.rs`](file:///workspaces/Zeltra-Protocol/nimbus-contracts/src/spend.rs#L666-L737):
+Pada arsitektur ZK-UTXO klasik (Zerocash 2014 hingga Zeltra Phase 1), setiap kali pengguna membelanjakan koin (*note*), kontrak pintar Stylus menandai nullifier unik sebagai terpakai di [`zeltra-contracts/src/spend.rs`](file:///workspaces/Zeltra-Protocol/zeltra-contracts/src/spend.rs#L666-L737):
 ```rust
 if self.note_nullifiers.get(input_nullifier) {
     return Err(b"NULLIFIER_ALREADY_SPENT".to_vec());
@@ -127,7 +127,7 @@ Dalam diskusi perancangan, Zeltra membandingkan tiga pendekatan untuk mengimplem
 Untuk menghindari kebangkrutan gas akibat perulangan `delete` jutaan storage keys di WASM/EVM, kontrak Stylus menggunakan **Generational Slot Mapping**:
 
 ```rust
-// nimbus-contracts/src/storage.rs
+// zeltra-contracts/src/storage.rs
 pub struct EpochNullifierState {
     pub current_epoch: StorageU32,
     pub epoch_start_timestamp: StorageU64,
@@ -239,7 +239,7 @@ $$\text{execution\_fee} = \text{gas\_cost} + \text{relayer\_markup}$$
 ### B. Dust Elimination Threshold (Anti-Spam Bot DoS)
 Untuk mencegah serangan DoS di mana penyerang membuat ribuan koin \$0.001 dan memicu rollover massal untuk menghabiskan kuota mempool relayer:
 ```rust
-// nimbus-core/src/fees.rs
+// zeltra-core/src/fees.rs
 pub const MIN_STANDALONE_ROLLOVER_THRESHOLD_USDC: u64 = 2_000_000; // 2.00 USDC
 ```
 - Transaksi standalone rollover dengan `input_value < 2_000_000` (kurang dari $2.00 USDC) **akan ditolak secara otomatis oleh relayer pre-flight sanitizer** dengan kode error `DUST_NOTE_ROLLOVER_REJECTED`.
@@ -254,7 +254,7 @@ pub const MIN_STANDALONE_ROLLOVER_THRESHOLD_USDC: u64 = 2_000_000; // 2.00 USDC
 
 ## 6. Modifikasi Smart Contract & ZK Circuit
 
-### A. Modifikasi `PrivateNoteCircuit` (`nimbus-core/src/note_circuit.rs`)
+### A. Modifikasi `PrivateNoteCircuit` (`zeltra-core/src/note_circuit.rs`)
 Public inputs sirkuit diperluas untuk mengikat `epoch_id`:
 
 ```rust
@@ -278,7 +278,7 @@ pub struct PrivateNoteCircuit {
 }
 ```
 
-### B. Derivasi Evolving Nullifier di `nimbus-core/src/note.rs`
+### B. Derivasi Evolving Nullifier di `zeltra-core/src/note.rs`
 $$\text{nullifier\_key} = \text{Poseidon}_{\text{W3}}(\text{spending\_key}, \text{DOMAIN\_NULLIFIER})$$
 $$\text{nullifier} = \text{Poseidon}_{\text{W5}}([\text{nullifier\_key}, \text{commitment}, \text{Fr}(\text{leaf\_index}), \text{Fr}(\text{epoch\_id})], \text{DOMAIN\_NULLIFIER})$$
 

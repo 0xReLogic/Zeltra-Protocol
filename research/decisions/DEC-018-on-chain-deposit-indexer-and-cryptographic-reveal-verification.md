@@ -9,7 +9,7 @@ Accepted for implementation on 2026-10-03.
 Implementasi alur deposit dan reveal sebelumnya memiliki dua celah kritis yang dapat disalahgunakan:
 
 1. **Injeksi Deposit Palsu via HTTP API (Phantom Deposits):**
-   Fungsi `handle_deposit` di `nimbus-node/src/handlers/deposit.rs` mengonfirmasi deposit (`deposit_confirmed = 1`) hanya berdasarkan payload HTTP `POST /api/deposit` tanpa memverifikasi apakah transaksi deposit tersebut benar-benar dieksekusi di smart contract Stylus. Penyerang dapat memanggil endpoint ini secara langsung untuk memicu unmasking token tanpa menyetorkan collateral USDC sepeser pun.
+   Fungsi `handle_deposit` di `zeltra-node/src/handlers/deposit.rs` mengonfirmasi deposit (`deposit_confirmed = 1`) hanya berdasarkan payload HTTP `POST /api/deposit` tanpa memverifikasi apakah transaksi deposit tersebut benar-benar dieksekusi di smart contract Stylus. Penyerang dapat memanggil endpoint ini secara langsung untuk memicu unmasking token tanpa menyetorkan collateral USDC sepeser pun.
    *Insiden Dunia Nyata:* Celah serupa menjadi penyebab exploit **Across Protocol Solana Bridge (Juli 2026)** di mana software relayer off-chain mempercayai event tanpa validasi program authority sehingga mengalirkan dana jutaan dolar untuk deposit fiktif, serta exploit **Coreum / XRP Ledger (Agustus 2026)** dan **Qubit Finance ($80M, 2022)**.
 
 2. **Ketiadaan Verifikasi Kriptografi pada Reveal:**
@@ -58,7 +58,7 @@ Implementasi alur deposit dan reveal sebelumnya memiliki dua celah kritis yang d
       |
       | 2. Emit Event: DepositFee(session_id, client, gross, fee, net)
       v
-[ Deposit Indexer Worker / nimbus-node ]
+[ Deposit Indexer Worker / zeltra-node ]
       |
       | 3. Query get_logs(contract_address, DepositFee) up to safe block
       | 4. Cocokkan session_id & net_amount dengan database sessions

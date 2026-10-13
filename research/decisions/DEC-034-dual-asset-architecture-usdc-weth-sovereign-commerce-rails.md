@@ -4,13 +4,13 @@
 - **Author:** Zeltra Protocol Architecture, Cryptography & Financial Economics Team
 - **Date:** 2026-10-09
 - **Applies to:**
-  - `nimbus-contracts/src/storage.rs` (Siloed per-asset liability mappings & contract balance tracking)
-  - `nimbus-contracts/src/deposit.rs` (Payable native ETH auto-wrap & ERC-20 USDC deposit ingress)
-  - `nimbus-contracts/src/spend.rs` (Asset-isolated spend execution & semantic asset binding)
-  - `nimbus-core/src/note.rs` (`asset_id` leaf domain binding & decimal scale representation)
-  - `nimbus-core/src/note_circuit.rs` (`PrivateNoteCircuit` intra-asset value conservation constraints)
-  - `nimbus-node/src/handlers/spend.rs` (Relayer zero-oracle reimbursement & asset routing)
-  - `nimbus-sdk/src/wallet/note_wallet.rs` (Multi-asset coin selection & balance separation)
+  - `zeltra-contracts/src/storage.rs` (Siloed per-asset liability mappings & contract balance tracking)
+  - `zeltra-contracts/src/deposit.rs` (Payable native ETH auto-wrap & ERC-20 USDC deposit ingress)
+  - `zeltra-contracts/src/spend.rs` (Asset-isolated spend execution & semantic asset binding)
+  - `zeltra-core/src/note.rs` (`asset_id` leaf domain binding & decimal scale representation)
+  - `zeltra-core/src/note_circuit.rs` (`PrivateNoteCircuit` intra-asset value conservation constraints)
+  - `zeltra-node/src/handlers/spend.rs` (Relayer zero-oracle reimbursement & asset routing)
+  - `zeltra-sdk/src/wallet/note_wallet.rs` (Multi-asset coin selection & balance separation)
 - **Related DECs:**
   - [`DEC-009`](file:///workspaces/Zeltra-Protocol/research/decisions/DEC-009-liability-invariant-check.md) (Mathematical Solvency Invariant Check)
   - [`DEC-016`](file:///workspaces/Zeltra-Protocol/research/decisions/DEC-016-private-note-change-ledger.md) (Private Note Change Ledger Baseline)
@@ -182,7 +182,7 @@ Jika kontrak USDC mengalami pembekuan eksternal oleh Circle:
 2. **Namun, kolam WETH tetap 100% aktif dan dapat dibelanjakan tanpa gangguan**, karena seluruh mapping storage, saldo token, dan verifikasi solvensi terisolasi secara kriptografis dan matematis.
 
 ```rust
-// nimbus-contracts/src/storage.rs
+// zeltra-contracts/src/storage.rs
 pub struct ProtocolStorage {
     // Mapping saldo dan liabilitas terisolasi per asset_id (0: WETH, 1: USDC)
     pub total_note_liabilities: StorageMap<u8, StorageU256>,

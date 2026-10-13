@@ -122,10 +122,10 @@ Accessed: 2026-06-07.
 
 ## Versi/library/network
 
-- Signing session monitoring: nimbus-node/src/database.rs
+- Signing session monitoring: zeltra-node/src/database.rs
 - Background job: tokio::spawn + tokio::time::interval
-- On-chain state verification: nimbus-node/src/evm_client.rs
-- Contract refund function: nimbus-contracts/src/lib.rs (existing)
+- On-chain state verification: zeltra-node/src/evm_client.rs
+- Contract refund function: zeltra-contracts/src/lib.rs (existing)
 - Metrics: Optional (Phase 3), Prometheus atau StatsD
 
 ## Test
@@ -147,7 +147,7 @@ Negative:
 ## Rollback/recovery
 
 Jika auto-refund menyebabkan issue:
-1. Disable auto-refund via environment variable `NIMBUS_AUTO_REFUND=false`
+1. Disable auto-refund via environment variable `ZELTRA_AUTO_REFUND=false`
 2. Monitoring tetap berjalan tapi tidak trigger action
 3. Manual refund fallback tetap tersedia
 4. Ops dapat menginvestigate log untuk debugging

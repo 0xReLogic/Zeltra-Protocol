@@ -50,4 +50,4 @@ jobs:
         run: cargo nextest run --workspace --all-targets
 
       - name: Build Stylus contract WASM
-        run: cargo build -p nimbus_contracts --target wasm32-unknown-unknown --release
+        run: cargo build -p zeltra_contracts --target wasm32-unknown-unknown --release

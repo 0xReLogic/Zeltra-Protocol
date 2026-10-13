@@ -3,7 +3,7 @@
 - **Status:** Proposed & Accepted (Red-Team Hardened)
 - **Author:** Zeltra Protocol Architecture Team
 - **Date:** 2026-10-04
-- **Impact Areas:** `nimbus-node` (ingress validation, preflight local verification, gas-griefing defense), `nimbus-contracts` (modular association roots, time-bound policy records), `nimbus-sdk` (client ZK proof of membership), `research/compliance`
+- **Impact Areas:** `zeltra-node` (ingress validation, preflight local verification, gas-griefing defense), `zeltra-contracts` (modular association roots, time-bound policy records), `zeltra-sdk` (client ZK proof of membership), `research/compliance`
 - **Architectural Paradigm:** *"Permissionless Privacy, Permissioned Acceptance"*
 - **Guiding Epistemological Principle:** *"A valid ZK proof proves exactly the statement encoded by the circuit. It does not prove that the policy root is honest, current, correctly issued, or legally sufficient."*
 
@@ -75,7 +75,7 @@ Berdasarkan tinjauan red-team Tier-1, berikut mitigasi atas celah-celah kritis:
 
 ### A. 🔴 Mitigasi C-01: Relayer Gas-Griefing Defense
 * **Ancaman:** Penyerang mengirim input publik yang tampak valid dengan **fake/corrupted Groth16 proof**. Jika relayer langsung mem-broadcast transaksi ke blockchain, kontrak Stylus akan me-revert eksekusi, tetapi relayer tetap membayar gas. Penyerang dapat menguras treasury relayer tanpa komputasi ZK yang valid.
-* **Patch Arsitektur di `nimbus-node`:**
+* **Patch Arsitektur di `zeltra-node`:**
   1. **Local Groth16 Preflight Verification:** Sebelum transaksi diserahkan ke mempool atau keluar biaya gas 1 wei pun, relayer memverifikasi bukti Groth16 secara lokal di CPU node menggunakan `ark-groth16` dan `NOTE_VK` (~2-3 ms). Transaksi dengan proof tidak valid ditolak di layer HTTP (`400 Bad Request`).
   2. **Dry-Run RPC Simulation (`eth_call`):** Menjalankan simulasi view call sebelum broadcast aktual untuk memastikan status kontrak tidak revert.
   3. **Admission Control:** Pembatasan laju (*rate limiting*) berbasis IP, kuota per-client, dan circuit-breaker batas maksimal gas harian.

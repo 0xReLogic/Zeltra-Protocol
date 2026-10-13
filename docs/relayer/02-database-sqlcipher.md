@@ -1,6 +1,6 @@
-# Nimbus Relayer — 02: Database & SQLCipher Encryption
+# Zeltra Relayer — 02: Database & SQLCipher Encryption
 
-Dokumen ini menjelaskan konfigurasi basis data terenkripsi, skema tabel, dan optimasi performa pada [`nimbus-node/src/database.rs`](file:///workspaces/Zeltra-Protocol/nimbus-node/src/database.rs).
+Dokumen ini menjelaskan konfigurasi basis data terenkripsi, skema tabel, dan optimasi performa pada [`zeltra-node/src/database.rs`](file:///workspaces/Zeltra-Protocol/zeltra-node/src/database.rs).
 
 ---
 
@@ -10,7 +10,7 @@ Untuk melindungi data antrian transaksi, nullifier, dan sesi sebelum on-chain da
 
 * **Engine:** Rusqlite dengan fitur `bundled-sqlcipher`.
 * **Algoritma:** Enkripsi tingkat disk penuh menggunakan **AES-256-CBC**.
-* **Kunci Database (`NIMBUS_DB_KEY`):** Kunci dibaca saat startup melalui environment variable atau OpenBao KMS. Dalam mode *strict production*, node akan menolak menyala (*fail-closed*) jika kunci masih menggunakan default `"default-change-in-production"`.
+* **Kunci Database (`ZELTRA_DB_KEY`):** Kunci dibaca saat startup melalui environment variable atau OpenBao KMS. Dalam mode *strict production*, node akan menolak menyala (*fail-closed*) jika kunci masih menggunakan default `"default-change-in-production"`.
 * **Izin Berkas Ketat:** Node secara otomatis menetapkan perizinan `chmod 600` (hanya pemilik proses yang dapat membaca/menulis) pada berkas `.db`, berkas WAL (`-wal`), dan berkas SHM (`-shm`).
 * **Secure Delete:** Mengaktifkan `PRAGMA secure_delete = ON` agar data yang dihapus langsung ditimpa (*zero-overwrite*), bukan sekadar dilepas dari index.
 

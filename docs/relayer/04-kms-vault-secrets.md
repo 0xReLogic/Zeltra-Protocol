@@ -1,6 +1,6 @@
-# Nimbus Relayer — 04: Key Management System & Vault OpenBao
+# Zeltra Relayer — 04: Key Management System & Vault OpenBao
 
-Dokumen ini menjelaskan integrasi Key Management System (KMS) untuk pengambilan kunci rahasia share BLS dan manajemen rahasia pada [`nimbus-node/src/kms.rs`](file:///workspaces/Zeltra-Protocol/nimbus-node/src/kms.rs).
+Dokumen ini menjelaskan integrasi Key Management System (KMS) untuk pengambilan kunci rahasia share BLS dan manajemen rahasia pada [`zeltra-node/src/kms.rs`](file:///workspaces/Zeltra-Protocol/zeltra-node/src/kms.rs).
 
 ---
 
@@ -11,7 +11,7 @@ Menyimpan kunci rahasia (*secret share key*) langsung di file `.env` atau enviro
 * Kunci rahasia dapat ter-commit tanpa sengaja ke Git repository.
 * Tidak memiliki jejak audit (*audit trail*) siapa dan kapan kunci diakses.
 
-Oleh karena itu, `nimbus-node` mengintegrasikan layanan **HashiCorp Vault / OpenBao KMS** sebagai penyedia kunci resmi tingkat produksi.
+Oleh karena itu, `zeltra-node` mengintegrasikan layanan **HashiCorp Vault / OpenBao KMS** sebagai penyedia kunci resmi tingkat produksi.
 
 ---
 
@@ -23,17 +23,17 @@ Saat node dinyalakan (*startup sequence*):
 [ Node Startup ]
        |
        v
-Cek variabel NIMBUS_VAULT_TOKEN?
+Cek variabel ZELTRA_VAULT_TOKEN?
        ├── YA (Mode Produksi KMS):
-       │    1. Kirim HTTP GET ke $NIMBUS_VAULT_ADDR/$NIMBUS_VAULT_PATH
-       │       dengan header: X-Vault-Token: $NIMBUS_VAULT_TOKEN
+       │    1. Kirim HTTP GET ke $ZELTRA_VAULT_ADDR/$ZELTRA_VAULT_PATH
+       │       dengan header: X-Vault-Token: $ZELTRA_VAULT_TOKEN
        │    2. Parse JSON response: data.data.share_key
        │    3. Deserialisasi 40-byte buffer: (index: usize, share_sk: Fr)
        │    4. Simpan kunci di memori RAM terisolasi
        │
        └── TIDAK:
             ├── Mode Strict: FAIL-CLOSED (Node seketika exit(1))
-            └── Mode Dev: Fallback membaca variabel NIMBUS_SHARE_KEY (Muncul Warning Keras)
+            └── Mode Dev: Fallback membaca variabel ZELTRA_SHARE_KEY (Muncul Warning Keras)
 ```
 
 ---
@@ -44,16 +44,16 @@ Untuk mengaktifkan pengambilan kunci via Vault/OpenBao:
 
 ```bash
 # Token autentikasi akses Vault
-export NIMBUS_VAULT_TOKEN="hvs.CAESIJ..."
+export ZELTRA_VAULT_TOKEN="hvs.CAESIJ..."
 
 # Alamat server Vault / OpenBao
-export NIMBUS_VAULT_ADDR="https://vault.internal.net:8200"
+export ZELTRA_VAULT_ADDR="https://vault.internal.net:8200"
 
 # Path penyimpanan secret data
-export NIMBUS_VAULT_PATH="v1/secret/data/nimbus/guardian-1"
+export ZELTRA_VAULT_PATH="v1/secret/data/zeltra/guardian-1"
 ```
 
-*Ketika `NIMBUS_VAULT_TOKEN` aktif, node secara otomatis mem-bypass pembacaan `NIMBUS_SHARE_KEY` mentah di file konfigurasi lokal.*
+*Ketika `ZELTRA_VAULT_TOKEN` aktif, node secara otomatis mem-bypass pembacaan `ZELTRA_SHARE_KEY` mentah di file konfigurasi lokal.*
 
 ---
 

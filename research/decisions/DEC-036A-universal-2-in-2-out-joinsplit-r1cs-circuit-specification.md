@@ -4,11 +4,11 @@
 - **Author:** Zeltra Architecture & Cryptography Team
 - **Date:** 2026-10-10
 - **Applies to:**
-  - `nimbus-core/src/joinsplit_circuit.rs` (Universal 2-in-2-out JoinSplit R1CS circuit, gadgets, and witness generation)
-  - `nimbus-core/src/note.rs` (`MerkleMountainRange` verification and peak bagging gadgets)
-  - `nimbus-core/src/poseidon.rs` (Audited Grain-128 Poseidon W5 hash and domain separation constants)
-  - `nimbus-core/src/evm.rs` (`from_evm_scalar` canonical scalar validation)
-  - `nimbus-contracts/src/groth16_joinsplit_verifier.rs` (Verifying key $IC$ layout and EIP-2537 MSM/Pairing routines)
+  - `zeltra-core/src/joinsplit_circuit.rs` (Universal 2-in-2-out JoinSplit R1CS circuit, gadgets, and witness generation)
+  - `zeltra-core/src/note.rs` (`MerkleMountainRange` verification and peak bagging gadgets)
+  - `zeltra-core/src/poseidon.rs` (Audited Grain-128 Poseidon W5 hash and domain separation constants)
+  - `zeltra-core/src/evm.rs` (`from_evm_scalar` canonical scalar validation)
+  - `zeltra-contracts/src/groth16_joinsplit_verifier.rs` (Verifying key $IC$ layout and EIP-2537 MSM/Pairing routines)
 - **Parent & Related DECs:**
   - [`DEC-036`](file:///workspaces/Zeltra-Protocol/research/decisions/DEC-036-universal-2-in-2-out-joinsplit-full-stack-architecture.md) (Master JoinSplit Architecture Blueprint)
   - [`DEC-036B`](file:///workspaces/Zeltra-Protocol/research/decisions/DEC-036B-client-sdk-knapsack-coin-selection-consolidation-and-bulk-sync.md) (Client SDK Knapsack & In-Pool Consolidation)
@@ -323,7 +323,7 @@ Setiap public input dikonversi dari calldata EVM menggunakan `from_evm_scalar(&b
 
 ## 7. Acceptance Criteria & Test Vectors
 
-Implementasi `JoinSplitCircuit` pada `nimbus-core` wajib lulus pengujian berikut:
+Implementasi `JoinSplitCircuit` pada `zeltra-core` wajib lulus pengujian berikut:
 
 1. **Uji Konservasi Nilai Positif (1-in & 2-in):**
    - Transaksi 1-in dengan dummy slot kedua: proof valid, nilai payout + fee + change tepat sama dengan $v_{in,1}$.

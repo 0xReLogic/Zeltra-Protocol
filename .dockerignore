@@ -1,7 +1,7 @@
 target/
 .git/
 .cargo/
-nimbus-relayer.db*
+zeltra-relayer.db*
 test-relayer.db*
 *.db
 *.log

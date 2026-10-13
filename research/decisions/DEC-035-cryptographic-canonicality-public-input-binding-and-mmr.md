@@ -4,18 +4,18 @@
 - **Author:** Zeltra Architecture & Cryptography Team
 - **Date:** 2026-10-10
 - **Applies to:**
-  - `nimbus-core/src/note_circuit.rs` (`PrivateNoteCircuit` constraint system, public input layout, range checks)
-  - `nimbus-core/src/joinsplit_circuit.rs` (Experimental 2-in-2-out JoinSplit circuit lifecycle)
-  - `nimbus-core/src/note.rs` (`MerkleMountainRange` accumulator and proof generation)
-  - `nimbus-core/src/evm.rs` (`from_evm_scalar` canonical deserialization)
-  - `nimbus-sdk/src/wallet/note_wallet.rs` (Proof generation witness assignment & public input serialization)
-  - `nimbus-sdk/src/eip712.rs` (`ExecutionQuote` schema, EIP-712 hashing and verification)
-  - `nimbus-node/src/handlers/quote.rs` (EIP-712 `ExecutionQuote` generation and nonce sampling)
-  - `nimbus-node/src/handlers/spend.rs` (Relayer ingress public input validation and semantic binding)
-  - `nimbus-node/src/deposit_indexer.rs` (On-chain event indexer architecture)
-  - `nimbus-contracts/src/spend.rs` (Stylus on-chain `spend_private_note` verification and calldata layout)
-  - `nimbus-contracts/src/merkle.rs` (On-chain Merkle Mountain Range state and peak updates)
-  - `nimbus-contracts/src/groth16_note_verifier.rs` (EIP-2537 MSM and Pairing verifier precompile routines)
+  - `zeltra-core/src/note_circuit.rs` (`PrivateNoteCircuit` constraint system, public input layout, range checks)
+  - `zeltra-core/src/joinsplit_circuit.rs` (Experimental 2-in-2-out JoinSplit circuit lifecycle)
+  - `zeltra-core/src/note.rs` (`MerkleMountainRange` accumulator and proof generation)
+  - `zeltra-core/src/evm.rs` (`from_evm_scalar` canonical deserialization)
+  - `zeltra-sdk/src/wallet/note_wallet.rs` (Proof generation witness assignment & public input serialization)
+  - `zeltra-sdk/src/eip712.rs` (`ExecutionQuote` schema, EIP-712 hashing and verification)
+  - `zeltra-node/src/handlers/quote.rs` (EIP-712 `ExecutionQuote` generation and nonce sampling)
+  - `zeltra-node/src/handlers/spend.rs` (Relayer ingress public input validation and semantic binding)
+  - `zeltra-node/src/deposit_indexer.rs` (On-chain event indexer architecture)
+  - `zeltra-contracts/src/spend.rs` (Stylus on-chain `spend_private_note` verification and calldata layout)
+  - `zeltra-contracts/src/merkle.rs` (On-chain Merkle Mountain Range state and peak updates)
+  - `zeltra-contracts/src/groth16_note_verifier.rs` (EIP-2537 MSM and Pairing verifier precompile routines)
 - **Related DECs:**
   - [`DEC-016A`](file:///workspaces/Zeltra-Protocol/research/decisions/DEC-016A-private-note-spec-freeze.md) (Private Note Specification & Public Input Layout)
   - [`DEC-016B`](file:///workspaces/Zeltra-Protocol/research/decisions/DEC-016B-mvp-circuit-shortcuts.md) (MVP Circuit Shortcuts & Scope Binding)
@@ -65,7 +65,7 @@ The protocol architecture MUST satisfy the following mathematical and operationa
 | **2. Quote Signature On-Chain Verification** | Highlighted as potential security-critical boundary gap. | Verified: Contract does NOT verify signature. But execution fees accrue to contract storage, not caller; settlement recipient is locked in proof. | Agrees: Direct contract invocation is safe from theft/front-running; signature is relayer pricing agreement. | **Clarified:** Direct invocation is architecturally permissible; front-running is economically harmless. |
 | **3. Groth16 Binding & `_binding`** | Warned that removing `_binding` unbinds 5 public inputs ($IC[i] \rightarrow \mathcal{O}$). | Confirmed: Inputs enter Poseidon S-boxes ($x^5$), giving $IC[i] \ne \mathcal{O}$. Deleting Poseidon calls without replacement drops them from matrix $A$. | Agrees: Must distinguish statement binding from semantic binding. Poseidon calls MUST NOT be deleted naively. | **Adopted as Direct Implementation:** Replace dangling `_binding` with a formal equality binding gadget. |
 | **4. Value Conservation & Wrap-Around** | Questioned range constraints, change notes, and field overflow. | Disproven: `enforce_u64_range` strictly decomposes all 5 values into 64 bits. Sum $\le 2^{66} \ll r$. Zero-change enforced. | Concurs: Soundness of conservation equation is mathematically proven by code evidence. | **Resolved & Closed:** Wrap-around is mathematically impossible; logic is 100% sound. |
-| **5. MMR End-to-End Status** | Questioned claim that MMR is fully integrated; called it correctness blocker. | Verified: Contract and circuit have MMR, but `nimbus-node` has no `NoteCommitmentAppended` indexer or sync endpoint. SDK fills zeros locally. | Concurs: True end-to-end multi-wallet spend is blocked until relayer MMR indexer is built. | **Adopted as Direct Implementation:** Build full relayer indexer & sync API before testnet. |
+| **5. MMR End-to-End Status** | Questioned claim that MMR is fully integrated; called it correctness blocker. | Verified: Contract and circuit have MMR, but `zeltra-node` has no `NoteCommitmentAppended` indexer or sync endpoint. SDK fills zeros locally. | Concurs: True end-to-end multi-wallet spend is blocked until relayer MMR indexer is built. | **Adopted as Direct Implementation:** Build full relayer indexer & sync API before testnet. |
 | **6. Key Freeze Status** | Questioned whether keys are frozen or development keys. | Verified: `NOTE_CIRCUIT_SETUP_SEED = 0x4e696d6275734e43` in code; `todo.md:48` confirms MPC ceremony is pending. | Concurs: Circuit redesign is 100% permissible prior to MPC ceremony. | **Confirmed:** Keys are development keys; circuit layout can be updated cleanly now. |
 
 ### B. ChatGPT Formal Endorsement & Recommendations Matrix
@@ -110,7 +110,7 @@ The protocol architecture MUST satisfy the following mathematical and operationa
 
 ### C. Complete MMR Pipeline Architecture
 1. **Relayer MMR Indexer Worker (`mmr_indexer.rs`):**
-   A background daemon in `nimbus-node` subscribes to on-chain `NoteCommitmentAppended` events:
+   A background daemon in `zeltra-node` subscribes to on-chain `NoteCommitmentAppended` events:
    - Persists leaf index, commitment, and bagged root into SQLite.
    - Maintains an in-memory/disk MMR state mirror.
 2. **Relayer Client Sync Endpoint:**
@@ -119,7 +119,7 @@ The protocol architecture MUST satisfy the following mathematical and operationa
    - Enables multi-user, multi-wallet client SDKs to generate valid Merkle inclusion proofs dynamically.
 
 ### D. Relayer Spend Handler Semantic Tightening
-In [`nimbus-node/src/handlers/spend.rs`](file:///workspaces/Zeltra-Protocol/nimbus-node/src/handlers/spend.rs), add explicit validation:
+In [`zeltra-node/src/handlers/spend.rs`](file:///workspaces/Zeltra-Protocol/zeltra-node/src/handlers/spend.rs), add explicit validation:
 ```rust
 let expected_signing_hash = compute_quote_hash(&execution_quote, chain_id, contract_addr);
 if parsed_inputs[9] != expected_signing_hash.0 {
@@ -135,11 +135,11 @@ if parsed_inputs[9] != expected_signing_hash.0 {
 
 ## 5. Security Architecture: Direct Contract Invocation & Quote Signature Boundary
 
-1. **No On-Chain Signature Check:** The Stylus contract [`_spend_private_note`](file:///workspaces/Zeltra-Protocol/nimbus-contracts/src/spend.rs#L608-L865) has NO `ecrecover` call and does not take signature parameters.
+1. **No On-Chain Signature Check:** The Stylus contract [`_spend_private_note`](file:///workspaces/Zeltra-Protocol/zeltra-contracts/src/spend.rs#L608-L865) has NO `ecrecover` call and does not take signature parameters.
 2. **Permissionless Execution:** There is no `only_relayer` or `only_owner` modifier. Anyone can submit a valid Groth16 proof directly to the contract.
 3. **Execution Fee Accrual Safety:**
-   - In [`nimbus-contracts/src/spend.rs:792-805`](file:///workspaces/Zeltra-Protocol/nimbus-contracts/src/spend.rs#L792-L805), `execution_fee` is NOT transferred to `msg.sender`.
-   - `execution_fee` is credited to `accumulated_execution_fees` in storage, which can ONLY be claimed by the governance-configured `execution_fee_recipient` ([`nimbus-contracts/src/lib.rs:215-236`](file:///workspaces/Zeltra-Protocol/nimbus-contracts/src/lib.rs#L215-L236)).
+   - In [`zeltra-contracts/src/spend.rs:792-805`](file:///workspaces/Zeltra-Protocol/zeltra-contracts/src/spend.rs#L792-L805), `execution_fee` is NOT transferred to `msg.sender`.
+   - `execution_fee` is credited to `accumulated_execution_fees` in storage, which can ONLY be claimed by the governance-configured `execution_fee_recipient` ([`zeltra-contracts/src/lib.rs:215-236`](file:///workspaces/Zeltra-Protocol/zeltra-contracts/src/lib.rs#L215-L236)).
 4. **Front-Running Immunity:**
    - If an attacker intercepts a relayer transaction in the mempool and submits it directly, the merchant still receives `merchant_amount`, the change note still belongs to the user, and the execution fee still accrues to the relayer.
    - The attacker spends their own L2 gas and gains zero financial reward.

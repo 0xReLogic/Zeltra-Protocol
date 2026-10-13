@@ -8,7 +8,7 @@ Sebelumnya, terdapat celah di mana secret share atau parameter arbitrary blind s
 
 ## Invariant bisnis/security
 
-- Guardian hanya boleh memproses permintaan tanda tangan dari Leader yang terautentikasi dan terdaftar di dalam allowlist (`NIMBUS_TRUSTED_LEADERS`).
+- Guardian hanya boleh memproses permintaan tanda tangan dari Leader yang terautentikasi dan terdaftar di dalam allowlist (`ZELTRA_TRUSTED_LEADERS`).
 - Permintaan tanda tangan harus terikat dengan parameter sesi yang sah (`session_id`, `blinded_hex`, `k_hex`, `timestamp`, `amount`, `client_address`, `com_k_hex`) untuk mencegah front-running dan perubahan parameter secara jahat.
 - Replay protection: Setiap session_id hanya boleh digunakan sekali untuk penandatanganan di setiap guardian untuk mencegah eksploitasi berulang (double signing).
 - Cryptographic consistency: Guardian harus memverifikasi bahwa commitment `com_k` yang dikirimkan oleh leader benar-benar cocok dengan hasil perkalian `pk_iss * k` dari masking key `k` yang dikirimkan.
@@ -19,7 +19,7 @@ Sebelumnya, terdapat celah di mana secret share atau parameter arbitrary blind s
 1. **Application-Layer Leader Authentication**:
    - Leader harus menandatangani payload parameter sesi menggunakan private key EVM miliknya (`sign_leader_payload`).
    - Guardian memverifikasi tanda tangan ini menggunakan algoritma secp256k1 (Alloy `Signature::recover_address_from_msg`).
-   - Guardian memastikan bahwa address leader yang terpulih cocok dengan parameter `leader_address` dan terdaftar di dalam environment variable `NIMBUS_TRUSTED_LEADERS` (diperbolehkan default hanya di lingkungan test/dev jika env tersebut tidak diset).
+   - Guardian memastikan bahwa address leader yang terpulih cocok dengan parameter `leader_address` dan terdaftar di dalam environment variable `ZELTRA_TRUSTED_LEADERS` (diperbolehkan default hanya di lingkungan test/dev jika env tersebut tidak diset).
 
 2. **Replay & Double-Sign Protection**:
    - Guardian mencatat setiap sesi penandatanganan di database lokalnya menggunakan `insert_signing_session`.
@@ -30,25 +30,25 @@ Sebelumnya, terdapat celah di mana secret share atau parameter arbitrary blind s
    - Guardian mencocokkan hasil rekonstruksi ini dengan `com_k_hex` yang dikirimkan oleh leader. Permintaan akan ditolak jika ada ketidakcocokan, mencegah manipulasi commitment.
 
 4. **Timestamp Verification**:
-   - Guardian memverifikasi bahwa `timestamp` yang ditandatangani oleh leader berada dalam rentang toleransi ±60 detik terhadap waktu lokal guardian saat ini (dinonaktifkan jika dalam mode pengujian `cfg!(test)` atau `NIMBUS_ENV=test`).
+   - Guardian memverifikasi bahwa `timestamp` yang ditandatangani oleh leader berada dalam rentang toleransi ±60 detik terhadap waktu lokal guardian saat ini (dinonaktifkan jika dalam mode pengujian `cfg!(test)` atau `ZELTRA_ENV=test`).
 
 5. **Share Identity dan Quorum Enforcement**:
    - Guardian mengembalikan `share_index` asli yang dibaca dari `KeyManager`.
    - Leader menolak indeks yang kosong, nol, atau sudah diterima sebelumnya.
    - Leader tidak lagi menurunkan indeks guardian dari urutan URL.
-   - Leader hanya mendaftarkan sesi dan mengembalikan sukses setelah jumlah share unik mencapai `NIMBUS_THRESHOLD` (default `3`).
+   - Leader hanya mendaftarkan sesi dan mengembalikan sukses setelah jumlah share unik mencapai `ZELTRA_THRESHOLD` (default `3`).
    - Verifikasi kriptografis partial signature terhadap public share masing-masing guardian tetap wajib sebelum agregasi dan belum diselesaikan oleh keputusan ini.
 
 ## Sumber primer
 
-- Nimbus Protocol TODO: `Hilangkan Secret Share Override dari API`
-- `nimbus-node/src/handlers/threshold.rs`
-- `nimbus-node/src/dto.rs`
-- `nimbus-node/src/evm_client.rs`
+- Zeltra Protocol TODO: `Hilangkan Secret Share Override dari API`
+- `zeltra-node/src/handlers/threshold.rs`
+- `zeltra-node/src/dto.rs`
+- `zeltra-node/src/evm_client.rs`
 
 ## Versi
 
-- `nimbus-node = "0.1.0"`
+- `zeltra-node = "0.1.0"`
 
 ## Test
 

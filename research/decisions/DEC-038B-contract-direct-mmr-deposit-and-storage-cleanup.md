@@ -4,11 +4,11 @@
 - **Author:** Zeltra Architecture & Cryptography Team
 - **Date:** 2026-10-12
 - **Applies to:**
-  - `nimbus-contracts/src/storage.rs` (Stylus `Nimbus` storage layout, purge of 11 legacy fields)
-  - `nimbus-contracts/src/deposit.rs` (Implementation of `deposit_direct_note`, elimination of session workflows)
-  - `nimbus-contracts/src/merkle.rs` (Merkle Mountain Range state updates `_mmr_insert` and peak updates upon deposit)
-  - `nimbus-contracts/src/spend.rs` (Elimination of legacy BLS spend routines `verify_bls_spend`, `_spend`, `_batch_spend`)
-  - `nimbus-contracts/src/lib.rs` (Public contract ABI interface purification)
+  - `zeltra-contracts/src/storage.rs` (Stylus `Zeltra` storage layout, purge of 11 legacy fields)
+  - `zeltra-contracts/src/deposit.rs` (Implementation of `deposit_direct_note`, elimination of session workflows)
+  - `zeltra-contracts/src/merkle.rs` (Merkle Mountain Range state updates `_mmr_insert` and peak updates upon deposit)
+  - `zeltra-contracts/src/spend.rs` (Elimination of legacy BLS spend routines `verify_bls_spend`, `_spend`, `_batch_spend`)
+  - `zeltra-contracts/src/lib.rs` (Public contract ABI interface purification)
 - **Parent & Related DECs:**
   - [`DEC-038`](file:///workspaces/Zeltra-Protocol/research/decisions/DEC-038-pure-zk-utxo-migration-and-direct-mmr-deposit.md) (Master Pure ZK-UTXO Architecture Blueprint)
   - [`DEC-038A`](file:///workspaces/Zeltra-Protocol/research/decisions/DEC-038A-zero-legacy-purge-and-threshold-bls-elimination.md) (Zero-Legacy Purge & Threshold BLS Elimination Protocol)
@@ -29,7 +29,7 @@ Pada arsitektur transisi sebelumnya, penyetoran dana ke dalam smart contract Sty
 
 Alur asinkronus ini menciptakan friksi fatal: biaya gas ganda, latensi tinggi, dependensi terhadap off-chain indexer, dan kerumitan akuntansi on-chain.
 
-**DEC-038B** mendefinisikan transformasi smart contract Stylus (`nimbus-contracts`) menuju **Direct MMR Inflow**:
+**DEC-038B** mendefinisikan transformasi smart contract Stylus (`zeltra-contracts`) menuju **Direct MMR Inflow**:
 - Penyetoran dana USDC dan penyisipan komitmen ke dalam pohon MMR on-chain diselesaikan secara **atomik dalam satu transaksi tunggal** (`deposit_direct_note`).
 - Seluruh 11 field storage pelacak sesi dihapus total dari storage contract.
 - Invarian solvensi matematis disederhanakan secara radikal karena ketiadaan dana mengambang (*zero in-flight limbo*).
@@ -130,7 +130,7 @@ Mekanisme deposit pada shielded pool on-chain berada pada gerbang perbatasan ant
 
 ## 3. Invariants Matematis Smart Contract Direct Inflow
 
-Smart contract Stylus (`nimbus-contracts`) wajib menegakkan invarian-invarian berikut secara mutlak:
+Smart contract Stylus (`zeltra-contracts`) wajib menegakkan invarian-invarian berikut secara mutlak:
 
 - **INV-DEP-1 (Atomic Inflow Finality):**
   $$\Delta(\text{user\_note\_liability}) \equiv \text{amount}$$
@@ -172,7 +172,7 @@ Struktur penyimpanan permanen smart contract dibersihkan dari seluruh variabel p
 ```rust
 sol_storage! {
     #[entrypoint]
-    pub struct Nimbus {
+    pub struct Zeltra {
         // --- Core Governance & Security ---
         address owner;
         bool paused;
@@ -218,7 +218,7 @@ sol_storage! {
 ### A. Entrypoint Tunggal Penyetoran: `deposit_direct_note` (`deposit.rs`)
 
 ```rust
-impl Nimbus {
+impl Zeltra {
     /// Penyetoran langsung USDC ke dalam pool privat ZK-UTXO Zeltra.
     /// Komitmen note langsung disisipkan ke dalam Merkle Mountain Range (MMR).
     pub fn deposit_direct_note(
@@ -297,7 +297,7 @@ impl Nimbus {
 
 ### B. Mekanisme Penyisipan MMR On-Chain (`merkle.rs`):
 ```rust
-impl Nimbus {
+impl Zeltra {
     /// Menyisipkan daun komitmen baru ke dalam pohon MMR on-chain dan memperbarui puncak.
     pub fn _mmr_insert(
         &mut self,
@@ -350,7 +350,7 @@ impl Nimbus {
 
 ### C. Penegasan Solvensi Mutlak (`check_liability_invariant`):
 ```rust
-impl Nimbus {
+impl Zeltra {
     pub fn check_liability_invariant(&self) -> Result<(), Vec<u8>> {
         #[cfg(not(test))]
         {
@@ -389,7 +389,7 @@ impl Nimbus {
 
 ### B. Entrypoint Publik yang Dihapus dari `lib.rs`:
 ```rust
-// HAPUS SEMUA ENTRYPOINT WARISAN INI DARI NIMBUS CONTRACT:
+// HAPUS SEMUA ENTRYPOINT WARISAN INI DARI ZELTRA CONTRACT:
 // fn deposit(...)
 // fn deposit_with_commitment(...)
 // fn reveal_mask_key(...)

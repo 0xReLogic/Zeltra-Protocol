@@ -4,7 +4,7 @@
 PROPOSED (Pre-deployment Architecture Decision)
 
 ## Context & The Problem
-Di fase awal pengembangan Zeltra Protocol (Gate A s/d F), penyimpanan Private Note mengandalkan database lokal client (`PrivateNoteWallet` di `nimbus-sdk`).
+Di fase awal pengembangan Zeltra Protocol (Gate A s/d F), penyimpanan Private Note mengandalkan database lokal client (`PrivateNoteWallet` di `zeltra-sdk`).
 Kelemahannya:
 1. **Device-Loss Vulnerability:** Jika user membersihkan cache browser, kehilangan perangkat smartphone, atau berpindah laptop, state lokal note (`value`, `rho`, `r`, `owner`) hilang secara permanen.
 2. **Blind MMR:** Meskipun daun komitmen (`commitment`) tersimpan abadi di Merkle Mountain Range (MMR, DEC-032) on-chain, user baru tidak dapat membedakan note miliknya dari ribuan note acak lainnya tanpa petunjuk rahasia.
@@ -56,7 +56,7 @@ Enkripsi:
 Total Encrypted Memo Calldata = 96 bytes (atau 80 bytes compact)
 ```
 
-### 3. On-Chain Event Upgrade (`nimbus-contracts`)
+### 3. On-Chain Event Upgrade (`zeltra-contracts`)
 Event pada `merkle.rs` diperbarui tanpa membebani storage contract (`SSTORE`):
 ```rust
 pub struct NoteCommitmentAppended {
@@ -69,7 +69,7 @@ pub struct NoteCommitmentAppended {
 ```
 *Biaya gas di Arbitrum:* Hanya ~1.200 gas per append (sekitar $0.00006 USDC).
 
-### 4. Client-Side Trial Decryption Engine (`nimbus-sdk`)
+### 4. Client-Side Trial Decryption Engine (`zeltra-sdk`)
 Ketika user membuka browser baru:
 1. Client mengambil batch event `NoteCommitmentAppended` dari block terakhir yang tersinkronisasi.
 2. Untuk setiap event, client menurunkan shared secret:

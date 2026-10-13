@@ -4,11 +4,11 @@
 - **Author:** Zeltra Architecture & Cryptography Team
 - **Date:** 2026-10-10
 - **Applies to:**
-  - `nimbus-node/src/handlers/spend.rs` (Relayer `/api/v1/spend-joinsplit` handler, dual-nullifier guards, and preflight Groth16 verification)
-  - `nimbus-node/src/db.rs` (SQLite `spent_nullifiers` tracking and transactional persistence)
-  - `nimbus-contracts/src/spend.rs` (Stylus on-chain `spend_joinsplit` entrypoint, multi-liability solvency invariant, and settlement)
-  - `nimbus-contracts/src/merkle.rs` (On-chain MMR constant-arity dual commitment insertion `_mmr_insert`)
-  - `nimbus-contracts/src/groth16_joinsplit_verifier.rs` (EIP-2537 precompile `0x0c` MSM and `0x0f` Pairing routines for 19 public inputs)
+  - `zeltra-node/src/handlers/spend.rs` (Relayer `/api/v1/spend-joinsplit` handler, dual-nullifier guards, and preflight Groth16 verification)
+  - `zeltra-node/src/db.rs` (SQLite `spent_nullifiers` tracking and transactional persistence)
+  - `zeltra-contracts/src/spend.rs` (Stylus on-chain `spend_joinsplit` entrypoint, multi-liability solvency invariant, and settlement)
+  - `zeltra-contracts/src/merkle.rs` (On-chain MMR constant-arity dual commitment insertion `_mmr_insert`)
+  - `zeltra-contracts/src/groth16_joinsplit_verifier.rs` (EIP-2537 precompile `0x0c` MSM and `0x0f` Pairing routines for 19 public inputs)
 - **Parent & Related DECs:**
   - [`DEC-036`](file:///workspaces/Zeltra-Protocol/research/decisions/DEC-036-universal-2-in-2-out-joinsplit-full-stack-architecture.md) (Master JoinSplit Architecture Blueprint)
   - [`DEC-036A`](file:///workspaces/Zeltra-Protocol/research/decisions/DEC-036A-universal-2-in-2-out-joinsplit-r1cs-circuit-specification.md) (Universal 2-in-2-out JoinSplit R1CS Circuit & Soundness)
@@ -23,8 +23,8 @@
 ## 1. Executive Summary & Problem Statement
 
 Penyelesaian transaksi pengeluaran privat (*spend settlement*) dalam arsitektur Zeltra Protocol melibatkan interaksi dua lapis eksekusi:
-1. **Lapisan Relayer Node (`nimbus-node`):** Bertindak sebagai gateway publik yang menerima payload transaksi dari klien, memverifikasi keabsahan kriptografis dan semantik sebelum memancarkan transaksi ke blockchain, serta melindungi modal relayer dari serangan pengurasan gas (*gas-griefing attacks*).
-2. **Lapisan Smart Contract Stylus WASM (`nimbus-contracts`):** Menjadi penegak kebenaran akhir (*ultimate arbiter of truth*) di blockchain Arbitrum, memverifikasi bukti Groth16 melalui host precompiles EIP-2537 (`0x0c` MSM dan `0x0f` Pairing), membakar nullifier, menyisipkan daun komitmen baru ke akumulator MMR, mentransfer dana ke merchant, dan memvalidasi invarian solvensi multi-liability.
+1. **Lapisan Relayer Node (`zeltra-node`):** Bertindak sebagai gateway publik yang menerima payload transaksi dari klien, memverifikasi keabsahan kriptografis dan semantik sebelum memancarkan transaksi ke blockchain, serta melindungi modal relayer dari serangan pengurasan gas (*gas-griefing attacks*).
+2. **Lapisan Smart Contract Stylus WASM (`zeltra-contracts`):** Menjadi penegak kebenaran akhir (*ultimate arbiter of truth*) di blockchain Arbitrum, memverifikasi bukti Groth16 melalui host precompiles EIP-2537 (`0x0c` MSM dan `0x0f` Pairing), membakar nullifier, menyisipkan daun komitmen baru ke akumulator MMR, mentransfer dana ke merchant, dan memvalidasi invarian solvensi multi-liability.
 
 Dalam skema JoinSplit 2-in-2-out ([`DEC-036A`](file:///workspaces/Zeltra-Protocol/research/decisions/DEC-036A-universal-2-in-2-out-joinsplit-r1cs-circuit-specification.md)), setiap transaksi mengonsumsi **dua buah nullifier sekaligus** dan menghasilkan **dua buah komitmen daun baru** ke pohon MMR. 
 
@@ -154,7 +154,7 @@ Ekosistem relayer dan verifier smart contract pada protokol zero-knowledge serin
                 └────────────────────────────────────────┘
 ```
 
-### Handler Ingress Rust (`nimbus-node/src/handlers/spend.rs`):
+### Handler Ingress Rust (`zeltra-node/src/handlers/spend.rs`):
 ```rust
 pub async fn handle_spend_joinsplit(
     State(state): State<Arc<RelayerState>>,
@@ -201,7 +201,7 @@ pub async fn handle_spend_joinsplit(
 
 ## 5. Stylus Smart Contract Specification (`spend_joinsplit`)
 
-### A. ABI Entrypoint Definitive (`nimbus-contracts/src/spend.rs`):
+### A. ABI Entrypoint Definitive (`zeltra-contracts/src/spend.rs`):
 ```rust
 pub fn spend_joinsplit(
     &mut self,
@@ -325,7 +325,7 @@ Verifikasi Groth16 BLS12-381 pada Stylus memanfaatkan dua precompiles host EIP-2
 
 ## 8. Acceptance Criteria & Negative Test Matrix
 
-Implementasi `spend_joinsplit` pada `nimbus-node` dan `nimbus-contracts` wajib lulus pengujian ketat dengan rasio tes negatif $\ge 2\times$ dari tes positif:
+Implementasi `spend_joinsplit` pada `zeltra-node` dan `zeltra-contracts` wajib lulus pengujian ketat dengan rasio tes negatif $\ge 2\times$ dari tes positif:
 
 1. **Positive Spend 1-in JoinSplit:**
    - 1 note real + 1 dummy input $\rightarrow$ 1 change real + 1 dummy change output.

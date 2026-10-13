@@ -4,14 +4,14 @@
 - **Author:** Zeltra Protocol Architecture, Cryptography & Security Team
 - **Date:** 2026-10-09
 - **Applies to:** 
-  - `nimbus-contracts/src/merkle.rs` (Stylus WASM accumulator engine)
-  - `nimbus-contracts/src/storage.rs` (Contract storage layout)
-  - `nimbus-contracts/src/spend.rs` (Direct spend & change note insertion)
-  - `nimbus-contracts/src/deposit.rs` (Deposit commitment minting)
-  - `nimbus-core/src/note_circuit.rs` (`PrivateNoteCircuit` Groth16 constraints)
-  - `nimbus-core/src/note.rs` (MMR hashing, peak derivation & proof types)
-  - `nimbus-sdk/src/wallet/note_wallet.rs` (Local wallet note storage & MMR witness generation)
-  - `nimbus-node/src/handlers/spend.rs` (Relayer pre-flight validation & root check)
+  - `zeltra-contracts/src/merkle.rs` (Stylus WASM accumulator engine)
+  - `zeltra-contracts/src/storage.rs` (Contract storage layout)
+  - `zeltra-contracts/src/spend.rs` (Direct spend & change note insertion)
+  - `zeltra-contracts/src/deposit.rs` (Deposit commitment minting)
+  - `zeltra-core/src/note_circuit.rs` (`PrivateNoteCircuit` Groth16 constraints)
+  - `zeltra-core/src/note.rs` (MMR hashing, peak derivation & proof types)
+  - `zeltra-sdk/src/wallet/note_wallet.rs` (Local wallet note storage & MMR witness generation)
+  - `zeltra-node/src/handlers/spend.rs` (Relayer pre-flight validation & root check)
 - **Related DECs:** 
   - [`DEC-016`](file:///workspaces/Zeltra-Protocol/research/decisions/DEC-016-private-note-change-ledger.md) (Private Note Change Ledger & LeanIMT Depth 20 Baseline)
   - [`DEC-016A`](file:///workspaces/Zeltra-Protocol/research/decisions/DEC-016A-private-note-spec-freeze.md) (Private Note Spec Freeze & Known Answer Vectors)
@@ -29,7 +29,7 @@
 ## 1. Executive Summary & Kajian Postmortem (2024–2026)
 
 ### A. Masalah Fundamental Status Quo: Dinding Kapasitas $2^{20}$ LeanIMT
-Pada implementasi Phase 1 Gate D ([`DEC-016`](file:///workspaces/Zeltra-Protocol/research/decisions/DEC-016-private-note-change-ledger.md) & [`nimbus-contracts/src/merkle.rs`](file:///workspaces/Zeltra-Protocol/nimbus-contracts/src/merkle.rs)), Zeltra menggunakan LeanIMT (*Incremental Merkle Tree*) dengan kedalaman tetap `MERKLE_TREE_DEPTH = 20`. 
+Pada implementasi Phase 1 Gate D ([`DEC-016`](file:///workspaces/Zeltra-Protocol/research/decisions/DEC-016-private-note-change-ledger.md) & [`zeltra-contracts/src/merkle.rs`](file:///workspaces/Zeltra-Protocol/zeltra-contracts/src/merkle.rs)), Zeltra menggunakan LeanIMT (*Incremental Merkle Tree*) dengan kedalaman tetap `MERKLE_TREE_DEPTH = 20`. 
 Pada baris 154–158:
 ```rust
 let next_idx = self.note_tree_next_index.get();
@@ -232,7 +232,7 @@ Untuk memastikan bug yang terjadi pada insiden Hyperbridge (13 April 2026) tidak
 
 ---
 
-## 5. Modifikasi ZK Circuit (`nimbus-core/src/note_circuit.rs`)
+## 5. Modifikasi ZK Circuit (`zeltra-core/src/note_circuit.rs`)
 
 ### A. Perubahan Public Input & Private Witness
 Struktur public input `PrivateNoteCircuit` tetap ramping dan kompatibel dengan tata kelola domain DEC-028:
@@ -286,9 +286,9 @@ pub struct PrivateNoteCircuit {
 
 ---
 
-## 6. Rencana Migrasi Storage Smart Contract (`nimbus-contracts`)
+## 6. Rencana Migrasi Storage Smart Contract (`zeltra-contracts`)
 
-Pada `nimbus-contracts/src/storage.rs`, bagian penampung pohon komitmen diperbarui tanpa merusak urutan slot field keuangan:
+Pada `zeltra-contracts/src/storage.rs`, bagian penampung pohon komitmen diperbarui tanpa merusak urutan slot field keuangan:
 
 ```rust
 // SEBELUM (LeanIMT Depth 20 - Terbatas 1M Daun):
@@ -320,12 +320,12 @@ event NoteCommitmentAppended(
 
 ---
 
-## 7. Dampak pada Relayer & Client SDK (`nimbus-sdk` & `nimbus-node`)
+## 7. Dampak pada Relayer & Client SDK (`zeltra-sdk` & `zeltra-node`)
 
-1. **Client SDK (`nimbus-sdk/src/wallet/note_wallet.rs`):**
+1. **Client SDK (`zeltra-sdk/src/wallet/note_wallet.rs`):**
    * Wallet lokal menyimpan daftar `mmr_peaks` dan riwayat daun miliknya.
    * Saat hendak membuat ZK proof, wallet menghasilkan MMR membership witness (`mountain_siblings` dan `bagging_peaks`) dari snapshot posisi daun di MMR lokal/indexer.
-2. **Relayer Ingress (`nimbus-node/src/handlers/spend.rs`):**
+2. **Relayer Ingress (`zeltra-node/src/handlers/spend.rs`):**
    * Endpoint `POST /api/v1/spend-private-note` memeriksa apakah `note_root` terdaftar di kontrak Stylus (`is_accepted_note_root`).
    * Menambahkan sanitasi pre-flight: memverifikasi bahwa `leaf_count` adalah nilai wajar dan `note_root` tidak sama dengan root kosong jika `leaf_count > 0`.
 

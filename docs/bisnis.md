@@ -1,12 +1,12 @@
-# Model Bisnis Nimbus Protocol
+# Model Bisnis Zeltra Protocol
 
 ## 1. Ringkasan
 
-Nimbus adalah **shielded payment pool untuk Web3**. Pengguna memasukkan stablecoin
-ke pool Nimbus, lalu manusia, aplikasi, atau AI agent dapat melakukan pembayaran
+Zeltra adalah **shielded payment pool untuk Web3**. Pengguna memasukkan stablecoin
+ke pool Zeltra, lalu manusia, aplikasi, atau AI agent dapat melakukan pembayaran
 tanpa membuka hubungan langsung antara alamat sumber dana dan pembayaran tersebut.
 
-Nimbus tidak menjual AI dan bukan bisnis SaaS. Nimbus menyediakan smart contract,
+Zeltra tidak menjual AI dan bukan bisnis SaaS. Zeltra menyediakan smart contract,
 SDK, relayer, dan jaringan guardian sebagai infrastruktur pembayaran privat.
 
 ```text
@@ -14,7 +14,7 @@ Pemilik dana
     |
     | shield stablecoin
     v
-Nimbus Privacy Pool
+Zeltra Privacy Pool
     |
     | private payment melalui SDK
     v
@@ -22,12 +22,12 @@ Merchant / API / dApp
 ```
 
 SDK diberikan gratis agar wallet, dApp, API provider, dan developer AI dapat
-mengintegrasikan Nimbus. Protokol memperoleh pendapatan ketika jaringan benar-benar
+mengintegrasikan Zeltra. Protokol memperoleh pendapatan ketika jaringan benar-benar
 digunakan.
 
 ## 2. Nilai Utama
 
-Nimbus memberikan:
+Zeltra memberikan:
 
 - pemutusan hubungan publik antara funding wallet dan pembayaran;
 - ephemeral identifier untuk mengurangi address clustering;
@@ -37,18 +37,18 @@ Nimbus memberikan:
 - nullifier untuk mencegah double-spending;
 - selective disclosure untuk audit atau proses compliance yang sah.
 
-Nimbus tidak menjanjikan anonimitas mutlak. Nominal, waktu, recipient, funding
+Zeltra tidak menjanjikan anonimitas mutlak. Nominal, waktu, recipient, funding
 source, gas payer, dan pola withdrawal masih dapat menimbulkan korelasi. Produk
 harus diposisikan sebagai **confidential settlement**, bukan alat untuk menghindari
 hukum.
 
 ### 2.1 Netralitas Kepatuhan & Verifiable Provenance (Association Sets)
 
-Nimbus dirancang dengan arsitektur **pembuktian selektif mandiri (self-provable innocence)**:
+Zeltra dirancang dengan arsitektur **pembuktian selektif mandiri (self-provable innocence)**:
 1. **Non-Custodial Absolut:** Protokol, smart contract, relayer, dan pengembang **tidak pernah memegang private spend key atau viewing key pengguna**. Tidak ada master key atau backdoor untuk membuka identitas secara sepihak.
 2. **Beban Pembuktian di Tangan Pengguna:** Pengguna jujur memiliki kemampuan matematis untuk membuktikan bahwa deposit mereka berasal dari himpunan bersih (*Association Set*) yang diterbitkan oleh pihak ketiga independen (*Association Set Provider / ASP*), tanpa membocorkan riwayat dompet pribadi mereka ke publik.
 3. **Penyaringan Otomatis di Pintu Masuk:** Aktor jahat atau dana hasil eksploitasi tidak akan dapat membuktikan keanggotaan dalam *clean association set*. Akibatnya, dana mereka akan otomatis ditolak oleh exchange atau merchant yang mewajibkan verifikasi kepatuhan.
-4. **Netralitas Infrastruktur:** Nimbus adalah rel pembayaran publik yang netral. Kewajiban pemilihan kebijakan verifikasi dan penegakan hukum berada di pihak verifier (exchange/merchant), bukan di tangan protokol.
+4. **Netralitas Infrastruktur:** Zeltra adalah rel pembayaran publik yang netral. Kewajiban pemilihan kebijakan verifikasi dan penegakan hukum berada di pihak verifier (exchange/merchant), bukan di tangan protokol.
 
 ## 3. Pihak dalam Jaringan
 
@@ -109,7 +109,7 @@ kendali kedaulatan mutlak (*100% self-custodial*) atas aset mereka tanpa bergant
 
 ## 5. Model Biaya Target (Zero-Deposit & Fixed Mathematical Constants)
 
-Untuk meminimalkan celah eksploitasi dan serangan governance DAO (seperti insiden flashloan/governance takeover The DAO 2016 atau Tornado Cash 2023), Nimbus mengadopsi **konstanta matematis protokol yang terjamin (*hardcoded immutable constants*)**:
+Untuk meminimalkan celah eksploitasi dan serangan governance DAO (seperti insiden flashloan/governance takeover The DAO 2016 atau Tornado Cash 2023), Zeltra mengadopsi **konstanta matematis protokol yang terjamin (*hardcoded immutable constants*)**:
 
 | Aktivitas | Biaya target | Penerima | Keterangan |
 |---|---:|---|---|
@@ -142,7 +142,7 @@ Total debit pengguna              100,4730 USDC
 Merchant menerima                 100,0000 USDC
 ```
 
-Relayer membayar gas dalam ETH terlebih dahulu. Biaya gas aktual dikonversi ke USDC menggunakan harga pasar real-time dari Oracle Chainlink Data Feeds ETH/USD (DEC-029) dengan fallback aman `NIMBUS_ETH_PRICE_USDC`. Execution quote ditetapkan
+Relayer membayar gas dalam ETH terlebih dahulu. Biaya gas aktual dikonversi ke USDC menggunakan harga pasar real-time dari Oracle Chainlink Data Feeds ETH/USD (DEC-029) dengan fallback aman `ZELTRA_ETH_PRICE_USDC`. Execution quote ditetapkan
 sebelum user menandatangani dan terdiri dari estimasi gas dalam stablecoin plus
 markup relayer (misal 15% dari gas quote). Jika beberapa transaksi berhasil
 dibatch dengan biaya aktual lebih rendah, selisihnya menjadi margin efisiensi relayer.
@@ -167,22 +167,22 @@ Payload memuat `max_fee` dan expiry agar relayer tidak dapat menaikkan biaya set
 
 ## 6. AI Agent Spending Wallet dan SDK
 
-Nimbus tidak membuat atau mengoperasikan bot AI pengguna. Developer memasang
-Nimbus SDK ke dalam autonomous agent mereka agar agent dapat melakukan pembayaran API
+Zeltra tidak membuat atau mengoperasikan bot AI pengguna. Developer memasang
+Zeltra SDK ke dalam autonomous agent mereka agar agent dapat melakukan pembayaran API
 atau layanan secara privat dan self-custodial.
 
 ```text
 Pemilik mendanai Initial Private Note untuk Agent
     |
     v
-Nimbus SDK (Client-Side Note & Spending Key Manager)
+Zeltra SDK (Client-Side Note & Spending Key Manager)
     |
     v
 AI agent menerima HTTP 402 atau payment request
     |
     | SDK membuat Groth16 ZK proof (Spend Note -> Pay Merchant + Change Note)
     v
-Nimbus Relayer melakukan instant settlement on-chain
+Zeltra Relayer melakukan instant settlement on-chain
     |
     +---> API provider menerima USDC
     |
@@ -190,7 +190,7 @@ Nimbus Relayer melakukan instant settlement on-chain
 ```
 
 Agent Spending Wallet **bukan akun kustodian di server relayer** dan bukan saldo Layer 7 fiktif.
-Ini adalah pengelolaan cryptographic private notes secara mandiri oleh Nimbus SDK:
+Ini adalah pengelolaan cryptographic private notes secara mandiri oleh Zeltra SDK:
 1. Pemilik mendelegasikan spending key terisolasi atau mentransfer note dengan nominal tertentu ke agent.
 2. Agent memegang spending key dan unspent notes secara lokal.
 3. Karena sisa pembayaran selalu kembali sebagai change note ke Merkle tree, agent dapat melakukan pembayaran API berulang kali secara instan tanpa perlu bantuan funding wallet manusia setiap kali ada invoice.
@@ -207,7 +207,7 @@ agar biaya gas on-chain tetap jauh lebih kecil daripada nilai pembayaran.
 
 ## 7. Liquid Reserve (Full Reserve) Model
 
-Untuk meminimalkan risiko keamanan smart contract, menghemat batas ukuran byte WASM di Arbitrum Stylus, dan meniadakan risiko Bank Run (kebangkrutan kas akibat penarikan massal), Nimbus mengadopsi **100% Liquid Reserve (Full Reserve)**. 
+Untuk meminimalkan risiko keamanan smart contract, menghemat batas ukuran byte WASM di Arbitrum Stylus, dan meniadakan risiko Bank Run (kebangkrutan kas akibat penarikan massal), Zeltra mengadopsi **100% Liquid Reserve (Full Reserve)**. 
 
 Seluruh collateral stablecoin milik pengguna disimpan dalam kas likuid aktif langsung di dalam kontrak utama. Model dynamic vault dengan alokasi 30/50/20 via Aave V3 dan Ondo RWA telah didelegasikan ke fase pengembangan modular selanjutnya. Jika dibutuhkan yield native di masa depan, fitur tersebut akan dibangun secara modular sebagai wrapper terpisah (misalnya adaptor ERC-4626) daripada digabungkan langsung ke dalam core privacy pool.
 
@@ -242,7 +242,7 @@ Seluruh collateral stablecoin milik pengguna disimpan dalam kas likuid aktif lan
 - reward hanya setelah memenuhi aturan availability dan tidak melakukan
   double-signing.
 
-Pada testnet, seluruh operator dapat dimiliki Nimbus. Pembukuan tetap harus
+Pada testnet, seluruh operator dapat dimiliki Zeltra. Pembukuan tetap harus
 memisahkan pendapatan relayer, guardian, dan treasury agar biaya jaringan nyata
 dapat diukur sebelum operator eksternal dibuka.
 
@@ -296,7 +296,7 @@ Dokumen ini menjelaskan **model bisnis target dan roadmap arsitektur**. Status t
 * **Fee Structure & Immutability:** Deposit 0% (zero-friction), spend 45 bps flat (DEC-028), relayer gas + 15% markup. Tanpa DAO attack surface.
 
 ### Yang Sedang Berjalan (Phase 2 - Jalur B: ZK-UTXO Note Balance):
-* **Gate C0 Security Repair (`nimbus-core`):** Pengerjaan sirkuit Groth16 Arkworks untuk private note dengan change output:
+* **Gate C0 Security Repair (`zeltra-core`):** Pengerjaan sirkuit Groth16 Arkworks untuk private note dengan change output:
   - Enforce pembuktian Merkle path direction bits terikat ke `input_leaf_index` di sirkuit (mencegah double-spend).
   - Enforce range constraint 64-bit untuk seluruh nilai nominal (mencegah modular wrap-around field scalar).
   - Enforce boolean constraint pada `has_change` (mencegah pemalsuan output commitment).
@@ -373,7 +373,7 @@ Agar eksekusi tidak bias dan fokus, pengerjaan diatur dalam 3 fase tegas:
 │         │ • Terapkan deposit_direct_note (Direct MMR Inflow, 250ms).   │
 │         │ • Finalisasi Groth16 spend di Arbitrum Sepolia.              │
 ├─────────┼──────────────────────────────────────────────────────────────┤
-│ FASE 2  │ CLIENT SDK & BROWSER PROVER (nimbus-sdk)                     │
+│ FASE 2  │ CLIENT SDK & BROWSER PROVER (zeltra-sdk)                     │
 │         │ • Integrasikan prepare_direct_deposit & Viewing Key recovery.│
 │         │ • Optimalkan Groth16 prover Web Worker (1-2s stream).        │
 ├─────────┼──────────────────────────────────────────────────────────────┤

@@ -1,12 +1,12 @@
 [workspace]
 members = [
-    "nimbus-core",
-    "nimbus-cli",
-    "nimbus-contracts",
-    "nimbus-sdk",
-    "nimbus-node"
+    "zeltra-core",
+    "zeltra-cli",
+    "zeltra-contracts",
+    "zeltra-sdk",
+    "zeltra-node"
 ]
-default-members = ["nimbus-contracts"]
+default-members = ["zeltra-contracts"]
 resolver = "2"
 
 [workspace.dependencies]

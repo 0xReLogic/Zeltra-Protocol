@@ -7,7 +7,7 @@ Accepted
 2026-10-03
 
 ## Context
-The Nimbus relayer batches private spend transactions (2 to 8 items) to amortize base transaction execution overhead on Arbitrum Stylus and generate relayer fee profit. In [`DEC-006`](file:///workspaces/Zeltra-Protocol/research/decisions/DEC-006-adaptive-private-spend-batching.md), an adaptive batching mechanism and SQLite table `spend_batches` were established.
+The Zeltra relayer batches private spend transactions (2 to 8 items) to amortize base transaction execution overhead on Arbitrum Stylus and generate relayer fee profit. In [`DEC-006`](file:///workspaces/Zeltra-Protocol/research/decisions/DEC-006-adaptive-private-spend-batching.md), an adaptive batching mechanism and SQLite table `spend_batches` were established.
 
 However, the relayer's health monitoring endpoint (`/api/health`) and operator telemetry lacked summarized visibility into batch profitability and efficiency metrics:
 1. **Total Batch Count (`batch_count`):** How many aggregated batches the relayer has settled on-chain.
@@ -22,7 +22,7 @@ However, the relayer's health monitoring endpoint (`/api/health`) and operator t
 ## Decision
 
 ### 1. Database Batch Metrics Query (`get_batch_metrics`)
-Add a dedicated query function on [`Database`](file:///workspaces/Zeltra-Protocol/nimbus-node/src/database.rs) that calculates:
+Add a dedicated query function on [`Database`](file:///workspaces/Zeltra-Protocol/zeltra-node/src/database.rs) that calculates:
 ```rust
 #[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
 pub struct BatchMetrics {
@@ -46,7 +46,7 @@ FROM spend_batches
 ```
 
 ### 2. Integration into `HealthResponse` (`/api/health`)
-Expose these metrics cleanly in [`HealthResponse`](file:///workspaces/Zeltra-Protocol/nimbus-node/src/dto.rs):
+Expose these metrics cleanly in [`HealthResponse`](file:///workspaces/Zeltra-Protocol/zeltra-node/src/dto.rs):
 ```json
 {
   "status": "OK",

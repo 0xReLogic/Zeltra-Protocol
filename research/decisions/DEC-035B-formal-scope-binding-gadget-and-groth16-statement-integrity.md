@@ -4,10 +4,10 @@
 - **Author:** Zeltra Architecture & Cryptography Team
 - **Date:** 2026-10-10
 - **Applies to:**
-  - `nimbus-core/src/note_circuit.rs` (`PrivateNoteCircuit` constraint system, replacement of dead `_binding` assignment)
-  - `nimbus-core/src/joinsplit_circuit.rs` (JoinSplit circuit scope binding gadget parity)
-  - `nimbus-contracts/src/groth16_note_verifier.rs` (Verifier constraint matrix consistency & public inputs check)
-  - `nimbus-node/src/handlers/spend.rs` (Relayer preflight statement checks and quote equality)
+  - `zeltra-core/src/note_circuit.rs` (`PrivateNoteCircuit` constraint system, replacement of dead `_binding` assignment)
+  - `zeltra-core/src/joinsplit_circuit.rs` (JoinSplit circuit scope binding gadget parity)
+  - `zeltra-contracts/src/groth16_note_verifier.rs` (Verifier constraint matrix consistency & public inputs check)
+  - `zeltra-node/src/handlers/spend.rs` (Relayer preflight statement checks and quote equality)
 - **Parent & Related DECs:**
   - [`DEC-035`](file:///workspaces/Zeltra-Protocol/research/decisions/DEC-035-cryptographic-canonicality-public-input-binding-and-mmr.md) (Master Zero-Tech-Debt Blueprint)
   - [`DEC-035A`](file:///workspaces/Zeltra-Protocol/research/decisions/DEC-035A-two-limb-quote-hash-representation-and-range-constraints.md) (Two-Limb Quote Hash Specification)
@@ -21,7 +21,7 @@
 In zero-knowledge proof systems based on Groth16 ([Groth, EUROCRYPT 2016](https://eprint.iacr.org/2016/260)), verification security relies on the absolute coupling between public inputs and the Quadratic Arithmetic Program (QAP) constraint matrices $A, B, C$. The joint audit across Claude (CTO), ChatGPT (Security Reviewer), and Gemini (Repository Investigator) uncovered two critical vulnerabilities in Zeltra's earlier circuit and relayer ingress implementations:
 
 1. **The Dangling `_binding` Defect (Dead Wire Assignment):**
-   In `nimbus-core/src/note_circuit.rs`, the circuit witness generation routine executed:
+   In `zeltra-core/src/note_circuit.rs`, the circuit witness generation routine executed:
    ```rust
    let _binding = poseidon_w3_hash(&quote_hash_var, &scope_hash, ...);
    ```
@@ -34,7 +34,7 @@ In zero-knowledge proof systems based on Groth16 ([Groth, EUROCRYPT 2016](https:
    $$IC[k] = \mathcal{O}_{G_1}$$
    When $IC[k] = \mathcal{O}_{G_1}$, any scalar scalar multiplier satisfies $x_k \cdot \mathcal{O}_{G_1} = \mathcal{O}_{G_1}$. An attacker or malicious relayer could freely replace the `recipient` or `quote_hash` with arbitrary values, and the Groth16 pairing verification would still succeed!
 3. **Missing Relayer Ingress Equality Guard:**
-   In `nimbus-node/src/handlers/spend.rs`, the relayer verified that the client had signed a valid `ExecutionQuote`, but failed to assert bit-exact equality between the reconstructed quote hash and the submitted public inputs `public_inputs[9]` and `public_inputs[10]`. This allowed a client to submit a valid signature for Quote A (e.g. paying high fees) while executing a proof bound to Quote B.
+   In `zeltra-node/src/handlers/spend.rs`, the relayer verified that the client had signed a valid `ExecutionQuote`, but failed to assert bit-exact equality between the reconstructed quote hash and the submitted public inputs `public_inputs[9]` and `public_inputs[10]`. This allowed a client to submit a valid signature for Quote A (e.g. paying high fees) while executing a proof bound to Quote B.
 
 [`DEC-035`](file:///workspaces/Zeltra-Protocol/research/decisions/DEC-035-cryptographic-canonicality-public-input-binding-and-mmr.md) mandates establishing a **Formal Scope Binding Gadget** that tightly couples all transaction context into active R1CS constraints, eliminating dead wires and guaranteeing non-trivial $IC[i] \ne \mathcal{O}_{G_1}$ across all public inputs.
 
@@ -169,8 +169,8 @@ Where:
 - $quote\_hash\_lo\_var$: Low 128-bit limb of EIP-712 quote hash (range checked in DEC-035A).
 - $\text{DOMAIN\_BINDING\_V1} = \texttt{0x5a454c5452415f42494e44494e475f5631}$ ("ZELTRA_BINDING_V1").
 
-### C. Active R1CS Enforcement in `nimbus-core`
-In `nimbus-core/src/note_circuit.rs`:
+### C. Active R1CS Enforcement in `zeltra-core`
+In `zeltra-core/src/note_circuit.rs`:
 ```rust
 // 1. Allocate contextual public inputs
 let recipient_var = cs.new_input_variable(|| Ok(self.recipient))?;
@@ -236,9 +236,9 @@ Index  Wire Name              Constraint Status & Binding Mechanism
 
 ---
 
-## 7. Relayer Ingress Equality Guard (`nimbus-node`)
+## 7. Relayer Ingress Equality Guard (`zeltra-node`)
 
-In `nimbus-node/src/handlers/spend.rs`, add the strict preflight equality assertion to prevent quote-swapping and griefing attacks:
+In `zeltra-node/src/handlers/spend.rs`, add the strict preflight equality assertion to prevent quote-swapping and griefing attacks:
 
 ```rust
 // 1. Reconstruct expected EIP-712 signing digest
@@ -291,7 +291,7 @@ if input_quote_hi != expected_hi || input_quote_lo != expected_lo {
 
 ## 9. Testing & Verification Matrix
 
-### A. R1CS Constraint Soundness Tests (`nimbus-core`)
+### A. R1CS Constraint Soundness Tests (`zeltra-core`)
 1. **Public Input Tampering Tests:**
    - Tamper `recipient` in public inputs without updating proof: assert `verify_proof() == false`.
    - Tamper `chain_id` or `contract_address`: assert `verify_proof() == false`.
@@ -309,7 +309,7 @@ if input_quote_hi != expected_hi || input_quote_lo != expected_lo {
      }
      ```
 
-### B. Relayer Ingress Negative Tests (`nimbus-node`)
+### B. Relayer Ingress Negative Tests (`zeltra-node`)
 1. **Mismatched Quote Rejection:**
    - Client signs valid quote with gas limit $G_1$, but submits proof generated with gas limit $G_2$.
    - Assert relayer immediately returns `400 Bad Request` with `MismatchedQuoteHash`.

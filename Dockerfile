@@ -9,7 +9,7 @@ RUN apt-get update && apt-get install -y \
 
 WORKDIR /app
 
-# The compiled binary will be copied to root as nimbus-node-bin before build
-COPY ./nimbus-node-bin /usr/local/bin/nimbus-node
+# The compiled binary will be copied to root as zeltra-node-bin before build
+COPY ./zeltra-node-bin /usr/local/bin/zeltra-node
 
-CMD ["/usr/local/bin/nimbus-node"]
+CMD ["/usr/local/bin/zeltra-node"]

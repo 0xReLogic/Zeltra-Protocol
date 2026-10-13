@@ -28,7 +28,7 @@ research/reference-repos/
 research/reporefer/
 
 # Local sensitive configuration files
-nimbus-node/.env.test
+zeltra-node/.env.test
 .env.test
 .env
 

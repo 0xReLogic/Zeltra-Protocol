@@ -4,10 +4,10 @@
 - **Author:** Zeltra Architecture & Cryptography Team
 - **Date:** 2026-10-10
 - **Applies to:**
-  - `nimbus-sdk/src/wallet/note_wallet.rs` (`PrivateNoteWallet` state, coin selection, local proof generation, and consolidation)
-  - `nimbus-sdk/src/coin_selection.rs` (Stochastic Knapsack multi-note selection algorithm)
-  - `nimbus-sdk/src/client.rs` (HTTP client routines for relayer quotes, bulk MMR sync, and spend broadcast)
-  - `nimbus-sdk/src/storage.rs` (SQLCipher / IndexedDB crash-safe 2PC note state transitions)
+  - `zeltra-sdk/src/wallet/note_wallet.rs` (`PrivateNoteWallet` state, coin selection, local proof generation, and consolidation)
+  - `zeltra-sdk/src/coin_selection.rs` (Stochastic Knapsack multi-note selection algorithm)
+  - `zeltra-sdk/src/client.rs` (HTTP client routines for relayer quotes, bulk MMR sync, and spend broadcast)
+  - `zeltra-sdk/src/storage.rs` (SQLCipher / IndexedDB crash-safe 2PC note state transitions)
 - **Parent & Related DECs:**
   - [`DEC-036`](file:///workspaces/Zeltra-Protocol/research/decisions/DEC-036-universal-2-in-2-out-joinsplit-full-stack-architecture.md) (Master JoinSplit Architecture Blueprint)
   - [`DEC-036A`](file:///workspaces/Zeltra-Protocol/research/decisions/DEC-036A-universal-2-in-2-out-joinsplit-r1cs-circuit-specification.md) (Universal 2-in-2-out JoinSplit R1CS Circuit & Soundness)
@@ -21,7 +21,7 @@
 
 ## 1. Executive Summary & Problem Statement
 
-Penerapan sirkuit ZK-UTXO JoinSplit 2-in-2-out ([`DEC-036A`](file:///workspaces/Zeltra-Protocol/research/decisions/DEC-036A-universal-2-in-2-out-joinsplit-r1cs-circuit-specification.md)) menuntut keandalan dan privasi absolut pada lapisan klien SDK (`nimbus-sdk`). Visi Zeltra Protocol adalah **Privasi 9.5/10, Produk 10/10**: pengguna awam harus menikmati kecepatan dan kemudahan seperti Apple Pay atau QRIS tanpa perlu memahami komputasi kriptografi di balik layar. Namun, implementasi dompet UTXO privat menghadapi jebakan arsitektur yang sering kali merusak privasi atau menyebabkan kehilangan dana (*funds loss*):
+Penerapan sirkuit ZK-UTXO JoinSplit 2-in-2-out ([`DEC-036A`](file:///workspaces/Zeltra-Protocol/research/decisions/DEC-036A-universal-2-in-2-out-joinsplit-r1cs-circuit-specification.md)) menuntut keandalan dan privasi absolut pada lapisan klien SDK (`zeltra-sdk`). Visi Zeltra Protocol adalah **Privasi 9.5/10, Produk 10/10**: pengguna awam harus menikmati kecepatan dan kemudahan seperti Apple Pay atau QRIS tanpa perlu memahami komputasi kriptografi di balik layar. Namun, implementasi dompet UTXO privat menghadapi jebakan arsitektur yang sering kali merusak privasi atau menyebabkan kehilangan dana (*funds loss*):
 
 1. **Balance Fragmentation Lockout ($N > 2$):** Karena sirkuit JoinSplit dibatasi tepat 2 input demi menjaga waktu pembuktian (< 2.5 detik) dan ukuran constraint (~10.800 R1CS constraints), dompet dengan banyak pecahan saldo mikro ($N > 2$) akan gagal bertransaksi tanpa mekanisme konsolidasi bertahap (*in-pool progressive consolidation*).
 2. **Metadata Snooping Threat on Tree Sync (ZIP 314):** Jika klien meminta jalur bukti Merkle/MMR secara spesifik per-daun (`GET /api/v1/mmr/proof/{leaf_index}`), operator relayer dapat memetakan indeks daun yang dimiliki pengguna, menghancurkan himpunan anonimitas (*anonymity set*) dari luar.
@@ -109,7 +109,7 @@ Modul Client SDK wajib mematuhi invarian operasional berikut:
 
 ## 4. Multi-UTXO Stochastic Knapsack Coin Selection Architecture
 
-Algoritma pemilihan koin pada `nimbus-sdk/src/coin_selection.rs` beroperasi melalui skema hirarkis 4-tingkat:
+Algoritma pemilihan koin pada `zeltra-sdk/src/coin_selection.rs` beroperasi melalui skema hirarkis 4-tingkat:
 
 ```
                        COIN SELECTION DECISION PIPELINE
@@ -347,7 +347,7 @@ CREATE TABLE joinsplit_sessions (
 
 ## 9. Acceptance Criteria & Test Matrix
 
-Modul `nimbus-sdk` wajib lulus pengujian unit dan integrasi berikut:
+Modul `zeltra-sdk` wajib lulus pengujian unit dan integrasi berikut:
 
 1. **Coin Selection Optimization:**
    - Single note pas: memilih Tier 1, dummy slot 2 diaktifkan.

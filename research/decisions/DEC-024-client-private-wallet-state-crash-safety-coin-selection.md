@@ -2,7 +2,7 @@
 
 **Status:** Accepted  
 **Date:** October 2026  
-**Applies to:** `nimbus-sdk/src/wallet/note_wallet.rs`, `nimbus-sdk/src/x402/pool.rs`, `nimbus-sdk/src/lib.rs`  
+**Applies to:** `zeltra-sdk/src/wallet/note_wallet.rs`, `zeltra-sdk/src/x402/pool.rs`, `zeltra-sdk/src/lib.rs`  
 **Related DECs:** DEC-016 (ZK-UTXO Model), DEC-016A (Nullifier & Circuit Invariants), DEC-016B (Gate C0 & Range Bounds), DEC-022 (Boundary Gaps), DEC-023 (Siloed Nullifiers)
 
 ---
@@ -24,9 +24,9 @@ While Gate C (ZK Circuit) and Gate D (Stylus Verifier & Settlement) mathematical
 
 ---
 
-## 2. Decision & Architecture for Nimbus Protocol
+## 2. Decision & Architecture for Zeltra Protocol
 
-To resolve these vulnerabilities, `nimbus-sdk` transitions from the legacy `AgentTokenPool` (rigid fixed-denomination BDHKE vouchers) to an audited **`PrivateNoteWallet`** implementing the following architectural principles:
+To resolve these vulnerabilities, `zeltra-sdk` transitions from the legacy `AgentTokenPool` (rigid fixed-denomination BDHKE vouchers) to an audited **`PrivateNoteWallet`** implementing the following architectural principles:
 
 ### A. 4-Stage UTXO Lifecycle State Machine with Two-Phase Commit (2PC)
 
@@ -65,7 +65,7 @@ Inspired by Aztec's `balance-set.nr` (`preprocess_notes_min_sum`) and WabiSabi v
 
 ### C. Pre-flight Merkle Root Freshness Guard
 
-Before invoking `nimbus-core::generate_note_proof`:
+Before invoking `zeltra-core::generate_note_proof`:
 1. The SDK queries the smart contract's latest `merkle_root` or validates that `accepted_note_roots(note.merkle_root) > 0`.
 2. If the note's recorded root has expired from the circular buffer, the SDK automatically performs a lightweight local Merkle witness update against the latest tree root without requiring user interaction.
 
@@ -80,9 +80,9 @@ Following Paper 2026/1621 (*Z-SCAPE*) and Paper 2026/513 (*zkBSA*):
 
 ---
 
-## 3. Implementation Blueprint for `nimbus-sdk`
+## 3. Implementation Blueprint for `zeltra-sdk`
 
-- **Module Location:** `nimbus-sdk/src/wallet/mod.rs` & `nimbus-sdk/src/wallet/note_wallet.rs`
+- **Module Location:** `zeltra-sdk/src/wallet/mod.rs` & `zeltra-sdk/src/wallet/note_wallet.rs`
 - **Exposed Client Methods:**
   - `PrivateNoteWallet::new(seed: [u8; 32]) -> Self`
   - `wallet.balance() -> u64` (Aggregate balance of all `Unspent` notes)

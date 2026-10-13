@@ -4,17 +4,17 @@
 Accepted
 
 ## Context
-During settlement and batching operations, the Nimbus/Zeltra relayer pays native gas in ETH upfront to Arbitrum and reimburses gas in USDC from user execution fees (`max_execution_fee` / `execution_fee`). 
+During settlement and batching operations, the Zeltra/Zeltra relayer pays native gas in ETH upfront to Arbitrum and reimburses gas in USDC from user execution fees (`max_execution_fee` / `execution_fee`). 
 
-Previously, `nimbus-node/src/handlers/spend.rs` calculated execution gas costs and batch margins using:
+Previously, `zeltra-node/src/handlers/spend.rs` calculated execution gas costs and batch margins using:
 ```rust
-let eth_price = std::env::var("NIMBUS_ETH_PRICE_USDC")
+let eth_price = std::env::var("ZELTRA_ETH_PRICE_USDC")
     .ok()
     .and_then(|v| v.parse::<f64>().ok())
     .unwrap_or(3500.0);
 ```
 As reported in GitHub Issue #2, this hardcoded approach had several deficiencies:
-1. `NIMBUS_ETH_PRICE_USDC` was absent from `docker-compose.yml`, `.env.test.example`, and centralized configuration structs (`config.rs`).
+1. `ZELTRA_ETH_PRICE_USDC` was absent from `docker-compose.yml`, `.env.test.example`, and centralized configuration structs (`config.rs`).
 2. ETH price exhibits significant market volatility (±30–50% over a 3-month period). Using a static fallback (e.g. $3,500) when actual ETH is $2,200 causes relayer to overstate gas cost and reject profitable batches; when actual ETH is $4,500, relayer experiences silent operational losses.
 3. No audit trail or real-time oracle reconciliation for relayer accounting and health reporting.
 
@@ -27,7 +27,7 @@ We query the official Chainlink ETH/USD aggregator proxy on-chain via read-only 
 - **Arbitrum Sepolia (Testnet):** `0xd30e2101a97dcbAeBCBC04F14C3f624E67A35165` (8 decimals, verified: returns active round data).
 - **Arbitrum One (Mainnet):** `0x639Fe6ab55C921f74e7fac1ee960C0B6293ba612` (8 decimals).
 
-We add `latestRoundData()` and `decimals()` ABI bindings directly in `nimbus-node/src/evm_client.rs` using Alloy's `sol!` macro:
+We add `latestRoundData()` and `decimals()` ABI bindings directly in `zeltra-node/src/evm_client.rs` using Alloy's `sol!` macro:
 ```solidity
 function latestRoundData() external view returns (
     uint80 roundId,
@@ -47,12 +47,12 @@ To ensure robust relayer execution under extreme network or oracle conditions an
 - **Staleness Check:** Answers older than `staleness_threshold_secs` (default 3,600s / 1 hour) trigger a warning or fallback.
 - **Hard Min/Max Circuit Breaker Bounds:** Enforce $\$100.00 \le \text{ETH} \le \$100,000.00$ to prevent decimal corruption, flash loan price distortions, or extreme misreporting.
 - **In-Memory Cache (TTL):** Successful oracle reads are cached for 300s (5 minutes) to avoid hammering the RPC node with redundant calls on high transaction volume.
-- **Configurable Fallback:** If the oracle call fails, times out, or returns invalid data, the relayer falls back to `NIMBUS_ETH_PRICE_USDC` env var, and finally to `3500.0`.
+- **Configurable Fallback:** If the oracle call fails, times out, or returns invalid data, the relayer falls back to `ZELTRA_ETH_PRICE_USDC` env var, and finally to `3500.0`.
 
 ### 3. Centralized Configuration (`PricingConfig`)
-Add `PricingConfig` to `nimbus-node/src/config.rs`:
-- `eth_price_feed_address`: Optional custom aggregator address override via `NIMBUS_CHAINLINK_ETH_FEED`.
-- `fallback_eth_price`: Fallback price in USDC via `NIMBUS_ETH_PRICE_USDC`.
+Add `PricingConfig` to `zeltra-node/src/config.rs`:
+- `eth_price_feed_address`: Optional custom aggregator address override via `ZELTRA_CHAINLINK_ETH_FEED`.
+- `fallback_eth_price`: Fallback price in USDC via `ZELTRA_ETH_PRICE_USDC`.
 - `cache_ttl_secs`: TTL for in-memory price caching (default 300s).
 - `staleness_threshold_secs`: Max age of oracle round before declaring stale (default 3600s).
 

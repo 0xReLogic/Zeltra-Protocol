@@ -7,7 +7,7 @@ Accepted
 2026-10-03
 
 ## Context
-In shielded payment systems (such as Tornado Cash, Railgun, and Zeltra/Nimbus), the relayer serves as the bridge between off-chain clients generating zero-knowledge/BLS proofs and the on-chain Stylus contract. Relayers face specific security vulnerabilities:
+In shielded payment systems (such as Tornado Cash, Railgun, and Zeltra/Zeltra), the relayer serves as the bridge between off-chain clients generating zero-knowledge/BLS proofs and the on-chain Stylus contract. Relayers face specific security vulnerabilities:
 1. **Invalid/Malformed Inputs & Stuck Funds:** If a user submits an unvalidated recipient (e.g., zero address `0x000...000`, truncated hex, or malformed bytes), the relayer pays execution gas only for the transaction to revert on-chain, or worse, permanently burn collateral to the zero address.
 2. **Dust Spam & Mempool Denial of Service (DoS):** Attackers can flood the relayer queue with micro-spends (e.g. 1 wei or $0.000001 USDC), exhausting database connections, mempool bandwidth, and queue worker resources.
 3. **Uncapped Single-Transaction Exposure:** In the absence of transaction ceiling limits, an abnormal or compromised transaction could drain a significant portion of pool liquidity in a single shot.
@@ -22,7 +22,7 @@ In shielded payment systems (such as Tornado Cash, Railgun, and Zeltra/Nimbus), 
 ## Decision
 
 ### 1. Smart Contract View Function (`is_nullifier_spent`)
-Add a public view function to [`nimbus-contracts/src/lib.rs`](file:///workspaces/Zeltra-Protocol/nimbus-contracts/src/lib.rs):
+Add a public view function to [`zeltra-contracts/src/lib.rs`](file:///workspaces/Zeltra-Protocol/zeltra-contracts/src/lib.rs):
 ```rust
 /// Returns whether a nullifier has already been spent on-chain.
 pub fn is_nullifier_spent(&self, nullifier: FixedBytes<32>) -> Result<bool, Vec<u8>> {
@@ -32,14 +32,14 @@ pub fn is_nullifier_spent(&self, nullifier: FixedBytes<32>) -> Result<bool, Vec<
 This enables EVM clients and relayer indexers to verify nullifier status directly over RPC without relying solely on local cache or re-simulating the entire BLS verification.
 
 ### 2. Strict Recipient EVM Address Validation
-In [`nimbus-node/src/validation.rs`](file:///workspaces/Zeltra-Protocol/nimbus-node/src/validation.rs) (applied at ingress in `handle_spend`):
+In [`zeltra-node/src/validation.rs`](file:///workspaces/Zeltra-Protocol/zeltra-node/src/validation.rs) (applied at ingress in `handle_spend`):
 - Recipient must be a valid 20-byte EVM address (hex format with `0x` prefix).
 - Recipient must NOT be `Address::ZERO` (`0x0000000000000000000000000000000000000000`).
 - If cross-chain params are specified, `destination_contract` must also parse to a valid non-zero EVM address.
 
 ### 3. Financial Safety Limits (Min / Max USDC Bounds)
 - **Minimum Spend Amount:** Minimum threshold of 5 USDC (`5_000_000` units, matching on-chain `AMOUNT_TOO_SMALL` invariant). Any spend below this amount is rejected immediately at ingress with HTTP 400.
-- **Maximum Spend Amount (Circuit Breaker):** Default ceiling of 50,000 USDC (`50_000_000_000` units), configurable via `NIMBUS_MAX_SPEND_USDC`. Any spend exceeding this limit is rejected immediately at ingress.
+- **Maximum Spend Amount (Circuit Breaker):** Default ceiling of 50,000 USDC (`50_000_000_000` units), configurable via `ZELTRA_MAX_SPEND_USDC`. Any spend exceeding this limit is rejected immediately at ingress.
 - Zero amount (`amount == 0`) is explicitly rejected.
 
 ### 4. CCIP Destination Chain Selector Allowlist
@@ -48,10 +48,10 @@ For cross-chain payments (`CrossChainParams`), `destination_chain_selector` must
 - Ethereum Sepolia: `16015286601757825753`
 - Base Sepolia: `10344971235874465080`
 - Optimism Sepolia: `5224473277236331295`
-Configurable via environment variable `NIMBUS_ALLOWED_CHAIN_SELECTORS` (comma-separated list).
+Configurable via environment variable `ZELTRA_ALLOWED_CHAIN_SELECTORS` (comma-separated list).
 
 ### 5. Post-Restart Nullifier Reconciliation
-During relayer startup in [`main.rs`](file:///workspaces/Zeltra-Protocol/nimbus-node/src/main.rs):
+During relayer startup in [`main.rs`](file:///workspaces/Zeltra-Protocol/zeltra-node/src/main.rs):
 1. Query local database for any spends in `queued`, `leased`, or `broadcasting` state.
 2. For each spend, query the on-chain contract via `evm_client.is_nullifier_spent(nullifier)`.
 3. If on-chain returns `true`:

@@ -9,4 +9,4 @@ Vincenzo Botta, Michal Pospieszalski, Emanuele Ragnoli, Justus Ranvier
 
 ZKPoSP proves that a public key or address was honestly derived from a hidden wallet seed, without revealing the seed or the private derivation state. This paper studies relationships among several derived values: whether public keys or addresses, possibly on different curves and different blockchains, share a hidden origin, which is the seed or an anchor of the wallet, and who else can recognize this relation. We give a model for such provenance proofs, with derivation proofs, which...
 
-**Relevance to Nimbus:** HIGH - Addresses Gap 3 (Stealth Address + HD Wallet) di 05-blueprint-gap-analysis.md
+**Relevance to Zeltra:** HIGH - Addresses Gap 3 (Stealth Address + HD Wallet) di 05-blueprint-gap-analysis.md

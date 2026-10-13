@@ -2,7 +2,7 @@
 
 **Status:** Accepted  
 **Date:** October 2026  
-**Applies to:** `nimbus-core/src/note.rs`, `nimbus-core/src/note_circuit.rs`, `nimbus-contracts/src/spend.rs`  
+**Applies to:** `zeltra-core/src/note.rs`, `zeltra-core/src/note_circuit.rs`, `zeltra-contracts/src/spend.rs`  
 **Related DECs:** DEC-016, DEC-016A, DEC-016B, DEC-021  
 
 ---
@@ -35,12 +35,12 @@ This ensures that:
 
 ---
 
-## 3. Decision for Nimbus Protocol
+## 3. Decision for Zeltra Protocol
 
 1. **Separation of Spending Key and Nullifier Key:**
-   In `nimbus-core/src/note.rs`, `derive_nullifier_key(sk)` derives `nk` using a unique domain separator (`nimbus.nullifier_key.v1`).
+   In `zeltra-core/src/note.rs`, `derive_nullifier_key(sk)` derives `nk` using a unique domain separator (`zeltra.nullifier_key.v1`).
 2. **Leaf Index Binding (Gate C0 Verified):**
-   In `nimbus-core/src/note_circuit.rs`, `nullifier` is strictly constrained to the 20-bit decomposition of `input_leaf_index`. A nullifier cannot be computed or spent without knowledge of its exact Merkle leaf index.
+   In `zeltra-core/src/note_circuit.rs`, `nullifier` is strictly constrained to the 20-bit decomposition of `input_leaf_index`. A nullifier cannot be computed or spent without knowledge of its exact Merkle leaf index.
 3. **On-Chain Domain Siloing (Anti-Cross-Chain Replay):**
    The `PrivateNoteCircuit` and smart contract `spend_private_note()` explicitly incorporate:
    - `chain_id`: Enforcing that a nullifier spent on Arbitrum Sepolia (421614) cannot be replayed on Arbitrum One (42161).
@@ -53,5 +53,5 @@ This ensures that:
 
 - **Security:** Guarantees cryptographic unlinkability, forward secrecy, and immunity against cross-chain and cross-contract replay.
 - **Verification:**
-  - `nimbus-core`: `note::tests::test_nullifier_unlinkable_without_key`, `test_domain_separators_distinct`, and `test_gate_c0_tampered_leaf_index_fails_proving`.
-  - `nimbus-contracts`: `test_spend_rejects_untrusted_key_and_message_replay` and `test_spend_private_note_double_spend_rejected`.
+  - `zeltra-core`: `note::tests::test_nullifier_unlinkable_without_key`, `test_domain_separators_distinct`, and `test_gate_c0_tampered_leaf_index_fails_proving`.
+  - `zeltra-contracts`: `test_spend_rejects_untrusted_key_and_message_replay` and `test_spend_private_note_double_spend_rejected`.

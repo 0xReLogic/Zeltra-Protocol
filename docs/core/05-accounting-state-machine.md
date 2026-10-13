@@ -1,6 +1,6 @@
-# Nimbus Core — 05: Multi-Liability Accounting & Solvabilitas
+# Zeltra Core — 05: Multi-Liability Accounting & Solvabilitas
 
-Dokumen ini menjelaskan model akuntansi formal pada [`nimbus-core/src/accounting.rs`](file:///workspaces/Zeltra-Protocol/nimbus-core/src/accounting.rs) dan kebijakan kalkulasi fee pada [`nimbus-core/src/fees.rs`](file:///workspaces/Zeltra-Protocol/nimbus-core/src/fees.rs) (mengacu pada spesifikasi [`DEC-016A Gate B`](file:///workspaces/Zeltra-Protocol/research/decisions/DEC-016A-private-note-spec-freeze.md)).
+Dokumen ini menjelaskan model akuntansi formal pada [`zeltra-core/src/accounting.rs`](file:///workspaces/Zeltra-Protocol/zeltra-core/src/accounting.rs) dan kebijakan kalkulasi fee pada [`zeltra-core/src/fees.rs`](file:///workspaces/Zeltra-Protocol/zeltra-core/src/fees.rs) (mengacu pada spesifikasi [`DEC-016A Gate B`](file:///workspaces/Zeltra-Protocol/research/decisions/DEC-016A-private-note-spec-freeze.md)).
 
 ---
 
@@ -49,7 +49,7 @@ Jika kondisi ini dilanggar bahkan hanya selisih 1 unit terkecil (1 *base unit* U
 
 ## 4. Kebijakan Biaya & Pembulatan Integer (`fees.rs`)
 
-File referensi: [`nimbus-core/src/fees.rs`](file:///workspaces/Zeltra-Protocol/nimbus-core/src/fees.rs)
+File referensi: [`zeltra-core/src/fees.rs`](file:///workspaces/Zeltra-Protocol/zeltra-core/src/fees.rs)
 
 1. **Aturan Pembulatan ke Atas (*Ceiling Division*):**
    Seluruh penghitungan fee protokol menggunakan pembagian pembulatan ke atas (*ceiling division*) agar tidak pernah ada fraksi desimal yang merugikan kas kontrak:

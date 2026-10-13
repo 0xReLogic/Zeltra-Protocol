@@ -1,4 +1,4 @@
-# Nimbus Protocol TODO (Active Backlog)
+# Zeltra Protocol TODO (Active Backlog)
 
 > **Catatan:** File history lengkap sebelum pembersihan tersimpan di [`archive/todo.full-archive.md`](file:///workspaces/Zeltra-Protocol/archive/todo.full-archive.md).
 > Seluruh task yang **sudah selesai (`[x]`)** telah diarsipkan agar dokumen ini murni berisi **task pending (`[ ]`)** dan arah kerja yang jelas.
@@ -20,10 +20,10 @@ Komponen inti berikut **sudah selesai dan diverifikasi**:
 * **Relayer Hardening & Compliance (DEC-026):** Local Groth16 preflight verification di CPU relayer (`verify_evm_note_proof`) sebagai mitigasi C-01 anti gas-griefing, serta screening sanksi publik aktif (OFAC SDN List di layer HTTP) dengan penolakan langsung (`403 / REJECTED`) pada spend handler dan validation.
 * **Inflow Compliance Gate & Mempool Anti-Limbo Lifecycle (DEC-027):** 2-layer sanctions screening pada deposit ingress (OFAC in-memory + Chainalysis on-chain Oracle), dynamic 15-minute lease, mempool lease watchdog background worker dengan strict on-chain simulation (`is_nullifier_spent`), dan restorasi self-custody di `PrivateNoteWallet` (`reclaim_expired_reservations`).
 * **Ingress Hardening, Flat Fee & Domain Binding (DEC-028):** Wajib 12 public inputs fail-closed (Fix R4), verifikasi domain target `chain_id` & `contract_address` (Fix R3), penyatuan fee spend flat 45 bps permanen tanpa diskon umur root (Fix R2), dan penegasan batas statement `ComplianceCircuit` (Fix R1).
-* **Multi-UTXO JoinSplit & Client Hardening (DEC-030):** Universal 2-in-2-out JoinSplit Groth16 circuit terdeploy di `nimbus-core` (14 public inputs, Option A constant topology, 448 range constraints). Client SDK `nimbus-sdk` ter-upgrade penuh: Tiered Stochastic Knapsack Coin Selection (1-note & 2-note JoinSplit, toleransi ±5%), in-pool autonomous consolidation (`consolidate_notes`), Argon2id + ChaCha20Poly1305 AEAD backup, `zeroize` memory security barrier, anti-ghost note `update_note_witness`, dan canonical hex parsers (29/29 sdk tests pass).
+* **Multi-UTXO JoinSplit & Client Hardening (DEC-030):** Universal 2-in-2-out JoinSplit Groth16 circuit terdeploy di `zeltra-core` (14 public inputs, Option A constant topology, 448 range constraints). Client SDK `zeltra-sdk` ter-upgrade penuh: Tiered Stochastic Knapsack Coin Selection (1-note & 2-note JoinSplit, toleransi ±5%), in-pool autonomous consolidation (`consolidate_notes`), Argon2id + ChaCha20Poly1305 AEAD backup, `zeroize` memory security barrier, anti-ghost note `update_note_witness`, dan canonical hex parsers (29/29 sdk tests pass).
 * **Relayer Reconciliation, Solvency Observability & Quote Hardening (DEC-031):** Three-way reconciliation engine (`reconcile_execution_fees`) menyinkronkan akrual kontrak on-chain, database SQLite (`spend_batches`), dan confirmed receipts (`status == 1`); pemusnahan total fallback quote berstatus OK tanpa signing domain (fail-closed EIP-712 domain derivation); serta observabilitas solvensi makro pada `/health` (`solvency_metrics`) tanpa kebocoran data privat user.
-* **Merkle Mountain Range Commitment Accumulator (DEC-032):** Menggantikan batas kaku LeanIMT depth 20 ($1.048.576$ daun) dengan in-memory dan on-chain Merkle Mountain Range (MMR). Canonical bagging backward fold mengikat total daun ($N$) via domain separator `DOMAIN_MMR_BAG` anti-malleability, mitigasi Hyperbridge out-of-bounds ($leaf\_index < leaf\_count$) di sirkuit R1CS dan Stylus WASM, verifikasi skalar EVM ($< r$), update storage Stylus `mmr_leaf_count` & `mmr_peaks`, 13 public inputs di `PrivateNoteCircuit`, serta sinkronisasi penuh di `nimbus-sdk` dan `nimbus-node` (367/367 tests pass di seluruh workspace, clippy & fmt clean).
-* **Epoch-Windowed Nullifier Pruning & In-Flight Rollover Economics (DEC-033):** Mengadopsi prinsip Sean Bowe & Ian Miers (IACR ePrint 2025/2031) untuk membasmi memory bloat nullifier pada Stylus WASM: 2-Epoch Generational Window ($E$ dan $E-1$, $O(1)$ gas per rotasi slot gen), Evolving Nullifier PRF terikat `epoch_id`, 15 public inputs di `PrivateNoteCircuit` (`note_epoch_id` di index 3 & `is_rollover` di index 14), In-Flight Auto-Rollover & Standalone Refresh dengan dust elimination threshold ($2.00 USDC / `MIN_STANDALONE_ROLLOVER_THRESHOLD_USDC`), self-paying relayer reimbursement (0% protocol fee, gas reimbursement + 15% relayer markup), dan preflight fail-closed validation di `nimbus-node` serta epoch status lifecycle di `nimbus-sdk`.
+* **Merkle Mountain Range Commitment Accumulator (DEC-032):** Menggantikan batas kaku LeanIMT depth 20 ($1.048.576$ daun) dengan in-memory dan on-chain Merkle Mountain Range (MMR). Canonical bagging backward fold mengikat total daun ($N$) via domain separator `DOMAIN_MMR_BAG` anti-malleability, mitigasi Hyperbridge out-of-bounds ($leaf\_index < leaf\_count$) di sirkuit R1CS dan Stylus WASM, verifikasi skalar EVM ($< r$), update storage Stylus `mmr_leaf_count` & `mmr_peaks`, 13 public inputs di `PrivateNoteCircuit`, serta sinkronisasi penuh di `zeltra-sdk` dan `zeltra-node` (367/367 tests pass di seluruh workspace, clippy & fmt clean).
+* **Epoch-Windowed Nullifier Pruning & In-Flight Rollover Economics (DEC-033):** Mengadopsi prinsip Sean Bowe & Ian Miers (IACR ePrint 2025/2031) untuk membasmi memory bloat nullifier pada Stylus WASM: 2-Epoch Generational Window ($E$ dan $E-1$, $O(1)$ gas per rotasi slot gen), Evolving Nullifier PRF terikat `epoch_id`, 15 public inputs di `PrivateNoteCircuit` (`note_epoch_id` di index 3 & `is_rollover` di index 14), In-Flight Auto-Rollover & Standalone Refresh dengan dust elimination threshold ($2.00 USDC / `MIN_STANDALONE_ROLLOVER_THRESHOLD_USDC`), self-paying relayer reimbursement (0% protocol fee, gas reimbursement + 15% relayer markup), dan preflight fail-closed validation di `zeltra-node` serta epoch status lifecycle di `zeltra-sdk`.
 * **Dual-Asset Architecture (USDC & WETH) (DEC-034):** Konvergensi dua aset terlikuid di Arbitrum One (USDC 63.57% pangsa pasar dolar & WETH sebagai kedaulatan anti-sensor tanpa admin key). Solvensi terisolasi per asset ID (`asset_id: 0` WETH, `asset_id: 1` USDC), zero-oracle reimbursement (reimbursement intra-aset kebal manipulasi harga), normalisasi skala WETH ke basis Gwei (9 desimal) untuk menjaga kapasitas sirkuit `u64`, auto-wrap native ETH payable pada deposit Stylus, dan sinergi proteksi sanksi DEC-026.
 * **Relayer Operational Hygiene & Health Probes:** Singleton pooling `reqwest::Client` dengan TLS dan timeout ketat (`http.rs`), periodic in-memory rate-limiter pruning anti-memory-leak, dedicated k8s `/live` & `/ready` health endpoints, dan validasi EVM address pada x402 facilitator (147/147 node tests pass, clippy clean).
 * **Cryptographic Canonicality, Circuit Binding Soundness & MMR Architecture (DEC-035):** Ratifikasi arsitektur Zero Tech Debt untuk pra-testnet: Representasi quote hash Two-Limb (128-bit) permanen ($H_{\text{hi}}, H_{\text{lo}} < 2^{128} \ll r$) tanpa shortcut pemotongan modulo / rejection sampling, penggantian dangling `_binding` dengan formal scope binding commitment gadget di R1CS, sinkronisasi end-to-end MMR indexer (`NoteCommitmentAppended`) dan dynamic sync endpoint di relayer, serta pengetatan equality quote hash pada relayer spend handler.
@@ -56,7 +56,7 @@ Ref: [`DEC-035`](file:///workspaces/Zeltra-Protocol/research/decisions/DEC-035-c
 - [x] **DEC-035A+B / Step 1 (Core):** Update `extract_public_inputs` (16 public inputs) & generate dev keys baru (`0x4e696d6275734e43`).
 - [x] **DEC-035A / Step 2 (Contract):** Update `_spend_private_note` di `spend.rs` (unpack `quote_hash: FixedBytes<32>` jadi `quote_hi` & `quote_lo`, calldata eksternal tetap `bytes32`).
 - [x] **DEC-035A+B / Step 2 (Contract):** Update `groth16_note_verifier.rs` dengan 17-point $IC$ verifying key baru.
-- [x] **DEC-035C / Step 3 (Node):** Build worker indexer event `NoteCommitmentAppended` di `nimbus-node`.
+- [x] **DEC-035C / Step 3 (Node):** Build worker indexer event `NoteCommitmentAppended` di `zeltra-node`.
 - [x] **DEC-035C / Step 3 (Node):** Endpoint `GET /api/v1/mmr/proof/:leaf_index` di relayer untuk dynamic sync proof client.
 - [x] **DEC-035B / Step 3 (Node):** Tambah missing equality check `payload.quote_hash == compute_quote_hash(&execution_quote)` di `spend.rs`.
 - [x] **DEC-035A+C / Step 4 (SDK):** Update `PrivateNoteWallet` untuk susun 16 public inputs dan fetch live MMR proof dari relayer.
@@ -65,14 +65,14 @@ Ref: [`DEC-035`](file:///workspaces/Zeltra-Protocol/research/decisions/DEC-035-c
 ### Gate C2 / DEC-036 — Universal 2-in-2-out JoinSplit End-to-End Pipeline
 Ref: [`DEC-036`](file:///workspaces/Zeltra-Protocol/research/decisions/DEC-036-universal-2-in-2-out-joinsplit-full-stack-architecture.md) *(Master Blueprint)* | [`DEC-036A`](file:///workspaces/Zeltra-Protocol/research/decisions/DEC-036A-universal-2-in-2-out-joinsplit-r1cs-circuit-specification.md) *(Circuit)* | [`DEC-036B`](file:///workspaces/Zeltra-Protocol/research/decisions/DEC-036B-client-sdk-knapsack-coin-selection-consolidation-and-bulk-sync.md) *(SDK & Sync)* | [`DEC-036C`](file:///workspaces/Zeltra-Protocol/research/decisions/DEC-036C-relayer-ingress-guard-and-stylus-joinsplit-settlement.md) *(Relayer & Contract)*
 
-- [x] **Sirkuit (`nimbus-core`):** Upgrade `JoinSplitCircuit` dengan MMR bagging, 19 public inputs, dual-epoch nullifier PRF (DEC-033), Two-Limb quote hash & scope binding (DEC-035/DEC-036A), Direction B dummy output.
-- [x] **SDK (`nimbus-sdk`):** Hubungkan bulk MMR proof sync anti-snooping, in-pool `consolidate_notes()`, dual-epoch handling, dan method submit `pay_joinsplit` ke relayer (DEC-036B).
-- [x] **Relayer (`nimbus-node`):** Tambah endpoint `POST /api/v1/spend-joinsplit`, dual-nullifier double-spend check di DB & on-chain, preflight Groth16, dan transaction dispatcher (DEC-036C).
-- [x] **Contract (`nimbus-contracts`):** Tambah entrypoint `spend_joinsplit`, Groth16 MSM/Pairing verifier untuk JoinSplit (EIP-2537), dual-nullifier burning, dan Direction B dual change MMR insertion (DEC-036C).
+- [x] **Sirkuit (`zeltra-core`):** Upgrade `JoinSplitCircuit` dengan MMR bagging, 19 public inputs, dual-epoch nullifier PRF (DEC-033), Two-Limb quote hash & scope binding (DEC-035/DEC-036A), Direction B dummy output.
+- [x] **SDK (`zeltra-sdk`):** Hubungkan bulk MMR proof sync anti-snooping, in-pool `consolidate_notes()`, dual-epoch handling, dan method submit `pay_joinsplit` ke relayer (DEC-036B).
+- [x] **Relayer (`zeltra-node`):** Tambah endpoint `POST /api/v1/spend-joinsplit`, dual-nullifier double-spend check di DB & on-chain, preflight Groth16, dan transaction dispatcher (DEC-036C).
+- [x] **Contract (`zeltra-contracts`):** Tambah entrypoint `spend_joinsplit`, Groth16 MSM/Pairing verifier untuk JoinSplit (EIP-2537), dual-nullifier burning, dan Direction B dual change MMR insertion (DEC-036C).
 
 ---
 
-## 2. Smart Contract Stylus (`nimbus-contracts`)
+## 2. Smart Contract Stylus (`zeltra-contracts`)
 
 > **Status Gate D:** SELESAI (100%) — Entrypoint `spend_private_note(...)` terintegrasi dengan verifier Groth16 EIP-2537 (`0x0c` + `0x0f`), pohon LeanIMT depth 20, dan multi-liability solvency invariant.
 
@@ -80,11 +80,11 @@ Ref: [`DEC-036`](file:///workspaces/Zeltra-Protocol/research/decisions/DEC-036-u
 
 ---
 
-## 3. Client SDK Private Wallet State (`nimbus-sdk`)
+## 3. Client SDK Private Wallet State (`zeltra-sdk`)
 
 > **Status Gate E:** SELESAI (100%) — `PrivateNoteWallet` mengelola saldo UTXO, coin selection, local proof generation, dan persistensi terenkripsi (DEC-024). Tiered Stochastic Knapsack Coin Selection & in-pool `consolidate_notes()` telah terintegrasi (DEC-030, 29/29 tests pass).
 
-- [x] WebAssembly / Browser packaging test runner untuk eksekusi sirkuit client-side secara non-blocking via Web Worker (3/3 unit tests pass di `nimbus-sdk/js/test_worker_runner.js`).
+- [x] WebAssembly / Browser packaging test runner untuk eksekusi sirkuit client-side secara non-blocking via Web Worker (3/3 unit tests pass di `zeltra-sdk/js/test_worker_runner.js`).
 
 ### Gate H / DEC-037 — Note Encryption Memo & Viewing Key Recovery Protocol
 Ref: [`DEC-037`](file:///workspaces/Zeltra-Protocol/research/decisions/DEC-037-note-encryption-memo-and-viewing-key-recovery.md) *(Anti Device-Loss & Zero Gas Viewing Key Engine)*
@@ -99,15 +99,15 @@ Ref: [`DEC-038`](file:///workspaces/Zeltra-Protocol/research/decisions/DEC-038-p
 
 #### Gate I.A / DEC-038A — Zero-Legacy Purge & Threshold BLS Elimination
 Ref: [`DEC-038A`](file:///workspaces/Zeltra-Protocol/research/decisions/DEC-038A-zero-legacy-purge-and-threshold-bls-elimination.md) *(Zero Dead Code, Zero Deprecated Shims, Complete Decommissioning)*
-- [x] **Fase 1 (Core):** Hapus fisik `nimbus-core/src/blind_sign.rs` dan `src/threshold.rs`, bersihkan seluruh BLS point/scalar types dari `types.rs` & `lib.rs`, verifikasi `cargo test -p nimbus-core` 100% pass.
+- [x] **Fase 1 (Core):** Hapus fisik `zeltra-core/src/blind_sign.rs` dan `src/threshold.rs`, bersihkan seluruh BLS point/scalar types dari `types.rs` & `lib.rs`, verifikasi `cargo test -p zeltra-core` 100% pass.
 - [x] **Fase 2 (Contracts):** Bersihkan 11 storage slots sesi lama dari `storage.rs`, hapus precompile `0x0e` (BLS12_G2_MSM) dan konstanta generator EVM, hapus entrypoints `_reveal_mask_key`, `_claim_refund`, `verify_bls_spend`, `_spend`, `_batch_spend`.
-- [x] **Fase 3 (Node):** Hapus `nimbus-node/src/handlers/threshold.rs`, `handlers/deposit.rs`, `circuit_breaker.rs`, dan worker `deposit_indexer.rs`. Jalankan migrasi SQLCipher untuk DROP TABLE `sessions`, `deposit_indexer_state`, `stalled_sessions`, `guardian_shares`.
-- [x] **Fase 4 (SDK & CLI):** Hapus `nimbus-sdk/src/blind_wasm.rs` dan `src/threshold_wasm.rs`. Hapus `nimbus-cli/src/commands/blind.rs` dan `commands/threshold.rs`, bersihkan subcommands BLS dari `cli.rs` & `main.rs`.
+- [x] **Fase 3 (Node):** Hapus `zeltra-node/src/handlers/threshold.rs`, `handlers/deposit.rs`, `circuit_breaker.rs`, dan worker `deposit_indexer.rs`. Jalankan migrasi SQLCipher untuk DROP TABLE `sessions`, `deposit_indexer_state`, `stalled_sessions`, `guardian_shares`.
+- [x] **Fase 4 (SDK & CLI):** Hapus `zeltra-sdk/src/blind_wasm.rs` dan `src/threshold_wasm.rs`. Hapus `zeltra-cli/src/commands/blind.rs` dan `commands/threshold.rs`, bersihkan subcommands BLS dari `cli.rs` & `main.rs`.
 - [x] **Fase 5 (Infra & Scripts):** Hapus `scripts/start_cluster.sh` (1 leader + 4 guardian + Vault), ganti dengan `scripts/start_relayer.sh` (single stateless sequencer).
 
 #### Gate I.B / DEC-038B — Stylus Smart Contract Direct MMR Inflow & Storage Purification
 Ref: [`DEC-038B`](file:///workspaces/Zeltra-Protocol/research/decisions/DEC-038B-contract-direct-mmr-deposit-and-storage-cleanup.md) *(On-Chain Atomic Deposit, Storage Cleanup, & Absolute Solvency)*
-- [x] **Step 1 (Deposit Entrypoint):** Implementasikan `deposit_direct_note(amount, note_commitment, encrypted_memo)` di `nimbus-contracts/src/deposit.rs` & `lib.rs` dengan validasi min 10 USDC, zero-commitment check, dan memo bounds 64..=256 bytes.
+- [x] **Step 1 (Deposit Entrypoint):** Implementasikan `deposit_direct_note(amount, note_commitment, encrypted_memo)` di `zeltra-contracts/src/deposit.rs` & `lib.rs` dengan validasi min 10 USDC, zero-commitment check, dan memo bounds 64..=256 bytes.
 - [x] **Step 2 (Canonical Scalar Validation):** Terapkan sanitasi kanonikal fail-closed `from_evm_scalar(&note_commitment.0)` untuk mencegah serangan aliasing modulus $x \ge r$ (EIP-2537).
 - [x] **Step 3 (Direct MMR Insertion):** Sambungkan penyetoran langsung ke `_mmr_insert` di `merkle.rs`, perbarui puncak `mmr_peaks`, daftarkan root ke cincin riwayat `accepted_note_roots` / `root_history` (Bounded History Ring anti-DoS), dan pancarkan event `NoteCommitmentAppended`.
 - [x] **Step 4 (Simplified Solvency):** Sederhanakan `check_liability_invariant()` menjadi `USDC Balance >= user_note_liability + accrued_execution_fee_liability + realized_protocol_fees`, eliminasi total liabilitas refund mengambang.
@@ -115,15 +115,15 @@ Ref: [`DEC-038B`](file:///workspaces/Zeltra-Protocol/research/decisions/DEC-038B
 
 #### Gate I.C / DEC-038C — Single Sequencer Relayer, Client SDK Direct Inflow, & Pure ZK CLI
 Ref: [`DEC-038C`](file:///workspaces/Zeltra-Protocol/research/decisions/DEC-038C-relayer-sequencer-sdk-direct-deposit-and-cli.md) *(Stateless Sequencer, 2PC SDK Inflow, & Ephemeral WASM)*
-- [x] **Step 1 (Relayer Router & DB):** Konfigurasi Axum 0.8 router di `nimbus-node/src/main.rs` murni untuk `/health`, `/api/v1/quote`, `/api/v1/spend-private-note`, `/api/v1/spend-joinsplit`, dan `/api/v1/mmr/proof/:leaf_index`. Finalisasi skema SQLite SQLCipher dengan mode WAL & normal sync.
-- [x] **Step 2 (SDK Direct Inflow):** Implementasikan `prepare_direct_deposit()` di `nimbus-sdk/src/wallet/note_wallet.rs` dengan komputasi lokal Poseidon hash ($74.7\ \mu\text{s}$) dan ChaCha20Poly1305 memo encryption ($15\ \mu\text{s}$), staging note ke database lokal (2PC state `PendingDeposit` $\rightarrow$ `Unspent`).
+- [x] **Step 1 (Relayer Router & DB):** Konfigurasi Axum 0.8 router di `zeltra-node/src/main.rs` murni untuk `/health`, `/api/v1/quote`, `/api/v1/spend-private-note`, `/api/v1/spend-joinsplit`, dan `/api/v1/mmr/proof/:leaf_index`. Finalisasi skema SQLite SQLCipher dengan mode WAL & normal sync.
+- [x] **Step 2 (SDK Direct Inflow):** Implementasikan `prepare_direct_deposit()` di `zeltra-sdk/src/wallet/note_wallet.rs` dengan komputasi lokal Poseidon hash ($74.7\ \mu\text{s}$) dan ChaCha20Poly1305 memo encryption ($15\ \mu\text{s}$), staging note ke database lokal (2PC state `PendingDeposit` $\rightarrow$ `Unspent`).
 - [x] **Step 3 (Ephemeral WASM Lifecycle):** Terapkan arsitektur isolasi memori Web Worker pada browser klien (`worker.terminate()`) untuk menjamin zero memory leak dan mencegah crash OOM linear WebAssembly pada perangkat mobile retail.
-- [x] **Step 4 (Pure ZK CLI):** Implementasikan subcommands baru di `nimbus-cli`: `GenerateWallet`, `CreateDepositNote`, `InspectMmr`, dan `VerifyProof`.
+- [x] **Step 4 (Pure ZK CLI):** Implementasikan subcommands baru di `zeltra-cli`: `GenerateWallet`, `CreateDepositNote`, `InspectMmr`, dan `VerifyProof`.
 - [x] **Step 5 (E2E & Negative Matrix):** Verifikasi test suite off-chain: relayer crash independence pada saat deposit, resilience terhadap event log memo rusak, penolakan preflight double-spend (HTTP 409), dan pemulihan crash 2PC.
 
 ---
 
-## 4. Relayer & Node Settlement (`nimbus-node`)
+## 4. Relayer & Node Settlement (`zeltra-node`)
 
 > **Status Gate F:** SELESAI (100% Full Pipeline & Solvency Observability) — Ingress endpoint `/api/v1/spend-private-note`, verifikasi skalar kanonikal, binding semantik DEC-022, dual-layer double-spend guard, direct EVM broadcast ([`DEC-025`](file:///workspaces/Zeltra-Protocol/research/decisions/DEC-025-relayer-zk-note-spend-settlement-atomic-batching-and-reconciliation.md)), Three-Way Reconciliation Engine (`reconcile_execution_fees`), pemusnahan total fallback quote tanpa signing domain, dan zero-leakage solvency observability ([`DEC-031`](file:///workspaces/Zeltra-Protocol/research/decisions/DEC-031-relayer-reconciliation-solvency-observability-quote-domain-binding.md), 68/68 node tests pass, clippy clean).
 

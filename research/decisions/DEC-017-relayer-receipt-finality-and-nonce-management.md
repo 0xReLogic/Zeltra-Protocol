@@ -20,7 +20,7 @@ Implementasi relayer sebelumnya memiliki celah operasional pada pengiriman trans
    $$\text{maxPriorityFeePerGas}_{\text{new}} \ge \lfloor \text{maxPriorityFeePerGas}_{\text{old}} \times 1.15 \rfloor$$
 3. **Chain-Specific Confirmation Threshold:** Transaksi dinyatakan `confirmed` hanya jika:
    $$\text{current\_block} - \text{receipt\_block} + 1 \ge \text{confirmation\_threshold}$$
-   (Nilai default: 1 untuk Arbitrum fast-finality, dapat dikonfigurasi via `NIMBUS_CONFIRMATION_THRESHOLD` hingga 12 untuk Ethereum L1).
+   (Nilai default: 1 untuk Arbitrum fast-finality, dapat dikonfigurasi via `ZELTRA_CONFIRMATION_THRESHOLD` hingga 12 untuk Ethereum L1).
 4. **Idempotent Terminal Status & Audit Trail:** Seluruh status pengiriman dan penggantian dicatat dalam database relayer untuk diaudit, dan diekspos melalui `GET /api/tx-status?tx_hash=...`.
 
 ## Pilihan yang Dipertimbangkan

@@ -1,7 +1,7 @@
 {
-  "_comment": "DEC-016A Known-Answer Vectors — canonical reference for cross-validation between nimbus-core, nimbus-sdk (WASM), and contract.",
+  "_comment": "DEC-016A Known-Answer Vectors — canonical reference for cross-validation between zeltra-core, zeltra-sdk (WASM), and contract.",
   "_generated": "2026-06-14",
-  "_source": "cargo test -p nimbus-core -- known_answer",
+  "_source": "cargo test -p zeltra-core -- known_answer",
 
   "seed_inputs": {
     "spending_key": "Fr::from(42)",

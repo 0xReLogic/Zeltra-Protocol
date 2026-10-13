@@ -4,7 +4,7 @@ Date: 2026-06-12
 
 ## Masalah
 
-Saat menerima pesan lintas rantai melalui Chainlink CCIP, kontrak pintar Nimbus di destination chain menerima data tanpa validasi yang memadai:
+Saat menerima pesan lintas rantai melalui Chainlink CCIP, kontrak pintar Zeltra di destination chain menerima data tanpa validasi yang memadai:
 1. Alamat CCIP Router tidak diwajibkan (jika bernilai `Address::ZERO`, siapa pun bisa memicu `_ccip_receive`).
 2. Tidak ada verifikasi chain asal (`source_chain_selector`) maupun alamat kontrak pengirim asli (`_sender`). Ini membuka celah spoofing di mana siapa pun bisa mengirim pesan palsu dari chain lain.
 3. Tidak ada proteksi replay terhadap `message_id`, sehingga pesan CCIP yang sama dapat dieksekusi berkali-kali (double payout).

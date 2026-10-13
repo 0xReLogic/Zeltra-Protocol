@@ -1,6 +1,6 @@
-# Nimbus SDK — 02: Integrasi JavaScript / TypeScript
+# Zeltra SDK — 02: Integrasi JavaScript / TypeScript
 
-Panduan integrasi pustaka WebAssembly Nimbus SDK ke dalam aplikasi frontend berbasis browser (React, Next.js, Vue, atau Vite) dan backend Node.js.
+Panduan integrasi pustaka WebAssembly Zeltra SDK ke dalam aplikasi frontend berbasis browser (React, Next.js, Vue, atau Vite) dan backend Node.js.
 
 ---
 
@@ -27,12 +27,12 @@ import init, {
     wasm_client_unmask,
     wasm_client_verify_final,
     wasm_aggregate_shares
-} from 'nimbus-sdk';
+} from 'zeltra-sdk';
 
 async function main() {
     // 1. Inisialisasi runtime WASM di browser
     await init();
-    console.log("Nimbus WASM Runtime Siap!");
+    console.log("Zeltra WASM Runtime Siap!");
 
     // 2. Client Blinding Pesan Pembayaran
     const message = new TextEncoder().encode("ephemeral_payment_intent_456");
@@ -42,7 +42,7 @@ async function main() {
     const rHex = blindedResult.r_hex;             // Faktor pembuta privat (r)
 
     // 3. Kirim X ke Relayer / Leader Node
-    const signResponse = await fetch("https://relayer.nimbus.network/api/leader/sign", {
+    const signResponse = await fetch("https://relayer.zeltra.network/api/leader/sign", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ blinded_hex: blindedHex })
@@ -61,7 +61,7 @@ async function main() {
     // ...
 
     // 6. Dapatkan Masking Key k dari Leader setelah Deposit Confirmed
-    const revealResponse = await fetch("https://relayer.nimbus.network/api/reveal", {
+    const revealResponse = await fetch("https://relayer.zeltra.network/api/reveal", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ session_id: "..." })
@@ -108,7 +108,7 @@ $$\text{Unconfirmed} \longrightarrow \text{Unspent} \overset{\text{Reserve}}{\un
 ### B. Contoh Penggunaan Wallet Lengkap (TypeScript / Rust SDK):
 
 ```typescript
-import { PrivateNoteWallet, NoteStatus } from 'nimbus-sdk';
+import { PrivateNoteWallet, NoteStatus } from 'zeltra-sdk';
 
 // 1. Inisialisasi Wallet dari 32-Byte Master Seed (BIP-32 / DEC-024)
 const seed = new Uint8Array(32); // Entropy aman (CSPRNG)

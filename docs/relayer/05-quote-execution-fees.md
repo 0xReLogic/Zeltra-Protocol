@@ -1,6 +1,6 @@
-# Nimbus Relayer — 05: Signed Quotes & Klaim Komisi Gas
+# Zeltra Relayer — 05: Signed Quotes & Klaim Komisi Gas
 
-Dokumen ini menjelaskan mesin estimasi biaya berbasis EIP-712 pada [`nimbus-node/src/handlers/quote.rs`](file:///workspaces/Zeltra-Protocol/nimbus-node/src/handlers/quote.rs) dan background worker penarikan komisi pada [`nimbus-node/src/execution_fee_claimer.rs`](file:///workspaces/Zeltra-Protocol/nimbus-node/src/execution_fee_claimer.rs).
+Dokumen ini menjelaskan mesin estimasi biaya berbasis EIP-712 pada [`zeltra-node/src/handlers/quote.rs`](file:///workspaces/Zeltra-Protocol/zeltra-node/src/handlers/quote.rs) dan background worker penarikan komisi pada [`zeltra-node/src/execution_fee_claimer.rs`](file:///workspaces/Zeltra-Protocol/zeltra-node/src/execution_fee_claimer.rs).
 
 ---
 
@@ -8,7 +8,7 @@ Dokumen ini menjelaskan mesin estimasi biaya berbasis EIP-712 pada [`nimbus-node
 
 Tanpa fixed quote di muka, pengguna tidak tahu berapa biaya akhir transaksi mereka, atau transaksi gagal di tengah jalan saat terjadi lonjakan gas (*gas spike*).
 
-Solusi Nimbus: **EIP-712 Signed Execution Quote**:
+Solusi Zeltra: **EIP-712 Signed Execution Quote**:
 * Pengguna meminta kuotasi harga pasti sebelum menandatangani transaksi.
 * Kuotasi mengikat batas maksimal komisi relayer (`max_execution_fee`) dan masa berlaku kuotasi (`quote_expiry`).
 * Relayer menanggung risiko fluktuasi gas di on-chain, dan sebagai kompensasinya mendapatkan margin efisiensi saat transaksi berhasil digabungkan ke dalam batch.
@@ -57,7 +57,7 @@ Komisi relayer tidak ditarik satu per satu di setiap transaksi spend karena akan
 3. **Pencairan Otomatis On-Chain:** 
    Ketika akumulasi mencapai ambang batas (misal: $\ge 50$ USDC), worker memanggil fungsi smart contract:
    ```rust
-   nimbus_contract.claim_execution_fees(amount)
+   zeltra_contract.claim_execution_fees(amount)
    ```
 4. **Update Status Atomic:** 
    Setelah tx receipt berhasil dikonfirmasi di blockchain, seluruh baris batch terkait diperbarui menjadi `claimed = true`.
@@ -71,11 +71,11 @@ Pada model ZK-UTXO ([`DEC-016`](file:///workspaces/Zeltra-Protocol/research/deci
 1. **Semantic Quote Hash Binding:**
    * Kuotasi biaya eksekusi relayer menghasilkan `quote_hash` (digest EIP-712).
    * Nilai `quote_hash` dipasok sebagai public input ke-7 (`public_inputs[7]`) pada sirkuit Groth16.
-   * Node relayer ([`nimbus-node/src/handlers/spend.rs`](file:///workspaces/Zeltra-Protocol/nimbus-node/src/handlers/spend.rs)) memverifikasi bahwa `quote_hash` di request cocok byte-for-byte dengan nilai yang dibuktikan di dalam proof ZK (mitigasi DEC-022).
+   * Node relayer ([`zeltra-node/src/handlers/spend.rs`](file:///workspaces/Zeltra-Protocol/zeltra-node/src/handlers/spend.rs)) memverifikasi bahwa `quote_hash` di request cocok byte-for-byte dengan nilai yang dibuktikan di dalam proof ZK (mitigasi DEC-022).
 2. **Replay Protection Quote ID:**
    * Jika signed quote disertakan pada request ZK spend (`quote_id`, `quote_signature`, `user_address`), relayer memverifikasi tanda tangan EIP-712 pengguna dan memastikan `quote_id` belum pernah dipakai sebelumnya via `check_and_insert_quote_id()`.
 3. **Penegakan Batas Maksimal Fee (`max_execution_fee`):**
-   * Di smart contract Stylus ([`nimbus-contracts/src/spend.rs`](file:///workspaces/Zeltra-Protocol/nimbus-contracts/src/spend.rs)) dan di ingress relayer, berlaku invariant ketat:
+   * Di smart contract Stylus ([`zeltra-contracts/src/spend.rs`](file:///workspaces/Zeltra-Protocol/zeltra-contracts/src/spend.rs)) dan di ingress relayer, berlaku invariant ketat:
      $$\text{execution\_fee} \le \text{max\_execution\_fee}$$
    * Jika relayer mencoba memotong fee di atas kesepakatan kuotasi pengguna, transaksi otomatis revert dengan kode `EXECUTION_FEE_EXCEEDS_MAX`.
 
@@ -90,7 +90,7 @@ Untuk menghitung biaya gas aktual dalam USDC dan melacak margin keuntungan opera
      - **Arbitrum One:** `0x639Fe6ab55C921f74e7fac1ee960C0B6293ba612`
    * Fungsi `get_chainlink_eth_price` memvalidasi bahwa nilai harga positif dan tidak kedaluwarsa (`staleness_threshold_secs <= 3600s`).
 2. **Fail-Safe Fallback:**
-   * Jika panggilan RPC ke oracle gagal atau data stale, relayer secara otomatis menggunakan fallback dari environment variable `NIMBUS_ETH_PRICE_USDC` (default: `$3,500.0`).
+   * Jika panggilan RPC ke oracle gagal atau data stale, relayer secara otomatis menggunakan fallback dari environment variable `ZELTRA_ETH_PRICE_USDC` (default: `$3,500.0`).
 3. **Penyimpanan Metrik & Observabilitas:**
    * Kolom `margin_usdc` pada tabel `spend_batches` dihitung berdasarkan harga pasar aktual:
      $$\text{margin\_usdc} = \text{total\_revenue\_usdc} - (\text{total\_cost\_eth} \times \text{eth\_price})$$

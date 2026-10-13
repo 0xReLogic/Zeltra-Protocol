@@ -1,6 +1,6 @@
-# Inovasi Jurnal untuk Kriptografi Inti (`nimbus-core`)
+# Inovasi Jurnal untuk Kriptografi Inti (`zeltra-core`)
 
-Dokumen ini memetakan paper terpilih untuk lapisan kriptografi fundamental Nimbus ([`nimbus-core`](file:///workspaces/Zeltra-Protocol/nimbus-core/)), mencakup sirkuit ZK-UTXO (Arkworks `ark-groth16`), BLS12-381, hashing Poseidon, dan skema blind signature.
+Dokumen ini memetakan paper terpilih untuk lapisan kriptografi fundamental Zeltra ([`zeltra-core`](file:///workspaces/Zeltra-Protocol/zeltra-core/)), mencakup sirkuit ZK-UTXO (Arkworks `ark-groth16`), BLS12-381, hashing Poseidon, dan skema blind signature.
 
 ---
 
@@ -10,8 +10,8 @@ Dokumen ini memetakan paper terpilih untuk lapisan kriptografi fundamental Nimbu
   Banyak protokol ZK mengabaikan sanitasi titik kurva Groth16 publik ($A \in G_1, B \in G_2, C \in G_1$). Paper *Argo* mendemonstrasikan serangan di mana prover jahat atau relayer manipulatif dapat mengekstraksi saksi rahasia (*witness leakage*) melalui pembuktian dengan titik kurva titik tak valid (invalid curve attack / small subgroup confinement).
 * **Inovasi & Mitigasi:**
   Validasi subgroup wajib (`into_affine()`, non-infinity check, dan subgroup membership check) sebelum mengevaluasi pairing.
-* **Implementasi di Nimbus Core:**
-  * Komponen: [`nimbus-core/src/circuit.rs`](file:///workspaces/Zeltra-Protocol/nimbus-core/src/circuit.rs) dan deserializer Groth16.
+* **Implementasi di Zeltra Core:**
+  * Komponen: [`zeltra-core/src/circuit.rs`](file:///workspaces/Zeltra-Protocol/zeltra-core/src/circuit.rs) dan deserializer Groth16.
   * Menjamin `proof_a_neg`, `proof_b`, dan `proof_c` lolos sanitasi strict subgroup sebelum dikirimkan ke verifier Stylus contract, mencegah kebocoran secret spend key (`sk_spend`) klien.
 
 ---
@@ -35,7 +35,7 @@ Dokumen ini memetakan paper terpilih untuk lapisan kriptografi fundamental Nimbu
 * **Inovasi Paper:**
   Merumuskan standar dan pembuktian formal untuk *Strongly History-Independent (SHI)* auditable data structures. Struktur data SHI menjamin bahwa status kriptografis hanya bergantung secara eksklusif pada himpunan data aktif saat ini, dan independen seragam terhadap urutan penyisipan masa lalu.
 * **Implementasi di Zeltra Core:**
-  * Komponen: [`nimbus-core/src/note.rs`](file:///workspaces/Zeltra-Protocol/nimbus-core/src/note.rs) (Merkle Mountain Range & Poseidon-W5 bagging).
+  * Komponen: [`zeltra-core/src/note.rs`](file:///workspaces/Zeltra-Protocol/zeltra-core/src/note.rs) (Merkle Mountain Range & Poseidon-W5 bagging).
   * Memastikan struktur pohon komitmen MMR dan hash nullifier bersifat *Strongly History-Independent*: pihak luar yang mengaudit state ledger hanya melihat status validitas saat ini tanpa dapat merekonstruksi urutan transaksi masa lalu antar pengguna.
 
 ---
@@ -48,7 +48,7 @@ Dokumen ini memetakan paper terpilih untuk lapisan kriptografi fundamental Nimbu
 * **Inovasi Paper:**
   Diagnostik aljabar berbasis linear algebra matriks Jacobian eksak. Mampu mengklasifikasikan sirkuit R1CS hingga 66.000 constraint dalam waktu $\le 1$ detik di hardware standar. Memverifikasi secara deterministik apakah sebuah variabel target memiliki derajat kebebasan tak terduga (*infinitesimal freedom / non-uniqueness certificate*).
 * **Implementasi di Zeltra Core:**
-  * Komponen: Test suite diagnostik di [`nimbus-core/src/note_circuit.rs`](file:///workspaces/Zeltra-Protocol/nimbus-core/src/note_circuit.rs) dan [`nimbus-core/src/joinsplit_circuit.rs`](file:///workspaces/Zeltra-Protocol/nimbus-core/src/joinsplit_circuit.rs).
+  * Komponen: Test suite diagnostik di [`zeltra-core/src/note_circuit.rs`](file:///workspaces/Zeltra-Protocol/zeltra-core/src/note_circuit.rs) dan [`zeltra-core/src/joinsplit_circuit.rs`](file:///workspaces/Zeltra-Protocol/zeltra-core/src/joinsplit_circuit.rs).
   * Menjalankan rank evaluation matriks Jacobian pada constraint system sebelum circuit freeze dan trusted setup ceremony untuk menjamin zero under-constrained wires pada seluruh sirkuit produksi.
 
 ---
@@ -61,7 +61,7 @@ Dokumen ini memetakan paper terpilih untuk lapisan kriptografi fundamental Nimbu
 * **Inovasi Paper:**
   Protokol pembayaran rahasia berbasis decoy set kecil yang membuktikan secara matematis sifat *cryptographic deniability*: pengamat luar tidak dapat membedakan mana note pembayaran riil dan mana dummy change note yang disuntikkan secara acak.
 * **Implementasi di Zeltra Core:**
-  * Komponen: Universal JoinSplit circuit di [`nimbus-core/src/joinsplit_circuit.rs`](file:///workspaces/Zeltra-Protocol/nimbus-core/src/joinsplit_circuit.rs) (DEC-036A) dengan slot dummy canonical dan 448 range gates.
+  * Komponen: Universal JoinSplit circuit di [`zeltra-core/src/joinsplit_circuit.rs`](file:///workspaces/Zeltra-Protocol/zeltra-core/src/joinsplit_circuit.rs) (DEC-036A) dengan slot dummy canonical dan 448 range gates.
   * Memungkinkan penyisipan dummy slot konstan bernilai nol/acak untuk memutus korelasi grafik saldo secara statistik dan menjamin privasi jangka panjang bagi AI Agent dan retail.
 
 

@@ -2,42 +2,42 @@
 
 **Status:** Accepted  
 **Date:** October 2026  
-**Applies to:** `nimbus-node/src/handlers/spend.rs`, `nimbus-node/src/evm_client.rs`, `nimbus-node/src/database.rs`, `nimbus-node/src/main.rs`, `nimbus-node/src/dto.rs`  
+**Applies to:** `zeltra-node/src/handlers/spend.rs`, `zeltra-node/src/evm_client.rs`, `zeltra-node/src/database.rs`, `zeltra-node/src/main.rs`, `zeltra-node/src/dto.rs`  
 **Related DECs:** DEC-016 (ZK-UTXO Model), DEC-016A (Nullifier & Circuit Invariants), DEC-016B (Range Constraints), DEC-017 (Receipt Finality & Nonce Lock), DEC-018 (Deposit Indexer & Cryptographic Reveal), DEC-019 (Input Sanitization & Post-Restart Reconciliation), DEC-020 (Batch Profitability & Operational Fee Metrics), DEC-022 (Defense Against Proof-Settlement Mismatch Boundary Gaps), DEC-023 (Siloed Nullifiers & Replay Immunity), DEC-024 (Client Private Note Wallet State)
 
 ---
 
 ## 1. Context & Vulnerability Vectors (2025–2026 Post-Mortems & Papers)
 
-While **Gate D** ([`nimbus-contracts/src/spend.rs`](file:///workspaces/Zeltra-Protocol/nimbus-contracts/src/spend.rs)) enforces on-chain zero-knowledge verification via EIP-2537 precompiles and **Gate E** ([`nimbus-sdk/src/wallet/note_wallet.rs`](file:///workspaces/Zeltra-Protocol/nimbus-sdk/src/wallet/note_wallet.rs)) manages client UTXO lifecycle and local proof generation, **Gate F (Relayer ZK Note Spend Settlement)** is the critical operational boundary where untrusted client zero-knowledge proofs are received, verified, queued, and dispatched on-chain.
+While **Gate D** ([`zeltra-contracts/src/spend.rs`](file:///workspaces/Zeltra-Protocol/zeltra-contracts/src/spend.rs)) enforces on-chain zero-knowledge verification via EIP-2537 precompiles and **Gate E** ([`zeltra-sdk/src/wallet/note_wallet.rs`](file:///workspaces/Zeltra-Protocol/zeltra-sdk/src/wallet/note_wallet.rs)) manages client UTXO lifecycle and local proof generation, **Gate F (Relayer ZK Note Spend Settlement)** is the critical operational boundary where untrusted client zero-knowledge proofs are received, verified, queued, and dispatched on-chain.
 
 Recent major exploits across decentralized privacy and settlement systems highlight the failure modes this design must mathematically eliminate:
 
 1. **The Aztec Connect Boundary Gap Exploit (June 2026 — $2.28M Drain):**
    - *Reference:* [Rekt News: Aztec Connect Exploit (June 2026)](https://rekt.news/?tag=BTC) & [`research/decisions/DEC-022-defense-against-proof-settlement-mismatch-boundary-gaps.md`](file:///workspaces/Zeltra-Protocol/research/decisions/DEC-022-defense-against-proof-settlement-mismatch-boundary-gaps.md).
    - *Exploit Mechanism:* Aztec Connect suffered a critical boundary mismatch where the transaction set processed by the ZK proof circuit diverged from the transaction parameters decoded and settled by the smart contract. Attackers exploited this parameter discrepancy to mint unbacked rollup balances and drain liquid collateral.
-   - *Nimbus Mandate:* As formalized in [`DEC-022`](file:///workspaces/Zeltra-Protocol/research/decisions/DEC-022-defense-against-proof-settlement-mismatch-boundary-gaps.md) and [`DEC-023`](file:///workspaces/Zeltra-Protocol/research/decisions/DEC-023-siloed-nullifiers-and-cross-domain-replay-immunity.md), every parameter passed to `spend_private_note(...)` must be cryptographically locked to the proof's public inputs. The relayer node must perform **strict pre-flight semantic consistency checks** before placing the spend into its transaction queue.
+   - *Zeltra Mandate:* As formalized in [`DEC-022`](file:///workspaces/Zeltra-Protocol/research/decisions/DEC-022-defense-against-proof-settlement-mismatch-boundary-gaps.md) and [`DEC-023`](file:///workspaces/Zeltra-Protocol/research/decisions/DEC-023-siloed-nullifiers-and-cross-domain-replay-immunity.md), every parameter passed to `spend_private_note(...)` must be cryptographically locked to the proof's public inputs. The relayer node must perform **strict pre-flight semantic consistency checks** before placing the spend into its transaction queue.
 2. **The Payy Network Range-Proof Cache Collision (September 2026 — $320M Breach):**
    - *Reference:* [Avoid.net Payy Network Security Report (September 2026)](https://www.avoid.net/).
    - *Exploit Mechanism:* A stablecoin payment ZK-rollup on Ethereum allowed unbacked note redemptions due to integer wraparound in finite field arithmetic ($\mathbb{F}_r$) coupled with improper range-proof verification at the relayer ingestion layer.
-   - *Nimbus Mandate:* In addition to on-chain checks ([`DEC-016B`](file:///workspaces/Zeltra-Protocol/research/decisions/DEC-016B-mvp-circuit-shortcuts.md)), the relayer must verify that all amounts ($\text{merchant\_amount}, \text{protocol\_fee}, \text{execution\_fee}$) satisfy strict 64-bit bounds and exact sum conservation ($\text{input\_amount} = \text{payout} + \text{protocol\_fee} + \text{execution\_fee} + \text{change\_amount}$) before spending relayer gas.
+   - *Zeltra Mandate:* In addition to on-chain checks ([`DEC-016B`](file:///workspaces/Zeltra-Protocol/research/decisions/DEC-016B-mvp-circuit-shortcuts.md)), the relayer must verify that all amounts ($\text{merchant\_amount}, \text{protocol\_fee}, \text{execution\_fee}$) satisfy strict 64-bit bounds and exact sum conservation ($\text{input\_amount} = \text{payout} + \text{protocol\_fee} + \text{execution\_fee} + \text{change\_amount}$) before spending relayer gas.
 3. **Mempool Front-Running & Amount Correlation Attacks (WabiSabi IACR 2021/206):**
    - *Reference:* [`jurnal/building-blocks/WabiSabi-Centrally-Coordinated-CoinJoins.md`](file:///workspaces/Zeltra-Protocol/jurnal/building-blocks/WabiSabi-Centrally-Coordinated-CoinJoins.md) & Full Paper PDF [`jurnal/pdf/2021-206.pdf`](file:///workspaces/Zeltra-Protocol/jurnal/pdf/2021-206.pdf).
    - In private UTXO systems, naive public batching allows external adversaries to link spenders with change notes by correlating input and change amounts across block transactions.
-   - *Nimbus Mandate:* The relayer batching mechanism must enforce discrete fee and amount structures, disallowing arbitrary fractional fee leakage as outlined in [`jurnal/filter/03-relayer-innovations.md`](file:///workspaces/Zeltra-Protocol/jurnal/filter/03-relayer-innovations.md#3-wabisabi-variable-amount-coinjoin-decomposition-iacr-eprint-2021206).
+   - *Zeltra Mandate:* The relayer batching mechanism must enforce discrete fee and amount structures, disallowing arbitrary fractional fee leakage as outlined in [`jurnal/filter/03-relayer-innovations.md`](file:///workspaces/Zeltra-Protocol/jurnal/filter/03-relayer-innovations.md#3-wabisabi-variable-amount-coinjoin-decomposition-iacr-eprint-2021206).
 4. **Controlled Oversight & Auditing Budget Enforcement (AuditPay IACR 2026/05):**
    - *Reference:* [`jurnal/honorable/AuditPay-Anonymous-Payments-Controlled-Oversight.md`](file:///workspaces/Zeltra-Protocol/jurnal/honorable/AuditPay-Anonymous-Payments-Controlled-Oversight.md) & [`jurnal/filter/03-relayer-innovations.md`](file:///workspaces/Zeltra-Protocol/jurnal/filter/03-relayer-innovations.md#1-auditpay-anonymous-payments-with-controlled-oversight-iacr-eprint-202605).
    - *Concept:* Enforce fail-closed quote and query budgets so relayer nodes can mathematically prove adherence to non-surveillance bounds while satisfying commercial quote signatures.
 5. **Relayer Crash Desynchronization & "Ghost Queue" Deadlocks:**
    - *Reference:* [`research/decisions/DEC-019-relayer-input-sanitization-safety-limits-and-post-restart-reconciliation.md`](file:///workspaces/Zeltra-Protocol/research/decisions/DEC-019-relayer-input-sanitization-safety-limits-and-post-restart-reconciliation.md).
    - If a relayer node crashes while a transaction is in-flight (`broadcasting`), upon reboot it must not re-submit a transaction that was already mined on-chain (wasting gas and causing on-chain reverts), nor should it abandon transactions that were never mined.
-   - *Nimbus Mandate:* The relayer requires **atomic two-phase leasing** in SQLite and **post-restart contract nullifier reconciliation** (extending DEC-019 to ZK private note nullifiers).
+   - *Zeltra Mandate:* The relayer requires **atomic two-phase leasing** in SQLite and **post-restart contract nullifier reconciliation** (extending DEC-019 to ZK private note nullifiers).
 
 ---
 
-## 2. Decision & Architecture for Gate F (`nimbus-node`)
+## 2. Decision & Architecture for Gate F (`zeltra-node`)
 
-To achieve fail-closed settlement and zero-loss operational robustness, `nimbus-node` implements the following architecture:
+To achieve fail-closed settlement and zero-loss operational robustness, `zeltra-node` implements the following architecture:
 
 ```
 [ Client SDK (PrivateNoteWallet) ]
@@ -45,7 +45,7 @@ To achieve fail-closed settlement and zero-loss operational robustness, `nimbus-
                │ POST /api/v1/spend-private-note
                │ (SpendProofPayload + Signed EIP-712 Quote)
                ▼
-[ Nimbus Node: Ingress Handler ]
+[ Zeltra Node: Ingress Handler ]
   ├─ 1. Idempotency Check (Cached Response)
   ├─ 2. Canonical Field Scalar & Non-Zero Proof Checks (< Fr modulus)
   ├─ 3. Fail-Closed Solvency Conservation: Input == Payout + ProtocolFee + ExecFee + Change
@@ -140,7 +140,7 @@ To prevent double-spending under concurrent loads or process restarts:
 The relayer constructs the ABI-encoded transaction for the Stylus contract entrypoint:
 
 ```rust
-// nimbus-contracts/src/lib.rs: spend_private_note(...)
+// zeltra-contracts/src/lib.rs: spend_private_note(...)
 pub fn spend_private_note(
     &mut self,
     note_root: FixedBytes<32>,
@@ -180,16 +180,16 @@ Upon node startup (`main.rs`), before accepting incoming HTTP requests:
 
 ---
 
-## 3. Implementation Plan across Nimbus Workspace
+## 3. Implementation Plan across Zeltra Workspace
 
-1. **`nimbus-node/src/dto.rs`**: Define `PrivateNoteSpendRequest` and `PrivateNoteSpendResponse`.
-2. **`nimbus-node/src/evm_client.rs`**: Add `spend_private_note(...)` method constructing Alloy transaction call.
-3. **`nimbus-node/src/database.rs`**:
+1. **`zeltra-node/src/dto.rs`**: Define `PrivateNoteSpendRequest` and `PrivateNoteSpendResponse`.
+2. **`zeltra-node/src/evm_client.rs`**: Add `spend_private_note(...)` method constructing Alloy transaction call.
+3. **`zeltra-node/src/database.rs`**:
    - Add `spend_type` and `proof_payload_json` columns to `spend_queue`.
    - Add nullifier lookup for `note_nullifiers`.
    - Update `reconcile_spend_as_confirmed` to support private note spends.
-4. **`nimbus-node/src/handlers/spend.rs`**: Implement `handle_private_note_spend` handler and update background batch worker to dispatch private note spends.
-5. **`nimbus-node/src/main.rs`**: Register route `/api/v1/spend-private-note` and include private note spends in post-restart reconciliation loop.
+4. **`zeltra-node/src/handlers/spend.rs`**: Implement `handle_private_note_spend` handler and update background batch worker to dispatch private note spends.
+5. **`zeltra-node/src/main.rs`**: Register route `/api/v1/spend-private-note` and include private note spends in post-restart reconciliation loop.
 
 ---
 

@@ -1,12 +1,12 @@
-# Nimbus Contract — 04: Spend, Pairing Check & Adaptive Batching
+# Zeltra Contract — 04: Spend, Pairing Check & Adaptive Batching
 
-Dokumen ini menjelaskan logika eksekusi pembelanjaan (*spend*), verifikasi pairing on-chain EIP-2537, kalkulasi diskon fee berbasis holding-time, dan penggabungan batch pada [`nimbus-contracts/src/spend.rs`](file:///workspaces/Zeltra-Protocol/nimbus-contracts/src/spend.rs).
+Dokumen ini menjelaskan logika eksekusi pembelanjaan (*spend*), verifikasi pairing on-chain EIP-2537, kalkulasi diskon fee berbasis holding-time, dan penggabungan batch pada [`zeltra-contracts/src/spend.rs`](file:///workspaces/Zeltra-Protocol/zeltra-contracts/src/spend.rs).
 
 ---
 
 ## 1. Verifikasi Pairing BLS On-Chain (EIP-2537)
 
-Smart contract Nimbus memverifikasi tanda tangan BLS secara langsung di atas kurva BLS12-381 menggunakan precompile native **`BLS12_PAIRING_CHECK` (alamat `0x0f`)**:
+Smart contract Zeltra memverifikasi tanda tangan BLS secara langsung di atas kurva BLS12-381 menggunakan precompile native **`BLS12_PAIRING_CHECK` (alamat `0x0f`)**:
 
 $$\text{Persamaan Pairing:} \quad e(-\alpha, G_2) \cdot e(H(m), pk_{iss}) == 1$$
 
@@ -28,11 +28,11 @@ Offset    Panjang   Komponen                 Keterangan
 
 ## 2. Rekonstruksi Pesan Mandiri On-Chain (Anti-Tamper)
 
-Kontrak tidak mempercayai hash pesan yang dikirimkan oleh pemanggil transaksi. Kontrak **merekonstruksi sendiri** hash canonical `NIMBUS_SPEND_V1`:
+Kontrak tidak mempercayai hash pesan yang dikirimkan oleh pemanggil transaksi. Kontrak **merekonstruksi sendiri** hash canonical `ZELTRA_SPEND_V1`:
 
 ```text
 m_hash = keccak256(
-    "NIMBUS_SPEND_V1",
+    "ZELTRA_SPEND_V1",
     chain_id,
     contract_address,
     amount,
@@ -87,7 +87,7 @@ Biaya eksekusi gas yang dibayarkan pengguna (`execution_fee`) diakumulasikan ke 
 
 ## 6. Private Note Spend & Groth16 Verifier (`spend_private_note` — Gate D)
 
-Untuk pembelanjaan saldo privat ZK-UTXO dengan kembalian otomatis (*change note*), kontrak mengekspos entrypoint `spend_private_note(...)` yang memverifikasi proof Groth16 kurva BLS12-381 secara langsung on-chain via module [`groth16_note_verifier.rs`](file:///workspaces/Zeltra-Protocol/nimbus-contracts/src/groth16_note_verifier.rs).
+Untuk pembelanjaan saldo privat ZK-UTXO dengan kembalian otomatis (*change note*), kontrak mengekspos entrypoint `spend_private_note(...)` yang memverifikasi proof Groth16 kurva BLS12-381 secara langsung on-chain via module [`groth16_note_verifier.rs`](file:///workspaces/Zeltra-Protocol/zeltra-contracts/src/groth16_note_verifier.rs).
 
 ### A. Format Proof & 12 Public Inputs
 - **Proof:** $A \in \mathbb{G}_1$ (128B), $B \in \mathbb{G}_2$ (256B), $C \in \mathbb{G}_1$ (128B) — total 512 bytes uncompressed EVM.

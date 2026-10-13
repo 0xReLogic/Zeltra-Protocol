@@ -81,4 +81,4 @@ Untuk ukuran batch $N = 8$, kita menghemat $7 \times 37,700 = 263,900$ gas hanya
 
 ## Rollback/recovery
 
-Jika ditemukan kendala kompatibilitas encoding di testnet atau mainnet, relayer node dapat menonaktifkan pengiriman batch secara instan via env configuration `NIMBUS_BATCH_ENABLED=false` untuk kembali ke mode fallback spend individual satu per satu tanpa memerlukan upgrade contract baru.
+Jika ditemukan kendala kompatibilitas encoding di testnet atau mainnet, relayer node dapat menonaktifkan pengiriman batch secara instan via env configuration `ZELTRA_BATCH_ENABLED=false` untuk kembali ke mode fallback spend individual satu per satu tanpa memerlukan upgrade contract baru.

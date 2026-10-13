@@ -2,7 +2,7 @@
 
 **Status:** Accepted  
 **Date:** October 2026  
-**Applies to:** `nimbus-contracts/src/spend.rs`, `nimbus-contracts/src/storage.rs`, `nimbus-node/src/handlers/spend.rs`  
+**Applies to:** `zeltra-contracts/src/spend.rs`, `zeltra-contracts/src/storage.rs`, `zeltra-node/src/handlers/spend.rs`  
 **Related DECs:** DEC-009, DEC-014, DEC-016, DEC-018  
 
 ---
@@ -19,18 +19,18 @@ According to post-mortem analyses by Halborn, Aztec Labs, and security researche
 
 ---
 
-## 2. Invariants for Nimbus Protocol
+## 2. Invariants for Zeltra Protocol
 
-To ensure Nimbus is structurally immune to proof-settlement mismatch and boundary gap exploits:
+To ensure Zeltra is structurally immune to proof-settlement mismatch and boundary gap exploits:
 
 ### Invariant 1: 1-to-1 Atomic Public Input Binding (No Decoupled Counters)
-In Nimbus smart contract (`nimbus-contracts/src/spend.rs`), there is **NO dynamic loop counter** or unconstrained batch parameter.
+In Zeltra smart contract (`zeltra-contracts/src/spend.rs`), there is **NO dynamic loop counter** or unconstrained batch parameter.
 - For individual spends (`spend_private_note`): Exactly 1 proof is submitted. The 12 public input scalars evaluated by the EIP-2537 precompiles (`0x0c` MSM + `0x0f` Pairing Check) strictly bind:
   `[merkle_root, nullifier, change_commitment, recipient, merchant_amount, protocol_fee, execution_fee, quote_hash, chain_id, contract_address, expiry, has_change]`
 - For batch spends (`batch_spend`): Every item in the batch array has its own dedicated nullifier, recipient, amount, and signature/proof tuple. The contract loops strictly over the validated calldata slice `0..items.len()`. No caller-supplied variable can extend or shrink the iteration range independently of the calldata array.
 
 ### Invariant 2: Multi-Liability Post-Execution Solvency Assertion
-Unlike traditional bridge contracts that only check individual balances, Nimbus enforces the global solvency invariant **at the end of every state-modifying spend transaction**:
+Unlike traditional bridge contracts that only check individual balances, Zeltra enforces the global solvency invariant **at the end of every state-modifying spend transaction**:
 $$\text{USDC.balanceOf}(\text{contract}) \ge \text{user\_note\_liability} + \text{refundable\_liability} + \text{accrued\_fee\_liability}$$
 If any rounding anomaly, reentrancy attempt, or settlement mismatch causes total liabilities to exceed physical USDC collateral by even 1 base unit, the entire transaction **reverts immediately** via `self.check_solvency()?`.
 
@@ -46,11 +46,11 @@ The nullifier is inserted into storage (`note_nullifiers.insert(nullifier, true)
 2. **Mandatory Solvency Gate:**
    `check_solvency()` must be invoked at the terminal step of `spend_private_note()`, `batch_spend()`, and `claim_refund()`.
 3. **Fail-Closed Relayer Verification:**
-   The relayer node (`nimbus-node`) verifies the EIP-712 signed quote and Groth16 proof locally before submitting the transaction to the mempool, rejecting any payload with mismatched public inputs.
+   The relayer node (`zeltra-node`) verifies the EIP-712 signed quote and Groth16 proof locally before submitting the transaction to the mempool, rejecting any payload with mismatched public inputs.
 
 ---
 
 ## 4. Consequences & Verification
 
 - **Security:** Completely closes any "boundary gap" vulnerability akin to the Aztec Connect exploit. Unbacked token payouts are mathematically impossible.
-- **Verification:** Unit tests in `nimbus-contracts` (`test_spend_private_note_insufficient_note_liability_rejected`, `test_spend_private_note_double_spend_rejected`, and `test_multi_liability_deposit_reveal_spend_lifecycle`) prove that mismatched liabilities revert without state corruption.
+- **Verification:** Unit tests in `zeltra-contracts` (`test_spend_private_note_insufficient_note_liability_rejected`, `test_spend_private_note_double_spend_rejected`, and `test_multi_liability_deposit_reveal_spend_lifecycle`) prove that mismatched liabilities revert without state corruption.

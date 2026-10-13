@@ -1,6 +1,6 @@
-# Nimbus SDK — 03: EIP-712 Quotes & AI Agent Wallet (x402)
+# Zeltra SDK — 03: EIP-712 Quotes & AI Agent Wallet (x402)
 
-Dokumen ini menjelaskan implementasi penandatanganan kuotasi berbasis **EIP-712** pada [`nimbus-sdk/src/eip712.rs`](file:///workspaces/Zeltra-Protocol/nimbus-sdk/src/eip712.rs) dan integrasi pembayaran mikro otonom untuk agen AI pada [`nimbus-sdk/src/x402/`](file:///workspaces/Zeltra-Protocol/nimbus-sdk/src/x402/).
+Dokumen ini menjelaskan implementasi penandatanganan kuotasi berbasis **EIP-712** pada [`zeltra-sdk/src/eip712.rs`](file:///workspaces/Zeltra-Protocol/zeltra-sdk/src/eip712.rs) dan integrasi pembayaran mikro otonom untuk agen AI pada [`zeltra-sdk/src/x402/`](file:///workspaces/Zeltra-Protocol/zeltra-sdk/src/x402/).
 
 ---
 
@@ -25,7 +25,7 @@ struct ExecutionQuoteEip712 {
 ```
 
 ### Domain Separator:
-* `name`: `"Nimbus Execution Quote"`
+* `name`: `"Zeltra Execution Quote"`
 * `version`: `"1"`
 * `chainId` & `verifyingContract`: Terikat kuat ke jaringan dan alamat kontrak target (*domain separation*).
 
@@ -35,9 +35,9 @@ Pengguna menandatangani struct ini menggunakan wallet Web3 (Metamask, Rabby, ata
 
 ## 2. AI Agent Spending Wallet & Protokol x402
 
-File referensi: [`nimbus-sdk/src/x402/`](file:///workspaces/Zeltra-Protocol/nimbus-sdk/src/x402/)
+File referensi: [`zeltra-sdk/src/x402/`](file:///workspaces/Zeltra-Protocol/zeltra-sdk/src/x402/)
 
-Nimbus SDK menyediakan pustaka self-custodial bagi autonomous agent AI untuk melakukan pembayaran API secara otomatis saat menemui kode status **HTTP 402 Payment Required**:
+Zeltra SDK menyediakan pustaka self-custodial bagi autonomous agent AI untuk melakukan pembayaran API secara otomatis saat menemui kode status **HTTP 402 Payment Required**:
 
 ```text
 [ AI Agent HTTP Client ]                       [ API Provider / LLM Server ]
@@ -46,7 +46,7 @@ Nimbus SDK menyediakan pustaka self-custodial bagi autonomous agent AI untuk mel
            |------------------------------------------------>|
            |                                                 |
            | 2. Response: HTTP 402 Payment Required          |
-           |    Header: WWW-Authenticate: Nimbus-BAT ...     |
+           |    Header: WWW-Authenticate: Zeltra-BAT ...     |
            |<------------------------------------------------|
            |                                                 |
            | 3. SDK mendeteksi invoice 402:                  |
@@ -55,7 +55,7 @@ Nimbus SDK menyediakan pustaka self-custodial bagi autonomous agent AI untuk mel
            |    • Encode payload ke Base64 JSON              |
            |                                                 |
            | 4. Retry Request dengan Header Pembayaran:      |
-           |    Header: Authorization: Nimbus-BAT <payload>  |
+           |    Header: Authorization: Zeltra-BAT <payload>  |
            |------------------------------------------------>|
            |                                                 |
            | 5. Provider memverifikasi / meredeem payment    |

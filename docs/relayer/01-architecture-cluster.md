@@ -1,12 +1,12 @@
-# Nimbus Relayer — 01: Arsitektur Cluster & Jaringan
+# Zeltra Relayer — 01: Arsitektur Cluster & Jaringan
 
-Dokumen ini menjelaskan arsitektur distributed node, pembagian peran Leader vs Guardian, dan topologi jaringan aman pada [`nimbus-node`](file:///workspaces/Zeltra-Protocol/nimbus-node).
+Dokumen ini menjelaskan arsitektur distributed node, pembagian peran Leader vs Guardian, dan topologi jaringan aman pada [`zeltra-node`](file:///workspaces/Zeltra-Protocol/zeltra-node).
 
 ---
 
 ## 1. Peran Node: Leader vs Guardian
 
-`nimbus-node` dapat dijalankan dalam salah satu dari dua peran utama tergantung konfigurasi environment:
+`zeltra-node` dapat dijalankan dalam salah satu dari dua peran utama tergantung konfigurasi environment:
 
 ```text
 [ Client / SDK ]
@@ -43,11 +43,11 @@ Untuk mencegah kebocoran secret share dan serangan DDoS pada Guardian:
 3. **Tanpa Ingress Publik:** 
    VPS guardian tidak memiliki port publik yang terbuka di firewall cloud (AWS Security Group / Azure NSG / DigitalOcean firewall menolak semua port kecuali SSH via VPN).
 4. **Otentikasi Identitas:** 
-   Leader mengenali guardian melalui registry kunci publik guardian (`NIMBUS_GUARDIAN_PUBLIC_KEYS`), dan guardian memvalidasi integritas blinded point yang diminta.
+   Leader mengenali guardian melalui registry kunci publik guardian (`ZELTRA_GUARDIAN_PUBLIC_KEYS`), dan guardian memvalidasi integritas blinded point yang diminta.
 
 ---
 
-## 3. Ringkasan Endpoint API HTTP (`nimbus-node/src/handlers/`)
+## 3. Ringkasan Endpoint API HTTP (`zeltra-node/src/handlers/`)
 
 Semua endpoint dibangun menggunakan framework async **Axum 0.8**:
 

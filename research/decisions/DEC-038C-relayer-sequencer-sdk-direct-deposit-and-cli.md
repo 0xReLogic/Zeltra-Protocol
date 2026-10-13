@@ -4,12 +4,12 @@
 - **Author:** Zeltra Architecture & Cryptography Team
 - **Date:** 2026-10-12
 - **Applies to:**
-  - `nimbus-node/src/database.rs` (Purge of legacy session tables & SQLite schema finalization)
-  - `nimbus-node/src/handlers/` (Elimination of `threshold.rs`, `deposit.rs`, `circuit_breaker.rs`; pure ZK endpoints)
-  - `nimbus-node/src/deposit_indexer.rs` (Replaced by MMR event listener worker)
-  - `nimbus-sdk/src/wallet/note_wallet.rs` (`prepare_direct_deposit`, direct note staging, unspent state machine)
-  - `nimbus-sdk/src/blind_wasm.rs`, `threshold_wasm.rs` (Complete deletion of legacy WASM bindings)
-  - `nimbus-cli/src/commands/` (Purge of BLS commands; pure ZK wallet and MMR diagnostic CLI)
+  - `zeltra-node/src/database.rs` (Purge of legacy session tables & SQLite schema finalization)
+  - `zeltra-node/src/handlers/` (Elimination of `threshold.rs`, `deposit.rs`, `circuit_breaker.rs`; pure ZK endpoints)
+  - `zeltra-node/src/deposit_indexer.rs` (Replaced by MMR event listener worker)
+  - `zeltra-sdk/src/wallet/note_wallet.rs` (`prepare_direct_deposit`, direct note staging, unspent state machine)
+  - `zeltra-sdk/src/blind_wasm.rs`, `threshold_wasm.rs` (Complete deletion of legacy WASM bindings)
+  - `zeltra-cli/src/commands/` (Purge of BLS commands; pure ZK wallet and MMR diagnostic CLI)
 - **Parent & Related DECs:**
   - [`DEC-038`](file:///workspaces/Zeltra-Protocol/research/decisions/DEC-038-pure-zk-utxo-migration-and-direct-mmr-deposit.md) (Master Pure ZK-UTXO Architecture Blueprint)
   - [`DEC-038A`](file:///workspaces/Zeltra-Protocol/research/decisions/DEC-038A-zero-legacy-purge-and-threshold-bls-elimination.md) (Zero-Legacy Purge & Threshold BLS Elimination Protocol)
@@ -28,12 +28,12 @@
 Pada paradigma transisi sebelumnya, lapisan off-chain Zeltra Protocol memikul beban komputasi dan koordinasi yang sangat terfragmentasi:
 1. **Relayer Sebagai Koordinator Multi-Guardian:** Relayer bertindak sebagai pemimpin klaster (*Leader*) yang wajib mengoordinasikan 4 Guardian independen via jaringan mesh Tailscale, melakukan agregasi tanda tangan Shamir/BLS, dan mengelola instance HashiCorp Vault / OpenBao KMS.
 2. **Database Overloaded dengan Sesi Asinkronus:** Basis data SQLite SQLCipher terbebani oleh tabel-tabel pemantau sesi (`sessions`, `stalled_sessions`, `guardian_shares`), menciptakan risiko korupsi kunci dan kegagalan leasing worker saat terjadi lonjakan beban.
-3. **Ketergantungan Total Pengguna pada Relayer Saat Menyetor:** Client SDK (`nimbus-sdk`) tidak dapat menyetor dana secara mandiri; pengguna harus meminta izin relayer, memanggil endpoint blind-sign, dan menunggu pelepasan masking key $k$. Jika relayer mengalami gangguan (*downtime*), aliran dana masuk (*inflow*) terhenti total.
+3. **Ketergantungan Total Pengguna pada Relayer Saat Menyetor:** Client SDK (`zeltra-sdk`) tidak dapat menyetor dana secara mandiri; pengguna harus meminta izin relayer, memanggil endpoint blind-sign, dan menunggu pelepasan masking key $k$. Jika relayer mengalami gangguan (*downtime*), aliran dana masuk (*inflow*) terhenti total.
 
 **DEC-038C** menetapkan transformasi menyeluruh pada arsitektur off-chain:
-- **Stateless Single Sequencer Relayer (`nimbus-node`):** Relayer sepenuhnya dibebaskan dari urusan penyetoran dana dan koordinasi multi-party. Relayer murni beroperasi sebagai *high-throughput execution sequencer* untuk memvalidasi bukti ZK Groth16, mensponsori gas eksekusi on-chain, dan melayani sinkronisasi data pohon Merkle Mountain Range (MMR).
-- **Self-Sovereign Client Inflow (`nimbus-sdk`):** Pengguna dapat menyetor langsung ke smart contract Arbitrum Stylus secara mandiri tanpa memerlukan koneksi jaringan ke relayer. Komputasi lokal hanya memakan waktu **$74.7\ \mu\text{s}$ (Poseidon Hash)** tanpa beban memori WebAssembly.
-- **Pure ZK Developer & Operator Tooling (`nimbus-cli`):** Menghapus seluruh subcommand warisan BLS dan melengkapi pengembang dengan perkakas CLI diagnostik untuk membuat dompet privat, menghasilkan komitmen deposit, dan memverifikasi integritas pohon MMR.
+- **Stateless Single Sequencer Relayer (`zeltra-node`):** Relayer sepenuhnya dibebaskan dari urusan penyetoran dana dan koordinasi multi-party. Relayer murni beroperasi sebagai *high-throughput execution sequencer* untuk memvalidasi bukti ZK Groth16, mensponsori gas eksekusi on-chain, dan melayani sinkronisasi data pohon Merkle Mountain Range (MMR).
+- **Self-Sovereign Client Inflow (`zeltra-sdk`):** Pengguna dapat menyetor langsung ke smart contract Arbitrum Stylus secara mandiri tanpa memerlukan koneksi jaringan ke relayer. Komputasi lokal hanya memakan waktu **$74.7\ \mu\text{s}$ (Poseidon Hash)** tanpa beban memori WebAssembly.
+- **Pure ZK Developer & Operator Tooling (`zeltra-cli`):** Menghapus seluruh subcommand warisan BLS dan melengkapi pengembang dengan perkakas CLI diagnostik untuk membuat dompet privat, menghasilkan komitmen deposit, dan memverifikasi integritas pohon MMR.
 
 ---
 
@@ -145,7 +145,7 @@ Sistem off-chain Zeltra wajib memenuhi invarian-invarian berikut secara mutlak:
 
 ---
 
-## 4. Transformasi Relayer Node (`nimbus-node`)
+## 4. Transformasi Relayer Node (`zeltra-node`)
 
 ### A. Migrasi Skema Basis Data SQLite (`database.rs`)
 Seluruh skema warisan multi-guardian dimusnahkan secara permanen:
@@ -230,7 +230,7 @@ pub fn create_relayer_router(state: Arc<AppState>) -> Router {
 
 ---
 
-## 5. Client SDK Direct Deposit Lifecycle (`nimbus-sdk`)
+## 5. Client SDK Direct Deposit Lifecycle (`zeltra-sdk`)
 
 ### A. Alur Kerja Komputasi Klien
 
@@ -306,7 +306,7 @@ impl PrivateNoteWallet {
 }
 ```
 
-### C. Pembersihan Binding WebAssembly (`nimbus-sdk`)
+### C. Pembersihan Binding WebAssembly (`zeltra-sdk`)
 File binding yang dihapus total:
 - `src/blind_wasm.rs`: Seluruh ekspor binding unmasking BDHKE.
 - `src/threshold_wasm.rs`: Seluruh ekspor binding rekonstruksi Lagrange.
@@ -318,9 +318,9 @@ Modul WASM yang dipertahankan & dioptimalkan untuk browser:
 
 ---
 
-## 6. Modernisasi CLI Tooling (`nimbus-cli`)
+## 6. Modernisasi CLI Tooling (`zeltra-cli`)
 
-Perkakas baris perintah `nimbus-cli` disederhanakan dari utilitas pengujian multi-party menjadi perkakas pengembang dan operator ZK-UTXO:
+Perkakas baris perintah `zeltra-cli` disederhanakan dari utilitas pengujian multi-party menjadi perkakas pengembang dan operator ZK-UTXO:
 
 ### A. Subcommand yang Dihapus Total:
 - `SplitKey`, `Aggregate`, `Blind`, `Sign`, `VerifyMasked`, `Unmask`, `VerifyUnmasked`.
@@ -329,12 +329,12 @@ Perkakas baris perintah `nimbus-cli` disederhanakan dari utilitas pengujian mult
 1. **`GenerateWallet`**:
    Membangkitkan pasangan kunci privat baru: Spending Key ($sk$), Full Viewing Key ($fvk$), dan Incoming Viewing Key ($ivk$).
    ```bash
-   nimbus-cli generate-wallet --out-file my_wallet.json
+   zeltra-cli generate-wallet --out-file my_wallet.json
    ```
 2. **`CreateDepositNote`**:
    Menghitung komitmen Poseidon dan encrypted memo untuk disematkan dalam transaksi manual on-chain.
    ```bash
-   nimbus-cli create-deposit-note --amount 100000000 --spending-key 0x123...
+   zeltra-cli create-deposit-note --amount 100000000 --spending-key 0x123...
    # Output:
    # Amount: 100 USDC (100000000 micro-units)
    # Commitment: 0x24a7bc9...
@@ -343,12 +343,12 @@ Perkakas baris perintah `nimbus-cli` disederhanakan dari utilitas pengujian mult
 3. **`InspectMmr`**:
    Melakukan query status puncak MMR (`mmr_peaks`) dan note root terkini dari node relayer atau smart contract on-chain.
    ```bash
-   nimbus-cli inspect-mmr --rpc-url https://sepolia-rollup.arbitrum.io/rpc
+   zeltra-cli inspect-mmr --rpc-url https://sepolia-rollup.arbitrum.io/rpc
    ```
 4. **`VerifyProof`**:
    Memverifikasi keabsahan bukti Groth16 secara lokal menggunakan Arkworks verifier sebelum disiarkan ke mempool.
    ```bash
-   nimbus-cli verify-proof --circuit joinsplit --proof-file proof.bin --inputs-file public_inputs.json
+   zeltra-cli verify-proof --circuit joinsplit --proof-file proof.bin --inputs-file public_inputs.json
    ```
 
 ---

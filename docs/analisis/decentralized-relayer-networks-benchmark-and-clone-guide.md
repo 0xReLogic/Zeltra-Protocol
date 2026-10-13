@@ -62,7 +62,7 @@ Berikut adalah 5 proyek open-source paling sukses dan teruji di industri Web3 ya
   - Permintaan transaksi dikirim dalam format **terenkripsi penuh**. Relayer meneruskan muatan (*payload*) tanpa mampu mendekripsi isinya, sehingga privasi dan kerahasiaan isi transaksi terjaga 100%.
   - Relayer diberi kompensasi atas bandwidth transmisi dan penjagaan privasi melalui saluran pembayaran mikro (*micropayment channels*).
 * **Aspek yang Di-ATM untuk Zeltra:**
-  - Pola komunikasi RPC terenkripsi antara Client SDK (`nimbus-sdk`) dan Relayer (`nimbus-node`), sehingga relayer publik tidak mengetahui identitas IP atau metadata user.
+  - Pola komunikasi RPC terenkripsi antara Client SDK (`zeltra-sdk`) dan Relayer (`zeltra-node`), sehingga relayer publik tidak mengetahui identitas IP atau metadata user.
 
 ---
 
@@ -73,7 +73,7 @@ Berikut adalah 5 proyek open-source paling sukses dan teruji di industri Web3 ya
   - Protokol interoperabilitas berbasis ZK coprocessor pertama yang sepenuhnya **permissionless**: siapa pun di dunia dapat menjalankan node relayer tanpa perlu izin, tanpa pendaftaran (*no whitelisting*), dan tanpa perlu mengunci modal jaminan (*no staking*).
   - Insentif ekonomi: Siapa pun relayer yang pertama kali berhasil memancarkan transaksi dan membuktikan validitas bukti kriptografis on-chain akan secara otomatis dan atomik menerima kompensasi fee dari smart contract.
 * **Aspek yang Di-ATM untuk Zeltra:**
-  - Kontrak Arbitrum Stylus Zeltra (`nimbus-contracts/src/spend.rs`) mengadopsi model ini 100%: entrypoint `spend_private_note` dan `spend_joinsplit` tidak menggunakan modifier `only_owner` atau `only_relayer`. Siapa pun yang men-submit proof valid langsung menerima pencairan `execution_fee`!
+  - Kontrak Arbitrum Stylus Zeltra (`zeltra-contracts/src/spend.rs`) mengadopsi model ini 100%: entrypoint `spend_private_note` dan `spend_joinsplit` tidak menggunakan modifier `only_owner` atau `only_relayer`. Siapa pun yang men-submit proof valid langsung menerima pencairan `execution_fee`!
 
 ---
 
@@ -88,7 +88,7 @@ Berikut adalah 5 proyek open-source paling sukses dan teruji di industri Web3 ya
     2. *Mempool watchdog*: jika transaksi tertahan >60 detik, otomatis melakukan transaksi pengganti (*transaction replacement*) dengan gas bump +15%.
     3. Nonce synchronization yang kebal terhadap kegagalan database atau restart mendadak.
 * **Aspek yang Di-ATM untuk Zeltra:**
-  - Mesin eksekusi internal `nimbus-node`: kita meniru algoritma nonce manager, exponential backoff, dan gas-bump replacement milik Alto agar transaksi di Arbitrum Sepolia/One tidak pernah nyangkut.
+  - Mesin eksekusi internal `zeltra-node`: kita meniru algoritma nonce manager, exponential backoff, dan gas-bump replacement milik Alto agar transaksi di Arbitrum Sepolia/One tidak pernah nyangkut.
 
 ---
 
@@ -124,7 +124,7 @@ Berikut adalah 5 proyek open-source paling sukses dan teruji di industri Web3 ya
 │                         ZELTRA RELAYER DECENTRALIZATION ROADMAP                        │
 ├───────────┬────────────────────────────────────────────────────────────────────────────┤
 │ FASE 1    │ Official Relayer Node (Testnet Arbitrum Sepolia)                           │
-│ (Saat Ini)│ - Frontend nembak backend nimbus-node resmi Zeltra.                        │
+│ (Saat Ini)│ - Frontend nembak backend zeltra-node resmi Zeltra.                        │
 │           │ - Fokus: Stabilitas, verifikasi kriptografi DEC-035/036, zero tech debt.   │
 ├───────────┼────────────────────────────────────────────────────────────────────────────┤
 │ FASE 2    │ On-Chain Relayer Registry (Mainnet v1 Launch)                              │
@@ -133,7 +133,7 @@ Berikut adalah 5 proyek open-source paling sukses dan teruji di industri Web3 ya
 │           │ - Frontend mengimplementasikan auto-routing ke relayer termurah/tercepat.  │
 ├───────────┼────────────────────────────────────────────────────────────────────────────┤
 │ FASE 3    │ P2P Gossip Encrypted Network (Mainnet v2 Sovereign Mode)                   │
-│           │ - Integrasi protokol Waku / Libp2p ke dalam nimbus-sdk.                    │
+│           │ - Integrasi protokol Waku / Libp2p ke dalam zeltra-sdk.                    │
 │           │ - Frontend membroadcast transaksi secara P2P tanpa tahu IP server relayer. │
 │           │ - 100% sensor-resistant & zero-knowledge end-to-end.                       │
 └───────────┴────────────────────────────────────────────────────────────────────────────┘

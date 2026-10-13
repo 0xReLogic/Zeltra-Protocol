@@ -1,6 +1,6 @@
-# Inovasi Jurnal untuk Smart Contract (Stylus WASM — `nimbus-contracts`)
+# Inovasi Jurnal untuk Smart Contract (Stylus WASM — `zeltra-contracts`)
 
-Dokumen ini memetakan paper terpilih untuk arsitektur smart contract Nimbus ([`nimbus-contracts`](file:///workspaces/Zeltra-Protocol/nimbus-contracts/)). Smart contract Stylus menuntut efisiensi WASM, biaya komputasi rendah, dan storage invariant ketat (`contract USDC balance >= liabilities`).
+Dokumen ini memetakan paper terpilih untuk arsitektur smart contract Zeltra ([`zeltra-contracts`](file:///workspaces/Zeltra-Protocol/zeltra-contracts/)). Smart contract Stylus menuntut efisiensi WASM, biaya komputasi rendah, dan storage invariant ketat (`contract USDC balance >= liabilities`).
 
 ---
 
@@ -10,9 +10,9 @@ Dokumen ini memetakan paper terpilih untuk arsitektur smart contract Nimbus ([`n
   Endpoint relayer gasless/meta-transaction rentan terhadap serangan spam DoS dan drained gas reserves karena siapa pun bisa mengirim request spend palsu tanpa modal.
 * **Inovasi Paper:**
   Rate-Limiting Nullifiers (RLN) berbasis Shamir Secret Sharing di finite field. Pengguna dapat mengeksekusi 1 transaksi per epoch secara gratis dan anonim. Jika mencoba mengirim 2 transaksi pada epoch yang sama, secret key pengguna secara otomatis terbongkar (terbuka di public) dan deposit/stakenya disita on-chain sebagai slashing.
-* **Implementasi di Nimbus Stylus:**
+* **Implementasi di Zeltra Stylus:**
   * Komponen: Kontrak pendaftaran relayer & staking pool di Arbitrum Sepolia.
-  * Perlindungan otomatis terhadap relayer `nimbus-node`: relayer tidak akan rugi gas karena transaksi spam ganda dapat langsung di-slash di kontrak Stylus.
+  * Perlindungan otomatis terhadap relayer `zeltra-node`: relayer tidak akan rugi gas karena transaksi spam ganda dapat langsung di-slash di kontrak Stylus.
 
 ---
 
@@ -23,7 +23,7 @@ Dokumen ini memetakan paper terpilih untuk arsitektur smart contract Nimbus ([`n
 * **Inovasi Paper:**
   Formulasi representasi koordinat terkompresi dan batching pre-evaluasi pairing multi-skalar untuk memangkas konsumsi gas on-chain hingga 35%.
 * **Implementasi di Zeltra Stylus:**
-  * Optimasi langsung fungsi verifikasi Groth16 di [`nimbus-contracts/src/groth16_note_verifier.rs`](file:///workspaces/Zeltra-Protocol/nimbus-contracts/src/groth16_note_verifier.rs) dan [`groth16_joinsplit_verifier.rs`](file:///workspaces/Zeltra-Protocol/nimbus-contracts/src/groth16_joinsplit_verifier.rs), mengagregasi verifikasi BLS EIP-2537 (`0x0c` MSM + `0x0f` 4-pairing check) dalam panggilan precompile terpadu.
+  * Optimasi langsung fungsi verifikasi Groth16 di [`zeltra-contracts/src/groth16_note_verifier.rs`](file:///workspaces/Zeltra-Protocol/zeltra-contracts/src/groth16_note_verifier.rs) dan [`groth16_joinsplit_verifier.rs`](file:///workspaces/Zeltra-Protocol/zeltra-contracts/src/groth16_joinsplit_verifier.rs), mengagregasi verifikasi BLS EIP-2537 (`0x0c` MSM + `0x0f` 4-pairing check) dalam panggilan precompile terpadu.
 
 ---
 
@@ -35,7 +35,7 @@ Dokumen ini memetakan paper terpilih untuk arsitektur smart contract Nimbus ([`n
 * **Inovasi Paper:**
   Mekanisme *bounded historical root window* dan *cryptographic state pruning* terverifikasi: membatasi kedalaman riwayat root yang disimpan on-chain tanpa merusak verifikasi bukti keanggotaan Merkle.
 * **Implementasi di Zeltra Stylus:**
-  * Komponen: [`nimbus-contracts/src/merkle.rs`](file:///workspaces/Zeltra-Protocol/nimbus-contracts/src/merkle.rs) (ring buffer `root_history` size 100 dan `accepted_note_roots` mapping).
+  * Komponen: [`zeltra-contracts/src/merkle.rs`](file:///workspaces/Zeltra-Protocol/zeltra-contracts/src/merkle.rs) (ring buffer `root_history` size 100 dan `accepted_note_roots` mapping).
   * Menjaga ukuran storage Stylus WASM tetap terkendali dan hemat gas, mencegah memory bloat pada validator Arbitrum.
 
 ---

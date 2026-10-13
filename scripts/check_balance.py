@@ -4,14 +4,14 @@ import sys
 
 RPC_URL = os.environ.get("RPC_URL")
 USDC_ADDRESS = os.environ.get("USDC_ADDRESS", "0x75faf114eafb1bdbe2f0316df893fd58ce46aa4d")
-ADDRESS = os.environ.get("ADDRESS") or os.environ.get("NIMBUS_RELAYER_ADDRESS")
+ADDRESS = os.environ.get("ADDRESS") or os.environ.get("ZELTRA_RELAYER_ADDRESS")
 
 if not RPC_URL:
     print("Error: missing required environment variable: RPC_URL")
     sys.exit(2)
 
 if not ADDRESS:
-    print("Error: missing required environment variable: ADDRESS or NIMBUS_RELAYER_ADDRESS")
+    print("Error: missing required environment variable: ADDRESS or ZELTRA_RELAYER_ADDRESS")
     sys.exit(2)
 
 w3 = Web3(Web3.HTTPProvider(RPC_URL))

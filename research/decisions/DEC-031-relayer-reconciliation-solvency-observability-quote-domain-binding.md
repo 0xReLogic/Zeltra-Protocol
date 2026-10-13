@@ -3,7 +3,7 @@
 - **Status:** Proposed & Accepted (Architecture Core Decision)
 - **Author:** Zeltra Protocol Architecture & Security Team
 - **Date:** 2026-10-08
-- **Applies to:** `nimbus-node/src/execution_fee_claimer.rs`, `nimbus-node/src/handlers/quote.rs`, `nimbus-node/src/handlers/health.rs`, `nimbus-node/src/handlers/spend.rs`, `nimbus-node/src/evm_client.rs`, `nimbus-node/src/dto.rs`, `nimbus-node/src/database.rs`
+- **Applies to:** `zeltra-node/src/execution_fee_claimer.rs`, `zeltra-node/src/handlers/quote.rs`, `zeltra-node/src/handlers/health.rs`, `zeltra-node/src/handlers/spend.rs`, `zeltra-node/src/evm_client.rs`, `zeltra-node/src/dto.rs`, `zeltra-node/src/database.rs`
 - **Related DECs:** DEC-016 (ZK-UTXO Change Ledger), DEC-017 (Receipt Finality & Nonce Tracking), DEC-018 (On-Chain Indexer), DEC-020 (Batch Profitability), DEC-022 (Proof Settlement Mismatch), DEC-025 (Relayer ZK Note Spend Settlement), DEC-028 (Public Input Domain Hardening)
 - **Architectural Paradigm:** *"Triangulated Solvency, Fail-Closed Domain Isolation, Zero User-Data Leakage Observability"*
 - **Guiding Principle:** *"A relayer must never claim a single base unit of fees that is not triply verified across on-chain contract state, local database accruals, and confirmed transaction receipts; it must never issue an unverified quote as OK; and it must prove aggregate solvency without exposing user identity or transaction graph."*
@@ -52,7 +52,7 @@ Menindaklanjuti penyelesaian Phase 1 Gate F (Direct Settlement Pipeline ZK-UTXO 
 ## 3. Pilar 1: Penghapusan Fallback Quote Tanpa Signing Domain
 
 ### A. Masalah Status Quo
-Pada `nimbus-node/src/handlers/quote.rs`, ketika `state.evm_client` bernilai `None` atau gagal memanggil `client.chain_id().await`, kode mengeksekusi `fallback_quote_response` yang mengembalikan:
+Pada `zeltra-node/src/handlers/quote.rs`, ketika `state.evm_client` bernilai `None` atau gagal memanggil `client.chain_id().await`, kode mengeksekusi `fallback_quote_response` yang mengembalikan:
 ```json
 {
   "status": "OK",
@@ -65,7 +65,7 @@ Ini melanggar prinsip *fail-closed* dan membuka celah di mana klien mengira quot
 
 ### B. Solusi & Spesifikasi
 1. **Pemusnahan Fallback "OK":** Struktur `FallbackQuoteParams` dan fungsi `fallback_quote_response` dihapus sepenuhnya dari kode produksi.
-2. **Kueri Domain Fallback Graceful:** Jika klien EVM belum siap, relayer memeriksa konfigurasi environment (`NIMBUS_CHAIN_ID` dan `NIMBUS_CONTRACT_ADDRESS`). Jika parameter domain valid tersedia, relayer menghitung `domain_separator` dan `struct_hash` resmi.
+2. **Kueri Domain Fallback Graceful:** Jika klien EVM belum siap, relayer memeriksa konfigurasi environment (`ZELTRA_CHAIN_ID` dan `ZELTRA_CONTRACT_ADDRESS`). Jika parameter domain valid tersedia, relayer menghitung `domain_separator` dan `struct_hash` resmi.
 3. **Fail-Closed Rejection:** Jika domain EIP-712 tetap tidak dapat dihitung, handler mengembalikan `error_response(...)` dengan:
    - `status: "ERROR"`
    - `domain_separator: None`, `struct_hash: None`

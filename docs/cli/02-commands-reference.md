@@ -1,6 +1,6 @@
-# Nimbus CLI — 02: Commands Reference
+# Zeltra CLI — 02: Commands Reference
 
-Rujukan lengkap 8 perintah CLI yang didefinisikan pada [`nimbus-cli/src/cli.rs`](file:///workspaces/Zeltra-Protocol/nimbus-cli/src/cli.rs) beserta flag, tipe data, dan outputnya.
+Rujukan lengkap 8 perintah CLI yang didefinisikan pada [`zeltra-cli/src/cli.rs`](file:///workspaces/Zeltra-Protocol/zeltra-cli/src/cli.rs) beserta flag, tipe data, dan outputnya.
 
 ---
 
@@ -11,7 +11,7 @@ Membuat keypair issuer baru (kunci rahasia $sk_{iss}$ dan kunci publik $pk_{iss}
 
 * **Sintaks:**
   ```bash
-  nimbus-cli generate-keys
+  zeltra-cli generate-keys
   ```
 * **Output:**
   * `Secret Key (sk_iss)` (Hex)
@@ -24,7 +24,7 @@ Membagi kunci rahasia issuer menjadi $n$ pecahan share dengan ambang batas (*thr
 
 * **Sintaks:**
   ```bash
-  nimbus-cli split-key --sk <SECRET_KEY_HEX> [-t <THRESHOLD>] [-n <TOTAL>]
+  zeltra-cli split-key --sk <SECRET_KEY_HEX> [-t <THRESHOLD>] [-n <TOTAL>]
   ```
 * **Argumen:**
   * `-s, --sk <HEX>`: Kunci rahasia issuer dalam format Hex. *(Wajib)*
@@ -41,7 +41,7 @@ Menggabungkan partial signatures dari sejumlah threshold guardian yang cukup men
 
 * **Sintaks:**
   ```bash
-  nimbus-cli aggregate --indices <INDICES> --signatures <SIGNATURES>
+  zeltra-cli aggregate --indices <INDICES> --signatures <SIGNATURES>
   ```
 * **Argumen:**
   * `-i, --indices <STRING>`: Daftar indeks guardian dipisahkan koma, misal: `"1,2,3"`. *(Wajib)*
@@ -58,7 +58,7 @@ Client membutakan pesan (misal: ephemeral public key atau nullifier pre-image) d
 
 * **Sintaks:**
   ```bash
-  nimbus-cli blind --message <MESSAGE_STRING>
+  zeltra-cli blind --message <MESSAGE_STRING>
   ```
 * **Argumen:**
   * `-m, --message <STRING>`: String pesan yang akan dibutakan. *(Wajib)*
@@ -73,7 +73,7 @@ Issuer atau leader menandatangani pesan yang sudah dibutakan dengan kunci rahasi
 
 * **Sintaks:**
   ```bash
-  nimbus-cli sign --blinded <BLINDED_HEX> --sk <SECRET_KEY_HEX>
+  zeltra-cli sign --blinded <BLINDED_HEX> --sk <SECRET_KEY_HEX>
   ```
 * **Argumen:**
   * `-b, --blinded <HEX>`: Blinded message $X$ dari client. *(Wajib)*
@@ -90,7 +90,7 @@ Client memverifikasi secara off-chain bahwa masked signature dari issuer valid t
 
 * **Sintaks:**
   ```bash
-  nimbus-cli verify-masked --blinded <BLINDED_HEX> --com-k <COM_K_HEX> --masked-sig <MASKED_SIG_HEX>
+  zeltra-cli verify-masked --blinded <BLINDED_HEX> --com-k <COM_K_HEX> --masked-sig <MASKED_SIG_HEX>
   ```
 * **Pengecekan Matematis:**
   $$e(\tilde{\sigma}, G_2) == e(X, com_k)$$
@@ -103,7 +103,7 @@ Client membuka masking setelah kunci $k$ dirilis on-chain untuk menghasilkan tan
 
 * **Sintaks:**
   ```bash
-  nimbus-cli unmask --masked-sig <MASKED_SIG_HEX> -r <R_HEX> -k <K_HEX>
+  zeltra-cli unmask --masked-sig <MASKED_SIG_HEX> -r <R_HEX> -k <K_HEX>
   ```
 * **Rumus Operasi:**
   $$\alpha = (r \cdot k)^{-1} \cdot \tilde{\sigma} \in G_1$$
@@ -117,7 +117,7 @@ Verifier publik atau merchant memverifikasi tanda tangan final unmasked terhadap
 
 * **Sintaks:**
   ```bash
-  nimbus-cli verify --message <MESSAGE_STRING> --sig <SIG_HEX> --pk <PK_HEX>
+  zeltra-cli verify --message <MESSAGE_STRING> --sig <SIG_HEX> --pk <PK_HEX>
   ```
 * **Pengecekan Matematis:**
   $$e(\alpha, G_2) == e(H(m), pk_{iss})$$

@@ -1,6 +1,6 @@
-# Nimbus Core — 03: Private Note UTXO & Merkle Tree
+# Zeltra Core — 03: Private Note UTXO & Merkle Tree
 
-Dokumen ini menjelaskan struktur data **Private Note V1**, skema komitmen kriptografi, derivasi nullifier, dan struktur Merkle tree yang diimplementasikan pada [`nimbus-core/src/note.rs`](file:///workspaces/Zeltra-Protocol/nimbus-core/src/note.rs) (mengacu pada spesifikasi [`DEC-016`](file:///workspaces/Zeltra-Protocol/research/decisions/DEC-016-private-note-change-ledger.md) & `DEC-016A`).
+Dokumen ini menjelaskan struktur data **Private Note V1**, skema komitmen kriptografi, derivasi nullifier, dan struktur Merkle tree yang diimplementasikan pada [`zeltra-core/src/note.rs`](file:///workspaces/Zeltra-Protocol/zeltra-core/src/note.rs) (mengacu pada spesifikasi [`DEC-016`](file:///workspaces/Zeltra-Protocol/research/decisions/DEC-016-private-note-change-ledger.md) & `DEC-016A`).
 
 ---
 
@@ -53,7 +53,7 @@ Agar sebuah note tidak dapat dibelanjakan dua kali, setiap pembelanjaan harus me
 
 $$\text{Nullifier} = \text{Poseidon}_3(\text{DOMAIN\_NULLIFIER}, nk, \text{Fr}(leaf\_index))$$
 
-Karakteristik Nullifier Nimbus:
+Karakteristik Nullifier Zeltra:
 1. **Unlinkable:** Orang lain tidak bisa menghubungkan antara `Commitment` di masa lalu dengan `Nullifier` saat di-spend.
 2. **Deterministic per Leaf:** Note yang sama pada posisi daun Merkle tree yang sama selalu menghasilkan nullifier yang identik.
 3. **Owner-Bound:** Hanya pihak yang mengetahui `sk_owner` yang bisa menghasilkan nullifier yang sah.

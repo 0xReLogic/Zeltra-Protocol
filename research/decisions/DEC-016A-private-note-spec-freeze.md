@@ -33,19 +33,19 @@ All domain tags are distinct, fixed `Fr` constants derived deterministically:
 
 ```text
 DOMAIN_NOTE_COMMITMENT_V1 = Fr::from(
-    keccak256("nimbus.note.commitment.v1") mod p
+    keccak256("zeltra.note.commitment.v1") mod p
 )
 
 DOMAIN_NULLIFIER_V1 = Fr::from(
-    keccak256("nimbus.note.nullifier.v1") mod p
+    keccak256("zeltra.note.nullifier.v1") mod p
 )
 
 DOMAIN_MERKLE_NODE_V1 = Fr::from(
-    keccak256("nimbus.merkle.node.v1") mod p
+    keccak256("zeltra.merkle.node.v1") mod p
 )
 
 DOMAIN_INITIAL_NOTE_V1 = Fr::from(
-    keccak256("nimbus.note.initial.v1") mod p
+    keccak256("zeltra.note.initial.v1") mod p
 )
 ```
 
@@ -76,7 +76,7 @@ These are computed at compile time. No runtime randomness in domain tags.
 For each width `t`, generate round constants deterministically:
 
 ```text
-seed_t = keccak256("nimbus.poseidon.rc.v1" || le_bytes(t))
+seed_t = keccak256("zeltra.poseidon.rc.v1" || le_bytes(t))
 rng = StdRng::seed_from_u64(seed_t as u64)
 for i in 0..(R_F + R_P) * t:
     rc[i] = Fr::rand(&mut rng)
@@ -195,7 +195,7 @@ nullifier_key = poseidon_hash_t3(spending_key, DOMAIN_NULLIFIER_V1)
 
 For MVP, the owner's "spending key" is a single `Fr` scalar. The nullifier
 derivation key is derived from it via Poseidon. This is simpler than Zcash
-Orchard's diversified key hierarchy but sufficient for Nimbus's use case
+Orchard's diversified key hierarchy but sufficient for Zeltra's use case
 (single asset, single user per note).
 
 **Future extension:** If multi-asset or delegated spending is needed, extend to:
@@ -493,10 +493,10 @@ prevents the relayer from minting notes without collateral.
 For test vector generation, use these deterministic seeds:
 
 ```text
-SEED_SPENDING_KEY     = keccak256("nimbus.test.spending_key.v1") mod p
-SEED_NOTE_RHO         = keccak256("nimbus.test.rho.v1") mod p
-SEED_NOTE_RANDOMNESS  = keccak256("nimbus.test.randomness.v1") mod p
-SEED_NULLIFIER_KEY    = keccak256("nimbus.test.nullifier_key.v1") mod p
+SEED_SPENDING_KEY     = keccak256("zeltra.test.spending_key.v1") mod p
+SEED_NOTE_RHO         = keccak256("zeltra.test.rho.v1") mod p
+SEED_NOTE_RANDOMNESS  = keccak256("zeltra.test.randomness.v1") mod p
+SEED_NULLIFIER_KEY    = keccak256("zeltra.test.nullifier_key.v1") mod p
 SEED_CHAIN_ID         = 421614  // Arbitrum Sepolia
 SEED_CONTRACT_ADDRESS = 0x00000000000000000000000072fa2ccfb2ac20fd98747ac407f8331f0f5fbd52
 SEED_ASSET_ID         = 1       // USDC
@@ -506,13 +506,13 @@ SEED_PROTOCOL_FEE     = 12500     // 0.0125 USDC (0.25% of 5 USDC)
 SEED_EXECUTION_FEE    = 23000     // 0.023 USDC
 SEED_LEAF_INDEX       = 0
 SEED_RECIPIENT        = 0x00000000000000000000000023e32D309c575A3D5E7CD2867BE12B00efa44Bb1
-SEED_QUOTE_HASH       = keccak256("nimbus.test.quote.v1")
+SEED_QUOTE_HASH       = keccak256("zeltra.test.quote.v1")
 SEED_EXPIRY           = 0  // no expiry
 ```
 
 Vectors MUST be computed independently in:
-1. `nimbus-core` (Rust, native + circuit)
-2. `nimbus-sdk` (WASM)
+1. `zeltra-core` (Rust, native + circuit)
+2. `zeltra-sdk` (WASM)
 3. Reference Python implementation (for cross-validation)
 
 All three MUST produce identical outputs.
@@ -564,9 +564,9 @@ All three MUST produce identical outputs.
 
 ### Design differences from Zcash Orchard
 
-Nimbus simplifies several aspects:
+Zeltra simplifies several aspects:
 
-| Aspect | Zcash Orchard | Nimbus PrivateNoteV1 |
+| Aspect | Zcash Orchard | Zeltra PrivateNoteV1 |
 |---|---|---|
 | Note fields | 6 (d, pkd, v, ρ, ψ, rcm) | 4 (value, owner_key, rho, randomness) |
 | Commitment hash | Sinsemilla | Poseidon width-5 |
@@ -576,7 +576,7 @@ Nimbus simplifies several aspects:
 | Recipient | Private (encrypted memo) | Public (EVM address) |
 | Amount | Private | Public (merchant payout visible) |
 
-Nimbus intentionally keeps recipient and amount public because the primary
+Zeltra intentionally keeps recipient and amount public because the primary
 use case is merchant payment where the recipient must know they were paid
 and how much. Privacy protects the sender's identity, balance, and
 transaction history — not the payment details.

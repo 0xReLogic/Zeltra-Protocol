@@ -9,4 +9,4 @@ Mingshu Cong, Sherman S. M. Chow, Tsz Hon Yuen, Siu-Ming Yiu
 
 Succinct zero-knowledge machine learning (zkML) uses zk succinct non-interactive arguments of knowledge (zkSNARKs) to prove neural-network (NN) computations with logarithmic-size proofs. However, general-purpose zkSNARKs do not scale in zkML because compiling matrix-heavy NNs into arithmetic circuits is memory-prohibitive. Existing zkML methods rely on rank-1 constraint systems (R1CS) to hide NN architectures while retaining succinctness. Removing circuit-based representations, it has...
 
-**Relevance to Nimbus:** **HIGH** - R1CS architecture untuk ZK circuits, structured matrix untuk efficient constraint systems
+**Relevance to Zeltra:** **HIGH** - R1CS architecture untuk ZK circuits, structured matrix untuk efficient constraint systems

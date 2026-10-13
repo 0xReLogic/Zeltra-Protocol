@@ -9,4 +9,4 @@ Nitanshu Lokhande, Rishabh Gupta, Rachit Chahar, Arun Jangra, Aniket Prajapati, 
 
 Public blockchains expose all state and computation by default, which is incompatible with financial applications that require confidentiality. Solana achieves high throughput and sub-second confirmation, making it an attractive settlement layer, yet it oﬀers no general mechanism for computing over encrypted state: fully homomorphic encryption (FHE) remains orders of magnitude too slow for interactive use, secure multi-party computation (MPC) incurs heavy communication, and Solana's native...
 
-**Relevance to Nimbus:** **MEDIUM** - TEE-based gasless computation alternative, confidential state management
+**Relevance to Zeltra:** **MEDIUM** - TEE-based gasless computation alternative, confidential state management
