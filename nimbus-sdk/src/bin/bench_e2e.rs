@@ -92,7 +92,12 @@ fn main() {
     let input_rho = Fr::rand(&mut rng);
     let input_randomness = Fr::rand(&mut rng);
     let input_cm = native_poseidon_w5(
-        &[Fr::from(input_value), input_owner_key, input_rho, input_randomness],
+        &[
+            Fr::from(input_value),
+            input_owner_key,
+            input_rho,
+            input_randomness,
+        ],
         domain_note_commitment(),
     );
 
