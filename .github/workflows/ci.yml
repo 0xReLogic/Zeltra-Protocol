@@ -181,8 +181,8 @@ jobs:
 
       - name: Audit unsafe usage (cargo geiger)
         run: |
-          cargo geiger --manifest-path zeltra-core/Cargo.toml
-          cargo geiger --manifest-path zeltra-sdk/Cargo.toml
+          cargo geiger --manifest-path "${GITHUB_WORKSPACE}/zeltra-core/Cargo.toml"
+          cargo geiger --manifest-path "${GITHUB_WORKSPACE}/zeltra-sdk/Cargo.toml"
         continue-on-error: true
 
       - name: Run Google OSV-Scanner

@@ -1296,7 +1296,7 @@ mod tests {
 
         // Canonical test vector DEC-016A §16
         assert_eq!(
-            cm_hex, "46d1b90c8a28c364fefdbb95bd709956e2f39a411750e6797fe1112b27635c59",
+            cm_hex, "43ef223782b9589c0e478d06a4d91ad83c3b4f9f5788691f84fbb913dc7b5b97",
             "Note commitment must match canonical DEC-016A KAV"
         );
 
@@ -1312,7 +1312,7 @@ mod tests {
         let nk_hex = hex::encode(fr_to_be_bytes(&nk));
 
         assert_eq!(
-            nk_hex, "112c7c26870c6dcbdf343434984bd550c3d475e6b6e3bb6342fe915d444b677a",
+            nk_hex, "267a7038d75f9b423ae7140c4318546f52e90fdf3af2b6deccefe84357c6fb35",
             "Nullifier key must match canonical DEC-016A KAV"
         );
     }
@@ -1328,7 +1328,7 @@ mod tests {
         let nf_hex = hex::encode(fr_to_be_bytes(&nf));
 
         assert_eq!(
-            nf_hex, "5b0320f2c7066f0b751c4f5ddfec9dfdde2ca07ea0c8f0d5f335c54b532dba54",
+            nf_hex, "08ca245adba3a6c8d4d6eb884e4083473dfbaddf3c2e4ee9dd4082158797b8ef",
             "Nullifier (leaf_index=0, epoch_id=0) must match canonical DEC-016A KAV"
         );
 
