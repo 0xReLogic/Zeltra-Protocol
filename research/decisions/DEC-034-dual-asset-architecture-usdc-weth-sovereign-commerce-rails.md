@@ -13,6 +13,9 @@
   - `zeltra-node/src/handlers/spend.rs` (Relayer zero-oracle reimbursement & asset routing)
   - `zeltra-sdk/src/wallet/note_wallet.rs` (Multi-asset coin selection & balance separation)
 - **Related DECs:**
+  - [`DEC-034A`](file:///workspaces/Zeltra-Protocol/research/decisions/DEC-034A-canonical-field-bit-packing-and-intra-asset-circuit-constraints.md) (Canonical Field Bit-Packing & Intra-Asset Circuit Soundness)
+  - [`DEC-034B`](file:///workspaces/Zeltra-Protocol/research/decisions/DEC-034B-stylus-siloed-solvency-payable-weth-wrap-and-multi-asset-settlement.md) (Stylus Smart Contract Siloed Solvency & Payable Auto-Wrap)
+  - [`DEC-034C`](file:///workspaces/Zeltra-Protocol/research/decisions/DEC-034C-relayer-zero-oracle-reimbursement-and-sdk-multi-asset-wallet.md) (Relayer Zero-Oracle Routing & Multi-Asset Client SDK)
   - [`DEC-009`](file:///workspaces/Zeltra-Protocol/research/decisions/DEC-009-liability-invariant-check.md) (Mathematical Solvency Invariant Check)
   - [`DEC-016`](file:///workspaces/Zeltra-Protocol/research/decisions/DEC-016-private-note-change-ledger.md) (Private Note Change Ledger Baseline)
   - [`DEC-022`](file:///workspaces/Zeltra-Protocol/research/decisions/DEC-022-defense-against-proof-settlement-mismatch-boundary-gaps.md) (Semantic Public Input Binding)
