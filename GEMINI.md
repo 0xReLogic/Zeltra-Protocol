@@ -47,18 +47,23 @@ Dokumen ini adalah memori konteks persisten untuk agen AI saat bekerja di reposi
 
 ## 3. Prioritas Aktif Selanjutnya
 
-Mengacu pada master checklist [`todo.md`](file:///workspaces/Zeltra-Protocol/todo.md):
+Mengacu pada master checklist [`todo.md`](file:///workspaces/Zeltra-Protocol/todo.md) dan [`docs/roadmap.md`](file:///workspaces/Zeltra-Protocol/docs/roadmap.md):
 
-1. **Hard-Test E2E Arbitrum Sepolia (Gate G / Gate C1 Step 5):**
-   * Deposit direct $\rightarrow$ partial spend $\rightarrow$ change note $\rightarrow$ second spend $\rightarrow$ withdraw-all di testnet Arbitrum Sepolia.
-   * Crash recovery & idempotency boundary testing.
-2. **Cross-Chain CCIP Testing & Verification (Phase 4):**
-   * Testnet E2E di Arbitrum Sepolia (source broadcast $\rightarrow$ router $\rightarrow$ destination execution $\rightarrow$ destination confirmation).
-   * Uji jalur kegagalan destination failure.
-3. **MPC Ceremony & Circuit Freeze (Gate C):**
-   * Freeze circuit constraints & public ABI sebelum production trusted setup ceremony.
-4. **Credential Rotation & Vault TLS Hardening:**
-   * Rotasi secret historis & auto-renew AppRole Vault tokens.
+1. **Fase 1 — SDK, Browser Prover & Ekosistem Fitur (Fokus Aktif Lokal):**
+   * Shielded-to-Shielded In-Pool Transfer (Merchant Masking tanpa penarikan USDC publik).
+   * Viewing Key Export Suite (laporan audit SPT/pajak B2B berbasis `ovk`/`ivk`).
+   * SDK Helper CEX ("Export Source of Funds" bypass bursa).
+   * Web Worker in-browser WASM Groth16 prover runner (`worker.terminate()` isolasi anti-OOM).
+   * HTTP 402 Facilitator mikro-pembayaran AI Agent.
+2. **Fase 2 — Circuit Freeze, Security Audit & Trusted Setup MPC:**
+   * Kunci mati constraints R1CS 16 PI & 19 PI beserta public-input ABI.
+   * Review keamanan sirkuit independen & persiapan MPC Phase 2 ceremony.
+3. **Fase 3 — Unified Hard-Test Arbitrum Sepolia (Gladi Bersih Akhir — Deploy Sekali):**
+   * Deploy kontrak Stylus dan relayer node **sekali saja** menggunakan verifying keys resmi hasil MPC.
+   * Full testnet lifecycle matrix (deposit direct $\rightarrow$ spend $\rightarrow$ change note $\rightarrow$ second spend $\rightarrow$ withdraw-all).
+   * Cross-Chain CCIP testnet flow & boundary crash recovery testing.
+4. **Fase 4 — Mainnet Arbitrum One Launch & Adopsi Pasar:**
+   * Deploy production, bug bounty, dan integrasi merchant checkout widget.
 
 
 ---
