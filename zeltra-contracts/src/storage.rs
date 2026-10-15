@@ -12,13 +12,14 @@ sol_storage! {
         address owner;
         bool paused;
 
-        // The ERC-20 stablecoin contract address
+        // The ERC-20 stablecoin contract address (kept for backwards-compatibility)
         address stablecoin;
         // Address that receives the protocol fees
         address fee_recipient;
 
-        // --- Principal Tracking for Liability Invariant ---
-        uint256 total_deposited_principal;
+        // --- Principal Tracking for Liability Invariant (DEC-034B Multi-Asset) ---
+        // 0: WETH (Gwei), 1: USDC (Micro-units)
+        mapping(uint256 => uint256) total_deposited_principals;
 
         // --- Two-Step Governance & Timelocked Parameter Changes (Issue 10) ---
         address pending_owner;
@@ -32,19 +33,21 @@ sol_storage! {
         mapping(bytes32 => bool) ccip_processed_messages;
         mapping(bytes32 => bool) ccip_allowed_senders;
 
-        // --- Execution Fee Accumulation (Signed Quote Revenue Engine) ---
-        // Accumulated execution fees from spends, claimable by execution_fee_recipient
-        uint256 accumulated_execution_fees;
-        // Address authorized to claim accumulated execution fees (relayer/operator)
+        // --- Pendaftaran Token Resmi (DEC-034B Curated Pair) ---
+        // mapping asset_id (0: WETH9, 1: USDC) => alamat smart contract ERC-20
+        mapping(uint256 => address) asset_tokens;
+        address weth9_address;
+
+        // --- Execution Fee Recipient (Signed Quote Revenue Engine) ---
         address execution_fee_recipient;
 
-        // --- Multi-Liability Storage Accounting (DEC-016 & Gate B) ---
-        // Sum of all unspent private note values held by users
-        uint256 user_note_liability;
-        // Execution fees accrued to relayer but not yet claimed
-        uint256 accrued_execution_fee_liability;
-        // Protocol fees realized and retained as protocol equity
-        uint256 realized_protocol_fees;
+        // --- Multi-Liability Storage Accounting (DEC-034B & DEC-038B) ---
+        // Sum of all unspent private note values held by users per asset_id (0: WETH Gwei, 1: USDC Micro)
+        mapping(uint256 => uint256) user_note_liabilities;
+        // Execution fees accrued to relayer but not yet claimed per asset_id
+        mapping(uint256 => uint256) accrued_execution_fee_liabilities;
+        // Protocol fees realized and retained as protocol equity per asset_id
+        mapping(uint256 => uint256) realized_protocol_fees;
 
         // --- Note Commitment Merkle Mountain Range (DEC-032) ---
         // Current total leaf count in the MMR (0 .. 2^64)

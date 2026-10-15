@@ -62,12 +62,68 @@ impl Zeltra {
         }
         self.owner.set(owner);
         self.paused.set(false);
-        self.stablecoin.set(stablecoin_addr);
+        let default_token = if stablecoin_addr == Address::ZERO {
+            Address::repeat_byte(0xee)
+        } else {
+            stablecoin_addr
+        };
+        self.stablecoin.set(default_token);
+        self.asset_tokens.setter(U256::from(1)).set(default_token);
+        if self.asset_tokens.get(U256::ZERO) == Address::ZERO {
+            self.asset_tokens.setter(U256::ZERO).set(default_token);
+            self.weth9_address.set(default_token);
+        }
         self.fee_recipient.set(fee_recipient_addr);
         self.epoch_start_timestamp
             .set(U256::from(self.block_timestamp()));
         self.generation_epoch_id.setter(U256::ZERO).set(U256::ZERO);
         Ok(())
+    }
+
+    /// Multi-asset initialization configuring both WETH9 and USDC token contracts
+    pub fn init_multi_asset(
+        &mut self,
+        owner: Address,
+        weth9_addr: Address,
+        usdc_addr: Address,
+        fee_recipient_addr: Address,
+    ) -> Result<(), Vec<u8>> {
+        self.init(owner, usdc_addr, fee_recipient_addr)?;
+        self.weth9_address.set(weth9_addr);
+        self.asset_tokens.setter(U256::ZERO).set(weth9_addr);
+        Ok(())
+    }
+
+    pub fn set_asset_token(&mut self, asset_id: U256, token_addr: Address) -> Result<(), Vec<u8>> {
+        self.check_owner()?;
+        if token_addr == Address::ZERO {
+            return Err(b"INVALID_TOKEN_ADDRESS".to_vec());
+        }
+        self.asset_tokens.setter(asset_id).set(token_addr);
+        if asset_id == U256::ZERO {
+            self.weth9_address.set(token_addr);
+        } else if asset_id == U256::from(1) {
+            self.stablecoin.set(token_addr);
+        }
+        Ok(())
+    }
+
+    pub fn set_weth9_address(&mut self, weth9: Address) -> Result<(), Vec<u8>> {
+        self.check_owner()?;
+        if weth9 == Address::ZERO {
+            return Err(b"INVALID_WETH9_ADDRESS".to_vec());
+        }
+        self.weth9_address.set(weth9);
+        self.asset_tokens.setter(U256::ZERO).set(weth9);
+        Ok(())
+    }
+
+    pub fn get_asset_token(&self, asset_id: U256) -> Result<Address, Vec<u8>> {
+        Ok(self.asset_tokens.get(asset_id))
+    }
+
+    pub fn weth9_address(&self) -> Result<Address, Vec<u8>> {
+        Ok(self.weth9_address.get())
     }
 
     pub fn stablecoin(&self) -> Result<Address, Vec<u8>> {
@@ -200,9 +256,14 @@ impl Zeltra {
         Ok(())
     }
 
-    /// Get total accumulated execution fees (view)
+    /// Get total accrued execution fees for USDC (view)
     pub fn get_accumulated_fees(&self) -> Result<U256, Vec<u8>> {
-        Ok(self.accumulated_execution_fees.get())
+        Ok(self.accrued_execution_fee_liabilities.get(U256::from(1)))
+    }
+
+    /// Get total accrued execution fees for a given asset (view)
+    pub fn get_accumulated_fees_of(&self, asset_id: U256) -> Result<U256, Vec<u8>> {
+        Ok(self.accrued_execution_fee_liabilities.get(asset_id))
     }
 
     /// Get execution fee recipient address (view)
@@ -210,39 +271,46 @@ impl Zeltra {
         Ok(self.execution_fee_recipient.get())
     }
 
-    /// Claim accumulated execution fees (admin only)
-    pub fn claim_execution_fees(&mut self, amount: U256) -> Result<bool, Vec<u8>> {
-        self.check_owner()?;
+    /// Claim accrued execution fees (recipient or admin only)
+    pub fn claim_execution_fees(&mut self, asset_id: u8, amount: U256) -> Result<bool, Vec<u8>> {
         let recipient = self.execution_fee_recipient.get();
         if recipient == Address::ZERO {
             return Err(b"NO_RECIPIENT_SET".to_vec());
         }
-        let accumulated = self.accumulated_execution_fees.get();
-        if amount > accumulated {
+        let caller = self.msg_sender();
+        if caller != recipient && caller != self.owner.get() {
+            return Err(b"NOT_AUTHORIZED".to_vec());
+        }
+        let asset_key = U256::from(asset_id);
+        let accrued = self.accrued_execution_fee_liabilities.get(asset_key);
+        if amount > accrued {
             return Err(b"INSUFFICIENT_ACCUMULATED_FEES".to_vec());
         }
         if amount == U256::ZERO {
             return Err(b"ZERO_AMOUNT".to_vec());
         }
 
-        // Transfer USDC to execution_fee_recipient
-        let stablecoin_address = self.stablecoin.get();
-        let erc20 = IErc20::new(stablecoin_address);
-        let host = Self::runtime_host();
-        let success = erc20
-            .transfer(&host, Call::new_mutating(self), recipient, amount)
-            .map_err(|_| b"TRANSFER_FAILED".to_vec())?;
-        if !success {
-            return Err(b"CLAIM_TRANSFER_FAILED".to_vec());
+        let token_addr = self.asset_tokens.get(asset_key);
+        if token_addr == Address::ZERO {
+            return Err(b"ASSET_NOT_CONFIGURED".to_vec());
         }
 
-        // Update accumulated and accrued fees
-        self.accumulated_execution_fees
-            .set(accumulated.checked_sub(amount).unwrap());
-        let accrued = self.accrued_execution_fee_liability.get();
-        if accrued >= amount {
-            self.accrued_execution_fee_liability.set(accrued - amount);
-        }
+        // Scaling: Gwei * 10^9 = Wei for WETH, raw for USDC
+        let raw_transfer_amount = if asset_id == 0 {
+            amount
+                .checked_mul(U256::from(1_000_000_000u64))
+                .ok_or_else(|| b"OVERFLOW".to_vec())?
+        } else {
+            amount
+        };
+
+        // Transfer token to recipient
+        self.asset_safe_transfer(token_addr, recipient, raw_transfer_amount)?;
+
+        // Deduct liability
+        self.accrued_execution_fee_liabilities
+            .setter(asset_key)
+            .set(accrued - amount);
 
         // Emit FeeClaim event
         crate::events::emit_event(crate::events::FeeClaim {
@@ -251,30 +319,50 @@ impl Zeltra {
             fee_type: keccak256(b"EXECUTION_FEE"),
         });
 
-        // Enforce invariant: contract_assets >= outstanding_liabilities
-        // Reject on-chain claims touching user/refund deposit backing (DEC-016 & Gate B)
-        self.check_liability_invariant()?;
+        // Enforce solvency invariant
+        self._check_asset_solvency_invariant(asset_id)?;
 
         Ok(true)
     }
 
-    /// Returns the sum of unspent private note liabilities held by users (DEC-016).
+    /// Returns the sum of unspent private note liabilities held by users for USDC (DEC-016).
     pub fn user_note_liability(&self) -> Result<U256, Vec<u8>> {
-        Ok(self.user_note_liability.get())
+        Ok(self.user_note_liabilities.get(U256::from(1)))
     }
 
-    /// Returns the accrued execution fee liability owed to the relayer (DEC-016).
+    /// Returns the sum of unspent private note liabilities for a specific asset_id (DEC-034B).
+    pub fn user_note_liabilities(&self, asset_id: U256) -> Result<U256, Vec<u8>> {
+        Ok(self.user_note_liabilities.get(asset_id))
+    }
+
+    /// Returns the accrued execution fee liability owed to the relayer for USDC (DEC-016).
     pub fn accrued_execution_fee_liability(&self) -> Result<U256, Vec<u8>> {
-        Ok(self.accrued_execution_fee_liability.get())
+        Ok(self.accrued_execution_fee_liabilities.get(U256::from(1)))
     }
 
-    /// Returns the realized protocol fees retained as protocol equity (DEC-016).
+    /// Returns the accrued execution fee liability for a specific asset_id (DEC-034B).
+    pub fn accrued_execution_fee_liabilities(&self, asset_id: U256) -> Result<U256, Vec<u8>> {
+        Ok(self.accrued_execution_fee_liabilities.get(asset_id))
+    }
+
+    /// Returns the realized protocol fees retained as protocol equity for USDC (DEC-016).
     pub fn realized_protocol_fees(&self) -> Result<U256, Vec<u8>> {
-        Ok(self.realized_protocol_fees.get())
+        Ok(self.realized_protocol_fees.get(U256::from(1)))
     }
 
+    /// Returns the realized protocol fees for a specific asset_id (DEC-034B).
+    pub fn realized_protocol_fees_of(&self, asset_id: U256) -> Result<U256, Vec<u8>> {
+        Ok(self.realized_protocol_fees.get(asset_id))
+    }
+
+    /// Returns total deposited principal for USDC (DEC-016).
     pub fn total_deposited_principal(&self) -> Result<U256, Vec<u8>> {
-        Ok(self.total_deposited_principal.get())
+        Ok(self.total_deposited_principals.get(U256::from(1)))
+    }
+
+    /// Returns total deposited principal for a specific asset_id (DEC-034B).
+    pub fn total_deposited_principals(&self, asset_id: U256) -> Result<U256, Vec<u8>> {
+        Ok(self.total_deposited_principals.get(asset_id))
     }
 
     /// Returns the current Merkle tree root hash. If mmr_leaf_count == 0, returns the canonical empty root (DEC-032).
@@ -433,39 +521,17 @@ impl Zeltra {
 
     // --- Liability Invariant Check ---
 
-    /// Verifies the invariant: contract_assets >= outstanding_liabilities
-    /// where outstanding_liabilities = user_note_liability + accrued_execution_fee_liability + realized_protocol_fees (DEC-038B).
-    /// This ensures the contract can always cover all active user notes and accrued fees.
-    pub fn check_liability_invariant(&self) -> Result<(), Vec<u8>> {
-        #[cfg(not(test))]
-        {
-            use stylus_sdk::prelude::Call;
-
-            let stablecoin_address = self.stablecoin.get();
-            let contract_address = self.env_contract_address();
-            let erc20 = IErc20::new(stablecoin_address);
-            let host = Self::runtime_host();
-            let balance = erc20
-                .balance_of(&host, Call::new(), contract_address)
-                .map_err(|_| b"INVARIANT_BALANCE_CHECK_FAILED".to_vec())?;
-
-            let total_liabilities = self
-                .user_note_liability
-                .get()
-                .checked_add(self.accrued_execution_fee_liability.get())
-                .ok_or_else(|| b"OVERFLOW".to_vec())?
-                .checked_add(self.realized_protocol_fees.get())
-                .ok_or_else(|| b"OVERFLOW".to_vec())?;
-
-            if balance < total_liabilities {
-                return Err(b"INSOLVENT".to_vec());
-            }
-        }
-
-        Ok(())
+    /// Verifies the invariant: contract_assets >= outstanding_liabilities for a given asset (DEC-034B)
+    pub fn check_asset_solvency_invariant(&self, asset_id: u8) -> Result<(), Vec<u8>> {
+        self._check_asset_solvency_invariant(asset_id)
     }
 
-    // --- Direct MMR Note Deposit (DEC-038B) ---
+    /// Verifies the invariant: contract_assets >= outstanding_liabilities (DEC-038B).
+    pub fn check_liability_invariant(&self) -> Result<(), Vec<u8>> {
+        self._check_asset_solvency_invariant(1)
+    }
+
+    // --- Direct MMR Note Deposit (DEC-038B & DEC-034B) ---
 
     pub fn deposit_direct_note(
         &mut self,
@@ -485,7 +551,25 @@ impl Zeltra {
         self.deposit_direct_note(amount, note_commitment, encrypted_memo)
     }
 
-    /// Executes a private spend or rollover using a Groth16 zero-knowledge proof for PrivateNoteCircuit (Gate D, DEC-032, DEC-033).
+    pub fn deposit_direct_weth(
+        &mut self,
+        amount_wei: U256,
+        note_commitment: FixedBytes<32>,
+        encrypted_memo: Bytes,
+    ) -> Result<(), Vec<u8>> {
+        self._deposit_direct_weth(amount_wei, note_commitment, encrypted_memo)
+    }
+
+    #[payable]
+    pub fn deposit_direct_native_eth(
+        &mut self,
+        note_commitment: FixedBytes<32>,
+        encrypted_memo: Bytes,
+    ) -> Result<(), Vec<u8>> {
+        self._deposit_direct_native_eth(note_commitment, encrypted_memo)
+    }
+
+    /// Executes a private spend or rollover using a Groth16 zero-knowledge proof for PrivateNoteCircuit (Gate D, DEC-032, DEC-033, DEC-034B).
     pub fn spend_private_note(
         &mut self,
         note_root: FixedBytes<32>,
@@ -501,7 +585,7 @@ impl Zeltra {
         quote_hash: FixedBytes<32>,
         expiry: U256,
         has_change: U256,
-        is_rollover: U256,
+        flags_packed: U256,
         proof_a_neg: Bytes,
         proof_b: Bytes,
         proof_c: Bytes,
@@ -521,7 +605,7 @@ impl Zeltra {
             quote_hash,
             expiry,
             has_change,
-            is_rollover,
+            flags_packed,
             proof_a_neg,
             proof_b,
             proof_c,
@@ -695,7 +779,11 @@ mod tests {
         pub(crate) static STORAGE: RefCell<HashMap<[u8; 32], [u8; 32]>> = RefCell::new(HashMap::new());
         pub(crate) static MSG_SENDER: RefCell<Address> = const { RefCell::new(Address::ZERO) };
         pub(crate) static BLOCK_TIMESTAMP: RefCell<u64> = const { RefCell::new(0) };
+        pub(crate) static MSG_VALUE: RefCell<U256> = const { RefCell::new(U256::ZERO) };
         pub(crate) static ERC20_TRANSFER_FROM_RESULT: RefCell<Result<bool, Vec<u8>>> = const { RefCell::new(Ok(true)) };
+        pub(crate) static ERC20_TRANSFER_RESULT: RefCell<Result<bool, Vec<u8>>> = const { RefCell::new(Ok(true)) };
+        pub(crate) static WETH9_DEPOSIT_CALLS: RefCell<Vec<(Address, U256)>> = RefCell::new(Vec::new());
+        pub(crate) static MOCK_ASSET_BALANCES: RefCell<HashMap<u8, U256>> = RefCell::new(HashMap::new());
         static PAIRING_RESULT: RefCell<u8> = const { RefCell::new(1) };
         static LAST_RETURN_DATA_SIZE: RefCell<usize> = const { RefCell::new(32) };
     }
@@ -704,13 +792,21 @@ mod tests {
         STORAGE.with(|s| s.borrow_mut().clear());
         MSG_SENDER.with(|s| *s.borrow_mut() = Address::ZERO);
         BLOCK_TIMESTAMP.with(|t| *t.borrow_mut() = 0);
+        MSG_VALUE.with(|v| *v.borrow_mut() = U256::ZERO);
         ERC20_TRANSFER_FROM_RESULT.with(|r| *r.borrow_mut() = Ok(true));
+        ERC20_TRANSFER_RESULT.with(|r| *r.borrow_mut() = Ok(true));
+        WETH9_DEPOSIT_CALLS.with(|c| c.borrow_mut().clear());
+        MOCK_ASSET_BALANCES.with(|m| m.borrow_mut().clear());
         PAIRING_RESULT.with(|result| *result.borrow_mut() = 1);
         LAST_RETURN_DATA_SIZE.with(|s| *s.borrow_mut() = 32);
     }
 
     fn set_msg_sender(sender: Address) {
         MSG_SENDER.with(|s| *s.borrow_mut() = sender);
+    }
+
+    fn set_msg_value(value: U256) {
+        MSG_VALUE.with(|v| *v.borrow_mut() = value);
     }
 
     fn set_block_timestamp(ts: u64) {
@@ -721,8 +817,26 @@ mod tests {
         ERC20_TRANSFER_FROM_RESULT.with(|r| *r.borrow_mut() = res);
     }
 
+    fn set_erc20_transfer_result(res: Result<bool, Vec<u8>>) {
+        ERC20_TRANSFER_RESULT.with(|r| *r.borrow_mut() = res);
+    }
+
+    fn set_mock_asset_balance(asset_id: u8, balance: U256) {
+        MOCK_ASSET_BALANCES.with(|m| {
+            m.borrow_mut().insert(asset_id, balance);
+        });
+    }
+
     fn set_pairing_result(result: bool) {
         PAIRING_RESULT.with(|value| *value.borrow_mut() = u8::from(result));
+    }
+
+    #[no_mangle]
+    pub unsafe extern "C" fn msg_value(dest: *mut u8) {
+        let dest_slice = std::slice::from_raw_parts_mut(dest, 32);
+        MSG_VALUE.with(|v| {
+            dest_slice.copy_from_slice(&v.borrow().to_be_bytes::<32>());
+        });
     }
 
     #[no_mangle]
@@ -1137,8 +1251,11 @@ mod tests {
         let res = contract.deposit_direct_note(amount, commitment, memo);
         assert!(res.is_ok());
 
-        assert_eq!(contract.user_note_liability.get(), amount);
-        assert_eq!(contract.total_deposited_principal.get(), amount);
+        assert_eq!(contract.user_note_liabilities.get(U256::from(1)), amount);
+        assert_eq!(
+            contract.total_deposited_principals.get(U256::from(1)),
+            amount
+        );
         assert_eq!(contract.mmr_leaf_count.get(), U256::from(1));
 
         let root = contract.note_tree_root.get();
@@ -1173,8 +1290,14 @@ mod tests {
             vec![0xaa; 96].into(),
         );
         assert_eq!(res, Err(b"INVALID_NOTE_COMMITMENT_SCALAR".to_vec()));
-        assert_eq!(contract.user_note_liability.get(), U256::ZERO);
-        assert_eq!(contract.total_deposited_principal.get(), U256::ZERO);
+        assert_eq!(
+            contract.user_note_liabilities.get(U256::from(1)),
+            U256::ZERO
+        );
+        assert_eq!(
+            contract.total_deposited_principals.get(U256::from(1)),
+            U256::ZERO
+        );
         assert_eq!(contract.mmr_leaf_count.get(), U256::ZERO);
         assert_eq!(contract.note_tree_root.get(), FixedBytes::ZERO);
     }
@@ -1199,8 +1322,14 @@ mod tests {
             vec![0xaa; 64].into(),
         );
         assert_eq!(res, Err(b"ZERO_COMMITMENT_REJECTED".to_vec()));
-        assert_eq!(contract.user_note_liability.get(), U256::ZERO);
-        assert_eq!(contract.total_deposited_principal.get(), U256::ZERO);
+        assert_eq!(
+            contract.user_note_liabilities.get(U256::from(1)),
+            U256::ZERO
+        );
+        assert_eq!(
+            contract.total_deposited_principals.get(U256::from(1)),
+            U256::ZERO
+        );
         assert_eq!(contract.mmr_leaf_count.get(), U256::ZERO);
         assert_eq!(contract.note_tree_root.get(), FixedBytes::ZERO);
     }
@@ -1225,8 +1354,14 @@ mod tests {
             vec![0xaa; 64].into(),
         );
         assert_eq!(res, Err(b"AMOUNT_TOO_SMALL".to_vec()));
-        assert_eq!(contract.user_note_liability.get(), U256::ZERO);
-        assert_eq!(contract.total_deposited_principal.get(), U256::ZERO);
+        assert_eq!(
+            contract.user_note_liabilities.get(U256::from(1)),
+            U256::ZERO
+        );
+        assert_eq!(
+            contract.total_deposited_principals.get(U256::from(1)),
+            U256::ZERO
+        );
         assert_eq!(contract.mmr_leaf_count.get(), U256::ZERO);
         assert_eq!(contract.note_tree_root.get(), FixedBytes::ZERO);
     }
@@ -1251,8 +1386,14 @@ mod tests {
             vec![0xaa; 95].into(),
         );
         assert_eq!(res_short, Err(b"INVALID_MEMO_LENGTH".to_vec()));
-        assert_eq!(contract.user_note_liability.get(), U256::ZERO);
-        assert_eq!(contract.total_deposited_principal.get(), U256::ZERO);
+        assert_eq!(
+            contract.user_note_liabilities.get(U256::from(1)),
+            U256::ZERO
+        );
+        assert_eq!(
+            contract.total_deposited_principals.get(U256::from(1)),
+            U256::ZERO
+        );
         assert_eq!(contract.mmr_leaf_count.get(), U256::ZERO);
         assert_eq!(contract.note_tree_root.get(), FixedBytes::ZERO);
 
@@ -1262,8 +1403,14 @@ mod tests {
             vec![0xaa; 97].into(),
         );
         assert_eq!(res_long, Err(b"INVALID_MEMO_LENGTH".to_vec()));
-        assert_eq!(contract.user_note_liability.get(), U256::ZERO);
-        assert_eq!(contract.total_deposited_principal.get(), U256::ZERO);
+        assert_eq!(
+            contract.user_note_liabilities.get(U256::from(1)),
+            U256::ZERO
+        );
+        assert_eq!(
+            contract.total_deposited_principals.get(U256::from(1)),
+            U256::ZERO
+        );
         assert_eq!(contract.mmr_leaf_count.get(), U256::ZERO);
         assert_eq!(contract.note_tree_root.get(), FixedBytes::ZERO);
     }
@@ -1293,7 +1440,7 @@ mod tests {
         let res = contract.deposit_direct_note(amount, commitment, empty_memo);
         assert_eq!(res, Ok(()));
 
-        assert_eq!(contract.user_note_liability.get(), amount);
+        assert_eq!(contract.user_note_liabilities.get(U256::from(1)), amount);
         assert_eq!(contract.mmr_leaf_count.get(), U256::from(1));
     }
 
@@ -1318,8 +1465,14 @@ mod tests {
             vec![0xaa; 96].into(),
         );
         assert_eq!(res, Err(b"CONTRACT_PAUSED".to_vec()));
-        assert_eq!(contract.user_note_liability.get(), U256::ZERO);
-        assert_eq!(contract.total_deposited_principal.get(), U256::ZERO);
+        assert_eq!(
+            contract.user_note_liabilities.get(U256::from(1)),
+            U256::ZERO
+        );
+        assert_eq!(
+            contract.total_deposited_principals.get(U256::from(1)),
+            U256::ZERO
+        );
         assert_eq!(contract.mmr_leaf_count.get(), U256::ZERO);
         assert_eq!(contract.note_tree_root.get(), FixedBytes::ZERO);
     }
@@ -1349,8 +1502,14 @@ mod tests {
         set_erc20_transfer_from_result(Ok(false));
         let res_false = contract.deposit_direct_note(amount, commitment, memo.clone());
         assert_eq!(res_false, Err(b"TRANSFER_FROM_FAILED".to_vec()));
-        assert_eq!(contract.user_note_liability.get(), U256::ZERO);
-        assert_eq!(contract.total_deposited_principal.get(), U256::ZERO);
+        assert_eq!(
+            contract.user_note_liabilities.get(U256::from(1)),
+            U256::ZERO
+        );
+        assert_eq!(
+            contract.total_deposited_principals.get(U256::from(1)),
+            U256::ZERO
+        );
         assert_eq!(contract.mmr_leaf_count.get(), U256::ZERO);
         assert_eq!(contract.note_tree_root.get(), FixedBytes::ZERO);
 
@@ -1358,8 +1517,14 @@ mod tests {
         set_erc20_transfer_from_result(Err(b"TRANSFER_FROM_FAILED".to_vec()));
         let res_err = contract.deposit_direct_note(amount, commitment, memo);
         assert_eq!(res_err, Err(b"TRANSFER_FROM_FAILED".to_vec()));
-        assert_eq!(contract.user_note_liability.get(), U256::ZERO);
-        assert_eq!(contract.total_deposited_principal.get(), U256::ZERO);
+        assert_eq!(
+            contract.user_note_liabilities.get(U256::from(1)),
+            U256::ZERO
+        );
+        assert_eq!(
+            contract.total_deposited_principals.get(U256::from(1)),
+            U256::ZERO
+        );
         assert_eq!(contract.mmr_leaf_count.get(), U256::ZERO);
         assert_eq!(contract.note_tree_root.get(), FixedBytes::ZERO);
     }
@@ -1389,8 +1554,11 @@ mod tests {
         let res = contract.deposit_direct_note(amount, valid_commitment, unverified_memo);
 
         assert_eq!(res, Ok(()));
-        assert_eq!(contract.user_note_liability.get(), amount);
-        assert_eq!(contract.total_deposited_principal.get(), amount);
+        assert_eq!(contract.user_note_liabilities.get(U256::from(1)), amount);
+        assert_eq!(
+            contract.total_deposited_principals.get(U256::from(1)),
+            amount
+        );
         assert_eq!(contract.mmr_leaf_count.get(), U256::from(1));
 
         let inserted_root = contract.note_tree_root.get();
@@ -1462,7 +1630,7 @@ mod tests {
         contract.set_execution_fee_recipient(recipient).unwrap();
 
         // Try to claim more than accumulated (0)
-        let result = contract.claim_execution_fees(U256::from(1000));
+        let result = contract.claim_execution_fees(1, U256::from(1000));
         assert_eq!(result, Err(b"INSUFFICIENT_ACCUMULATED_FEES".to_vec()));
     }
 
@@ -1482,7 +1650,7 @@ mod tests {
 
         // Try to claim without setting recipient
         set_msg_sender(owner);
-        let result = contract.claim_execution_fees(U256::from(1000));
+        let result = contract.claim_execution_fees(1, U256::from(1000));
         assert_eq!(result, Err(b"NO_RECIPIENT_SET".to_vec()));
     }
 
@@ -1617,7 +1785,10 @@ mod tests {
         contract
             .accepted_note_roots
             .insert(initial_root, U256::from(1000));
-        contract.user_note_liability.set(U256::from(100_000_000)); // 100 USDC liability
+        contract
+            .user_note_liabilities
+            .setter(U256::ZERO)
+            .set(U256::from(100_000_000)); // 100 USDC liability
 
         let nullifier = FixedBytes::<32>::from_slice(&[0x0a; 32]);
         let change_cm = FixedBytes::<32>::from_slice(&[0x01; 32]);
@@ -1651,16 +1822,18 @@ mod tests {
         assert_eq!(result, Ok(true));
         assert!(contract.note_nullifiers.get(nullifier));
         // Remaining liability = 100M - 5M - 22.5k - 23k = 94_954_500
-        assert_eq!(contract.user_note_liability.get(), U256::from(94_954_500));
         assert_eq!(
-            contract.accumulated_execution_fees.get(),
+            contract.user_note_liabilities.get(U256::ZERO),
+            U256::from(94_954_500)
+        );
+        assert_eq!(
+            contract.accrued_execution_fee_liabilities.get(U256::ZERO),
             U256::from(23_000)
         );
         assert_eq!(
-            contract.accrued_execution_fee_liability.get(),
-            U256::from(23_000)
+            contract.realized_protocol_fees.get(U256::ZERO),
+            U256::from(22_500)
         );
-        assert_eq!(contract.realized_protocol_fees.get(), U256::from(22_500));
         assert_eq!(contract.mmr_leaf_count.get(), U256::from(1));
     }
 
@@ -1680,7 +1853,10 @@ mod tests {
         contract
             .accepted_note_roots
             .insert(initial_root, U256::from(1000));
-        contract.user_note_liability.set(U256::from(100_000_000));
+        contract
+            .user_note_liabilities
+            .setter(U256::ZERO)
+            .set(U256::from(100_000_000));
 
         let nullifier = FixedBytes::<32>::from_slice(&[0x0b; 32]);
         let change_cm = FixedBytes::<32>::from_slice(&[0x02; 32]);
@@ -1886,7 +2062,10 @@ mod tests {
         let root =
             FixedBytes::<32>::from_slice(&crate::poseidon_w5_constants::EMPTY_TREE_ROOT_BYTES);
         contract.accepted_note_roots.insert(root, U256::from(1000));
-        contract.user_note_liability.set(U256::from(1_000_000)); // only 1 USDC liability
+        contract
+            .user_note_liabilities
+            .setter(U256::ZERO)
+            .set(U256::from(1_000_000)); // only 1 USDC liability
 
         let result = contract.spend_private_note(
             root,
@@ -1922,7 +2101,10 @@ mod tests {
         let root =
             FixedBytes::<32>::from_slice(&crate::poseidon_w5_constants::EMPTY_TREE_ROOT_BYTES);
         contract.accepted_note_roots.insert(root, U256::from(1000));
-        contract.user_note_liability.set(U256::from(100_000_000));
+        contract
+            .user_note_liabilities
+            .setter(U256::ZERO)
+            .set(U256::from(100_000_000));
 
         // Set mock pairing check to return false (0)
         set_pairing_result(false);
@@ -1961,7 +2143,10 @@ mod tests {
         let root =
             FixedBytes::<32>::from_slice(&crate::poseidon_w5_constants::EMPTY_TREE_ROOT_BYTES);
         contract.accepted_note_roots.insert(root, U256::from(1000));
-        contract.user_note_liability.set(U256::from(100_000_000));
+        contract
+            .user_note_liabilities
+            .setter(U256::ZERO)
+            .set(U256::from(100_000_000));
 
         // Attempting spend with leaf_count == 0 must fail closed
         let result = contract.spend_private_note(
@@ -2061,7 +2246,10 @@ mod tests {
         let root =
             FixedBytes::<32>::from_slice(&crate::poseidon_w5_constants::EMPTY_TREE_ROOT_BYTES);
         contract.accepted_note_roots.insert(root, U256::from(1000));
-        contract.user_note_liability.set(U256::from(50_000_000));
+        contract
+            .user_note_liabilities
+            .setter(U256::ZERO)
+            .set(U256::from(50_000_000));
 
         let nullifier = FixedBytes::<32>::from_slice(&[0x1a; 32]);
         let change_cm = FixedBytes::<32>::from_slice(&[0x1b; 32]);
@@ -2114,7 +2302,10 @@ mod tests {
         let root =
             FixedBytes::<32>::from_slice(&crate::poseidon_w5_constants::EMPTY_TREE_ROOT_BYTES);
         contract.accepted_note_roots.insert(root, U256::from(1000));
-        contract.user_note_liability.set(U256::from(50_000_000));
+        contract
+            .user_note_liabilities
+            .setter(U256::ZERO)
+            .set(U256::from(50_000_000));
 
         let nullifier = FixedBytes::<32>::from_slice(&[0x2a; 32]);
         let change_cm = FixedBytes::<32>::from_slice(&[0x2b; 32]);
@@ -2161,7 +2352,10 @@ mod tests {
         let root =
             FixedBytes::<32>::from_slice(&crate::poseidon_w5_constants::EMPTY_TREE_ROOT_BYTES);
         contract.accepted_note_roots.insert(root, U256::from(1000));
-        contract.user_note_liability.set(U256::from(50_000_000));
+        contract
+            .user_note_liabilities
+            .setter(U256::ZERO)
+            .set(U256::from(50_000_000));
 
         let nullifier = FixedBytes::<32>::from_slice(&[0x3a; 32]);
         let renewed_cm = FixedBytes::<32>::from_slice(&[0x3b; 32]);
@@ -2193,7 +2387,7 @@ mod tests {
             .is_generational_nullifier_spent(0, nullifier)
             .unwrap());
         assert_eq!(
-            contract.accumulated_execution_fees.get(),
+            contract.accrued_execution_fee_liabilities.get(U256::ZERO),
             U256::from(21_275)
         );
     }
@@ -2216,7 +2410,10 @@ mod tests {
         let root =
             FixedBytes::<32>::from_slice(&crate::poseidon_w5_constants::EMPTY_TREE_ROOT_BYTES);
         contract.accepted_note_roots.insert(root, U256::from(1000));
-        contract.user_note_liability.set(U256::from(50_000_000));
+        contract
+            .user_note_liabilities
+            .setter(U256::ZERO)
+            .set(U256::from(50_000_000));
 
         let nullifier = FixedBytes::<32>::from_slice(&[0xe1; 32]);
 
@@ -2258,7 +2455,10 @@ mod tests {
         let root =
             FixedBytes::<32>::from_slice(&crate::poseidon_w5_constants::EMPTY_TREE_ROOT_BYTES);
         contract.accepted_note_roots.insert(root, U256::from(1000));
-        contract.user_note_liability.set(U256::from(50_000_000));
+        contract
+            .user_note_liabilities
+            .setter(U256::ZERO)
+            .set(U256::from(50_000_000));
 
         // Note epoch 5 when current_epoch is 0
         let res = contract.spend_private_note(
@@ -2298,7 +2498,10 @@ mod tests {
         let root =
             FixedBytes::<32>::from_slice(&crate::poseidon_w5_constants::EMPTY_TREE_ROOT_BYTES);
         contract.accepted_note_roots.insert(root, U256::from(1000));
-        contract.user_note_liability.set(U256::from(50_000_000));
+        contract
+            .user_note_liabilities
+            .setter(U256::ZERO)
+            .set(U256::from(50_000_000));
 
         // Corrupt slot 0 epoch id to 999
         contract
@@ -2480,7 +2683,10 @@ mod tests {
         let root =
             FixedBytes::<32>::from_slice(&crate::poseidon_w5_constants::EMPTY_TREE_ROOT_BYTES);
         contract.accepted_note_roots.insert(root, U256::from(1000));
-        contract.user_note_liability.set(U256::from(100_000_000));
+        contract
+            .user_note_liabilities
+            .setter(U256::ZERO)
+            .set(U256::from(100_000_000));
 
         let nullifier = FixedBytes::<32>::from_slice(&[0x4a; 32]);
         let change_cm = FixedBytes::<32>::from_slice(&[0x4b; 32]);
@@ -2551,7 +2757,10 @@ mod tests {
         contract
             .accepted_note_roots
             .insert(initial_root, U256::from(1000));
-        contract.user_note_liability.set(U256::from(100_000_000)); // 100 USDC liability
+        contract
+            .user_note_liabilities
+            .setter(U256::ZERO)
+            .set(U256::from(100_000_000)); // 100 USDC liability
 
         let nullifier_1 = FixedBytes::<32>::from_slice(&[0x1a; 32]);
         let nullifier_2 = FixedBytes::<32>::from_slice(&[0x1b; 32]);
@@ -2590,16 +2799,18 @@ mod tests {
         assert!(contract.note_nullifiers.get(nullifier_1));
         assert!(contract.note_nullifiers.get(nullifier_2));
         // Remaining liability = 100M - 5M - 22.5k - 23k = 94_954_500
-        assert_eq!(contract.user_note_liability.get(), U256::from(94_954_500));
         assert_eq!(
-            contract.accumulated_execution_fees.get(),
+            contract.user_note_liabilities.get(U256::ZERO),
+            U256::from(94_954_500)
+        );
+        assert_eq!(
+            contract.accrued_execution_fee_liabilities.get(U256::ZERO),
             U256::from(23_000)
         );
         assert_eq!(
-            contract.accrued_execution_fee_liability.get(),
-            U256::from(23_000)
+            contract.realized_protocol_fees.get(U256::ZERO),
+            U256::from(22_500)
         );
-        assert_eq!(contract.realized_protocol_fees.get(), U256::from(22_500));
         // Direction B Constant Arity: exactly 2 MMR insertions
         assert_eq!(contract.mmr_leaf_count.get(), U256::from(2));
     }
@@ -2620,7 +2831,10 @@ mod tests {
         contract
             .accepted_note_roots
             .insert(initial_root, U256::from(1000));
-        contract.user_note_liability.set(U256::from(100_000_000));
+        contract
+            .user_note_liabilities
+            .setter(U256::ZERO)
+            .set(U256::from(100_000_000));
 
         let same_nullifier = FixedBytes::<32>::from_slice(&[0x77; 32]);
         let change_cm_1 = FixedBytes::<32>::from_slice(&[0x2a; 32]);
@@ -2652,7 +2866,10 @@ mod tests {
 
         assert_eq!(result, Err(b"DuplicateNullifierInSameTx".to_vec()));
         assert!(!contract.note_nullifiers.get(same_nullifier));
-        assert_eq!(contract.user_note_liability.get(), U256::from(100_000_000));
+        assert_eq!(
+            contract.user_note_liabilities.get(U256::ZERO),
+            U256::from(100_000_000)
+        );
         assert_eq!(contract.mmr_leaf_count.get(), U256::ZERO);
     }
 
@@ -2672,7 +2889,10 @@ mod tests {
         contract
             .accepted_note_roots
             .insert(initial_root, U256::from(1000));
-        contract.user_note_liability.set(U256::from(100_000_000));
+        contract
+            .user_note_liabilities
+            .setter(U256::ZERO)
+            .set(U256::from(100_000_000));
 
         let nf1 = FixedBytes::<32>::from_slice(&[0x88; 32]);
         let nf2 = FixedBytes::<32>::from_slice(&[0x89; 32]);
@@ -2705,7 +2925,10 @@ mod tests {
 
         assert_eq!(result, Err(b"Nullifier1AlreadySpent".to_vec()));
         assert!(!contract.note_nullifiers.get(nf2));
-        assert_eq!(contract.user_note_liability.get(), U256::from(100_000_000));
+        assert_eq!(
+            contract.user_note_liabilities.get(U256::ZERO),
+            U256::from(100_000_000)
+        );
     }
 
     #[test]
@@ -2724,7 +2947,10 @@ mod tests {
         contract
             .accepted_note_roots
             .insert(initial_root, U256::from(1000));
-        contract.user_note_liability.set(U256::from(100_000_000));
+        contract
+            .user_note_liabilities
+            .setter(U256::ZERO)
+            .set(U256::from(100_000_000));
 
         let nf1 = FixedBytes::<32>::from_slice(&[0x98; 32]);
         let nf2 = FixedBytes::<32>::from_slice(&[0x99; 32]);
@@ -2757,7 +2983,10 @@ mod tests {
 
         assert_eq!(result, Err(b"Nullifier2AlreadySpent".to_vec()));
         assert!(!contract.note_nullifiers.get(nf1));
-        assert_eq!(contract.user_note_liability.get(), U256::from(100_000_000));
+        assert_eq!(
+            contract.user_note_liabilities.get(U256::ZERO),
+            U256::from(100_000_000)
+        );
     }
 
     #[test]
@@ -2776,7 +3005,10 @@ mod tests {
         contract
             .accepted_note_roots
             .insert(initial_root, U256::from(1000));
-        contract.user_note_liability.set(U256::from(100_000_000));
+        contract
+            .user_note_liabilities
+            .setter(U256::ZERO)
+            .set(U256::from(100_000_000));
 
         let nf1 = FixedBytes::<32>::from_slice(&[0xa1; 32]);
         let nf2 = FixedBytes::<32>::from_slice(&[0xa2; 32]);
@@ -2823,7 +3055,10 @@ mod tests {
         contract
             .accepted_note_roots
             .insert(initial_root, U256::from(1000));
-        contract.user_note_liability.set(U256::from(1_000_000)); // Only 1 USDC liability
+        contract
+            .user_note_liabilities
+            .setter(U256::ZERO)
+            .set(U256::from(1_000_000)); // Only 1 USDC liability
 
         let nf1 = FixedBytes::<32>::from_slice(&[0xb1; 32]);
         let nf2 = FixedBytes::<32>::from_slice(&[0xb2; 32]);
@@ -2871,7 +3106,10 @@ mod tests {
         contract
             .accepted_note_roots
             .insert(initial_root, U256::from(1000));
-        contract.user_note_liability.set(U256::from(100_000_000));
+        contract
+            .user_note_liabilities
+            .setter(U256::ZERO)
+            .set(U256::from(100_000_000));
 
         let nf1 = FixedBytes::<32>::from_slice(&[0x1c; 32]);
         let nf2 = FixedBytes::<32>::from_slice(&[0x1d; 32]);
@@ -2920,7 +3158,10 @@ mod tests {
         contract
             .accepted_note_roots
             .insert(initial_root, U256::from(1000));
-        contract.user_note_liability.set(U256::from(100_000_000));
+        contract
+            .user_note_liabilities
+            .setter(U256::ZERO)
+            .set(U256::from(100_000_000));
 
         // Non-canonical scalar: 0xFF >= r
         let non_canonical_nf = FixedBytes::<32>::from_slice(&[0xff; 32]);
@@ -2960,13 +3201,14 @@ mod tests {
     fn test_dec037_encrypted_memo_lifecycle() {
         reset_test_state();
         let owner = address!("1111111111111111111111111111111111111111");
+        let stablecoin = address!("3333333333333333333333333333333333333333");
         let client = address!("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
         let merchant = address!("2222222222222222222222222222222222222222");
         set_msg_sender(owner);
         set_block_timestamp(1000);
 
         let mut contract = Zeltra::default();
-        contract.init(owner, Address::ZERO, Address::ZERO).unwrap();
+        contract.init(owner, stablecoin, Address::ZERO).unwrap();
 
         // 1. Direct deposit with note commitment and memo (DEC-038B)
         set_msg_sender(client);
@@ -3002,7 +3244,7 @@ mod tests {
                 FixedBytes::ZERO,
                 U256::from(5000),
                 U256::from(1), // has_change = 1
-                U256::ZERO,    // is_rollover = 0
+                U256::from(2), // flags_packed: is_rollover = 0, asset_id = 1 (USDC)
                 vec![0x11; 128].into(),
                 vec![0x22; 256].into(),
                 vec![0x33; 128].into(),
@@ -3019,5 +3261,372 @@ mod tests {
         assert_eq!(batch_res, vec![true, false]);
         // MMR leaf count incremented to 2 (1 initial deposit + 1 change note)
         assert_eq!(contract.mmr_leaf_count().unwrap(), U256::from(2));
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // TASK B (DEC-034B): Multi-Asset Siloed Accounting & Solvency Tests
+    // ═══════════════════════════════════════════════════════════════════════
+
+    #[test]
+    fn test_weth_payable_wrap_success_cei_order() {
+        reset_test_state();
+        let owner = address!("1111111111111111111111111111111111111111");
+        let weth9 = address!("2222222222222222222222222222222222222222");
+        let usdc = address!("3333333333333333333333333333333333333333");
+        let fee_recipient = address!("4444444444444444444444444444444444444444");
+        let user = address!("5555555555555555555555555555555555555555");
+
+        let mut contract = Zeltra::default();
+        contract
+            .init_multi_asset(owner, weth9, usdc, fee_recipient)
+            .unwrap();
+
+        // 0.01 ETH = 10^16 Wei = 10_000_000 Gwei
+        let amount_wei = U256::from(10_000_000_000_000_000u64);
+        let amount_gwei = U256::from(10_000_000u64);
+        set_msg_sender(user);
+        set_msg_value(amount_wei);
+
+        let note_cm = FixedBytes::repeat_byte(0x01);
+        let memo: Bytes = vec![0x77; 96].into();
+
+        // Pre-condition
+        assert_eq!(
+            contract.user_note_liabilities(U256::ZERO).unwrap(),
+            U256::ZERO
+        );
+        assert_eq!(
+            contract.total_deposited_principals(U256::ZERO).unwrap(),
+            U256::ZERO
+        );
+        assert_eq!(contract.mmr_leaf_count.get(), U256::ZERO);
+
+        // Execute payable native ETH auto-wrap deposit
+        contract.deposit_direct_native_eth(note_cm, memo).unwrap();
+
+        // Verify post-conditions
+        assert_eq!(
+            contract.user_note_liabilities(U256::ZERO).unwrap(),
+            amount_gwei
+        );
+        assert_eq!(
+            contract.total_deposited_principals(U256::ZERO).unwrap(),
+            amount_gwei
+        );
+        assert_eq!(contract.mmr_leaf_count.get(), U256::from(1));
+
+        // Verify IWeth9::deposit{value: amount_wei}() interaction was recorded with exact Wei
+        let deposit_calls = WETH9_DEPOSIT_CALLS.with(|c| c.borrow().clone());
+        assert_eq!(deposit_calls.len(), 1);
+        assert_eq!(deposit_calls[0], (weth9, amount_wei));
+    }
+
+    #[test]
+    fn test_unaligned_gwei_wei_rejection() {
+        reset_test_state();
+        let owner = address!("1111111111111111111111111111111111111111");
+        let weth9 = address!("2222222222222222222222222222222222222222");
+        let usdc = address!("3333333333333333333333333333333333333333");
+        let user = address!("5555555555555555555555555555555555555555");
+
+        let mut contract = Zeltra::default();
+        contract
+            .init_multi_asset(owner, weth9, usdc, Address::ZERO)
+            .unwrap();
+
+        set_msg_sender(user);
+        let note_cm = FixedBytes::repeat_byte(0x01);
+        let memo: Bytes = vec![0x77; 96].into();
+
+        // 1. Unaligned Native ETH: 0.005 ETH + 1 wei = 5_000_000_000_000_001 Wei
+        let unaligned_eth = U256::from(5_000_000_000_000_001u64);
+        set_msg_value(unaligned_eth);
+        let err_eth = contract.deposit_direct_native_eth(note_cm, memo.clone());
+        assert_eq!(err_eth, Err(b"ETH_VALUE_NOT_GWEI_ALIGNED".to_vec()));
+
+        // 2. Unaligned WETH ERC-20: 5_000_000_000_000_999 Wei
+        let unaligned_weth = U256::from(5_000_000_000_000_999u64);
+        let err_weth = contract.deposit_direct_weth(unaligned_weth, note_cm, memo);
+        assert_eq!(err_weth, Err(b"WETH_AMOUNT_NOT_GWEI_ALIGNED".to_vec()));
+
+        // Verify state is completely unchanged
+        assert_eq!(
+            contract.user_note_liabilities(U256::ZERO).unwrap(),
+            U256::ZERO
+        );
+        assert_eq!(contract.mmr_leaf_count.get(), U256::ZERO);
+    }
+
+    #[test]
+    fn test_caller_token_injection_impossible() {
+        reset_test_state();
+        let owner = address!("1111111111111111111111111111111111111111");
+        let weth9 = address!("2222222222222222222222222222222222222222");
+        let usdc = address!("3333333333333333333333333333333333333333");
+        let merchant = address!("6666666666666666666666666666666666666666");
+
+        let mut contract = Zeltra::default();
+        contract
+            .init_multi_asset(owner, weth9, usdc, Address::ZERO)
+            .unwrap();
+
+        // Verify storage registration: calldata cannot alter target_token
+        assert_eq!(contract.get_asset_token(U256::ZERO).unwrap(), weth9);
+        assert_eq!(contract.get_asset_token(U256::from(1)).unwrap(), usdc);
+
+        let initial_root =
+            FixedBytes::<32>::from_slice(&crate::poseidon_w5_constants::EMPTY_TREE_ROOT_BYTES);
+        contract
+            .accepted_note_roots
+            .insert(initial_root, U256::from(1000));
+        contract
+            .user_note_liabilities
+            .setter(U256::from(1))
+            .set(U256::from(50_000_000));
+
+        // When unconfigured asset is accessed via flags_packed
+        // (e.g. asset_tokens mapping at slot 1 is Address::ZERO)
+        contract
+            .asset_tokens
+            .setter(U256::from(1))
+            .set(Address::ZERO);
+
+        let res = contract.spend_private_note(
+            initial_root,
+            U256::from(1),
+            FixedBytes::repeat_byte(0x11),
+            U256::ZERO,
+            FixedBytes::repeat_byte(0x22),
+            merchant,
+            U256::from(5_000_000),
+            U256::from(22_500),
+            U256::from(23_000),
+            U256::from(25_000),
+            FixedBytes::ZERO,
+            U256::from(2000),
+            U256::from(1),
+            U256::from(2), // asset_id = 1, is_rollover = 0
+            vec![0x11; 128].into(),
+            vec![0x22; 256].into(),
+            vec![0x33; 128].into(),
+            vec![].into(),
+        );
+
+        assert_eq!(res, Err(b"ASSET_NOT_CONFIGURED".to_vec()));
+    }
+
+    #[test]
+    fn test_weth_relayer_fee_claim_scaling_exactness() {
+        reset_test_state();
+        let owner = address!("1111111111111111111111111111111111111111");
+        let weth9 = address!("2222222222222222222222222222222222222222");
+        let usdc = address!("3333333333333333333333333333333333333333");
+        let fee_recipient = address!("4444444444444444444444444444444444444444");
+
+        set_msg_sender(owner);
+        let mut contract = Zeltra::default();
+        contract
+            .init_multi_asset(owner, weth9, usdc, fee_recipient)
+            .unwrap();
+        contract.set_execution_fee_recipient(fee_recipient).unwrap();
+
+        // 25_000 Gwei accrued execution fee for WETH (asset_id = 0)
+        let fee_gwei = U256::from(25_000u64);
+        contract
+            .accrued_execution_fee_liabilities
+            .setter(U256::ZERO)
+            .set(fee_gwei);
+
+        // Unauthorized caller fails
+        let hacker = address!("9999999999999999999999999999999999999999");
+        set_msg_sender(hacker);
+        let err_auth = contract.claim_execution_fees(0, fee_gwei);
+        assert_eq!(err_auth, Err(b"NOT_AUTHORIZED".to_vec()));
+
+        // Amount > accrued fails
+        set_msg_sender(fee_recipient);
+        let err_over = contract.claim_execution_fees(0, fee_gwei + U256::from(1));
+        assert_eq!(err_over, Err(b"INSUFFICIENT_ACCUMULATED_FEES".to_vec()));
+
+        // Zero amount fails
+        let err_zero = contract.claim_execution_fees(0, U256::ZERO);
+        assert_eq!(err_zero, Err(b"ZERO_AMOUNT".to_vec()));
+
+        // Valid claim of full fee
+        let ok = contract.claim_execution_fees(0, fee_gwei).unwrap();
+        assert!(ok);
+        assert_eq!(
+            contract
+                .accrued_execution_fee_liabilities(U256::ZERO)
+                .unwrap(),
+            U256::ZERO
+        );
+    }
+
+    #[test]
+    fn test_flags_packed_malleable_bits_rejection() {
+        reset_test_state();
+        let owner = address!("1111111111111111111111111111111111111111");
+        let stablecoin = address!("3333333333333333333333333333333333333333");
+        let merchant = address!("2222222222222222222222222222222222222222");
+        set_msg_sender(owner);
+        set_block_timestamp(1000);
+
+        let mut contract = Zeltra::default();
+        contract.init(owner, stablecoin, Address::ZERO).unwrap();
+
+        let initial_root =
+            FixedBytes::<32>::from_slice(&crate::poseidon_w5_constants::EMPTY_TREE_ROOT_BYTES);
+        contract
+            .accepted_note_roots
+            .insert(initial_root, U256::from(1000));
+        contract
+            .user_note_liabilities
+            .setter(U256::ZERO)
+            .set(U256::from(100_000_000));
+
+        // 1. Private note spend: valid range is 0..=3
+        // flags_packed = 4 (> 3) must revert FLAGS_PACKED_MALLEABLE_BITS
+        let res_spend_4 = contract.spend_private_note(
+            initial_root,
+            U256::from(1),
+            FixedBytes::repeat_byte(0x01),
+            U256::ZERO,
+            FixedBytes::repeat_byte(0x02),
+            merchant,
+            U256::from(5_000_000),
+            U256::from(22_500),
+            U256::from(23_000),
+            U256::from(25_000),
+            FixedBytes::ZERO,
+            U256::from(2000),
+            U256::from(1),
+            U256::from(4), // MALLEABLE BIT (> 3)
+            vec![0x11; 128].into(),
+            vec![0x22; 256].into(),
+            vec![0x33; 128].into(),
+            vec![].into(),
+        );
+        assert_eq!(res_spend_4, Err(b"FLAGS_PACKED_MALLEABLE_BITS".to_vec()));
+
+        // flags_packed = 255 must also revert
+        let res_spend_255 = contract.spend_private_note(
+            initial_root,
+            U256::from(1),
+            FixedBytes::repeat_byte(0x01),
+            U256::ZERO,
+            FixedBytes::repeat_byte(0x02),
+            merchant,
+            U256::from(5_000_000),
+            U256::from(22_500),
+            U256::from(23_000),
+            U256::from(25_000),
+            FixedBytes::ZERO,
+            U256::from(2000),
+            U256::from(1),
+            U256::from(255), // MALLEABLE BITS (> 3)
+            vec![0x11; 128].into(),
+            vec![0x22; 256].into(),
+            vec![0x33; 128].into(),
+            vec![].into(),
+        );
+        assert_eq!(res_spend_255, Err(b"FLAGS_PACKED_MALLEABLE_BITS".to_vec()));
+
+        // 2. JoinSplit spend: valid range is 0..=7
+        // flags_packed = 8 (> 7) must revert FLAGS_PACKED_MALLEABLE_BITS
+        let res_js_8 = contract.spend_joinsplit(
+            vec![0x11; 128].into(),
+            vec![0x22; 256].into(),
+            vec![0x33; 128].into(),
+            initial_root,
+            U256::from(1),
+            FixedBytes::repeat_byte(0x03),
+            FixedBytes::repeat_byte(0x04),
+            U256::ZERO,
+            U256::ZERO,
+            FixedBytes::ZERO,
+            FixedBytes::ZERO,
+            merchant,
+            U256::from(5_000_000),
+            U256::from(22_500),
+            U256::from(23_000),
+            U256::from(25_000),
+            FixedBytes::ZERO,
+            U256::from(2000),
+            U256::from(8), // MALLEABLE BIT (> 7)
+            U256::ZERO,
+        );
+        assert_eq!(res_js_8, Err(b"FLAGS_PACKED_MALLEABLE_BITS".to_vec()));
+
+        // flags_packed = 255 must also revert
+        let res_js_255 = contract.spend_joinsplit(
+            vec![0x11; 128].into(),
+            vec![0x22; 256].into(),
+            vec![0x33; 128].into(),
+            initial_root,
+            U256::from(1),
+            FixedBytes::repeat_byte(0x03),
+            FixedBytes::repeat_byte(0x04),
+            U256::ZERO,
+            U256::ZERO,
+            FixedBytes::ZERO,
+            FixedBytes::ZERO,
+            merchant,
+            U256::from(5_000_000),
+            U256::from(22_500),
+            U256::from(23_000),
+            U256::from(25_000),
+            FixedBytes::ZERO,
+            U256::from(2000),
+            U256::from(255), // MALLEABLE BITS (> 7)
+            U256::ZERO,
+        );
+        assert_eq!(res_js_255, Err(b"FLAGS_PACKED_MALLEABLE_BITS".to_vec()));
+    }
+
+    #[test]
+    fn test_usdc_revert_leaves_weth_solvent() {
+        reset_test_state();
+        let owner = address!("1111111111111111111111111111111111111111");
+        let weth9 = address!("2222222222222222222222222222222222222222");
+        let usdc = address!("3333333333333333333333333333333333333333");
+        let user = address!("5555555555555555555555555555555555555555");
+
+        let mut contract = Zeltra::default();
+        contract
+            .init_multi_asset(owner, weth9, usdc, Address::ZERO)
+            .unwrap();
+
+        // 1. Establish WETH pool state (0.01 ETH = 10_000_000 Gwei)
+        set_msg_sender(user);
+        let amount_wei = U256::from(10_000_000_000_000_000u64);
+        set_msg_value(amount_wei);
+        let note_cm = FixedBytes::repeat_byte(0x05);
+        let memo: Bytes = vec![0x77; 96].into();
+        contract
+            .deposit_direct_native_eth(note_cm, memo.clone())
+            .unwrap();
+
+        // 2. Simulate Circle freezing / blacklisting USDC transfers
+        set_erc20_transfer_from_result(Err(b"USDC_BLACKLISTED".to_vec()));
+
+        // USDC deposit fails
+        let res_usdc = contract.deposit_direct_note(
+            U256::from(20_000_000),
+            FixedBytes::repeat_byte(0x06),
+            memo,
+        );
+        assert_eq!(res_usdc, Err(b"USDC_BLACKLISTED".to_vec()));
+
+        // 3. Theorem Verification: WETH pool accounting and solvency invariant are completely unaffected!
+        assert!(contract.check_asset_solvency_invariant(0).is_ok());
+        assert_eq!(
+            contract.user_note_liabilities(U256::ZERO).unwrap(),
+            U256::from(10_000_000)
+        );
+        assert_eq!(
+            contract.user_note_liabilities(U256::from(1)).unwrap(),
+            U256::ZERO
+        );
     }
 }

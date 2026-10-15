@@ -100,7 +100,7 @@ impl Zeltra {
         quote_hash: FixedBytes<32>,
         expiry: U256,
         has_change: U256,
-        is_rollover: U256,
+        flags_packed: U256,
         proof_a_neg: Bytes,
         proof_b: Bytes,
         proof_c: Bytes,
@@ -120,10 +120,13 @@ impl Zeltra {
             return Err(b"TRANSACTION_EXPIRED".to_vec());
         }
 
-        // Rollover mode validation (DEC-033)
-        if is_rollover != U256::ZERO && is_rollover != U256::from(1) {
-            return Err(b"INVALID_IS_ROLLOVER_FLAG".to_vec());
+        // Strict bit-bounds check on flags_packed (PATCH AUDIT KRITIS #2)
+        // Bit 0: is_rollover, Bit 1: asset_id => valid range: 0..=3
+        if flags_packed > U256::from(3) {
+            return Err(b"FLAGS_PACKED_MALLEABLE_BITS".to_vec());
         }
+        let is_rollover = flags_packed & U256::from(1);
+        let asset_id: u8 = ((flags_packed >> 1usize) & U256::from(1)).byte(0);
 
         if is_rollover == U256::ZERO {
             // Normal spend: merchant amount must be positive
@@ -189,6 +192,12 @@ impl Zeltra {
             return Err(b"NOTE_ALREADY_SPENT".to_vec());
         }
 
+        // NOL CALLER TOKEN INJECTION: Resolve token purely from storage registry
+        let target_token = self.asset_tokens.get(U256::from(asset_id));
+        if target_token == Address::ZERO {
+            return Err(b"ASSET_NOT_CONFIGURED".to_vec());
+        }
+
         // Fail-Fast Check: Validate total debit and note liability BEFORE expensive ZK precompile calls
         let total_debit = merchant_amount
             .checked_add(protocol_fee)
@@ -196,12 +205,13 @@ impl Zeltra {
             .checked_add(execution_fee)
             .ok_or_else(|| b"TOTAL_DEBIT_OVERFLOW".to_vec())?;
 
-        let user_liab = self.user_note_liability.get();
+        let asset_key = U256::from(asset_id);
+        let user_liab = self.user_note_liabilities.get(asset_key);
         if user_liab < total_debit {
             return Err(b"INSUFFICIENT_NOTE_LIABILITY".to_vec());
         }
 
-        // Construct 15 public input scalars in big-endian EVM format
+        // Construct 16 public input scalars in big-endian EVM format
         let mut recipient_bytes = [0u8; 32];
         recipient_bytes[12..].copy_from_slice(recipient.as_slice());
 
@@ -216,7 +226,7 @@ impl Zeltra {
         let execution_fee_bytes = execution_fee.to_be_bytes::<32>();
         let expiry_bytes = expiry.to_be_bytes::<32>();
         let has_change_bytes = has_change.to_be_bytes::<32>();
-        let is_rollover_bytes = is_rollover.to_be_bytes::<32>();
+        let flags_packed_bytes = flags_packed.to_be_bytes::<32>();
 
         // Unpack 32-byte quote_hash into two 128-bit EVM words in memory (DEC-035A)
         let mut quote_hi = [0u8; 32];
@@ -241,7 +251,7 @@ impl Zeltra {
             contract_bytes,
             expiry_bytes,
             has_change_bytes,
-            is_rollover_bytes,
+            flags_packed_bytes,
         ];
 
         // Validate canonicality for each public input scalar
@@ -276,45 +286,38 @@ impl Zeltra {
             self._mmr_insert(output_commitment, encrypted_memo.to_vec())?;
         }
 
-        // Multi-liability accounting (DEC-016 Gate B)
-        self.user_note_liability.set(user_liab - total_debit);
+        // Multi-liability accounting per asset (DEC-034B & DEC-038B)
+        self.user_note_liabilities
+            .setter(asset_key)
+            .set(user_liab - total_debit);
 
-        let new_accumulated_fees = self
-            .accumulated_execution_fees
-            .get()
-            .checked_add(execution_fee)
-            .ok_or_else(|| b"EXECUTION_FEE_OVERFLOW".to_vec())?;
-        self.accumulated_execution_fees.set(new_accumulated_fees);
-
-        let new_accrued_fees = self
-            .accrued_execution_fee_liability
-            .get()
+        let cur_accrued = self.accrued_execution_fee_liabilities.get(asset_key);
+        let new_accrued = cur_accrued
             .checked_add(execution_fee)
             .ok_or_else(|| b"ACCRUED_FEE_OVERFLOW".to_vec())?;
-        self.accrued_execution_fee_liability.set(new_accrued_fees);
+        self.accrued_execution_fee_liabilities
+            .setter(asset_key)
+            .set(new_accrued);
 
-        let new_realized_fees = self
-            .realized_protocol_fees
-            .get()
+        let cur_realized = self.realized_protocol_fees.get(asset_key);
+        let new_realized = cur_realized
             .checked_add(protocol_fee)
-            .unwrap_or_else(|| self.realized_protocol_fees.get());
-        self.realized_protocol_fees.set(new_realized_fees);
+            .ok_or_else(|| b"PROTOCOL_FEE_OVERFLOW".to_vec())?;
+        self.realized_protocol_fees
+            .setter(asset_key)
+            .set(new_realized);
 
-        // 3. INTERACTIONS (Token transfer to recipient)
-        #[cfg(not(test))]
-        {
-            if recipient != Address::ZERO && merchant_amount > U256::ZERO {
-                self.ensure_liquidity(merchant_amount)?;
-                let stablecoin_address = self.stablecoin.get();
-                let erc20 = IErc20::new(stablecoin_address);
-                let host = Self::runtime_host();
-                let call_res =
-                    erc20.transfer(&host, Call::new_mutating(self), recipient, merchant_amount);
-                match call_res {
-                    Ok(true) => {}
-                    _ => return Err(b"ERC20_TRANSFER_FAILED".to_vec()),
-                }
-            }
+        // 3. INTERACTIONS (Token transfer to recipient with scaling)
+        if recipient != Address::ZERO && merchant_amount > U256::ZERO {
+            self.ensure_asset_liquidity(asset_id, merchant_amount)?;
+            let raw_payout = if asset_id == 0 {
+                merchant_amount
+                    .checked_mul(U256::from(1_000_000_000u64))
+                    .ok_or_else(|| b"OVERFLOW".to_vec())?
+            } else {
+                merchant_amount
+            };
+            self.asset_safe_transfer(target_token, recipient, raw_payout)?;
         }
 
         // 4. EVENTS
@@ -348,7 +351,7 @@ impl Zeltra {
         });
 
         // 5. SOLVENCY INVARIANT
-        self.check_liability_invariant()?;
+        self._check_asset_solvency_invariant(asset_id)?;
 
         Ok(true)
     }
@@ -448,15 +451,25 @@ impl Zeltra {
             return Err(b"INVALID_LEAF_COUNT".to_vec());
         }
 
-        // flags_packed range check (0..=3)
-        if flags_packed > U256::from(3) {
-            return Err(b"INVALID_FLAGS_PACKED".to_vec());
+        // Strict bit-bounds check on flags_packed
+        // Bit 0: has_change_1, Bit 1: has_change_2, Bit 2: asset_id => valid range: 0..=7
+        if flags_packed > U256::from(7) {
+            return Err(b"FLAGS_PACKED_MALLEABLE_BITS".to_vec());
         }
+        let has_change_1 = flags_packed & U256::from(1);
+        let has_change_2 = (flags_packed >> 1usize) & U256::from(1);
+        let asset_id: u8 = ((flags_packed >> 2usize) & U256::from(1)).byte(0);
 
         // Note root must be recorded in accepted_note_roots
         let root_timestamp = self.accepted_note_roots.get(note_root);
         if root_timestamp == U256::ZERO {
             return Err(b"UNACCEPTED_NOTE_ROOT".to_vec());
+        }
+
+        // NOL CALLER TOKEN INJECTION: Resolve token purely from storage registry
+        let target_token = self.asset_tokens.get(U256::from(asset_id));
+        if target_token == Address::ZERO {
+            return Err(b"ASSET_NOT_CONFIGURED".to_vec());
         }
 
         // Fail-Fast Check: Validate total debit and note liability BEFORE expensive ZK precompile calls
@@ -466,7 +479,8 @@ impl Zeltra {
             .checked_add(execution_fee)
             .ok_or_else(|| b"TOTAL_DEBIT_OVERFLOW".to_vec())?;
 
-        let user_liab = self.user_note_liability.get();
+        let asset_key = U256::from(asset_id);
+        let user_liab = self.user_note_liabilities.get(asset_key);
         if user_liab < total_debit {
             return Err(b"INSUFFICIENT_NOTE_LIABILITY".to_vec());
         }
@@ -551,45 +565,38 @@ impl Zeltra {
         self._mmr_insert(output_cm_1, Vec::new())?;
         self._mmr_insert(output_cm_2, Vec::new())?;
 
-        // Multi-liability accounting
-        self.user_note_liability.set(user_liab - total_debit);
+        // Multi-liability accounting per asset (DEC-034B & DEC-038B)
+        self.user_note_liabilities
+            .setter(asset_key)
+            .set(user_liab - total_debit);
 
-        let new_accumulated_fees = self
-            .accumulated_execution_fees
-            .get()
-            .checked_add(execution_fee)
-            .ok_or_else(|| b"EXECUTION_FEE_OVERFLOW".to_vec())?;
-        self.accumulated_execution_fees.set(new_accumulated_fees);
-
-        let new_accrued_fees = self
-            .accrued_execution_fee_liability
-            .get()
+        let cur_accrued = self.accrued_execution_fee_liabilities.get(asset_key);
+        let new_accrued = cur_accrued
             .checked_add(execution_fee)
             .ok_or_else(|| b"ACCRUED_FEE_OVERFLOW".to_vec())?;
-        self.accrued_execution_fee_liability.set(new_accrued_fees);
+        self.accrued_execution_fee_liabilities
+            .setter(asset_key)
+            .set(new_accrued);
 
-        let new_realized_fees = self
-            .realized_protocol_fees
-            .get()
+        let cur_realized = self.realized_protocol_fees.get(asset_key);
+        let new_realized = cur_realized
             .checked_add(protocol_fee)
-            .unwrap_or_else(|| self.realized_protocol_fees.get());
-        self.realized_protocol_fees.set(new_realized_fees);
+            .ok_or_else(|| b"PROTOCOL_FEE_OVERFLOW".to_vec())?;
+        self.realized_protocol_fees
+            .setter(asset_key)
+            .set(new_realized);
 
-        // 3. INTERACTIONS (Token transfer to recipient)
-        #[cfg(not(test))]
-        {
-            if recipient != Address::ZERO && merchant_amount > U256::ZERO {
-                self.ensure_liquidity(merchant_amount)?;
-                let stablecoin_address = self.stablecoin.get();
-                let erc20 = IErc20::new(stablecoin_address);
-                let host = Self::runtime_host();
-                let call_res =
-                    erc20.transfer(&host, Call::new_mutating(self), recipient, merchant_amount);
-                match call_res {
-                    Ok(true) => {}
-                    _ => return Err(b"ERC20_TRANSFER_FAILED".to_vec()),
-                }
-            }
+        // 3. INTERACTIONS (Token transfer to recipient with scaling)
+        if recipient != Address::ZERO && merchant_amount > U256::ZERO {
+            self.ensure_asset_liquidity(asset_id, merchant_amount)?;
+            let raw_payout = if asset_id == 0 {
+                merchant_amount
+                    .checked_mul(U256::from(1_000_000_000u64))
+                    .ok_or_else(|| b"OVERFLOW".to_vec())?
+            } else {
+                merchant_amount
+            };
+            self.asset_safe_transfer(target_token, recipient, raw_payout)?;
         }
 
         // 4. EVENTS
@@ -622,7 +629,7 @@ impl Zeltra {
         }
 
         // 5. SOLVENCY INVARIANT (C5.4)
-        self.check_liability_invariant()?;
+        self._check_asset_solvency_invariant(asset_id)?;
 
         Ok(true)
     }
