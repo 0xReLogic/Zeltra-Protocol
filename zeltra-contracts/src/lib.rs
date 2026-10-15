@@ -782,7 +782,7 @@ mod tests {
         pub(crate) static MSG_VALUE: RefCell<U256> = const { RefCell::new(U256::ZERO) };
         pub(crate) static ERC20_TRANSFER_FROM_RESULT: RefCell<Result<bool, Vec<u8>>> = const { RefCell::new(Ok(true)) };
         pub(crate) static ERC20_TRANSFER_RESULT: RefCell<Result<bool, Vec<u8>>> = const { RefCell::new(Ok(true)) };
-        pub(crate) static WETH9_DEPOSIT_CALLS: RefCell<Vec<(Address, U256)>> = RefCell::new(Vec::new());
+        pub(crate) static WETH9_DEPOSIT_CALLS: RefCell<Vec<(Address, U256)>> = const { RefCell::new(Vec::new()) };
         pub(crate) static MOCK_ASSET_BALANCES: RefCell<HashMap<u8, U256>> = RefCell::new(HashMap::new());
         static PAIRING_RESULT: RefCell<u8> = const { RefCell::new(1) };
         static LAST_RETURN_DATA_SIZE: RefCell<usize> = const { RefCell::new(32) };

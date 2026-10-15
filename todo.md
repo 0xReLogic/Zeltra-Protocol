@@ -19,12 +19,12 @@
 ## 0. Implementasi Dual-Asset Architecture (USDC & WETH — DEC-034)
 Ref: [`DEC-034`](file:///workspaces/Zeltra-Protocol/research/decisions/DEC-034-dual-asset-architecture-usdc-weth-sovereign-commerce-rails.md)
 
-- [ ] **Task A — Kriptografi, Bit-Packing & Sirkuit ZK (`zeltra-core`):**
+- [x] **Task A — Kriptografi, Bit-Packing & Sirkuit ZK (`zeltra-core`):** [SELESAI & AUDITED]
   - Detail spesifikasi eksekusi: [`taskAdec034.md`](file:///workspaces/Zeltra-Protocol/taskAdec034.md) & [`DEC-034A`](file:///workspaces/Zeltra-Protocol/research/decisions/DEC-034A-canonical-field-bit-packing-and-intra-asset-circuit-constraints.md)
-  - `PrivateNoteV1` asset_id, `value_packed = value + asset_id * 2^64`, R1CS gadget `flags_packed`, dummy input & zero-value change note canonical packing ($2^{64}$), intra-asset equality.
-- [ ] **Task B — Smart Contract Stylus Arbitrum (`zeltra-contracts`):**
+  - `PrivateNoteV1` asset_id, `value_packed = value + asset_id * 2^64`, R1CS gadget `flags_packed`, dummy input & zero-value change note canonical packing ($2^{64}$), intra-asset equality. (162 unit tests passed, Python soundness passed).
+- [x] **Task B — Smart Contract Stylus Arbitrum (`zeltra-contracts`):** [SELESAI & AUDITED]
   - Detail spesifikasi eksekusi: [`taskBdec034.md`](file:///workspaces/Zeltra-Protocol/taskBdec034.md) & [`DEC-034B`](file:///workspaces/Zeltra-Protocol/research/decisions/DEC-034B-stylus-siloed-solvency-payable-weth-wrap-and-multi-asset-settlement.md)
-  - Multi-liability per-asset, `deposit_direct_weth` & `deposit_direct_native_eth` auto-wrap, pemisahan raw vs normalized amount, bit-bounds check `flags_packed`, unifikasi storage relayer fee.
+  - Multi-liability per-asset, `deposit_direct_weth` & `deposit_direct_native_eth` auto-wrap, pemisahan raw vs normalized amount, bit-bounds check `flags_packed`, unifikasi storage relayer fee. (64/64 Rust unit tests passed, wasm32 clean, clippy clean, Python real-case 46/46 passed).
 - [ ] **Task C — Relayer Zero-Oracle, Client SDK & CLI Tooling (`zeltra-node`, `zeltra-sdk`, `zeltra-cli`):**
   - Detail spesifikasi eksekusi: [`taskCdec034.md`](file:///workspaces/Zeltra-Protocol/taskCdec034.md) & [`DEC-034C`](file:///workspaces/Zeltra-Protocol/research/decisions/DEC-034C-relayer-zero-oracle-reimbursement-and-sdk-multi-asset-wallet.md)
   - EIP-712 quote preimage binding `asset_id`, anti-drain preflight validation, partitioned wallet & Knapsack coin selection, trial decryption recovery.
