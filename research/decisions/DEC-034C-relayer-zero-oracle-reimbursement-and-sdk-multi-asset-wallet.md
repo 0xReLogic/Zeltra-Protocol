@@ -68,6 +68,17 @@ pub struct ExecutionQuoteResponse {
 1. **Short Expiry Duration:** Masa berlaku quote USDC dibatasi maksimal **20 detik** (~80 blok Arbitrum) untuk mencegah pengguna mengeksploitasi quote lama saat gas Arbitrum melonjak.
 2. **Dynamic Gas Spike Guard:** Jika base fee L2 saat broadcast melonjak $> 1.5\times$ dari fee pada quote tertandatangani, relayer secara otomatis menolak transaksi tanpa penalti SLA untuk mencegah *drainage of relayer operational capital*.
 
+#### Pengikatan `asset_id` ke dalam Preimage EIP-712 `quote_hash`:
+TypeHash EIP-712 untuk kuotasi relayer **WAJIB** menyertakan `asset_id` di dalam struktur yang ditandatangani dan di-hash menjadi `quote_hash`:
+
+```solidity
+bytes32 constant EXECUTION_QUOTE_TYPEHASH = keccak256(
+    "ExecutionQuote(uint8 assetId,address targetContract,uint64 baseGasFee,uint64 relayerMarkupFee,uint64 totalExecutionFee,uint64 expiry,uint256 chainId)"
+);
+```
+
+Dengan demikian, `quote_hash_hi` dan `quote_hash_lo` pada Public Inputs sirkuit secara kriptografis mengikat `asset_id` dari quote tersebut, mencegah manipulasi silang metadata aset pada payload JSON request tanpa membatalkan tanda tangan EIP-712 relayer.
+
 ### B. Preflight Validation Guard (Anti-Drain Filter)
 Sebelum membroadcast transaksi ke smart contract Stylus, relayer memeriksa validitas transaksi secara fail-closed:
 
@@ -100,10 +111,38 @@ pub fn validate_multi_asset_preflight(
 ## 3. Client SDK & Private Note Wallet (`zeltra-sdk`)
 
 ### A. Penyimpanan Note Terpartisi & Trial Decryption (Big-Endian DEC-037)
-Untuk mencegah kontaminasi saldo, `PrivateNoteWallet` mengisolasi note berdasarkan `asset_id`:
+Untuk mencegah kontaminasi saldo, `PrivateNoteWallet` mengisolasi note berdasarkan `asset_id`.
 
 ```rust
 // zeltra-sdk/src/wallet/note_wallet.rs
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct PrivateNoteV1 {
+    pub value: u64,        // Gwei (jika asset_id == 0) atau Micro-USDC (jika asset_id == 1)
+    pub asset_id: u8,      // 0: WETH, 1: USDC (WAJIB disimpan untuk perhitungan value_packed!)
+    pub owner_key: Fr,     // Public owner key (bukan raw spending_key)
+    pub rho: Fr,
+    pub randomness: Fr,
+}
+
+impl PrivateNoteV1 {
+    /// Menghitung value_packed kanonikal sesuai DEC-034A: value + asset_id * 2^64
+    pub fn value_packed(&self) -> Fr {
+        let two_pow_64 = Fr::from(1u128 << 64);
+        Fr::from(self.value) + (Fr::from(self.asset_id as u64) * two_pow_64)
+    }
+
+    /// Menghitung komitmen leaf Poseidon-W5
+    pub fn commitment(&self) -> Fr {
+        native_poseidon_w5(
+            self.value_packed(),
+            self.owner_key,
+            self.rho,
+            self.randomness,
+            DOMAIN_NOTE_COMMITMENT,
+        )
+    }
+}
+
 pub struct PrivateNoteWallet {
     // 2PC Encrypted Note Stores terpartisi
     usdc_notes: Vec<PrivateNoteV1>, // asset_id = 1 (6 desimal)
@@ -123,18 +162,31 @@ impl PrivateNoteWallet {
     }
 
     /// Deserialisasi memo on-chain kanonikal Big-Endian (DEC-037)
-    pub fn process_decrypted_plaintext(&mut self, plaintext_bytes: &[u8; 48]) -> Result<(), WalletError> {
+    pub fn process_decrypted_plaintext(
+        &mut self,
+        plaintext_bytes: &[u8; 48],
+        shared_secret: &[u8; 32],
+    ) -> Result<(), WalletError> {
         let value = u64::from_be_bytes(plaintext_bytes[0..8].try_into().unwrap());
         let rho = crate::from_evm_scalar(&plaintext_bytes[8..40].try_into().unwrap())
             .ok_or(WalletError::NonCanonicalRhoScalar)?;
-        let asset_id = u64::from_be_bytes(plaintext_bytes[40..48].try_into().unwrap());
+        let asset_id_u64 = u64::from_be_bytes(plaintext_bytes[40..48].try_into().unwrap());
 
-        if asset_id > 1 {
-            return Err(WalletError::UnsupportedAssetId(asset_id as u8));
+        if asset_id_u64 > 1 {
+            return Err(WalletError::UnsupportedAssetId(asset_id_u64 as u8));
         }
+        let asset_id = asset_id_u64 as u8;
 
-        let randomness = derive_note_randomness(self.spending_key, rho);
-        let note = PrivateNoteV1::new(value, self.spending_key, rho, randomness);
+        // Randomness diturunkan dari shared_secret ECDH & rho (sesuai DEC-037)
+        let randomness = derive_note_randomness(shared_secret, &rho);
+        let owner_key = self.incoming_viewing_key.owner_key();
+        let note = PrivateNoteV1 {
+            value,
+            asset_id,
+            owner_key,
+            rho,
+            randomness,
+        };
 
         if asset_id == 0 {
             self.weth_notes.push(note);
@@ -213,3 +265,5 @@ zeltra-cli balance
 4. `test_relayer_rejects_cross_asset_quote_tampering`: Permintaan spend note WETH menggunakan quote USDC ditolak pada preflight check (`CrossAssetFeeMismatch`).
 5. `test_sdk_trial_decryption_partitions_notes_correctly`: Deserialisasi memo log on-chain secara otomatis mengelompokkan note masuk ke sub-wallet yang sesuai via format kanonikal Big-Endian.
 6. `test_knapsack_ceiling_fee_calculation`: Pembayaran dengan pecahan kecil (baik WETH maupun USDC) membuktikan nilai fee protokol tidak pernah terpotong ke nol.
+7. `test_eip712_quote_hash_binds_asset_id`: Memastikan manipulasi `asset_id` pada permintaan spend membatalkan verifikasi tanda tangan EIP-712 relayer dan quote hash sirkuit.
+

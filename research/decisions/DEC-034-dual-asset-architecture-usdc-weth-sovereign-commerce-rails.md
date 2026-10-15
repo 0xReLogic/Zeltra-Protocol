@@ -205,7 +205,6 @@ sol_storage! {
         mapping(uint256 => uint256) user_note_liabilities;
         mapping(uint256 => uint256) accrued_execution_fee_liabilities;
         mapping(uint256 => uint256) realized_protocol_fees;
-        mapping(uint256 => uint256) accumulated_execution_fees;
         
         // Canonical WETH9 address & Gateway
         address weth9_address;
@@ -280,15 +279,26 @@ Untuk menjaga kompatibilitas verifier on-chain Stylus EIP-2537 (`0x0c` MSM + `0x
    - Slot 0..=13: Roots, nullifier, epochs, payment terms, quote hash, chain_id, contract_address, expiry.
    - Slot 14 (`has_change`): Tetap boolean $0$ atau $1$.
    - Slot 15 (`flags_packed`): Mengemas `is_rollover` dan `asset_id`:
-     $$\text{flags\_packed} = \text{is\_rollover} + 2 \cdot \text{asset\_id}$$
+     * Bit 0: `is_rollover` (0 atau 1)
+     * Bit 1: `asset_id` (0: WETH, 1: USDC)
+     * Formula: $\text{flags\_packed} = \text{is\_rollover} + 2 \cdot \text{asset\_id}$
+     * Rentang Nilai Kanonikal: $\text{flags\_packed} \in \{0, 1, 2, 3\}$. Wajib revert dengan `FLAGS_PACKED_MALLEABLE_BITS` jika $\text{flags\_packed} > 3$.
 2. **Pada `JoinSplitCircuit` (DEC-036A, Tepat 19 Public Inputs):**
    - Slot 0..=16: Roots, nullifiers, epochs, output commitments, payment terms, quote hash, chain_id, contract_address, expiry.
    - Slot 17 (`flags_packed`): Mengemas change flags dan `asset_id`:
-     $$\text{flags\_packed} = \text{has\_change\_1} + 2 \cdot \text{has\_change\_2} + 4 \cdot \text{asset\_id}$$
+     * Bit 0: `has_change_1` (0 atau 1)
+     * Bit 1: `has_change_2` (0 atau 1)
+     * Bit 2: `asset_id` (0: WETH, 1: USDC)
+     * Formula: $\text{flags\_packed} = \text{has\_change\_1} + 2 \cdot \text{has\_change\_2} + 4 \cdot \text{asset\_id}$
+     * Rentang Nilai Kanonikal: $\text{flags\_packed} \in \{0 \dots 7\}$. Wajib revert dengan `FLAGS_PACKED_MALLEABLE_BITS` jika $\text{flags\_packed} > 7$.
    - Slot 18 (`is_rollover`): Tetap boolean $0$ atau $1$.
 3. **Konservasi Nilai Intra-Aset Mutlak (Anti-Penumbra Exploit):**
    $$\text{asset\_id}_{in1} == \text{asset\_id}_{in2} == \text{asset\_id}_{out1} == \text{asset\_id}_{out2} == \text{public\_asset\_id}$$
    Tidak ada pertukaran silang aset di dalam sirkuit. Semua nilai input, payout merchant, protocol fee, relayer fee, dan change note terikat pada `asset_id` yang sama.
+
+4. **Aturan Kanonikal Dummy Input & Zero-Value Change Note pada `JoinSplitCircuit`:**
+   - **Dummy Input Note:** Input ke-2 (`in2`) bernilai `value = 0` **WAJIB** tetap menggunakan `asset_id` yang sama dengan transaksi (`asset_id_in2 == public_asset_id`). Untuk transaksi USDC (`asset_id = 1`), dummy note memiliki $\text{value\_packed} = 0 + 1 \cdot 2^{64} = 2^{64}$.
+   - **Zero-Value Output Note:** Saat slot output tidak memiliki kembalian (`has_change_i == 0`), komitmen output tetap dihitung menggunakan `asset_id` transaksi dengan `value_out_i = 0`, sehingga constraint kesetaraan aset berlaku mutlak tanpa percabangan kondisional.
 
 ---
 
@@ -298,27 +308,89 @@ Tidak ada lagi sesi timelock, tidak ada lagi kunci masking $k$, dan tidak ada la
 ```rust
 // zeltra-contracts/src/deposit.rs (DEC-034 + DEC-038B Direct Inflow - Strict CEI)
 impl Zeltra {
-    /// 1. Direct USDC Deposit (Asset ID 1)
+    /// 1. Direct USDC Deposit (Asset ID 1: Raw = Micro-USDC, Norm = Micro-USDC)
     pub fn deposit_direct_note(
         &mut self,
-        amount: U256,
+        amount_micro: U256,
         note_commitment: FixedBytes<32>,
         encrypted_memo: Bytes,
     ) -> Result<(), Vec<u8>> {
-        self._deposit_direct_erc20(1, amount, note_commitment, encrypted_memo)
+        self.check_not_paused()?;
+        if amount_micro < U256::from(10_000_000u64) {
+            return Err(b"AMOUNT_TOO_SMALL".to_vec());
+        }
+        if amount_micro > U256::from(u64::MAX) {
+            return Err(b"AMOUNT_EXCEEDS_U64_CIRCUIT_BOUND".to_vec());
+        }
+        self._execute_direct_erc20_inflow(1, amount_micro, amount_micro, note_commitment, encrypted_memo)
     }
 
-    /// 2. Direct WETH ERC-20 Deposit (Asset ID 0)
+    /// 2. Direct WETH ERC-20 Deposit (Asset ID 0: Raw = Wei, Norm = Gwei)
     pub fn deposit_direct_weth(
         &mut self,
         amount_wei: U256,
         note_commitment: FixedBytes<32>,
         encrypted_memo: Bytes,
     ) -> Result<(), Vec<u8>> {
-        if amount_wei % U256::from(1_000_000_000) != U256::ZERO {
+        self.check_not_paused()?;
+        // Min 0.005 WETH (5_000_000 Gwei = 5 * 10^15 Wei)
+        if amount_wei < U256::from(5_000_000_000_000_000u64) {
+            return Err(b"AMOUNT_TOO_SMALL".to_vec());
+        }
+        let gwei_scale = U256::from(1_000_000_000u64);
+        if amount_wei % gwei_scale != U256::ZERO {
             return Err(b"WETH_AMOUNT_NOT_GWEI_ALIGNED".to_vec());
         }
-        self._deposit_direct_erc20(0, amount_wei, note_commitment, encrypted_memo)
+        let amount_gwei = amount_wei / gwei_scale;
+        if amount_gwei > U256::from(u64::MAX) {
+            return Err(b"AMOUNT_EXCEEDS_U64_CIRCUIT_BOUND".to_vec());
+        }
+        // PENTING: oper amount_wei untuk ERC20 transferFrom, dan amount_gwei untuk liabilitas!
+        self._execute_direct_erc20_inflow(0, amount_wei, amount_gwei, note_commitment, encrypted_memo)
+    }
+
+    /// Helper Internal Eksekusi Inflow ERC-20 (Strict CEI Compliant)
+    fn _execute_direct_erc20_inflow(
+        &mut self,
+        asset_id: u8,
+        raw_erc20_amount: U256,
+        norm_liability_amount: U256,
+        note_commitment: FixedBytes<32>,
+        encrypted_memo: Bytes,
+    ) -> Result<(), Vec<u8>> {
+        // 1. CHECKS
+        if encrypted_memo.len() != 96 {
+            return Err(b"INVALID_MEMO_LENGTH".to_vec());
+        }
+        if note_commitment == FixedBytes::<32>::ZERO {
+            return Err(b"ZERO_COMMITMENT_REJECTED".to_vec());
+        }
+        if crate::types::from_evm_scalar(&note_commitment.0).is_none() {
+            return Err(b"INVALID_NOTE_COMMITMENT_SCALAR".to_vec());
+        }
+        let token_addr = self.asset_tokens.get(U256::from(asset_id));
+        if token_addr == Address::ZERO {
+            return Err(b"ASSET_NOT_CONFIGURED".to_vec());
+        }
+
+        // 2. EFFECTS (Catat liabilitas dalam satuan normalisasi sirkuit: Gwei atau Micro-USDC)
+        let asset_key = U256::from(asset_id);
+        let cur_liab = self.user_note_liabilities.get(asset_key);
+        self.user_note_liabilities.insert(asset_key, cur_liab.checked_add(norm_liability_amount).ok_or(b"LIAB_OVERFLOW".to_vec())?);
+
+        let cur_principal = self.total_deposited_principals.get(asset_key);
+        self.total_deposited_principals.insert(asset_key, cur_principal.checked_add(norm_liability_amount).ok_or(b"PRINCIPAL_OVERFLOW".to_vec())?);
+
+        self._mmr_insert(note_commitment, encrypted_memo.to_vec())?;
+
+        // 3. INTERACTIONS (Tarik token sebesar raw_erc20_amount: Wei untuk WETH, Micro untuk USDC)
+        let sender = self.msg_sender();
+        let this_contract = self.contract_address();
+        self.safe_transfer_from(token_addr, sender, this_contract, raw_erc20_amount)?;
+
+        // 4. SOLVENCY INVARIANT CHECK
+        self.check_asset_solvency_invariant(asset_id)?;
+        Ok(())
     }
 
     /// 3. Direct Native ETH Auto-Wrap Deposit (Payable - Asset ID 0 - Strict CEI)
@@ -373,12 +445,15 @@ impl Zeltra {
 }
 ```
 
+*(Catatan Pengikatan Komitmen Deposit: Pada implementasi `DEC-038B`, nilai `value_packed` di dalam `note_commitment` wajib diverifikasi on-chain melalui input parameter pembentukan leaf `(owner_key, rho, randomness)` + `Poseidon_W5` on-chain, ATAU diverifikasi saat deposit agar depositor tidak bisa menyetor nominal kecil sambil mendaftarkan `note_commitment` berisi klaim nominal besar).*
+
 ---
 
-### G. Zero-Oracle Relayer Reimbursement
+### G. Zero-Oracle Relayer Reimbursement & EIP-712 Quote Asset Binding
 Relayer Zeltra tidak bergantung pada Price Oracle eksternal (Chainlink/Pyth):
 * Biaya eksekusi gas untuk pembelanjaan note USDC dipotong dari saldo note dalam bentuk **USDC** (menggunakan kuotasi gas L2 yang dijamin EIP-712).
 * Biaya eksekusi gas untuk pembelanjaan note WETH dipotong dari saldo note dalam bentuk **WETH** (yang secara langsung merupakan mata uang gas dasar Arbitrum).
+* **Pengikatan Kriptografis `asset_id` pada Quote:** TypeHash EIP-712 untuk kuotasi relayer menyertakan `uint8 assetId` (`EXECUTION_QUOTE_TYPEHASH`). Dengan demikian, `quote_hash_hi` dan `quote_hash_lo` pada Public Inputs sirkuit secara mutlak mengikat aset quote relayer, mencegah serangan manipulasi atau substitusi kuotasi lintas aset.
 * **Hasil:** Sistem kebal terhadap manipulasi flash loan oracle, downtime API pihak ketiga, atau eksploitasi arbitrase nilai tukar.
 
 ---

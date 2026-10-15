@@ -112,16 +112,18 @@ Untuk menghindari penambahan biaya gas pada verifikasi precompile EIP-2537 (`0x0
 * **Slot 14 (`has_change`):** Tetap boolean $0$ atau $1$.
 * **Slot 15 (`flags_packed`):** Mengemas `is_rollover` dan `asset_id`:
   * Bit 0: `is_rollover` (0 atau 1)
-  * Bit 1..=8: `asset_id` (0: WETH, 1: USDC)
+  * Bit 1: `asset_id` (0: WETH, 1: USDC)
   * Formula: $\text{flags\_packed} = \text{is\_rollover} + 2 \cdot \text{asset\_id}$
+  * Rentang Nilai Kanonikal: $\text{flags\_packed} \in \{0, 1, 2, 3\}$. Bit $2 \dots 254$ WAJIB 0.
 
 ### B. Pada `JoinSplitCircuit` (DEC-036A, Tepat 19 Public Inputs)
 * **Slot 0..=16:** Identik dengan DEC-036A (akar MMR, 2 nullifier, 2 epoch, 2 output commitment, recipient, merchant_amount, protocol_fee, execution_fee, 2-limb quote hash, chain_id, contract_address, expiry).
 * **Slot 17 (`flags_packed`):** Mengemas change flags dan `asset_id`:
   * Bit 0: `has_change_1` (0 atau 1)
   * Bit 1: `has_change_2` (0 atau 1)
-  * Bit 2..=9: `asset_id` (0: WETH, 1: USDC)
+  * Bit 2: `asset_id` (0: WETH, 1: USDC)
   * Formula: $\text{flags\_packed} = \text{has\_change\_1} + 2 \cdot \text{has\_change\_2} + 4 \cdot \text{asset\_id}$
+  * Rentang Nilai Kanonikal: $\text{flags\_packed} \in \{0 \dots 7\}$. Bit $3 \dots 254$ WAJIB 0.
 * **Slot 18 (`is_rollover`):** Tetap boolean $0$ atau $1$.
 
 ### C. Konservasi Nilai Intra-Aset (Anti-Penumbra Exploit 2024–2025)
@@ -129,6 +131,64 @@ Sirkuit menegakkan kesetaraan aset mutlak antara seluruh input dan output:
 $$\text{asset\_id}_{in1} == \text{asset\_id}_{in2} == \text{asset\_id}_{out1} == \text{asset\_id}_{out2} == \text{public\_asset\_id}$$
 
 Jika penyerang mencoba memasukkan note WETH dan mengklaim payout USDC (cross-asset mismatch), constraint kesetaraan akan langsung gagal, mencegah eksploitasi pencetakan saldo unbacked.
+
+### D. R1CS Gadget untuk `flags_packed` & Dummy/Zero-Value Note Handling (Anti-Miss-Wire Spec)
+
+Untuk mencegah *unconstrained public input wire* antara variabel saksi sirkuit dan slot `flags_packed`, AI/implementor WAJIB memasang gadget berikut di `note_circuit.rs` dan `joinsplit_circuit.rs`:
+
+```rust
+/// 1. Gadget untuk PrivateNoteCircuit (16-PI, Slot 15)
+/// Menegakkan: flags_packed == is_rollover + 2 * asset_id
+pub fn enforce_private_note_flags_packed(
+    flags_packed_pi: &FpVar<Fr>, // Public Input Slot 15
+    is_rollover_var: &FpVar<Fr>,
+    asset_id_var: &FpVar<Fr>,
+) -> Result<(), SynthesisError> {
+    use ark_r1cs_std::eq::EqGadget;
+
+    // Pastikan keduanya boolean (0 atau 1)
+    is_rollover_var.enforce_equal(&is_rollover_var.square()?)?;
+    asset_id_var.enforce_equal(&asset_id_var.square()?)?;
+
+    // Rekonstruksi linear: is_rollover + 2 * asset_id
+    let two = FpVar::Constant(Fr::from(2u64));
+    let expected_flags = is_rollover_var + (asset_id_var * &two);
+    flags_packed_pi.enforce_equal(&expected_flags)?;
+
+    Ok(())
+}
+
+/// 2. Gadget untuk JoinSplitCircuit (19-PI, Slot 17)
+/// Menegakkan: flags_packed == has_change_1 + 2 * has_change_2 + 4 * asset_id
+pub fn enforce_joinsplit_flags_packed(
+    flags_packed_pi: &FpVar<Fr>, // Public Input Slot 17
+    has_change_1_var: &FpVar<Fr>,
+    has_change_2_var: &FpVar<Fr>,
+    asset_id_var: &FpVar<Fr>,
+) -> Result<(), SynthesisError> {
+    use ark_r1cs_std::eq::EqGadget;
+
+    has_change_1_var.enforce_equal(&has_change_1_var.square()?)?;
+    has_change_2_var.enforce_equal(&has_change_2_var.square()?)?;
+    asset_id_var.enforce_equal(&asset_id_var.square()?)?;
+
+    let two = FpVar::Constant(Fr::from(2u64));
+    let four = FpVar::Constant(Fr::from(4u64));
+    let expected_flags = has_change_1_var
+        + (has_change_2_var * &two)
+        + (asset_id_var * &four);
+    flags_packed_pi.enforce_equal(&expected_flags)?;
+
+    Ok(())
+}
+```
+
+#### Aturan Kanonikal Dummy Input & Zero-Value Change Note pada `JoinSplitCircuit`:
+
+1. **Dummy Input Note (Saat belanja hanya menggunakan 1 note di JoinSplit 2-in-2-out):**
+   Input ke-2 (`in2`) yang bernilai `value = 0` **WAJIB** tetap menggunakan `asset_id` yang sama dengan transaksi (`asset_id_in2 == public_asset_id`). Artinya, untuk transaksi USDC (`asset_id = 1`), dummy note memiliki `value_packed = 0 + 1 * 2^64 = 2^64`.
+2. **Zero-Value Output Note (Saat `has_change_i == 0`):**
+   Komitmen output untuk slot yang tidak memiliki kembalian tetap dihitung menggunakan `asset_id` transaksi (`asset_id_out_i == public_asset_id`) dengan `value_out_i = 0`, sehingga constraint kesetaraan `asset_id_in1 == asset_id_in2 == asset_id_out1 == asset_id_out2 == public_asset_id` berlaku mutlak tanpa percabangan kondisional.
 
 ---
 
@@ -178,3 +238,6 @@ Saat dompet memulihkan note via Incoming Viewing Key (`recover_notes`):
 4. `test_dec037_note_plaintext_roundtrip_with_asset_id`: Serialisasi dan dekripsi memo 96-byte dengan Big-Endian 48-byte plaintext berhasil mengembalikan `asset_id` dengan benar.
 5. `test_gwei_normalization_precision_bounds`: Pengujian batas atas dan batas bawah konversi Wei-Gwei tanpa sisa modulo.
 6. `test_flags_packed_canonical_bits`: Pengujian bahwa bit manipulasi di luar rentang bit yang dialokasikan ditolak on-chain.
+7. `test_joinsplit_dummy_input_usdc_value_packed`: Memastikan dummy input note dengan `value = 0` pada transaksi USDC (`asset_id = 1`) mengemas `value_packed = 2^64` dan memenuhi constraint intra-asset equality tanpa unsatisfied constraint.
+8. `test_flags_packed_r1cs_gadget_enforcement`: Memastikan variabel publik `flags_packed` terikat ketat dengan witness saksi boolean (`is_rollover`/`has_change` dan `asset_id`).
+
