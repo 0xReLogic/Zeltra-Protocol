@@ -43,7 +43,11 @@ pub struct PrivateNoteCircuit {
     pub contract_address: Option<Fr>,
     pub expiry: Option<Fr>,
     pub has_change: Option<Fr>,
+    pub flags_packed: Option<Fr>,
+
+    // ── Private witnesses ──
     pub is_rollover: Option<Fr>,
+    pub asset_id: Option<Fr>,
 
     // ── Private witnesses: input note ──
     pub input_value: Option<Fr>,
@@ -113,80 +117,7 @@ fn private_witness(
     Ok(alloc_fp(cs, var, value))
 }
 
-/// Enforce that `val` is in [0, 2^64) by decomposing into 64 boolean bits.
-fn enforce_u64_range(
-    cs: &ConstraintSystemRef<Fr>,
-    val: &FpVar<Fr>,
-    val_witness: Option<Fr>,
-) -> Result<(), SynthesisError> {
-    use ark_r1cs_std::eq::EqGadget;
-
-    let zero = FpVar::Constant(Fr::from(0u64));
-    let one = FpVar::Constant(Fr::from(1u64));
-    let mut reconstructed = zero.clone();
-    let mut two_power = Fr::from(1u64);
-
-    let bigint_opt = val_witness.map(|w| w.into_bigint());
-
-    for bit_idx in 0..64 {
-        let bit_val = bigint_opt.as_ref().map(|bi| {
-            let word = bi.as_ref()[0];
-            Fr::from((word >> bit_idx) & 1u64)
-        });
-        let bit_var = private_witness(cs, bit_val)?;
-
-        // bit * (1 - bit) == 0
-        let one_minus_bit = &one - &bit_var;
-        let bit_check = &bit_var * &one_minus_bit;
-        bit_check.enforce_equal(&zero)?;
-
-        reconstructed += &bit_var * FpVar::Constant(two_power);
-        two_power = two_power + two_power;
-    }
-
-    reconstructed.enforce_equal(val)?;
-    Ok(())
-}
-
-/// Enforce that `val` is in [0, 2^128) by decomposing into 128 boolean bits (DEC-035A).
-///
-/// Implements 128 boolean constraints: b_i * (1 - b_i) == 0
-/// and 1 linear combination constraint: sum(2^i * b_i) == val.
-fn enforce_u128_range(
-    cs: &ConstraintSystemRef<Fr>,
-    val: &FpVar<Fr>,
-    val_witness: Option<Fr>,
-) -> Result<(), SynthesisError> {
-    use ark_r1cs_std::eq::EqGadget;
-
-    let zero = FpVar::Constant(Fr::from(0u64));
-    let one = FpVar::Constant(Fr::from(1u64));
-    let mut reconstructed = zero.clone();
-    let mut two_power = Fr::from(1u64);
-
-    let bigint_opt = val_witness.map(|w| w.into_bigint());
-
-    for bit_idx in 0..128 {
-        let bit_val = bigint_opt.as_ref().map(|bi| {
-            let limb_idx = bit_idx / 64;
-            let bit_in_limb = bit_idx % 64;
-            let word = bi.as_ref()[limb_idx];
-            Fr::from((word >> bit_in_limb) & 1u64)
-        });
-        let bit_var = private_witness(cs, bit_val)?;
-
-        // bit * (1 - bit) == 0
-        let one_minus_bit = &one - &bit_var;
-        let bit_check = &bit_var * &one_minus_bit;
-        bit_check.enforce_equal(&zero)?;
-
-        reconstructed += &bit_var * FpVar::Constant(two_power);
-        two_power = two_power + two_power;
-    }
-
-    reconstructed.enforce_equal(val)?;
-    Ok(())
-}
+pub use crate::circuit_gadgets::{enforce_u128_range, enforce_u64_range};
 
 impl ConstraintSynthesizer<Fr> for PrivateNoteCircuit {
     fn generate_constraints(self, cs: ConstraintSystemRef<Fr>) -> Result<(), SynthesisError> {
@@ -220,11 +151,40 @@ impl ConstraintSynthesizer<Fr> for PrivateNoteCircuit {
         let contract_addr_var = public_input(&cs, self.contract_address)?;
         let expiry_var = public_input(&cs, self.expiry)?;
         let has_change_var = public_input(&cs, self.has_change)?;
-        let is_rollover_var = public_input(&cs, self.is_rollover)?;
+
+        let flags_val = self.flags_packed.or_else(|| {
+            let is_roll = self.is_rollover.unwrap_or(Fr::from(0u64));
+            let aid = self.asset_id.unwrap_or(Fr::from(1u64));
+            Some(is_roll + aid * Fr::from(2u64))
+        });
+        let flags_packed_var = public_input(&cs, flags_val)?;
 
         // ═══════════════════════════════════════════════════════════════
         // 2. Allocate all private witnesses
         // ═══════════════════════════════════════════════════════════════
+
+        let is_roll_witness = self.is_rollover.or_else(|| {
+            flags_val.map(|f| {
+                let f_u64 = f.into_bigint().as_ref()[0];
+                Fr::from(f_u64 & 1)
+            })
+        });
+        let is_rollover_var = private_witness(&cs, is_roll_witness)?;
+
+        let aid_witness = self.asset_id.or_else(|| {
+            flags_val.map(|f| {
+                let f_u64 = f.into_bigint().as_ref()[0];
+                Fr::from((f_u64 >> 1) & 1)
+            })
+        });
+        let asset_id_var = private_witness(&cs, aid_witness)?;
+
+        // Enforce flags_packed Gadget (Slot 15): flags_packed == is_rollover + 2 * asset_id
+        crate::circuit_gadgets::enforce_private_note_flags_packed(
+            &flags_packed_var,
+            &is_rollover_var,
+            &asset_id_var,
+        )?;
 
         let in_value = private_witness(&cs, self.input_value)?;
         let in_owner = private_witness(&cs, self.input_owner_key)?;
@@ -239,12 +199,31 @@ impl ConstraintSynthesizer<Fr> for PrivateNoteCircuit {
 
         // ═══════════════════════════════════════════════════════════════
         // 3. Compute input note commitment (used for Merkle AND nullifier)
-        //    cm = Poseidon_W5(value, owner_key, rho, randomness; domain_note)
+        //    cm = Poseidon_W5(value_packed, owner_key, rho, randomness; domain_note)
         // ═══════════════════════════════════════════════════════════════
+
+        let in_val_u64 = self.input_value.map(|v| v.into_bigint().as_ref()[0]);
+        let in_aid_u8 = aid_witness.map(|a| a.into_bigint().as_ref()[0] as u8);
+        let in_value_packed_val = match (self.input_value, aid_witness) {
+            (Some(v), Some(a)) => {
+                let two_pow_64 = Fr::from(1u128 << 64);
+                Some(v + a * two_pow_64)
+            }
+            _ => None,
+        };
+        let in_value_packed = private_witness(&cs, in_value_packed_val)?;
+        crate::circuit_gadgets::enforce_packed_value_and_asset(
+            &cs,
+            &in_value_packed,
+            &in_value,
+            &asset_id_var,
+            in_val_u64,
+            in_aid_u8,
+        )?;
 
         let in_commitment = poseidon_w5_hash(
             &[
-                in_value.clone(),
+                in_value_packed.clone(),
                 in_owner.clone(),
                 in_rho.clone(),
                 in_rand.clone(),
@@ -450,11 +429,29 @@ impl ConstraintSynthesizer<Fr> for PrivateNoteCircuit {
 
         // ═══════════════════════════════════════════════════════════════
         // 7. Compute change note commitment & enforce has_change rules
-        //    change_cm = Poseidon_W5(ch_value, ch_owner, ch_rho, ch_rand; domain_note)
+        //    change_cm = Poseidon_W5(ch_value_packed, ch_owner, ch_rho, ch_rand; domain_note)
         // ═══════════════════════════════════════════════════════════════
 
+        let ch_val_u64 = self.change_value.map(|v| v.into_bigint().as_ref()[0]);
+        let ch_value_packed_val = match (self.change_value, aid_witness) {
+            (Some(v), Some(a)) => {
+                let two_pow_64 = Fr::from(1u128 << 64);
+                Some(v + a * two_pow_64)
+            }
+            _ => None,
+        };
+        let ch_value_packed = private_witness(&cs, ch_value_packed_val)?;
+        crate::circuit_gadgets::enforce_packed_value_and_asset(
+            &cs,
+            &ch_value_packed,
+            &ch_value,
+            &asset_id_var,
+            ch_val_u64,
+            in_aid_u8,
+        )?;
+
         let change_cm = poseidon_w5_hash(
-            &[ch_value.clone(), ch_owner, ch_rho, ch_rand],
+            &[ch_value_packed, ch_owner, ch_rho, ch_rand],
             domain_note,
             w5_rc,
             w5_mds,
@@ -655,10 +652,11 @@ pub fn create_dummy_circuit() -> PrivateNoteCircuit {
     let nk = dnk(spending_key);
 
     let in_value: u64 = 99_800_000;
+    let asset_id: u8 = 1; // USDC
     let in_rho = Fr::from(1u64);
     let in_rand = Fr::from(2u64);
 
-    let in_cm = nc(in_value, spending_key, in_rho, in_rand);
+    let in_cm = nc(in_value, asset_id, spending_key, in_rho, in_rand);
 
     let mut mmr = MerkleMountainRange::new();
     let (leaf_idx, root) = mmr.append(in_cm);
@@ -682,7 +680,9 @@ pub fn create_dummy_circuit() -> PrivateNoteCircuit {
 
     let ch_rho = Fr::from(3u64);
     let ch_rand = Fr::from(4u64);
-    let ch_cm = nc(change, spending_key, ch_rho, ch_rand);
+    let ch_cm = nc(change, asset_id, spending_key, ch_rho, ch_rand);
+    let is_roll = 0u64;
+    let flags_packed = is_roll + 2 * (asset_id as u64);
 
     PrivateNoteCircuit {
         note_root: Some(root),
@@ -700,7 +700,10 @@ pub fn create_dummy_circuit() -> PrivateNoteCircuit {
         contract_address: Some(Fr::from(300u64)),
         expiry: Some(Fr::from(0u64)),
         has_change: Some(Fr::from(1u64)),
-        is_rollover: Some(Fr::from(0u64)),
+        flags_packed: Some(Fr::from(flags_packed)),
+
+        is_rollover: Some(Fr::from(is_roll)),
+        asset_id: Some(Fr::from(asset_id as u64)),
 
         input_value: Some(Fr::from(in_value)),
         input_owner_key: Some(spending_key),
@@ -781,6 +784,11 @@ pub fn verify_evm_note_proof(
 
 /// Extract public inputs from a dummy circuit (for testing).
 pub fn extract_public_inputs(circuit: &PrivateNoteCircuit) -> Vec<Fr> {
+    let flags_packed = circuit.flags_packed.unwrap_or_else(|| {
+        let is_roll = circuit.is_rollover.unwrap_or(Fr::from(0u64));
+        let aid = circuit.asset_id.unwrap_or(Fr::from(1u64));
+        is_roll + aid * Fr::from(2u64)
+    });
     vec![
         circuit.note_root.unwrap(),
         circuit.leaf_count.unwrap(),
@@ -797,7 +805,7 @@ pub fn extract_public_inputs(circuit: &PrivateNoteCircuit) -> Vec<Fr> {
         circuit.contract_address.unwrap(),
         circuit.expiry.unwrap(),
         circuit.has_change.unwrap(),
-        circuit.is_rollover.unwrap(),
+        flags_packed,
     ]
 }
 
@@ -933,13 +941,14 @@ mod tests {
         let in_value: u64 = 99_800_000;
         let in_rho = Fr::from(1u64);
         let in_rand = Fr::from(2u64);
-        let in_cm = nc(in_value, spending_key, in_rho, in_rand);
+        let in_cm = nc(in_value, 1, spending_key, in_rho, in_rand);
 
         // Build MMR with 2 leaves so mountain_height = 1 and mountain_siblings has 1 active element
         let mut mmr = MerkleMountainRange::new();
         let (leaf_idx, _) = mmr.append(in_cm);
         let other_cm = nc(
             10_000_000,
+            1,
             Fr::from(99u64),
             Fr::from(88u64),
             Fr::from(77u64),
@@ -965,7 +974,7 @@ mod tests {
         let change: u64 = in_value - merchant - pfee - efee;
         let ch_rho = Fr::from(3u64);
         let ch_rand = Fr::from(4u64);
-        let ch_cm = nc(change, spending_key, ch_rho, ch_rand);
+        let ch_cm = nc(change, 1, spending_key, ch_rho, ch_rand);
 
         // Corrupt active mountain sibling!
         m_sibs[0] += Fr::from(1u64);
@@ -986,7 +995,9 @@ mod tests {
             contract_address: Some(Fr::from(300u64)),
             expiry: Some(Fr::from(0u64)),
             has_change: Some(Fr::from(1u64)),
+            flags_packed: Some(Fr::from(2u64)),
             is_rollover: Some(Fr::from(0u64)),
+            asset_id: Some(Fr::from(1u64)),
 
             input_value: Some(Fr::from(in_value)),
             input_owner_key: Some(spending_key),
@@ -1028,19 +1039,21 @@ mod tests {
         let in_value: u64 = 99_800_000;
         let in_rho = Fr::from(1u64);
         let in_rand = Fr::from(2u64);
-        let in_cm = nc(in_value, spending_key, in_rho, in_rand);
+        let in_cm = nc(in_value, 1, spending_key, in_rho, in_rand);
 
         // Build MMR with 3 leaves so peak count = 2 (peaks at height 1 and height 0)
         let mut mmr = MerkleMountainRange::new();
         let (leaf_idx, _) = mmr.append(in_cm);
         mmr.append(nc(
             10_000_000,
+            1,
             Fr::from(99u64),
             Fr::from(88u64),
             Fr::from(77u64),
         ));
         let (_, root) = mmr.append(nc(
             20_000_000,
+            1,
             Fr::from(66u64),
             Fr::from(55u64),
             Fr::from(44u64),
@@ -1065,7 +1078,7 @@ mod tests {
         let change: u64 = in_value - merchant - pfee - efee;
         let ch_rho = Fr::from(3u64);
         let ch_rand = Fr::from(4u64);
-        let ch_cm = nc(change, spending_key, ch_rho, ch_rand);
+        let ch_cm = nc(change, 1, spending_key, ch_rho, ch_rand);
 
         // Corrupt bagging peak sibling!
         p_sibs[0] += Fr::from(1u64);
@@ -1086,7 +1099,9 @@ mod tests {
             contract_address: Some(Fr::from(300u64)),
             expiry: Some(Fr::from(0u64)),
             has_change: Some(Fr::from(1u64)),
+            flags_packed: Some(Fr::from(2u64)),
             is_rollover: Some(Fr::from(0u64)),
+            asset_id: Some(Fr::from(1u64)),
 
             input_value: Some(Fr::from(in_value)),
             input_owner_key: Some(spending_key),
@@ -1145,7 +1160,7 @@ mod tests {
         let in_value: u64 = 5_035_500; // 5 USDC + fees
         let in_rho = Fr::from(10u64);
         let in_rand = Fr::from(20u64);
-        let in_cm = nc(in_value, spending_key, in_rho, in_rand);
+        let in_cm = nc(in_value, 1, spending_key, in_rho, in_rand);
 
         let mut mmr = MerkleMountainRange::new();
         let (leaf_idx, root) = mmr.append(in_cm);
@@ -1184,7 +1199,9 @@ mod tests {
             contract_address: Some(Fr::from(300u64)),
             expiry: Some(Fr::from(0u64)),
             has_change: Some(Fr::from(0u64)), // no change
+            flags_packed: Some(Fr::from(2u64)),
             is_rollover: Some(Fr::from(0u64)),
+            asset_id: Some(Fr::from(1u64)),
 
             input_value: Some(Fr::from(in_value)),
             input_owner_key: Some(spending_key),
@@ -1490,7 +1507,7 @@ mod tests {
         let in_value: u64 = 10_000_000; // 10 USDC
         let in_rho = Fr::from(101u64);
         let in_rand = Fr::from(202u64);
-        let in_cm = nc(in_value, spending_key, in_rho, in_rand);
+        let in_cm = nc(in_value, 1, spending_key, in_rho, in_rand);
 
         let mut mmr = MerkleMountainRange::new();
         let (leaf_idx, root) = mmr.append(in_cm);
@@ -1512,7 +1529,7 @@ mod tests {
         let change: u64 = in_value - efee; // in_value == execution_fee + change (merchant=0, fee=0)
         let ch_rho = Fr::from(303u64);
         let ch_rand = Fr::from(404u64);
-        let ch_cm = nc(change, spending_key, ch_rho, ch_rand);
+        let ch_cm = nc(change, 1, spending_key, ch_rho, ch_rand);
 
         let circuit = PrivateNoteCircuit {
             note_root: Some(root),
@@ -1530,7 +1547,9 @@ mod tests {
             contract_address: Some(Fr::from(300u64)),
             expiry: Some(Fr::from(0u64)),
             has_change: Some(Fr::from(1u64)),
-            is_rollover: Some(Fr::from(1u64)), // Rollover mode = 1
+            flags_packed: Some(Fr::from(3u64)), // 1 + 2 * 1 = 3
+            is_rollover: Some(Fr::from(1u64)),  // Rollover mode = 1
+            asset_id: Some(Fr::from(1u64)),
 
             input_value: Some(Fr::from(in_value)),
             input_owner_key: Some(spending_key),
@@ -1623,6 +1642,120 @@ mod tests {
         assert!(
             result.is_err() || result.unwrap().is_err(),
             "Tampered note_epoch_id must fail nullifier derivation constraint check"
+        );
+    }
+
+    #[test]
+    fn test_note_circuit_asset_id_boolean_constraint_rejects_greater_than_one() {
+        let cs = ConstraintSystem::<Fr>::new_ref();
+        let mut circuit = setup_valid_circuit();
+        // Tamper asset_id to 2
+        circuit.asset_id = Some(Fr::from(2u64));
+        circuit.flags_packed = Some(Fr::from(4u64)); // 0 + 2 * 2 = 4
+
+        circuit.generate_constraints(cs.clone()).unwrap();
+        assert!(
+            !cs.is_satisfied().unwrap(),
+            "asset_id >= 2 must fail boolean constraint b * (1 - b) == 0!"
+        );
+    }
+
+    #[test]
+    fn test_note_circuit_flags_packed_mismatch_rejected() {
+        let cs = ConstraintSystem::<Fr>::new_ref();
+        let mut circuit = setup_valid_circuit();
+        // Tamper flags_packed to 3 (rollover=1, asset=1) while circuit is_rollover is 0
+        circuit.flags_packed = Some(Fr::from(3u64));
+
+        circuit.generate_constraints(cs.clone()).unwrap();
+        assert!(
+            !cs.is_satisfied().unwrap(),
+            "flags_packed mismatching is_rollover + 2*asset_id must fail!"
+        );
+    }
+
+    #[test]
+    fn test_note_circuit_weth_asset_id_zero_success() {
+        use crate::note::{
+            derive_nullifier as dn, derive_nullifier_key as dnk, note_commitment as nc,
+            MerkleMountainRange,
+        };
+
+        let cs = ConstraintSystem::<Fr>::new_ref();
+        let sk = Fr::from(100u64);
+        let nk = dnk(sk);
+        let rho = Fr::from(200u64);
+        let rand = Fr::from(300u64);
+        let val = 10_000_000_000_000_000_000u128 as u64; // 10 WETH in Wei truncated/scaled or test val
+        let asset_id_u8 = 0u8; // WETH
+        let cm = nc(val, asset_id_u8, sk, rho, rand);
+
+        let mut mmr = MerkleMountainRange::new();
+        let (leaf_idx, root) = mmr.append(cm);
+        let proof = mmr.generate_proof(leaf_idx);
+
+        let mut sibs = [Fr::from(0u64); 32];
+        for (i, sib) in proof.mountain_siblings.iter().enumerate() {
+            sibs[i] = *sib;
+        }
+
+        let mut p_sibs = [Fr::from(0u64); 32];
+        for (i, p) in proof.peak_bagging_siblings.iter().enumerate() {
+            p_sibs[i] = *p;
+        }
+
+        let nf = dn(nk, cm, leaf_idx as u64, 0);
+
+        let rec = Fr::from(0x1234u64);
+        let cid = Fr::from(421614u64);
+        let caddr = Fr::from(0x5678u64);
+        let exp = Fr::from(2000u64);
+        let q_hi = Fr::from(0x1111u64);
+        let q_lo = Fr::from(0x2222u64);
+
+        let scope_hash = crate::note::compute_scope_hash(rec, cid, caddr, exp);
+        let binding = crate::note::compute_binding_commitment(q_hi, q_lo, scope_hash);
+
+        let circuit = PrivateNoteCircuit {
+            note_root: Some(root),
+            leaf_count: Some(Fr::from(mmr.leaf_count as u64)),
+            input_nullifier: Some(nf),
+            quote_hash_hi: Some(q_hi),
+            quote_hash_lo: Some(q_lo),
+            recipient: Some(rec),
+            merchant_amount: Some(Fr::from(val)),
+            protocol_fee: Some(Fr::from(0u64)),
+            execution_fee: Some(Fr::from(0u64)),
+            chain_id: Some(cid),
+            contract_address: Some(caddr),
+            expiry: Some(exp),
+            output_commitment: Some(Fr::from(0u64)),
+            note_epoch_id: Some(Fr::from(0u64)),
+            has_change: Some(Fr::from(0u64)),
+            flags_packed: Some(Fr::from(0u64)), // is_rollover=0, asset_id=0 => 0 + 2*0 = 0
+            is_rollover: Some(Fr::from(0u64)),
+            asset_id: Some(Fr::from(asset_id_u8 as u64)),
+            input_value: Some(Fr::from(val)),
+            input_owner_key: Some(sk),
+            input_rho: Some(rho),
+            input_randomness: Some(rand),
+            input_leaf_index: Some(Fr::from(leaf_idx as u64)),
+            mountain_height: Some(proof.mountain_height as u8),
+            mountain_siblings: Some(sibs),
+            peak_bagging_siblings: Some(p_sibs),
+            peak_bagging_count: Some(proof.peak_bagging_siblings.len() as u8),
+            change_value: Some(Fr::from(0u64)),
+            change_owner_key: Some(sk),
+            change_rho: Some(Fr::from(0u64)),
+            change_randomness: Some(Fr::from(0u64)),
+            expected_binding: Some(binding),
+        };
+
+        circuit.generate_constraints(cs.clone()).unwrap();
+        assert!(
+            cs.is_satisfied().unwrap(),
+            "WETH PrivateNoteCircuit must be satisfied: {:?}",
+            cs.which_is_unsatisfied()
         );
     }
 }

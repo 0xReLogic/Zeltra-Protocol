@@ -298,13 +298,16 @@ impl NotePlaintext {
     }
 
     /// Deserializes 48 bytes into a NotePlaintext.
-    /// Returns None if the rho scalar is non-canonical (>= r).
+    /// Returns None if the rho scalar is non-canonical (>= r) or asset_id > 1.
     pub fn from_bytes(bytes: &[u8; Self::SERIALIZED_SIZE]) -> Option<Self> {
         let value = u64::from_be_bytes(bytes[0..8].try_into().unwrap());
         let mut rho_bytes = [0u8; 32];
         rho_bytes.copy_from_slice(&bytes[8..40]);
         let rho = crate::from_evm_scalar(&rho_bytes)?;
         let asset_id = u64::from_be_bytes(bytes[40..48].try_into().unwrap());
+        if asset_id > 1 {
+            return None;
+        }
         Some(Self {
             value,
             rho,
@@ -315,7 +318,13 @@ impl NotePlaintext {
     /// Reconstructs the complete PrivateNoteV1 with deterministic randomness.
     pub fn to_note(&self, owner_key: Fr) -> PrivateNoteV1 {
         let randomness = derive_note_randomness(owner_key, self.rho);
-        PrivateNoteV1::new(self.value, owner_key, self.rho, randomness)
+        PrivateNoteV1::new(
+            self.value,
+            self.asset_id as u8,
+            owner_key,
+            self.rho,
+            randomness,
+        )
     }
 }
 
@@ -450,20 +459,25 @@ pub fn decrypt_note_memo(encrypted_memo: &[u8], ivk: &IncomingViewingKey) -> Opt
 // PrivateNoteV1
 // ═══════════════════════════════════════════════════════════════════════════
 
+pub const ASSET_ID_WETH: u8 = 0;
+pub const ASSET_ID_USDC: u8 = 1;
+
 /// Private Note V1 — the fundamental unit of private value in Zeltra.
 ///
-/// Each note represents a specific amount of stablecoin owned by a specific
+/// Each note represents a specific amount of stablecoin or native asset owned by a specific
 /// user. Notes are consumed (nullified) when spent, producing change notes
 /// for any remaining value.
 ///
 /// Fields:
-/// - `value`: Amount in base units (u64, 6 decimals for USDC)
+/// - `value`: Amount in base units (u64, 6 decimals for USDC, 9 decimals Gwei for WETH)
+/// - `asset_id`: 0 for WETH, 1 for USDC
 /// - `owner_key`: Owner's spending key (Fr element)
 /// - `rho`: Unique note identifier / nullifier randomness (Fr element)
 /// - `randomness`: Commitment trapdoor for hiding property (Fr element)
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PrivateNoteV1 {
     pub value: u64,
+    pub asset_id: u8,
     pub owner_key: Fr,
     pub rho: Fr,
     pub randomness: Fr,
@@ -471,24 +485,38 @@ pub struct PrivateNoteV1 {
 
 impl PrivateNoteV1 {
     /// Create a new note with the given parameters.
-    pub fn new(value: u64, owner_key: Fr, rho: Fr, randomness: Fr) -> Self {
+    pub fn new(value: u64, asset_id: u8, owner_key: Fr, rho: Fr, randomness: Fr) -> Self {
         Self {
             value,
+            asset_id,
             owner_key,
             rho,
             randomness,
         }
     }
 
+    /// Compute the field bit-packed value Fr representation (DEC-034A).
+    /// value_packed = value + asset_id * 2^64
+    pub fn value_packed(&self) -> Fr {
+        let two_pow_64 = Fr::from(1u128 << 64);
+        Fr::from(self.value) + (Fr::from(self.asset_id as u64) * two_pow_64)
+    }
+
     /// Compute the commitment for this note.
     ///
-    /// commitment = Poseidon_W5(value, owner_key, rho, randomness; domain)
+    /// commitment = Poseidon_W5(value_packed, owner_key, rho, randomness; domain)
     ///
     /// The commitment is binding (cannot change any field without changing
     /// the commitment) and hiding (reveals nothing about the note contents
     /// without knowing the preimage).
     pub fn commitment(&self) -> Fr {
-        note_commitment(self.value, self.owner_key, self.rho, self.randomness)
+        note_commitment(
+            self.value,
+            self.asset_id,
+            self.owner_key,
+            self.rho,
+            self.randomness,
+        )
     }
 }
 
@@ -496,13 +524,21 @@ impl PrivateNoteV1 {
 // Note Commitment
 // ═══════════════════════════════════════════════════════════════════════════
 
-/// Compute a note commitment from individual fields.
+/// Compute a note commitment from individual fields including asset_id.
 ///
-/// commitment = Poseidon_W5(Fr(value), owner_key, rho, randomness; DOMAIN_NOTE_COMMITMENT_V1)
+/// commitment = Poseidon_W5(value_packed, owner_key, rho, randomness; DOMAIN_NOTE_COMMITMENT_V1)
+/// where value_packed = value + asset_id * 2^64
 ///
-/// State layout: [value_fr, owner_key, rho, randomness, domain_tag]
-pub fn note_commitment(value: u64, owner_key: Fr, rho: Fr, randomness: Fr) -> Fr {
-    let inputs = [Fr::from(value), owner_key, rho, randomness];
+/// State layout: [value_packed, owner_key, rho, randomness, domain_tag]
+pub fn note_commitment(value: u64, asset_id: u8, owner_key: Fr, rho: Fr, randomness: Fr) -> Fr {
+    let two_pow_64 = Fr::from(1u128 << 64);
+    let value_packed = Fr::from(value) + (Fr::from(asset_id as u64) * two_pow_64);
+    note_commitment_packed(value_packed, owner_key, rho, randomness)
+}
+
+/// Compute a note commitment directly from value_packed field element.
+pub fn note_commitment_packed(value_packed: Fr, owner_key: Fr, rho: Fr, randomness: Fr) -> Fr {
+    let inputs = [value_packed, owner_key, rho, randomness];
     native_poseidon_w5(&inputs, domain_note_commitment())
 }
 
@@ -991,6 +1027,7 @@ mod tests {
     fn test_note() -> PrivateNoteV1 {
         PrivateNoteV1::new(
             99_800_000, // 99.8 USDC
+            1,          // USDC
             Fr::from(12345u64),
             Fr::from(67890u64),
             Fr::from(11111u64),
@@ -1031,8 +1068,8 @@ mod tests {
 
     #[test]
     fn test_note_commitment_binding_value() {
-        let note1 = PrivateNoteV1::new(100, Fr::from(1u64), Fr::from(2u64), Fr::from(3u64));
-        let note2 = PrivateNoteV1::new(200, Fr::from(1u64), Fr::from(2u64), Fr::from(3u64));
+        let note1 = PrivateNoteV1::new(100, 1, Fr::from(1u64), Fr::from(2u64), Fr::from(3u64));
+        let note2 = PrivateNoteV1::new(200, 1, Fr::from(1u64), Fr::from(2u64), Fr::from(3u64));
         assert_ne!(
             note1.commitment(),
             note2.commitment(),
@@ -1041,9 +1078,20 @@ mod tests {
     }
 
     #[test]
+    fn test_note_commitment_binding_asset_id() {
+        let note_weth = PrivateNoteV1::new(100, 0, Fr::from(1u64), Fr::from(2u64), Fr::from(3u64));
+        let note_usdc = PrivateNoteV1::new(100, 1, Fr::from(1u64), Fr::from(2u64), Fr::from(3u64));
+        assert_ne!(
+            note_weth.commitment(),
+            note_usdc.commitment(),
+            "Different asset_id must produce different commitments (anti-cross-asset)"
+        );
+    }
+
+    #[test]
     fn test_note_commitment_binding_owner() {
-        let note1 = PrivateNoteV1::new(100, Fr::from(1u64), Fr::from(2u64), Fr::from(3u64));
-        let note2 = PrivateNoteV1::new(100, Fr::from(99u64), Fr::from(2u64), Fr::from(3u64));
+        let note1 = PrivateNoteV1::new(100, 1, Fr::from(1u64), Fr::from(2u64), Fr::from(3u64));
+        let note2 = PrivateNoteV1::new(100, 1, Fr::from(99u64), Fr::from(2u64), Fr::from(3u64));
         assert_ne!(
             note1.commitment(),
             note2.commitment(),
@@ -1053,8 +1101,8 @@ mod tests {
 
     #[test]
     fn test_note_commitment_binding_rho() {
-        let note1 = PrivateNoteV1::new(100, Fr::from(1u64), Fr::from(2u64), Fr::from(3u64));
-        let note2 = PrivateNoteV1::new(100, Fr::from(1u64), Fr::from(99u64), Fr::from(3u64));
+        let note1 = PrivateNoteV1::new(100, 1, Fr::from(1u64), Fr::from(2u64), Fr::from(3u64));
+        let note2 = PrivateNoteV1::new(100, 1, Fr::from(1u64), Fr::from(99u64), Fr::from(3u64));
         assert_ne!(
             note1.commitment(),
             note2.commitment(),
@@ -1065,8 +1113,8 @@ mod tests {
     #[test]
     fn test_note_commitment_hiding() {
         // Same note with different randomness produces different commitments
-        let note1 = PrivateNoteV1::new(100, Fr::from(1u64), Fr::from(2u64), Fr::from(3u64));
-        let note2 = PrivateNoteV1::new(100, Fr::from(1u64), Fr::from(2u64), Fr::from(99u64));
+        let note1 = PrivateNoteV1::new(100, 1, Fr::from(1u64), Fr::from(2u64), Fr::from(3u64));
+        let note2 = PrivateNoteV1::new(100, 1, Fr::from(1u64), Fr::from(2u64), Fr::from(99u64));
         assert_ne!(
             note1.commitment(),
             note2.commitment(),
@@ -1333,8 +1381,14 @@ mod tests {
 
     #[test]
     fn known_answer_note_commitment() {
-        // Note: value=99800000, owner_key=Fr(42), rho=Fr(1), randomness=Fr(2)
-        let note = PrivateNoteV1::new(99_800_000, Fr::from(42u64), Fr::from(1u64), Fr::from(2u64));
+        // Note: value=99800000, asset_id=0 (WETH), owner_key=Fr(42), rho=Fr(1), randomness=Fr(2)
+        let note = PrivateNoteV1::new(
+            99_800_000,
+            0,
+            Fr::from(42u64),
+            Fr::from(1u64),
+            Fr::from(2u64),
+        );
         let cm = note.commitment();
         let cm_hex = hex::encode(fr_to_be_bytes(&cm));
 
@@ -1366,7 +1420,7 @@ mod tests {
         let spending_key = Fr::from(42u64);
         let nk = derive_nullifier_key(spending_key);
 
-        let note = PrivateNoteV1::new(99_800_000, spending_key, Fr::from(1u64), Fr::from(2u64));
+        let note = PrivateNoteV1::new(99_800_000, 0, spending_key, Fr::from(1u64), Fr::from(2u64));
         let cm = note.commitment();
         let nf = derive_nullifier(nk, cm, 0, 0);
         let nf_hex = hex::encode(fr_to_be_bytes(&nf));
@@ -1788,7 +1842,8 @@ mod tests {
 
         // Ground-truth note commitment
         let deterministic_r = derive_note_randomness(spending_key, rho);
-        let expected_cm = note_commitment(value, spending_key, rho, deterministic_r);
+        let expected_cm =
+            note_commitment(value, asset_id as u8, spending_key, rho, deterministic_r);
 
         // Encrypt and trial-decrypt memo
         let memo = encrypt_note_memo(value, rho, asset_id, &ivk);
@@ -1797,6 +1852,7 @@ mod tests {
         // Reconstruct note from recovered plaintext + spending key
         let reconstructed_note = decrypted_pt.to_note(spending_key);
         assert_eq!(reconstructed_note.value, value);
+        assert_eq!(reconstructed_note.asset_id, asset_id as u8);
         assert_eq!(reconstructed_note.owner_key, spending_key);
         assert_eq!(reconstructed_note.rho, rho);
         assert_eq!(reconstructed_note.randomness, deterministic_r);
@@ -1958,7 +2014,7 @@ mod tests {
         let value_a = 100_000_000u64;
         let rho_a = Fr::from(123456789u64);
         let randomness_a = derive_note_randomness(spending_key, rho_a);
-        let note_a = PrivateNoteV1::new(value_a, spending_key, rho_a, randomness_a);
+        let note_a = PrivateNoteV1::new(value_a, 1, spending_key, rho_a, randomness_a);
         let commitment_a = note_a.commitment();
 
         let value_b = 50_000_000u64;
@@ -1990,5 +2046,74 @@ mod tests {
             decrypted_attacker.is_none(),
             "Victim cannot decrypt memo encrypted for attacker's viewing key"
         );
+    }
+
+    #[test]
+    fn test_bit_packing_roundtrip_soundness() {
+        use ark_ff::PrimeField;
+        // Test boundary values for value (u64) and asset_id (0 and 1)
+        let test_values = [0u64, 1u64, 100_000_000u64, u64::MAX - 1, u64::MAX];
+        let two_pow_64 = Fr::from(1u128 << 64);
+
+        for &val in &test_values {
+            for &aid in &[0u8, 1u8] {
+                let note = PrivateNoteV1::new(
+                    val,
+                    aid,
+                    Fr::from(100u64),
+                    Fr::from(200u64),
+                    Fr::from(300u64),
+                );
+                let packed = note.value_packed();
+
+                // Reconstruct value and asset_id from Fr representation
+                let bi = packed.into_bigint();
+                let limbs = bi.as_ref();
+                let recovered_val = limbs[0];
+                let recovered_aid = limbs[1] as u8;
+
+                assert_eq!(
+                    recovered_val, val,
+                    "Recovered value mismatch for val={val}, aid={aid}"
+                );
+                assert_eq!(
+                    recovered_aid, aid,
+                    "Recovered asset_id mismatch for val={val}, aid={aid}"
+                );
+
+                // Confirm algebraic linear combination: packed == val + aid * 2^64
+                let expected_packed = Fr::from(val) + Fr::from(aid as u64) * two_pow_64;
+                assert_eq!(packed, expected_packed);
+            }
+        }
+    }
+
+    #[test]
+    fn test_dec037_note_plaintext_roundtrip_with_asset_id() {
+        for &aid in &[0u64, 1u64] {
+            let (ivk, _) = derive_viewing_keys(b"dec037_roundtrip_seed");
+            let val = 25_000_000u64;
+            let rho = Fr::from(999888777u64);
+
+            let memo = encrypt_note_memo(val, rho, aid, &ivk);
+            assert_eq!(memo.len(), 96, "Memo must be exactly 96 bytes");
+
+            let decrypted = decrypt_note_memo(&memo, &ivk).expect("Decryption must succeed");
+            assert_eq!(decrypted.value, val);
+            assert_eq!(decrypted.asset_id, aid);
+            assert_eq!(decrypted.rho, rho);
+
+            // Reconstruct note and verify commitment
+            let sk = Fr::from(123456u64);
+            let note = decrypted.to_note(sk);
+            assert_eq!(note.value, val);
+            assert_eq!(note.asset_id, aid as u8);
+            assert_eq!(note.owner_key, sk);
+            assert_eq!(note.rho, rho);
+            assert_eq!(
+                note.commitment(),
+                note_commitment(val, aid as u8, sk, rho, note.randomness)
+            );
+        }
     }
 }

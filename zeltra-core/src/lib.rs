@@ -1,4 +1,5 @@
 pub mod accounting;
+pub mod circuit_gadgets;
 pub mod compliance_circuit;
 pub mod evm;
 pub mod fees;
@@ -13,6 +14,12 @@ pub use ark_ec::pairing::Pairing;
 pub use ark_ec::PrimeGroup;
 pub use ark_ff::{Field, PrimeField, UniformRand};
 
+// Re-export circuit gadgets (DEC-034A)
+pub use circuit_gadgets::{
+    enforce_joinsplit_flags_packed, enforce_packed_value_and_asset,
+    enforce_private_note_flags_packed,
+};
+
 // Re-export serialization helpers
 pub use serialization::{deserialize_from_bytes, serialize_to_bytes};
 
@@ -24,12 +31,12 @@ pub use evm::{
 // Re-export fee policy helpers
 pub use fees::{
     ceil_div, deposit_fee, fee_round_up, gross_up_for_exact_net, gross_up_private_spend_amount,
-    net_after_fee, private_spend_fee, quote_cross_chain_private_spend_with_fee,
+    gwei_to_wei, net_after_fee, private_spend_fee, quote_cross_chain_private_spend_with_fee,
     quote_execution_fee, quote_execution_fee_with_pass_through, quote_private_spend,
-    quote_private_spend_with_fee, quote_standalone_rollover, spend_fee_bps_for_holding, SpendQuote,
-    DEFAULT_RELAYER_MARKUP_BPS, DEPOSIT_FEE_BPS, FEE_DENOMINATOR_BPS,
+    quote_private_spend_with_fee, quote_standalone_rollover, spend_fee_bps_for_holding,
+    wei_to_gwei, SpendQuote, DEFAULT_RELAYER_MARKUP_BPS, DEPOSIT_FEE_BPS, FEE_DENOMINATOR_BPS,
     MIN_STANDALONE_ROLLOVER_THRESHOLD_USDC, PRIVATE_SPEND_FEE_BPS, SPEND_FEE_30DAY_BPS,
-    THIRTY_DAYS_SECS,
+    THIRTY_DAYS_SECS, WEI_PER_GWEI,
 };
 
 // Re-export compliance circuit (deprecated prototype)
@@ -54,10 +61,11 @@ pub use note::{
     domain_binding_v1, domain_dummy_nullifier, domain_initial_note, domain_merkle_node,
     domain_mmr_bag, domain_note_commitment, domain_note_randomness, domain_nullifier,
     domain_quote_binding, domain_scope_v1, encrypt_note_memo, encrypt_note_memo_optional,
-    fr_from_be_bytes, fr_to_be_bytes, merkle_hash, note_commitment, split_quote_hash_to_limbs,
-    verify_value_conservation, IncomingViewingKey, MMRProof, MerkleMountainRange, NotePlaintext,
-    OutcomingViewingKey, PrivateNoteV1, RecipientViewingKey, DOMAIN_BINDING_V1_HEX,
-    DOMAIN_MMR_BAG_BYTES, DOMAIN_SCOPE_V1_HEX, ENCRYPTED_MEMO_SIZE,
+    fr_from_be_bytes, fr_to_be_bytes, merkle_hash, note_commitment, note_commitment_packed,
+    split_quote_hash_to_limbs, verify_value_conservation, IncomingViewingKey, MMRProof,
+    MerkleMountainRange, NotePlaintext, OutcomingViewingKey, PrivateNoteV1, RecipientViewingKey,
+    ASSET_ID_USDC, ASSET_ID_WETH, DOMAIN_BINDING_V1_HEX, DOMAIN_MMR_BAG_BYTES, DOMAIN_SCOPE_V1_HEX,
+    ENCRYPTED_MEMO_SIZE,
 };
 
 // Re-export accounting state machine (DEC-016A Gate B)

@@ -106,6 +106,13 @@ pub struct JoinSplitCircuit {
 
     // ── Private witnesses: Scope Binding (DEC-035B) ──
     pub expected_binding: Option<Fr>,
+
+    // ── Private witnesses: Dual-Asset & Intra-Asset Equality (DEC-034A) ──
+    pub public_asset_id: Option<Fr>,
+    pub in1_asset_id: Option<Fr>,
+    pub in2_asset_id: Option<Fr>,
+    pub out1_asset_id: Option<Fr>,
+    pub out2_asset_id: Option<Fr>,
 }
 
 impl JoinSplitCircuit {
@@ -307,7 +314,13 @@ impl ConstraintSynthesizer<Fr> for JoinSplitCircuit {
         let chain_id_var = public_input(&cs, self.chain_id)?; // 14
         let contract_addr_var = public_input(&cs, self.contract_address)?; // 15
         let expiry_var = public_input(&cs, self.expiry)?; // 16
-        let flags_var = public_input(&cs, self.flags_packed)?; // 17
+        let flags_val = self.flags_packed.or_else(|| {
+            let ch1 = self.has_change_1.unwrap_or(Fr::from(0u64));
+            let ch2 = self.has_change_2.unwrap_or(Fr::from(0u64));
+            let aid = self.public_asset_id.unwrap_or(Fr::from(1u64));
+            Some(ch1 + ch2 * Fr::from(2u64) + aid * Fr::from(4u64))
+        });
+        let flags_var = public_input(&cs, flags_val)?; // 17
         let is_rollover_var = public_input(&cs, self.is_rollover)?; // 18
 
         // ═══════════════════════════════════════════════════════════════
@@ -353,17 +366,104 @@ impl ConstraintSynthesizer<Fr> for JoinSplitCircuit {
         let out2_rho = private_witness(&cs, self.out2_rho)?;
         let out2_rand = private_witness(&cs, self.out2_randomness)?;
 
-        // Change Flags
+        // Change Flags & Asset IDs
         let has_ch1_var = private_witness(&cs, self.has_change_1)?;
         let has_ch2_var = private_witness(&cs, self.has_change_2)?;
 
+        let pub_aid_witness = self.public_asset_id.or_else(|| {
+            flags_val.map(|f| {
+                let f_u64 = f.into_bigint().as_ref()[0];
+                Fr::from((f_u64 >> 2) & 1)
+            })
+        });
+        let public_asset_id_var = private_witness(&cs, pub_aid_witness)?;
+
+        let in1_aid_witness = self.in1_asset_id.or(pub_aid_witness);
+        let in2_aid_witness = self.in2_asset_id.or(pub_aid_witness);
+        let out1_aid_witness = self.out1_asset_id.or(pub_aid_witness);
+        let out2_aid_witness = self.out2_asset_id.or(pub_aid_witness);
+
+        let in1_asset_id_var = private_witness(&cs, in1_aid_witness)?;
+        let in2_asset_id_var = private_witness(&cs, in2_aid_witness)?;
+        let out1_asset_id_var = private_witness(&cs, out1_aid_witness)?;
+        let out2_asset_id_var = private_witness(&cs, out2_aid_witness)?;
+
+        // Strict intra-asset equality without conditional branching (Patch Audit #1):
+        // asset_id_in1 == asset_id_in2 == asset_id_out1 == asset_id_out2 == public_asset_id
+        in1_asset_id_var.enforce_equal(&public_asset_id_var)?;
+        in2_asset_id_var.enforce_equal(&public_asset_id_var)?;
+        out1_asset_id_var.enforce_equal(&public_asset_id_var)?;
+        out2_asset_id_var.enforce_equal(&public_asset_id_var)?;
+
         // ═══════════════════════════════════════════════════════════════
-        // 4. Value Range Checks (448 quadratic boolean gates, A1.1)
+        // 4. Value Range Checks & Dual-Asset Bit-Packing (DEC-034A)
         // ═══════════════════════════════════════════════════════════════
-        enforce_u64_range(&cs, &in1_value, self.in1_value)?;
-        enforce_u64_range(&cs, &in2_value, self.in2_value)?;
-        enforce_u64_range(&cs, &out1_val, self.out1_value)?;
-        enforce_u64_range(&cs, &out2_val, self.out2_value)?;
+        let two_pow_64 = Fr::from(1u128 << 64);
+
+        let in1_val_u64 = self.in1_value.map(|v| v.into_bigint().as_ref()[0]);
+        let in1_aid_u8 = in1_aid_witness.map(|a| a.into_bigint().as_ref()[0] as u8);
+        let in1_value_packed_val = match (self.in1_value, in1_aid_witness) {
+            (Some(v), Some(a)) => Some(v + a * two_pow_64),
+            _ => None,
+        };
+        let in1_value_packed = private_witness(&cs, in1_value_packed_val)?;
+        crate::circuit_gadgets::enforce_packed_value_and_asset(
+            &cs,
+            &in1_value_packed,
+            &in1_value,
+            &in1_asset_id_var,
+            in1_val_u64,
+            in1_aid_u8,
+        )?;
+
+        let in2_val_u64 = self.in2_value.map(|v| v.into_bigint().as_ref()[0]);
+        let in2_aid_u8 = in2_aid_witness.map(|a| a.into_bigint().as_ref()[0] as u8);
+        let in2_value_packed_val = match (self.in2_value, in2_aid_witness) {
+            (Some(v), Some(a)) => Some(v + a * two_pow_64),
+            _ => None,
+        };
+        let in2_value_packed = private_witness(&cs, in2_value_packed_val)?;
+        crate::circuit_gadgets::enforce_packed_value_and_asset(
+            &cs,
+            &in2_value_packed,
+            &in2_value,
+            &in2_asset_id_var,
+            in2_val_u64,
+            in2_aid_u8,
+        )?;
+
+        let out1_val_u64 = self.out1_value.map(|v| v.into_bigint().as_ref()[0]);
+        let out1_aid_u8 = out1_aid_witness.map(|a| a.into_bigint().as_ref()[0] as u8);
+        let out1_value_packed_val = match (self.out1_value, out1_aid_witness) {
+            (Some(v), Some(a)) => Some(v + a * two_pow_64),
+            _ => None,
+        };
+        let out1_value_packed = private_witness(&cs, out1_value_packed_val)?;
+        crate::circuit_gadgets::enforce_packed_value_and_asset(
+            &cs,
+            &out1_value_packed,
+            &out1_val,
+            &out1_asset_id_var,
+            out1_val_u64,
+            out1_aid_u8,
+        )?;
+
+        let out2_val_u64 = self.out2_value.map(|v| v.into_bigint().as_ref()[0]);
+        let out2_aid_u8 = out2_aid_witness.map(|a| a.into_bigint().as_ref()[0] as u8);
+        let out2_value_packed_val = match (self.out2_value, out2_aid_witness) {
+            (Some(v), Some(a)) => Some(v + a * two_pow_64),
+            _ => None,
+        };
+        let out2_value_packed = private_witness(&cs, out2_value_packed_val)?;
+        crate::circuit_gadgets::enforce_packed_value_and_asset(
+            &cs,
+            &out2_value_packed,
+            &out2_val,
+            &out2_asset_id_var,
+            out2_val_u64,
+            out2_aid_u8,
+        )?;
+
         enforce_u64_range(&cs, &in1_index, self.in1_leaf_index)?;
         enforce_u64_range(&cs, &in2_index, self.in2_leaf_index)?;
 
@@ -403,17 +503,15 @@ impl ConstraintSynthesizer<Fr> for JoinSplitCircuit {
         // ═══════════════════════════════════════════════════════════════
         // 6. Phase 3: Direction B Constant-Arity Output Gadget (ZIP 315 Defense)
         // ═══════════════════════════════════════════════════════════════
-        // Boolean constraints on change flags
+        crate::circuit_gadgets::enforce_joinsplit_flags_packed(
+            &flags_var,
+            &has_ch1_var,
+            &has_ch2_var,
+            &public_asset_id_var,
+        )?;
+
         let one_minus_ch1 = &one - &has_ch1_var;
-        (&has_ch1_var * &one_minus_ch1).enforce_equal(&zero)?;
-
         let one_minus_ch2 = &one - &has_ch2_var;
-        (&has_ch2_var * &one_minus_ch2).enforce_equal(&zero)?;
-
-        // flags_packed == has_change_1 + 2 * has_change_2
-        let two = FpVar::Constant(Fr::from(2u64));
-        let expected_flags = &has_ch1_var + &has_ch2_var * two;
-        expected_flags.enforce_equal(&flags_var)?;
 
         // A3.1: If has_change == 0 => change value MUST be zero
         (&out1_val * &one_minus_ch1).enforce_equal(&zero)?;
@@ -422,7 +520,7 @@ impl ConstraintSynthesizer<Fr> for JoinSplitCircuit {
         // A3.2 & A3.3: Direction B: Compute and export exactly 2 output commitments
         // Even when has_change == 0, a canonical dummy commitment (value = 0) is synthesized and exported!
         let cm_out1 = poseidon_w5_hash(
-            &[out1_val.clone(), out1_owner, out1_rho, out1_rand],
+            &[out1_value_packed, out1_owner, out1_rho, out1_rand],
             domain_note,
             w5_rc,
             w5_mds,
@@ -430,7 +528,7 @@ impl ConstraintSynthesizer<Fr> for JoinSplitCircuit {
         cm_out1.enforce_equal(&output_cm1_var)?;
 
         let cm_out2 = poseidon_w5_hash(
-            &[out2_val.clone(), out2_owner, out2_rho, out2_rand],
+            &[out2_value_packed, out2_owner, out2_rho, out2_rand],
             domain_note,
             w5_rc,
             w5_mds,
@@ -495,7 +593,7 @@ impl ConstraintSynthesizer<Fr> for JoinSplitCircuit {
         // Input Note Commitments (A1.4)
         let in1_cm = poseidon_w5_hash(
             &[
-                in1_value.clone(),
+                in1_value_packed,
                 in1_owner.clone(),
                 in1_rho.clone(),
                 in1_rand,
@@ -507,7 +605,7 @@ impl ConstraintSynthesizer<Fr> for JoinSplitCircuit {
 
         let in2_cm = poseidon_w5_hash(
             &[
-                in2_value.clone(),
+                in2_value_packed,
                 in2_owner.clone(),
                 in2_rho.clone(),
                 in2_rand,
@@ -848,8 +946,9 @@ pub fn create_dummy_joinsplit_circuit() -> JoinSplitCircuit {
     let rho1 = Fr::from(200u64);
     let rand1 = Fr::from(300u64);
     let v_in1 = 10_000_000u64; // 10 USDC
+    let asset_id_u8 = 1u8; // USDC default
 
-    let cm1 = note_commitment(v_in1, sk, rho1, rand1);
+    let cm1 = note_commitment(v_in1, asset_id_u8, sk, rho1, rand1);
 
     // Create MMR with 1 leaf (cm1)
     let mut mmr = MerkleMountainRange::new();
@@ -877,11 +976,11 @@ pub fn create_dummy_joinsplit_circuit() -> JoinSplitCircuit {
     // Direction B: Canonical dummy output commitments (v=0)
     let rho_out1 = Fr::from(401u64);
     let rand_out1 = Fr::from(402u64);
-    let cm_out1 = note_commitment(0, sk, rho_out1, rand_out1);
+    let cm_out1 = note_commitment(0, asset_id_u8, sk, rho_out1, rand_out1);
 
     let rho_out2 = Fr::from(501u64);
     let rand_out2 = Fr::from(502u64);
-    let cm_out2 = note_commitment(0, sk, rho_out2, rand_out2);
+    let cm_out2 = note_commitment(0, asset_id_u8, sk, rho_out2, rand_out2);
 
     let merch_amt = 9_900_000u64;
     let proto_fee = (merch_amt * 45).div_ceil(10_000); // 44_550
@@ -915,7 +1014,7 @@ pub fn create_dummy_joinsplit_circuit() -> JoinSplitCircuit {
         chain_id: Some(cid),
         contract_address: Some(caddr),
         expiry: Some(exp),
-        flags_packed: Some(Fr::from(0u64)), // has_change_1 = 0, has_change_2 = 0
+        flags_packed: Some(Fr::from(4u64)), // has_change_1 = 0, has_change_2 = 0, asset_id = 1 (0 + 2*0 + 4*1 = 4)
         is_rollover: Some(Fr::from(0u64)),
 
         in1_value: Some(Fr::from(v_in1)),
@@ -951,6 +1050,12 @@ pub fn create_dummy_joinsplit_circuit() -> JoinSplitCircuit {
         has_change_1: Some(Fr::from(0u64)),
         has_change_2: Some(Fr::from(0u64)),
         expected_binding: Some(binding),
+
+        public_asset_id: Some(Fr::from(asset_id_u8 as u64)),
+        in1_asset_id: Some(Fr::from(asset_id_u8 as u64)),
+        in2_asset_id: Some(Fr::from(asset_id_u8 as u64)),
+        out1_asset_id: Some(Fr::from(asset_id_u8 as u64)),
+        out2_asset_id: Some(Fr::from(asset_id_u8 as u64)),
     }
 }
 
@@ -1046,18 +1151,19 @@ mod tests {
 
         let sk = Fr::from(100u64);
         let nk = derive_nullifier_key(sk);
+        let asset_id_u8 = 1u8; // USDC
 
         // Input 1: 10 USDC (10_000_000)
         let rho1 = Fr::from(111u64);
         let rand1 = Fr::from(222u64);
-        let cm1 = note_commitment(10_000_000, sk, rho1, rand1);
+        let cm1 = note_commitment(10_000_000, asset_id_u8, sk, rho1, rand1);
         let epoch1 = 5u64;
         let nf1 = derive_joinsplit_nullifier(nk, rho1, epoch1);
 
         // Input 2: 10 USDC (10_000_000)
         let rho2 = Fr::from(333u64);
         let rand2 = Fr::from(444u64);
-        let cm2 = note_commitment(10_000_000, sk, rho2, rand2);
+        let cm2 = note_commitment(10_000_000, asset_id_u8, sk, rho2, rand2);
         let epoch2 = 6u64;
         let nf2 = derive_joinsplit_nullifier(nk, rho2, epoch2);
 
@@ -1093,11 +1199,11 @@ mod tests {
 
         let rho_c1 = Fr::from(555u64);
         let rand_c1 = Fr::from(666u64);
-        let cm_out1 = note_commitment(3_000_000, sk, rho_c1, rand_c1);
+        let cm_out1 = note_commitment(3_000_000, asset_id_u8, sk, rho_c1, rand_c1);
 
         let rho_c2 = Fr::from(777u64);
         let rand_c2 = Fr::from(888u64);
-        let cm_out2 = note_commitment(1_900_000, sk, rho_c2, rand_c2);
+        let cm_out2 = note_commitment(1_900_000, asset_id_u8, sk, rho_c2, rand_c2);
 
         let rec = Fr::from(0xbeefu64);
         let cid = Fr::from(421614u64);
@@ -1127,7 +1233,7 @@ mod tests {
             chain_id: Some(cid),
             contract_address: Some(caddr),
             expiry: Some(exp),
-            flags_packed: Some(Fr::from(3u64)), // has_change_1 = 1, has_change_2 = 1 (1 + 2 = 3)
+            flags_packed: Some(Fr::from(7u64)), // has_change_1 = 1, has_change_2 = 1, asset_id = 1 (1 + 2*1 + 4*1 = 7)
             is_rollover: Some(Fr::from(0u64)),
 
             in1_value: Some(Fr::from(10_000_000u64)),
@@ -1163,6 +1269,12 @@ mod tests {
             has_change_1: Some(Fr::from(1u64)),
             has_change_2: Some(Fr::from(1u64)),
             expected_binding: Some(binding),
+
+            public_asset_id: Some(Fr::from(asset_id_u8 as u64)),
+            in1_asset_id: Some(Fr::from(asset_id_u8 as u64)),
+            in2_asset_id: Some(Fr::from(asset_id_u8 as u64)),
+            out1_asset_id: Some(Fr::from(asset_id_u8 as u64)),
+            out2_asset_id: Some(Fr::from(asset_id_u8 as u64)),
         };
 
         circuit.generate_constraints(cs.clone()).unwrap();
@@ -1362,5 +1474,107 @@ mod tests {
         let proof = generate_joinsplit_proof(circuit, &keys.proving_key).unwrap();
         let valid = verify_joinsplit_proof(&keys.verifying_key, &proof, &public_inputs).unwrap();
         assert!(valid, "JoinSplit Groth16 proof verification must succeed!");
+    }
+
+    #[test]
+    fn test_joinsplit_asset_id_intra_asset_equality_enforced() {
+        // Critical Audit Patch #1: Cross-asset note mixing must fail!
+        let cs = ConstraintSystem::<Fr>::new_ref();
+        let mut circuit = create_dummy_joinsplit_circuit();
+        // Tamper in2_asset_id to WETH (0) while public_asset_id is USDC (1)
+        circuit.in2_asset_id = Some(Fr::from(0u64));
+
+        circuit.generate_constraints(cs.clone()).unwrap();
+        assert!(
+            !cs.is_satisfied().unwrap(),
+            "Cross-asset input note asset_id mismatch must fail equality constraint!"
+        );
+    }
+
+    #[test]
+    fn test_joinsplit_asset_id_boolean_constraint() {
+        let cs = ConstraintSystem::<Fr>::new_ref();
+        let mut circuit = create_dummy_joinsplit_circuit();
+        // Set invalid asset_id = 2
+        circuit.public_asset_id = Some(Fr::from(2u64));
+        circuit.in1_asset_id = Some(Fr::from(2u64));
+        circuit.in2_asset_id = Some(Fr::from(2u64));
+        circuit.out1_asset_id = Some(Fr::from(2u64));
+        circuit.out2_asset_id = Some(Fr::from(2u64));
+        circuit.flags_packed = Some(Fr::from(8u64)); // 0 + 0 + 4 * 2 = 8
+
+        circuit.generate_constraints(cs.clone()).unwrap();
+        assert!(
+            !cs.is_satisfied().unwrap(),
+            "asset_id >= 2 must fail quadratic boolean constraint b * (1 - b) == 0!"
+        );
+    }
+
+    #[test]
+    fn test_joinsplit_dummy_input_usdc_value_packed() {
+        // Direction B for USDC: value = 0 but asset_id = 1 => value_packed = 2^64
+        let cs = ConstraintSystem::<Fr>::new_ref();
+        let circuit = create_dummy_joinsplit_circuit();
+        assert_eq!(circuit.public_asset_id, Some(Fr::from(1u64)));
+
+        circuit.generate_constraints(cs.clone()).unwrap();
+        assert!(
+            cs.is_satisfied().unwrap(),
+            "USDC dummy input packing (value_packed = 2^64) must satisfy constraints: {:?}",
+            cs.which_is_unsatisfied()
+        );
+    }
+
+    #[test]
+    fn test_flags_packed_r1cs_gadget_enforcement() {
+        use crate::circuit_gadgets::{
+            enforce_joinsplit_flags_packed, enforce_private_note_flags_packed, private_witness,
+        };
+
+        // 1. JoinSplit flags: flags = ch1 + 2*ch2 + 4*asset_id
+        for ch1 in 0..=1u64 {
+            for ch2 in 0..=1u64 {
+                for aid in 0..=1u64 {
+                    let cs = ConstraintSystem::<Fr>::new_ref();
+                    let expected = ch1 + 2 * ch2 + 4 * aid;
+                    let flags_var = private_witness(&cs, Some(Fr::from(expected))).unwrap();
+                    let ch1_var = private_witness(&cs, Some(Fr::from(ch1))).unwrap();
+                    let ch2_var = private_witness(&cs, Some(Fr::from(ch2))).unwrap();
+                    let aid_var = private_witness(&cs, Some(Fr::from(aid))).unwrap();
+
+                    enforce_joinsplit_flags_packed(&flags_var, &ch1_var, &ch2_var, &aid_var)
+                        .unwrap();
+                    assert!(cs.is_satisfied().unwrap());
+                }
+            }
+        }
+
+        // 2. Private note flags: flags = rollover + 2*asset_id
+        for ro in 0..=1u64 {
+            for aid in 0..=1u64 {
+                let cs = ConstraintSystem::<Fr>::new_ref();
+                let expected = ro + 2 * aid;
+                let flags_var = private_witness(&cs, Some(Fr::from(expected))).unwrap();
+                let ro_var = private_witness(&cs, Some(Fr::from(ro))).unwrap();
+                let aid_var = private_witness(&cs, Some(Fr::from(aid))).unwrap();
+
+                enforce_private_note_flags_packed(&flags_var, &ro_var, &aid_var).unwrap();
+                assert!(cs.is_satisfied().unwrap());
+            }
+        }
+    }
+
+    #[test]
+    fn test_intra_asset_conservation_rejects_cross_spend() {
+        let cs = ConstraintSystem::<Fr>::new_ref();
+        let mut circuit = create_dummy_joinsplit_circuit();
+        // Malicious attempt: input notes are USDC (asset_id = 1), but attacker attempts to produce WETH change note (out1_asset_id = 0)
+        circuit.out1_asset_id = Some(Fr::from(0u64));
+
+        circuit.generate_constraints(cs.clone()).unwrap();
+        assert!(
+            !cs.is_satisfied().unwrap(),
+            "Cross-asset spend (mixing USDC input with WETH output) must be strictly rejected by intra-asset equality constraint!"
+        );
     }
 }

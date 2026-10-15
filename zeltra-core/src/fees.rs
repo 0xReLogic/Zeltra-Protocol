@@ -115,6 +115,24 @@ pub fn quote_private_spend(
 /// Prevents spam bot DoS that drains relayer mempool and CPU quota.
 pub const MIN_STANDALONE_ROLLOVER_THRESHOLD_USDC: u64 = 2_000_000; // 2.00 USDC
 
+/// Number of Wei in 1 Gwei (10^9) for WETH 9-decimal normalization (DEC-034A §6).
+pub const WEI_PER_GWEI: u128 = 1_000_000_000;
+
+/// Converts Wei (18 decimals) to Gwei (9 decimals).
+/// Returns None if there is a remainder modulo 10^9 (precision loss) or if value overflows u64.
+pub fn wei_to_gwei(wei: u128) -> Option<u64> {
+    if !wei.is_multiple_of(WEI_PER_GWEI) {
+        return None;
+    }
+    let gwei = wei / WEI_PER_GWEI;
+    u64::try_from(gwei).ok()
+}
+
+/// Converts Gwei (9 decimals) to Wei (18 decimals).
+pub fn gwei_to_wei(gwei: u64) -> u128 {
+    (gwei as u128) * WEI_PER_GWEI
+}
+
 /// Quotes a standalone rollover / refresh transaction (DEC-033).
 /// In standalone rollover, merchant_amount = 0 and protocol_fee = 0 (0 bps).
 /// Relayer receives gas reimbursement + 15% markup directly from the note being rolled over.
@@ -299,5 +317,35 @@ mod tests {
     #[test]
     fn dust_rollover_threshold_matches_dec033() {
         assert_eq!(MIN_STANDALONE_ROLLOVER_THRESHOLD_USDC, 2_000_000); // Exactly $2.00 USDC
+    }
+
+    #[test]
+    fn test_gwei_normalization_precision_bounds() {
+        // Zero bound
+        assert_eq!(wei_to_gwei(0), Some(0));
+        assert_eq!(gwei_to_wei(0), 0);
+
+        // 1 Gwei = 10^9 Wei
+        assert_eq!(wei_to_gwei(1_000_000_000), Some(1));
+        assert_eq!(gwei_to_wei(1), 1_000_000_000);
+
+        // Clean values with no modulo remainder
+        let five_weth_wei: u128 = 5 * 10u128.pow(18);
+        let five_weth_gwei = 5_000_000_000u64;
+        assert_eq!(wei_to_gwei(five_weth_wei), Some(five_weth_gwei));
+        assert_eq!(gwei_to_wei(five_weth_gwei), five_weth_wei);
+
+        // Fractional remainder rejected: 10^9 + 1 wei has remainder 1
+        assert_eq!(wei_to_gwei(1_000_000_001), None);
+        assert_eq!(wei_to_gwei(999_999_999), None);
+
+        // Upper bound: u64::MAX Gwei in Wei
+        let max_gwei = u64::MAX;
+        let max_wei = gwei_to_wei(max_gwei);
+        assert_eq!(wei_to_gwei(max_wei), Some(max_gwei));
+
+        // Overflow of u64 capacity
+        let overflow_wei = (u64::MAX as u128 + 1) * WEI_PER_GWEI;
+        assert_eq!(wei_to_gwei(overflow_wei), None);
     }
 }
