@@ -142,6 +142,10 @@ pub enum ValidationError {
     InvalidDestinationContract(String),
     ZeroDestinationContract,
     UnsupportedChainSelector(u64),
+    UnsupportedAssetId(u8),
+    CrossAssetFeeMismatch,
+    QuoteExpired,
+    GasSpikeDetected,
 }
 
 impl std::fmt::Display for ValidationError {
@@ -179,6 +183,23 @@ impl std::fmt::Display for ValidationError {
             Self::UnsupportedChainSelector(sel) => {
                 write!(f, "Unsupported cross-chain destination selector: {}", sel)
             }
+            Self::UnsupportedAssetId(id) => {
+                write!(
+                    f,
+                    "Unsupported asset ID: {id}. Supported: 0 (WETH), 1 (USDC)"
+                )
+            }
+            Self::CrossAssetFeeMismatch => {
+                write!(
+                    f,
+                    "Cross-asset fee mismatch: requested spend asset does not match quoted asset"
+                )
+            }
+            Self::QuoteExpired => write!(f, "Execution quote has expired (> 20s window)"),
+            Self::GasSpikeDetected => write!(
+                f,
+                "L2 base fee surged > 1.5x of quoted fee, transaction rejected to protect relayer"
+            ),
         }
     }
 }
@@ -247,6 +268,43 @@ pub fn validate_spend_request(
     }
 
     Ok(parsed_recipient)
+}
+
+/// Preflight validation for multi-asset spend requests (DEC-034C Section 2.B)
+pub fn validate_multi_asset_preflight(
+    req_asset_id: u8,
+    quote_asset_id: u8,
+) -> Result<(), ValidationError> {
+    // 1. Validasi Canonical Asset ID (0: WETH, 1: USDC)
+    if req_asset_id > 1 {
+        return Err(ValidationError::UnsupportedAssetId(req_asset_id));
+    }
+
+    // 2. Anti-Cross-Asset Fee Drain: quote asset must match spend asset
+    if req_asset_id != quote_asset_id {
+        return Err(ValidationError::CrossAssetFeeMismatch);
+    }
+
+    Ok(())
+}
+
+/// Validates quote freshness and anti-volatility / gas spike guard (DEC-034C Section 2.A)
+pub fn validate_quote_guard(
+    expiry: u64,
+    current_time_secs: u64,
+    current_base_fee: u64,
+    quoted_base_fee: u64,
+) -> Result<(), ValidationError> {
+    if current_time_secs >= expiry {
+        return Err(ValidationError::QuoteExpired);
+    }
+
+    // Dynamic Gas Spike Guard: reject if current base fee surged > 1.5x quoted base fee
+    if quoted_base_fee > 0 && (current_base_fee as u128) * 10 > (quoted_base_fee as u128) * 15 {
+        return Err(ValidationError::GasSpikeDetected);
+    }
+
+    Ok(())
 }
 
 #[cfg(test)]

@@ -252,6 +252,7 @@ async fn test_private_note_spend_enqueue_and_queue_lifecycle() {
         note_epoch_id: Some(1),
         is_rollover: Some(0),
         input_value: Some(10_000_000),
+        asset_id: Some(1),
         proof_a_neg: format!("0x{}", "11".repeat(128)),
         proof_b: format!("0x{}", "22".repeat(256)),
         proof_c: format!("0x{}", "33".repeat(128)),
@@ -343,7 +344,7 @@ async fn test_end_to_end_multi_wallet_spend_with_mmr_sync() {
     let rho_a = zeltra_sdk::wallet::note_wallet::parse_fr_from_hex(&note_a.rho_hex).unwrap();
     let rand_a =
         zeltra_sdk::wallet::note_wallet::parse_fr_from_hex(&note_a.randomness_hex).unwrap();
-    let cm_a = zeltra_core::note_commitment(10_000_000, sk_a, rho_a, rand_a);
+    let cm_a = zeltra_core::note_commitment(10_000_000, 1, sk_a, rho_a, rand_a);
 
     // Simulate on-chain MMR: append Note 1
     let mut on_chain_mmr = zeltra_core::MerkleMountainRange::new();
@@ -368,7 +369,7 @@ async fn test_end_to_end_multi_wallet_spend_with_mmr_sync() {
     let rho_b = zeltra_sdk::wallet::note_wallet::parse_fr_from_hex(&note_b.rho_hex).unwrap();
     let rand_b =
         zeltra_sdk::wallet::note_wallet::parse_fr_from_hex(&note_b.randomness_hex).unwrap();
-    let cm_b = zeltra_core::note_commitment(25_000_000, sk_b, rho_b, rand_b);
+    let cm_b = zeltra_core::note_commitment(25_000_000, 1, sk_b, rho_b, rand_b);
 
     // Simulate on-chain MMR: append Note 2
     on_chain_mmr.append_leaf(cm_b);
@@ -509,6 +510,7 @@ async fn test_end_to_end_multi_wallet_spend_with_mmr_sync() {
         note_epoch_id: Some(spend_payload.note_epoch_id),
         is_rollover: Some(0),
         input_value: Some(10_000_000),
+        asset_id: Some(1),
         proof_a_neg: format!("0x{}", spend_payload.proof_a_neg_hex),
         proof_b: format!("0x{}", spend_payload.proof_b_hex),
         proof_c: format!("0x{}", spend_payload.proof_c_hex),

@@ -73,6 +73,9 @@ pub struct SpendRequest {
     /// User's Ethereum address (signer of the quote)
     #[serde(default)]
     pub user_address: Option<String>,
+    /// Asset ID: 0 for WETH (Gwei), 1 for USDC (Micro-USDC) (DEC-034C)
+    #[serde(default)]
+    pub asset_id: Option<u8>,
     // --- Private Note ZK UTXO Fields (DEC-016 & DEC-025) ---
     #[serde(default)]
     pub spend_type: Option<String>,
@@ -138,6 +141,8 @@ pub struct PrivateNoteSpendRequest {
     pub is_rollover: Option<u64>,
     #[serde(alias = "input_value", default)]
     pub input_value: Option<u64>,
+    #[serde(default)]
+    pub asset_id: Option<u8>,
     #[serde(alias = "input_nullifier_hex", alias = "nullifier")]
     pub input_nullifier: String,
     #[serde(alias = "output_commitment_hex", default)]
@@ -239,6 +244,8 @@ pub struct JoinSplitSpendRequest {
     pub has_change_2: Option<serde_json::Value>,
     #[serde(default)]
     pub flags_packed: Option<u8>,
+    #[serde(default)]
+    pub asset_id: Option<u8>,
     #[serde(alias = "is_rollover", default)]
     pub is_rollover: Option<u64>,
     #[serde(default)]
@@ -366,6 +373,7 @@ impl From<PrivateNoteSpendRequest> for SpendRequest {
             quote_expiry: req.expiry,
             quote_signature: req.quote_signature,
             user_address: req.user_address,
+            asset_id: req.asset_id,
             // Private Note ZK fields
             spend_type: Some("private_note".to_string()),
             note_root_hex: Some(req.note_root),
@@ -385,6 +393,26 @@ impl From<PrivateNoteSpendRequest> for SpendRequest {
             change_encrypted_memo: req.change_encrypted_memo,
         }
     }
+}
+
+/// Signed Execution Quote Request for Dual-Asset zero-oracle rails (DEC-034C)
+#[derive(Clone, Serialize, Deserialize, Debug)]
+pub struct ExecutionQuoteRequest {
+    pub asset_id: u8, // 0: WETH, 1: USDC
+    pub target_contract: String,
+    pub estimated_gas_limit: u64,
+}
+
+/// Signed Execution Quote Response for Dual-Asset zero-oracle rails (DEC-034C)
+#[derive(Clone, Serialize, Deserialize, Debug)]
+pub struct ExecutionQuoteResponse {
+    pub asset_id: u8,
+    pub base_gas_fee: u64,
+    pub relayer_markup_fee: u64,  // Flat 15% markup (DEC-031)
+    pub total_execution_fee: u64, // Gwei (WETH)  Mikro (USDC)
+    pub quote_hash: String,
+    pub expiry: u64,               // Maks 20 detik
+    pub relayer_signature: String, // EIP-712 Signature
 }
 
 #[derive(Deserialize)]

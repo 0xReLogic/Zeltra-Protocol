@@ -27,6 +27,49 @@ pub async fn handle_private_note_spend(
     axum::extract::State(state): axum::extract::State<AppState>,
     Json(payload): Json<PrivateNoteSpendRequest>,
 ) -> Json<PrivateNoteSpendResponse> {
+    // 0. Asset ID validation (DEC-034C: 0 for WETH, 1 for USDC)
+    let req_asset_id = payload.asset_id.unwrap_or(1);
+    if req_asset_id > 1 {
+        return Json(PrivateNoteSpendResponse {
+            status: "REJECTED".to_string(),
+            message: format!("UnsupportedAssetId: {}", req_asset_id),
+            queue_position: 0,
+            estimated_gas_usdc: None,
+        });
+    }
+
+    // Anti-Cross-Asset Fee Drain (DEC-034C Section 2.B)
+    let cached_quote_opt = {
+        let cache = state.quote_cache.lock().await;
+        let mut found = None;
+        if let Some(ref qh) = payload.quote_hash {
+            if let Some(q) = cache.get(qh) {
+                found = Some(q.clone());
+            }
+        }
+        if found.is_none() {
+            if let Some(ref qid) = payload.quote_id {
+                if let Some(q) = cache.get(qid) {
+                    found = Some(q.clone());
+                }
+            }
+        }
+        found
+    };
+
+    if let Some(ref cached) = cached_quote_opt {
+        if crate::validation::validate_multi_asset_preflight(req_asset_id, cached.asset_id).is_err()
+        {
+            return Json(PrivateNoteSpendResponse {
+                status: "REJECTED".to_string(),
+                message: "CrossAssetFeeMismatch: spend asset does not match quote asset"
+                    .to_string(),
+                queue_position: 0,
+                estimated_gas_usdc: None,
+            });
+        }
+    }
+
     // 1. Idempotency check
     if let Some(ref idem_key) = payload.idempotency_key {
         match state
@@ -537,12 +580,25 @@ pub async fn handle_private_note_spend(
         });
     }
 
-    // Index 15: is_rollover flag (DEC-033)
-    let is_rollover_u64 = U256::from_be_bytes(parsed_inputs[15]).to::<u64>();
-    if is_rollover_u64 != 0 && is_rollover_u64 != 1 {
+    // Index 15: flags_packed (DEC-034A: flags_packed = is_rollover + 2 * asset_id)
+    let flags_packed_u64 = U256::from_be_bytes(parsed_inputs[15]).to::<u64>();
+    if flags_packed_u64 > 3 {
         return Json(PrivateNoteSpendResponse {
             status: "REJECTED".to_string(),
-            message: "public_inputs[15] (is_rollover) must be 0 or 1".to_string(),
+            message: "public_inputs[15] (flags_packed) must be in 0..=3".to_string(),
+            queue_position: 0,
+            estimated_gas_usdc: None,
+        });
+    }
+    let is_rollover_u64 = flags_packed_u64 & 1;
+    let pi_asset_id = (flags_packed_u64 >> 1) as u8;
+    if pi_asset_id != req_asset_id {
+        return Json(PrivateNoteSpendResponse {
+            status: "REJECTED".to_string(),
+            message: format!(
+                "public_inputs[15] asset_id ({}) does not match request asset_id ({})",
+                pi_asset_id, req_asset_id
+            ),
             queue_position: 0,
             estimated_gas_usdc: None,
         });
@@ -679,6 +735,27 @@ pub async fn handle_private_note_spend(
         });
     }
 
+    if let Some(cached) = cached_quote_opt {
+        let current_base_fee = if let Some(client) = state.evm_client.as_ref() {
+            client.get_gas_price().await.unwrap_or(20_000_000) as u64
+        } else {
+            20_000_000
+        };
+        if let Err(e) = crate::validation::validate_quote_guard(
+            cached.expiry,
+            now,
+            current_base_fee,
+            cached.base_gas_fee,
+        ) {
+            return Json(PrivateNoteSpendResponse {
+                status: "REJECTED".to_string(),
+                message: format!("QuoteGuardRejection: {:?}", e),
+                queue_position: 0,
+                estimated_gas_usdc: None,
+            });
+        }
+    }
+
     // 9. EIP-712 Quote Verification (if signed quote provided)
     if let (Some(quote_id), Some(quote_sig), Some(user_addr)) = (
         payload.quote_id.as_ref(),
@@ -739,14 +816,19 @@ pub async fn handle_private_note_spend(
 
         let contract_addr = Address::from_str(&contract_address).unwrap_or(Address::ZERO);
         let user_addr_parsed = Address::from_str(user_addr).unwrap_or(Address::ZERO);
-        let relayer_addr = Address::from_str(&state.relayer_address).unwrap_or(Address::ZERO);
+        let _relayer_addr = Address::from_str(&state.relayer_address).unwrap_or(Address::ZERO);
+
+        let base_gas_fee = (payload.max_execution_fee * 100) / 115;
+        let relayer_markup_fee = payload.max_execution_fee.saturating_sub(base_gas_fee);
 
         let execution_quote = ExecutionQuote {
-            quoteId: U256::from_str(quote_id).unwrap_or(U256::ZERO),
-            maxExecutionFee: U256::from(payload.max_execution_fee),
-            merchantAmount: U256::from(payload.merchant_amount),
-            quoteExpiry: U256::from(payload.expiry.unwrap_or(0)),
-            relayerAddress: relayer_addr,
+            assetId: payload.asset_id.unwrap_or(1),
+            targetContract: contract_addr,
+            baseGasFee: base_gas_fee,
+            relayerMarkupFee: relayer_markup_fee,
+            totalExecutionFee: payload.max_execution_fee,
+            expiry: payload.expiry.unwrap_or(0),
+            chainId: U256::from(chain_id),
         };
 
         let sig_bytes = match hex::decode(quote_sig.trim_start_matches("0x")) {
@@ -1480,6 +1562,51 @@ pub async fn handle_spend_joinsplit(
     axum::extract::State(state): axum::extract::State<AppState>,
     Json(payload): Json<JoinSplitSpendRequest>,
 ) -> Json<JoinSplitSpendResponse> {
+    // 0. Asset ID validation (DEC-034C: 0 for WETH, 1 for USDC)
+    let req_asset_id = payload.asset_id.unwrap_or(1);
+    if req_asset_id > 1 {
+        return Json(JoinSplitSpendResponse {
+            status: "REJECTED".to_string(),
+            message: format!("UnsupportedAssetId: {}", req_asset_id),
+            tx_hash: None,
+            queue_position: 0,
+            estimated_gas_usdc: None,
+        });
+    }
+
+    // Anti-Cross-Asset Fee Drain (DEC-034C Section 2.B)
+    let cached_quote_opt = {
+        let cache = state.quote_cache.lock().await;
+        let mut found = None;
+        if let Some(ref qh) = payload.quote_hash {
+            if let Some(q) = cache.get(qh) {
+                found = Some(q.clone());
+            }
+        }
+        if found.is_none() {
+            if let Some(ref qid) = payload.quote_id {
+                if let Some(q) = cache.get(qid) {
+                    found = Some(q.clone());
+                }
+            }
+        }
+        found
+    };
+
+    if let Some(ref cached) = cached_quote_opt {
+        if crate::validation::validate_multi_asset_preflight(req_asset_id, cached.asset_id).is_err()
+        {
+            return Json(JoinSplitSpendResponse {
+                status: "REJECTED".to_string(),
+                message: "CrossAssetFeeMismatch: spend asset does not match quote asset"
+                    .to_string(),
+                tx_hash: None,
+                queue_position: 0,
+                estimated_gas_usdc: None,
+            });
+        }
+    }
+
     // 1. Idempotency check
     if let Some(ref idem_key) = payload.idempotency_key {
         match state
@@ -1591,7 +1718,7 @@ pub async fn handle_spend_joinsplit(
         Some(serde_json::Value::Number(ref n)) => n.as_u64().unwrap_or(0) as u8,
         _ => 0u8,
     };
-    let expected_flags = hc1 + 2 * hc2;
+    let expected_flags = hc1 + 2 * hc2 + 4 * req_asset_id;
     let flags_packed = payload.flags_packed.unwrap_or(expected_flags);
     if flags_packed != expected_flags {
         return Json(JoinSplitSpendResponse {
@@ -2325,6 +2452,7 @@ mod tests {
                     note_epoch_id: Some(0),
                     is_rollover: Some(0),
                     input_value: Some(10_000_000),
+                    asset_id: Some(1),
                     input_nullifier,
                     output_commitment: Some(output_commitment),
                     recipient,
@@ -2620,7 +2748,7 @@ mod tests {
         req.idempotency_key = Some("idem_dust_rollover".to_string());
         // DEC-033: Standalone rollover with dust input value (< $2.00 USDC)
         req.is_rollover = Some(1);
-        req.public_inputs[15] = format!("0x{:064x}", 1);
+        req.public_inputs[15] = format!("0x{:064x}", 3);
         req.merchant_amount = 0;
         req.public_inputs[6] = format!("0x{:064x}", 0);
         req.protocol_fee = 0;
@@ -2639,7 +2767,7 @@ mod tests {
         req.idempotency_key = Some("idem_rollover_merchant".to_string());
         // DEC-033: Standalone rollover must have merchant_amount == 0
         req.is_rollover = Some(1);
-        req.public_inputs[15] = format!("0x{:064x}", 1);
+        req.public_inputs[15] = format!("0x{:064x}", 3);
         req.merchant_amount = 5_000_000;
         req.public_inputs[6] = format!("0x{:064x}", 5_000_000);
 
@@ -2672,7 +2800,7 @@ mod tests {
         req.idempotency_key = Some("idem_insufficient_gas".to_string());
         // DEC-033: Standalone rollover where input_value < execution_fee
         req.is_rollover = Some(1);
-        req.public_inputs[15] = format!("0x{:064x}", 1);
+        req.public_inputs[15] = format!("0x{:064x}", 3);
         req.merchant_amount = 0;
         req.public_inputs[6] = format!("0x{:064x}", 0);
         req.protocol_fee = 0;
@@ -2707,20 +2835,22 @@ mod tests {
         )
         .unwrap();
         let user_address = format!("{:?}", signer.address());
-        let relayer_addr =
+        let _relayer_addr =
             std::str::FromStr::from_str(&state.relayer_address).unwrap_or(Address::ZERO);
-
-        let quote_b = ExecutionQuote {
-            quoteId: U256::from(999999u64),
-            maxExecutionFee: U256::from(50_000u64),
-            merchantAmount: U256::from(5_000_000u64),
-            quoteExpiry: U256::from(0u64),
-            relayerAddress: relayer_addr,
-        };
 
         let chain_id = 421614u64;
         let contract_addr =
             std::str::FromStr::from_str("0x000000000000000000000000000000000000012c").unwrap();
+
+        let quote_b = ExecutionQuote {
+            assetId: 1,
+            targetContract: contract_addr,
+            baseGasFee: 43478,
+            relayerMarkupFee: 6522,
+            totalExecutionFee: 50_000,
+            expiry: 0,
+            chainId: U256::from(chain_id),
+        };
         let (v, r, s) =
             sign_quote(&quote_b, chain_id, contract_addr, &user_pk).expect("sign quote B");
         let mut sig_bytes = Vec::with_capacity(65);
@@ -2769,7 +2899,7 @@ mod tests {
         let rand1 = Fr::from(300u64);
         let v_in1 = 10_000_000u64; // 10 USDC
 
-        let cm1 = note_commitment(v_in1, sk, rho1, rand1);
+        let cm1 = note_commitment(v_in1, 1, sk, rho1, rand1);
 
         let mut mmr = MerkleMountainRange::new();
         let (leaf_idx1, root) = mmr.append(cm1);
@@ -2794,11 +2924,11 @@ mod tests {
 
         let rho_out1 = Fr::from(401u64);
         let rand_out1 = Fr::from(402u64);
-        let cm_out1 = note_commitment(0, sk, rho_out1, rand_out1);
+        let cm_out1 = note_commitment(0, 1, sk, rho_out1, rand_out1);
 
         let rho_out2 = Fr::from(501u64);
         let rand_out2 = Fr::from(502u64);
-        let cm_out2 = note_commitment(0, sk, rho_out2, rand_out2);
+        let cm_out2 = note_commitment(0, 1, sk, rho_out2, rand_out2);
 
         let merch_amt = 9_900_000u64;
         let proto_fee = (merch_amt * 45).div_ceil(10_000); // 44_550
@@ -2832,10 +2962,11 @@ mod tests {
             chain_id: Some(cid),
             contract_address: Some(caddr),
             expiry: Some(exp),
-            flags_packed: Some(Fr::from(0u64)),
+            flags_packed: Some(Fr::from(4u64)),
             is_rollover: Some(Fr::from(0u64)),
 
             in1_value: Some(Fr::from(v_in1)),
+            in1_asset_id: Some(Fr::from(1u64)),
             in1_owner_key: Some(sk),
             in1_rho: Some(rho1),
             in1_randomness: Some(rand1),
@@ -2844,6 +2975,7 @@ mod tests {
             in1_mountain_siblings: Some(in1_sibs),
 
             in2_value: Some(Fr::from(0u64)),
+            in2_asset_id: Some(Fr::from(1u64)),
             in2_owner_key: Some(sk),
             in2_rho: Some(Fr::from(0u64)),
             in2_randomness: Some(Fr::from(0u64)),
@@ -2856,17 +2988,20 @@ mod tests {
             mmr_peaks: Some(peaks),
 
             out1_value: Some(Fr::from(0u64)),
+            out1_asset_id: Some(Fr::from(1u64)),
             out1_owner_key: Some(sk),
             out1_rho: Some(rho_out1),
             out1_randomness: Some(rand_out1),
 
             out2_value: Some(Fr::from(0u64)),
+            out2_asset_id: Some(Fr::from(1u64)),
             out2_owner_key: Some(sk),
             out2_rho: Some(rho_out2),
             out2_randomness: Some(rand_out2),
 
             has_change_1: Some(Fr::from(0u64)),
             has_change_2: Some(Fr::from(0u64)),
+            public_asset_id: Some(Fr::from(1u64)),
             expected_binding: Some(binding),
         }
     }
@@ -2914,7 +3049,7 @@ mod tests {
                 let chain_id = 421614u64;
                 let contract_address = "0x0000000000000000000000000000000000005678".to_string();
                 let expiry = 0u64;
-                let flags_packed = 0u8;
+                let flags_packed = 4u8;
                 let is_rollover = 0u64;
 
                 let public_inputs: Vec<String> = pis
@@ -2932,6 +3067,7 @@ mod tests {
                     input_nullifier_2,
                     epoch_id_1: Some(epoch_id_1),
                     epoch_id_2: Some(epoch_id_2),
+                    asset_id: Some(1),
                     output_commitment_1,
                     output_commitment_2,
                     recipient,
@@ -3148,5 +3284,46 @@ mod tests {
             .0
             .message
             .contains("restricted under public sanctions policy"));
+    }
+
+    #[tokio::test]
+    async fn test_relayer_rejects_cross_asset_quote_tampering() {
+        let (state, _tmp) = setup_test_state().await;
+
+        // 1. Relayer creates a valid quote for USDC (asset_id = 1)
+        let usdc_quote = crate::dto::ExecutionQuoteResponse {
+            asset_id: 1,
+            base_gas_fee: 20_000,
+            relayer_markup_fee: 3_000,
+            total_execution_fee: 23_000,
+            quote_hash: "0xabcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890"
+                .to_string(),
+            expiry: std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_secs()
+                + 20,
+            relayer_signature: "0x1234".to_string(),
+        };
+
+        // Cache this quote in state
+        state
+            .quote_cache
+            .lock()
+            .await
+            .insert(usdc_quote.quote_hash.clone(), usdc_quote.clone());
+
+        // 2. Client attempts to spend a WETH note (asset_id = 0) referencing the USDC quote
+        let mut req = sample_valid_private_note_request();
+        req.asset_id = Some(0); // WETH spend
+        req.quote_hash = Some(usdc_quote.quote_hash.clone());
+
+        let resp = handle_private_note_spend(State(state), Json(req)).await;
+        assert_eq!(resp.0.status, "REJECTED");
+        assert!(
+            resp.0.message.contains("CrossAssetFeeMismatch"),
+            "Expected CrossAssetFeeMismatch, got: {}",
+            resp.0.message
+        );
     }
 }

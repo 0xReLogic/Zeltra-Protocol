@@ -23,11 +23,10 @@ use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use zeltra_core::{
     decrypt_note_memo, derive_joinsplit_dummy_nullifier, derive_joinsplit_nullifier,
-    derive_note_randomness, derive_nullifier, derive_nullifier_key, derive_viewing_keys,
-    encrypt_note_memo, encrypt_note_memo_optional, extract_joinsplit_public_inputs,
-    fr_from_be_bytes, fr_to_be_bytes, generate_joinsplit_proof, generate_note_proof,
-    note_commitment, split_quote_hash_to_limbs, to_evm_g1, to_evm_g2, IncomingViewingKey,
-    JoinSplitCircuit, OutcomingViewingKey,
+    derive_nullifier, derive_nullifier_key, derive_viewing_keys, encrypt_note_memo,
+    encrypt_note_memo_optional, extract_joinsplit_public_inputs, fr_from_be_bytes, fr_to_be_bytes,
+    generate_joinsplit_proof, generate_note_proof, note_commitment, split_quote_hash_to_limbs,
+    to_evm_g1, to_evm_g2, IncomingViewingKey, JoinSplitCircuit, OutcomingViewingKey,
 };
 
 /// Minimum non-dust amount (1000 base units = 0.001 USDC)
@@ -104,11 +103,94 @@ pub struct DirectDepositPayload {
     pub encrypted_memo: Vec<u8>,
 }
 
+mod fr_serde {
+    use serde::{Deserialize, Deserializer, Serializer};
+    use zeltra_core::{fr_to_be_bytes, Fr};
+
+    pub fn serialize<S>(fr: &Fr, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let hex_str = format!("0x{}", hex::encode(fr_to_be_bytes(fr)));
+        serializer.serialize_str(&hex_str)
+    }
+
+    pub fn deserialize<'de, D>(deserializer: D) -> Result<Fr, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let s = String::deserialize(deserializer)?;
+        let clean = s.strip_prefix("0x").unwrap_or(&s);
+        let bytes = hex::decode(clean).map_err(serde::de::Error::custom)?;
+        if bytes.len() != 32 {
+            return Err(serde::de::Error::custom("expected 32 bytes for Fr"));
+        }
+        let mut arr = [0u8; 32];
+        arr.copy_from_slice(&bytes);
+        zeltra_core::from_evm_scalar(&arr)
+            .ok_or_else(|| serde::de::Error::custom("non-canonical scalar"))
+    }
+}
+
+/// Private Note V1 with integrated asset_id (DEC-034C / Patch Audit #5)
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PrivateNoteV1 {
+    pub value: u64,   // Gwei (if asset_id == 0) or Micro-USDC (if asset_id == 1)
+    pub asset_id: u8, // 0: WETH, 1: USDC
+    #[serde(with = "fr_serde")]
+    pub owner_key: Fr, // Public owner key (not raw spending_key)
+    #[serde(with = "fr_serde")]
+    pub rho: Fr,
+    #[serde(with = "fr_serde")]
+    pub randomness: Fr,
+}
+
+impl PrivateNoteV1 {
+    pub fn new(value: u64, asset_id: u8, owner_key: Fr, rho: Fr, randomness: Fr) -> Self {
+        Self {
+            value,
+            asset_id,
+            owner_key,
+            rho,
+            randomness,
+        }
+    }
+
+    /// Computes canonical bit-packed value according to DEC-034A: value + asset_id * 2^64
+    pub fn value_packed(&self) -> Fr {
+        let two_pow_64 = Fr::from(1u128 << 64);
+        Fr::from(self.value) + (Fr::from(self.asset_id as u64) * two_pow_64)
+    }
+
+    /// Computes leaf commitment Poseidon-W5
+    pub fn commitment(&self) -> Fr {
+        zeltra_core::note_commitment(
+            self.value,
+            self.asset_id,
+            self.owner_key,
+            self.rho,
+            self.randomness,
+        )
+    }
+}
+
+/// Deterministically derives the note hiding randomness r from shared secret and rho (DEC-037 / DEC-034C).
+pub fn derive_note_randomness(shared_secret: &[u8; 32], rho: &Fr) -> Fr {
+    let secret_fr = Fr::from_be_bytes_mod_order(shared_secret);
+    zeltra_core::derive_note_randomness(secret_fr, *rho)
+}
+
+fn default_wallet_note_asset_id() -> u8 {
+    1 // USDC
+}
+
 /// UTXO Note stored in client wallet
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct WalletNote {
     pub commitment_hex: String,
     pub value: u64,
+    #[serde(default = "default_wallet_note_asset_id")]
+    pub asset_id: u8,
     pub owner_key_hex: String,
     pub rho_hex: String,
     pub randomness_hex: String,
@@ -382,6 +464,9 @@ pub enum WalletError {
     BackupDecryptionFailed,
     NoteNotYetIndexed(u64),
     RelayerError(String),
+    UnsupportedAssetId(u8),
+    NonCanonicalRhoScalar,
+    MixedAssetSelection,
 }
 
 impl std::fmt::Display for WalletError {
@@ -418,6 +503,19 @@ impl std::fmt::Display for WalletError {
                 write!(f, "Note at leaf index {idx} is not yet indexed on relayer")
             }
             Self::RelayerError(err) => write!(f, "Relayer sync error: {err}"),
+            Self::UnsupportedAssetId(id) => {
+                write!(
+                    f,
+                    "Unsupported asset ID: {id}. Supported: 0 (WETH), 1 (USDC)"
+                )
+            }
+            Self::NonCanonicalRhoScalar => write!(f, "Non-canonical rho scalar (>= r)"),
+            Self::MixedAssetSelection => {
+                write!(
+                    f,
+                    "Mixed-asset transaction rejected: notes must share the same asset_id"
+                )
+            }
         }
     }
 }
@@ -449,6 +547,10 @@ pub struct PrivateNoteWallet {
     #[serde(default)]
     outcoming_viewing_key_hex: String,
     pub notes: HashMap<String, WalletNote>,
+    #[serde(default)]
+    pub usdc_notes: Vec<PrivateNoteV1>,
+    #[serde(default)]
+    pub weth_notes: Vec<PrivateNoteV1>,
     pub current_merkle_root_hex: Option<String>,
     #[serde(skip)]
     pub mmr: zeltra_core::MerkleMountainRange,
@@ -493,10 +595,73 @@ impl PrivateNoteWallet {
             incoming_viewing_public_key_hex: ivk_pub_hex,
             outcoming_viewing_key_hex: ovk_hex,
             notes: HashMap::new(),
+            usdc_notes: Vec::new(),
+            weth_notes: Vec::new(),
             current_merkle_root_hex: None,
             mmr: zeltra_core::MerkleMountainRange::new(),
             mmr_proof_cache: HashMap::new(),
         }
+    }
+
+    /// Returns total active balance per asset ID (DEC-034C).
+    /// - `asset_id == 0`: WETH total balance in Gwei (9 decimals)
+    /// - `asset_id == 1`: USDC total balance in Micro-USDC (6 decimals)
+    pub fn get_balance(&self, asset_id: u8) -> Result<u64, WalletError> {
+        match asset_id {
+            0 => Ok(self.weth_notes.iter().map(|n| n.value).sum()),
+            1 => Ok(self.usdc_notes.iter().map(|n| n.value).sum()),
+            _ => Err(WalletError::UnsupportedAssetId(asset_id)),
+        }
+    }
+
+    /// Returns human-readable formatted balance string (DEC-034C).
+    /// - `asset_id == 0`: format as "{:.6} ETH"
+    /// - `asset_id == 1`: format as "${:.2} USDC"
+    pub fn get_human_balance(&self, asset_id: u8) -> Result<String, WalletError> {
+        let raw = self.get_balance(asset_id)?;
+        match asset_id {
+            0 => Ok(format!("{:.6} ETH", raw as f64 / 1_000_000_000.0)),
+            1 => Ok(format!("${:.2} USDC", raw as f64 / 1_000_000.0)),
+            _ => Err(WalletError::UnsupportedAssetId(asset_id)),
+        }
+    }
+
+    /// Canonical big-endian deserialization of on-chain note plaintext (DEC-034C / Patch Audit #6).
+    /// Format: Bytes 0..8: value, Bytes 8..40: rho EVM scalar, Bytes 40..48: asset_id.
+    pub fn process_decrypted_plaintext(
+        &mut self,
+        plaintext_bytes: &[u8; 48],
+        shared_secret: &[u8; 32],
+    ) -> Result<(), WalletError> {
+        let value = u64::from_be_bytes(plaintext_bytes[0..8].try_into().unwrap());
+        let mut rho_bytes = [0u8; 32];
+        rho_bytes.copy_from_slice(&plaintext_bytes[8..40]);
+        let rho =
+            zeltra_core::from_evm_scalar(&rho_bytes).ok_or(WalletError::NonCanonicalRhoScalar)?;
+        let asset_id_u64 = u64::from_be_bytes(plaintext_bytes[40..48].try_into().unwrap());
+
+        if asset_id_u64 > 1 {
+            return Err(WalletError::UnsupportedAssetId(asset_id_u64 as u8));
+        }
+        let asset_id = asset_id_u64 as u8;
+
+        let randomness = derive_note_randomness(shared_secret, &rho);
+        let owner_key = self.incoming_viewing_key()?.owner_key();
+        let note = PrivateNoteV1 {
+            value,
+            asset_id,
+            owner_key,
+            rho,
+            randomness,
+        };
+
+        if asset_id == 0 {
+            self.weth_notes.push(note);
+        } else {
+            self.usdc_notes.push(note);
+        }
+
+        Ok(())
     }
 
     /// Spending key as Fr
@@ -597,7 +762,7 @@ impl PrivateNoteWallet {
                 continue;
             }
             if let Some(pt) = decrypt_note_memo(&ev.encrypted_memo, &ivk) {
-                let deterministic_r = derive_note_randomness(sk, pt.rho);
+                let deterministic_r = zeltra_core::derive_note_randomness(sk, pt.rho);
                 let note = pt.to_note(sk);
                 let cm = note.commitment();
                 let cm_hex = format!("0x{}", hex::encode(fr_to_be_bytes(&cm)));
@@ -660,6 +825,7 @@ impl PrivateNoteWallet {
             let wallet_note = WalletNote {
                 commitment_hex: cand.cm_hex.clone(),
                 value: cand.value,
+                asset_id: cand.asset_id as u8,
                 owner_key_hex: hex::encode(fr_to_be_bytes(&sk)),
                 rho_hex: hex::encode(fr_to_be_bytes(&cand.rho)),
                 randomness_hex: hex::encode(fr_to_be_bytes(&cand.deterministic_r)),
@@ -774,7 +940,7 @@ impl PrivateNoteWallet {
                     continue;
                 }
                 if let Some(pt) = decrypt_note_memo(&ev.encrypted_memo, ivk) {
-                    let deterministic_r = derive_note_randomness(sk, pt.rho);
+                    let deterministic_r = zeltra_core::derive_note_randomness(sk, pt.rho);
                     let note = pt.to_note(sk);
                     let cm = note.commitment();
                     let cm_hex = format!("0x{}", hex::encode(fr_to_be_bytes(&cm)));
@@ -837,6 +1003,7 @@ impl PrivateNoteWallet {
                     let wallet_note = WalletNote {
                         commitment_hex: cand.cm_hex.clone(),
                         value: cand.value,
+                        asset_id: cand.asset_id as u8,
                         owner_key_hex: hex::encode(fr_to_be_bytes(&sk)),
                         rho_hex: hex::encode(fr_to_be_bytes(&cand.rho)),
                         randomness_hex: hex::encode(fr_to_be_bytes(&cand.deterministic_r)),
@@ -872,14 +1039,15 @@ impl PrivateNoteWallet {
 
     pub fn recover_note_manual(&mut self, value: u64, rho: Fr) -> Result<WalletNote, WalletError> {
         let sk = self.spending_key()?;
-        let r = derive_note_randomness(sk, rho);
-        let cm = note_commitment(value, sk, rho, r);
+        let r = zeltra_core::derive_note_randomness(sk, rho);
+        let cm = note_commitment(value, 1 /* USDC */, sk, rho, r);
         let cm_raw_hex = hex::encode(fr_to_be_bytes(&cm));
         let cm_hex = format!("0x{}", cm_raw_hex);
 
         let note = WalletNote {
             commitment_hex: cm_hex.clone(),
             value,
+            asset_id: 1,
             owner_key_hex: hex::encode(fr_to_be_bytes(&sk)),
             rho_hex: hex::encode(fr_to_be_bytes(&rho)),
             randomness_hex: hex::encode(fr_to_be_bytes(&r)),
@@ -1055,20 +1223,33 @@ impl PrivateNoteWallet {
         self.balance() + self.reserved_balance(current_time_secs)
     }
 
-    /// Prepares payload for on-chain `deposit_direct_note` transaction (DEC-038C).
+    /// Prepares payload for on-chain `deposit_direct_note` transaction (DEC-038C), defaulting to USDC (asset_id = 1).
     pub fn prepare_direct_deposit(
         &mut self,
         amount: u64,
         recipient_key: Option<Fr>,
     ) -> Result<DirectDepositPayload, WalletError> {
+        self.prepare_direct_deposit_asset(amount, 1 /* USDC */, recipient_key)
+    }
+
+    /// Prepares payload for on-chain `deposit_direct_note` transaction for a specific asset (DEC-034C).
+    pub fn prepare_direct_deposit_asset(
+        &mut self,
+        amount: u64,
+        asset_id: u8,
+        recipient_key: Option<Fr>,
+    ) -> Result<DirectDepositPayload, WalletError> {
+        if asset_id > 1 {
+            return Err(WalletError::UnsupportedAssetId(asset_id));
+        }
         let spending_key = match recipient_key {
             Some(key) => key,
             None => self.spending_key()?,
         };
         let mut rng = OsRng;
         let rho = Fr::rand(&mut rng);
-        let r = derive_note_randomness(spending_key, rho);
-        let cm = note_commitment(amount, spending_key, rho, r);
+        let r = zeltra_core::derive_note_randomness(spending_key, rho);
+        let cm = note_commitment(amount, asset_id, spending_key, rho, r);
 
         let ivk = match recipient_key {
             Some(key) => {
@@ -1080,9 +1261,9 @@ impl PrivateNoteWallet {
         };
 
         let memo =
-            encrypt_note_memo_optional(amount, rho, 1 /* USDC */, &ivk).unwrap_or_else(Vec::new);
+            encrypt_note_memo_optional(amount, rho, asset_id as u64, &ivk).unwrap_or_else(Vec::new);
 
-        self.stage_pending_deposit_note(cm, amount, rho, r)?;
+        self.stage_pending_deposit_note_asset(cm, amount, asset_id, rho, r)?;
 
         Ok(DirectDepositPayload {
             amount,
@@ -1091,11 +1272,23 @@ impl PrivateNoteWallet {
         })
     }
 
-    /// Stages a pending direct deposit note locally with NoteStatus::PendingDeposit (DEC-038C).
+    /// Stages a pending direct deposit note locally with NoteStatus::PendingDeposit (DEC-038C), defaulting to USDC (asset_id = 1).
     pub fn stage_pending_deposit_note(
         &mut self,
         cm: Fr,
         amount: u64,
+        rho: Fr,
+        rand_val: Fr,
+    ) -> Result<WalletNote, WalletError> {
+        self.stage_pending_deposit_note_asset(cm, amount, 1 /* USDC */, rho, rand_val)
+    }
+
+    /// Stages a pending direct deposit note locally with NoteStatus::PendingDeposit for a specific asset (DEC-034C).
+    pub fn stage_pending_deposit_note_asset(
+        &mut self,
+        cm: Fr,
+        amount: u64,
+        asset_id: u8,
         rho: Fr,
         rand_val: Fr,
     ) -> Result<WalletNote, WalletError> {
@@ -1113,6 +1306,7 @@ impl PrivateNoteWallet {
         let note = WalletNote {
             commitment_hex: cm_hex.clone(),
             value: amount,
+            asset_id,
             owner_key_hex: sk_hex,
             rho_hex,
             randomness_hex: rand_hex,
@@ -1169,7 +1363,7 @@ impl PrivateNoteWallet {
         Ok(false)
     }
 
-    /// Creates a new note for an on-chain deposit.
+    /// Creates a new note for an on-chain deposit, defaulting to USDC (asset_id = 1).
     ///
     /// Returns the created `WalletNote` and its `commitment_hex` ready to be passed
     /// to `Zeltra::deposit(amount, commitment)`.
@@ -1178,12 +1372,25 @@ impl PrivateNoteWallet {
         amount: u64,
         current_time_secs: u64,
     ) -> Result<(WalletNote, String), WalletError> {
+        self.create_deposit_note_asset(amount, 1 /* USDC */, current_time_secs)
+    }
+
+    /// Creates a new note for an on-chain deposit with a specific asset (DEC-034C).
+    pub fn create_deposit_note_asset(
+        &mut self,
+        amount: u64,
+        asset_id: u8,
+        current_time_secs: u64,
+    ) -> Result<(WalletNote, String), WalletError> {
+        if asset_id > 1 {
+            return Err(WalletError::UnsupportedAssetId(asset_id));
+        }
         let mut rng = OsRng;
         let sk = self.spending_key()?;
         let rho = Fr::rand(&mut rng);
         let rand_val = Fr::rand(&mut rng);
 
-        let cm = note_commitment(amount, sk, rho, rand_val);
+        let cm = note_commitment(amount, asset_id, sk, rho, rand_val);
         let cm_hex = hex::encode(fr_to_be_bytes(&cm));
         let sk_hex = hex::encode(fr_to_be_bytes(&sk));
         let rho_hex = hex::encode(fr_to_be_bytes(&rho));
@@ -1192,6 +1399,7 @@ impl PrivateNoteWallet {
         let note = WalletNote {
             commitment_hex: cm_hex.clone(),
             value: amount,
+            asset_id,
             owner_key_hex: sk_hex,
             rho_hex,
             randomness_hex: rand_hex,
@@ -1208,19 +1416,38 @@ impl PrivateNoteWallet {
         Ok((note, cm_hex))
     }
 
-    /// Creates an unconfirmed note for a deposit transaction with a specific epoch (DEC-033).
+    /// Creates an unconfirmed note for a deposit transaction with a specific epoch (DEC-033), defaulting to USDC (asset_id = 1).
     pub fn create_deposit_note_with_epoch(
         &mut self,
         amount: u64,
         epoch_id: u32,
         current_time_secs: u64,
     ) -> Result<(WalletNote, String), WalletError> {
+        self.create_deposit_note_with_epoch_asset(
+            amount,
+            1, /* USDC */
+            epoch_id,
+            current_time_secs,
+        )
+    }
+
+    /// Creates an unconfirmed note for a deposit transaction with a specific epoch and asset (DEC-034C).
+    pub fn create_deposit_note_with_epoch_asset(
+        &mut self,
+        amount: u64,
+        asset_id: u8,
+        epoch_id: u32,
+        current_time_secs: u64,
+    ) -> Result<(WalletNote, String), WalletError> {
+        if asset_id > 1 {
+            return Err(WalletError::UnsupportedAssetId(asset_id));
+        }
         let mut rng = OsRng;
         let sk = self.spending_key()?;
         let rho = Fr::rand(&mut rng);
         let rand_val = Fr::rand(&mut rng);
 
-        let cm = note_commitment(amount, sk, rho, rand_val);
+        let cm = note_commitment(amount, asset_id, sk, rho, rand_val);
         let cm_hex = hex::encode(fr_to_be_bytes(&cm));
         let sk_hex = hex::encode(fr_to_be_bytes(&sk));
         let rho_hex = hex::encode(fr_to_be_bytes(&rho));
@@ -1229,6 +1456,7 @@ impl PrivateNoteWallet {
         let note = WalletNote {
             commitment_hex: cm_hex.clone(),
             value: amount,
+            asset_id,
             owner_key_hex: sk_hex,
             rho_hex,
             randomness_hex: rand_hex,
@@ -1930,7 +2158,7 @@ impl PrivateNoteWallet {
         let in_rho = parse_fr_from_hex(&input_note.rho_hex)?;
         let in_rand = parse_fr_from_hex(&input_note.randomness_hex)?;
 
-        let in_cm = note_commitment(input_note.value, sk, in_rho, in_rand);
+        let in_cm = note_commitment(input_note.value, input_note.asset_id, sk, in_rho, in_rand);
         let nk = self.nullifier_key()?;
         let note_epoch_id = input_note.epoch_id.unwrap_or(0);
         let nullifier = derive_nullifier(nk, in_cm, leaf_index, note_epoch_id);
@@ -1990,8 +2218,14 @@ impl PrivateNoteWallet {
         let (ch_val, ch_cm, ch_rho, ch_rand, change_encrypted_memo_hex) = if selected.has_change {
             let mut rng = OsRng;
             let c_rho = Fr::rand(&mut rng);
-            let c_rand = derive_note_randomness(sk, c_rho);
-            let c_cm = note_commitment(selected.change_amount, sk, c_rho, c_rand);
+            let c_rand = zeltra_core::derive_note_randomness(sk, c_rho);
+            let c_cm = note_commitment(
+                selected.change_amount,
+                input_note.asset_id,
+                sk,
+                c_rho,
+                c_rand,
+            );
 
             let c_cm_hex = hex::encode(fr_to_be_bytes(&c_cm));
             let c_rho_hex = hex::encode(fr_to_be_bytes(&c_rho));
@@ -2002,13 +2236,19 @@ impl PrivateNoteWallet {
 
             // Encrypt change memo with IVK (DEC-037)
             let change_memo = self.incoming_viewing_key().ok().map(|ivk| {
-                hex::encode(encrypt_note_memo(selected.change_amount, c_rho, 1u64, &ivk))
+                hex::encode(encrypt_note_memo(
+                    selected.change_amount,
+                    c_rho,
+                    input_note.asset_id as u64,
+                    &ivk,
+                ))
             });
 
             // Persist unconfirmed change note (2PC Phase 1)
             let change_note = WalletNote {
                 commitment_hex: c_cm_hex,
                 value: selected.change_amount,
+                asset_id: input_note.asset_id,
                 owner_key_hex: sk_hex,
                 rho_hex: c_rho_hex,
                 randomness_hex: c_rand_hex,
@@ -2063,6 +2303,10 @@ impl PrivateNoteWallet {
         };
         let note_epoch_id_fr = Fr::from(note_epoch_id as u64);
 
+        let is_rollover_u64 = if is_rollover { 1u64 } else { 0u64 };
+        let flags_packed_val = is_rollover_u64 + 2 * (input_note.asset_id as u64);
+        let flags_packed_fr = Fr::from(flags_packed_val);
+
         // Compute Scope Binding Commitment (DEC-035B Stage 1 & Stage 2)
         let scope_hash = zeltra_core::compute_scope_hash(
             recipient_fr,
@@ -2090,7 +2334,10 @@ impl PrivateNoteWallet {
             contract_address: Some(contract_fr),
             expiry: Some(Fr::from(expiry)),
             has_change: Some(has_change_fr),
+            flags_packed: Some(flags_packed_fr),
+
             is_rollover: Some(is_rollover_fr),
+            asset_id: Some(Fr::from(input_note.asset_id as u64)),
 
             input_value: Some(Fr::from(input_note.value)),
             input_owner_key: Some(sk),
@@ -2135,7 +2382,7 @@ impl PrivateNoteWallet {
             hex::encode(contract_bytes),
             hex::encode(fr_to_be_bytes(&Fr::from(expiry))),
             hex::encode(fr_to_be_bytes(&has_change_fr)),
-            hex::encode(fr_to_be_bytes(&is_rollover_fr)),
+            hex::encode(fr_to_be_bytes(&flags_packed_fr)),
         ];
 
         Ok(SpendProofPayload {
@@ -2422,7 +2669,13 @@ impl PrivateNoteWallet {
         let sk = self.spending_key()?;
         let in1_rho = parse_fr_from_hex(&input_note_1.rho_hex)?;
         let in1_rand = parse_fr_from_hex(&input_note_1.randomness_hex)?;
-        let in1_cm = note_commitment(input_note_1.value, sk, in1_rho, in1_rand);
+        let in1_cm = note_commitment(
+            input_note_1.value,
+            input_note_1.asset_id,
+            sk,
+            in1_rho,
+            in1_rand,
+        );
 
         // Pre-fetch Input Note 2 if present
         let input_note_2_opt = if let Some(ref cm2_hex) = selected.second_input_commitment_hex {
@@ -2451,7 +2704,8 @@ impl PrivateNoteWallet {
                 .ok_or_else(|| WalletError::NoteMissingWitness("input 2 leaf_index".into()))?;
             let rho_2 = parse_fr_from_hex(&input_note_2.rho_hex)?;
             let rand_2 = parse_fr_from_hex(&input_note_2.randomness_hex)?;
-            let cm_2 = note_commitment(input_note_2.value, sk, rho_2, rand_2);
+            let cm_2 =
+                note_commitment(input_note_2.value, input_note_2.asset_id, sk, rho_2, rand_2);
 
             if self.mmr.leaf_count <= leaf_index_2 as usize {
                 while self.mmr.leaf_count < leaf_index_2 as usize {
@@ -2543,7 +2797,13 @@ impl PrivateNoteWallet {
             let mut rng = OsRng;
             let c_rho = Fr::rand(&mut rng);
             let c_rand = Fr::rand(&mut rng);
-            let c_cm = note_commitment(selected.change_amount, sk, c_rho, c_rand);
+            let c_cm = note_commitment(
+                selected.change_amount,
+                input_note_1.asset_id,
+                sk,
+                c_rho,
+                c_rand,
+            );
 
             let c_cm_hex = hex::encode(fr_to_be_bytes(&c_cm));
             let c_rho_hex = hex::encode(fr_to_be_bytes(&c_rho));
@@ -2554,6 +2814,7 @@ impl PrivateNoteWallet {
             let change_note = WalletNote {
                 commitment_hex: c_cm_hex,
                 value: selected.change_amount,
+                asset_id: input_note_1.asset_id,
                 owner_key_hex: sk_hex,
                 rho_hex: c_rho_hex,
                 randomness_hex: c_rand_hex,
@@ -2574,7 +2835,7 @@ impl PrivateNoteWallet {
             let mut rng = OsRng;
             let c_rho = Fr::rand(&mut rng);
             let c_rand = Fr::rand(&mut rng);
-            let c_cm = note_commitment(0, sk, c_rho, c_rand);
+            let c_cm = note_commitment(0, input_note_1.asset_id, sk, c_rho, c_rand);
             (Fr::from(0u64), c_cm, c_rho, c_rand)
         };
 
@@ -2583,7 +2844,7 @@ impl PrivateNoteWallet {
         let ch2_val = Fr::from(0u64);
         let ch2_rho = Fr::rand(&mut rng);
         let ch2_rand = Fr::rand(&mut rng);
-        let ch2_cm = note_commitment(0, sk, ch2_rho, ch2_rand);
+        let ch2_cm = note_commitment(0, input_note_1.asset_id, sk, ch2_rho, ch2_rand);
 
         // 6. EVM parameters & domain scope
         let recipient_bytes = parse_bytes32_from_hex(recipient_evm_address, true)?;
@@ -2609,7 +2870,10 @@ impl PrivateNoteWallet {
             Fr::from(0u64)
         };
         let has_change_2_fr = Fr::from(0u64);
-        let flags_packed_fr = has_change_1_fr; // bit 0 = has_change_1, bit 1 = 0
+        let asset_id_u8 = input_note_1.asset_id;
+        let asset_id_fr = Fr::from(asset_id_u8 as u64);
+        let flags_packed_fr =
+            has_change_1_fr + has_change_2_fr * Fr::from(2u64) + asset_id_fr * Fr::from(4u64);
 
         // 7. Construct JoinSplitCircuit (DEC-036A)
         let circuit = JoinSplitCircuit {
@@ -2666,6 +2930,12 @@ impl PrivateNoteWallet {
             has_change_1: Some(has_change_1_fr),
             has_change_2: Some(has_change_2_fr),
             expected_binding: Some(expected_binding),
+
+            public_asset_id: Some(asset_id_fr),
+            in1_asset_id: Some(asset_id_fr),
+            in2_asset_id: Some(asset_id_fr),
+            out1_asset_id: Some(asset_id_fr),
+            out2_asset_id: Some(asset_id_fr),
         };
 
         // 8. Generate Groth16 Proof
@@ -4170,7 +4440,7 @@ mod tests {
         let (note, cm) = wallet.create_deposit_note(10_000_000, 1000).unwrap();
         let rho = parse_fr_from_hex(&note.rho_hex).unwrap();
         let rand = parse_fr_from_hex(&note.randomness_hex).unwrap();
-        let fr_cm = zeltra_core::note_commitment(10_000_000, sk, rho, rand);
+        let fr_cm = zeltra_core::note_commitment(10_000_000, 1, sk, rho, rand);
 
         let mut mmr = zeltra_core::MerkleMountainRange::new();
         mmr.append(fr_cm);
@@ -4266,14 +4536,14 @@ mod tests {
         // Simulate 2 incoming notes: note 1 (10 USDC), note 2 (5 USDC)
         let rho1 = Fr::from(111u64);
         let val1 = 10_000_000u64;
-        let r1 = derive_note_randomness(sk, rho1);
-        let cm1 = note_commitment(val1, sk, rho1, r1);
+        let r1 = zeltra_core::derive_note_randomness(sk, rho1);
+        let cm1 = note_commitment(val1, 1, sk, rho1, r1);
         let memo1 = encrypt_note_memo(val1, rho1, 1, &ivk);
 
         let rho2 = Fr::from(222u64);
         let val2 = 5_000_000u64;
-        let r2 = derive_note_randomness(sk, rho2);
-        let cm2 = note_commitment(val2, sk, rho2, r2);
+        let r2 = zeltra_core::derive_note_randomness(sk, rho2);
+        let cm2 = note_commitment(val2, 1, sk, rho2, r2);
         let memo2 = encrypt_note_memo(val2, rho2, 1, &ivk);
 
         // Third memo from an unrelated user (should be ignored by trial decryption)
@@ -4400,14 +4670,14 @@ mod tests {
 
         let val1 = 7_000_000u64;
         let rho1 = Fr::from(555u64);
-        let r1 = derive_note_randomness(sk, rho1);
-        let cm1 = note_commitment(val1, sk, rho1, r1);
+        let r1 = zeltra_core::derive_note_randomness(sk, rho1);
+        let cm1 = note_commitment(val1, 1, sk, rho1, r1);
         let memo1 = encrypt_note_memo(val1, rho1, 1, &ivk);
 
         let val2 = 3_000_000u64;
         let rho2 = Fr::from(777u64);
-        let r2 = derive_note_randomness(sk, rho2);
-        let cm2 = note_commitment(val2, sk, rho2, r2);
+        let r2 = zeltra_core::derive_note_randomness(sk, rho2);
+        let cm2 = note_commitment(val2, 1, sk, rho2, r2);
         let memo2 = encrypt_note_memo(val2, rho2, 1, &ivk);
 
         let nf1 = derive_nullifier(nk, cm1, 0, 0);
@@ -4450,5 +4720,66 @@ mod tests {
         assert_eq!(res.total_spent_balance, val1);
         assert_eq!(res.total_unspent_balance, val2);
         assert_eq!(wallet.balance(), val2);
+    }
+
+    #[test]
+    fn test_sdk_trial_decryption_partitions_notes_correctly() {
+        let seed = [0x99u8; 32];
+        let mut wallet = PrivateNoteWallet::new(&seed);
+        let shared_secret = [0x42u8; 32];
+
+        // 1. Prepare WETH Note (asset_id = 0, 1.5 ETH = 1_500_000_000 Gwei)
+        let weth_val = 1_500_000_000u64;
+        let weth_rho = Fr::from(12345u64);
+        let weth_rho_bytes = fr_to_be_bytes(&weth_rho);
+        let mut weth_pt_bytes = [0u8; 48];
+        weth_pt_bytes[0..8].copy_from_slice(&weth_val.to_be_bytes());
+        weth_pt_bytes[8..40].copy_from_slice(&weth_rho_bytes);
+        weth_pt_bytes[40..48].copy_from_slice(&0u64.to_be_bytes()); // asset_id = 0
+
+        // 2. Prepare USDC Note (asset_id = 1, 25.00 USDC = 25_000_000 Micro-USDC)
+        let usdc_val = 25_000_000u64;
+        let usdc_rho = Fr::from(67890u64);
+        let usdc_rho_bytes = fr_to_be_bytes(&usdc_rho);
+        let mut usdc_pt_bytes = [0u8; 48];
+        usdc_pt_bytes[0..8].copy_from_slice(&usdc_val.to_be_bytes());
+        usdc_pt_bytes[8..40].copy_from_slice(&usdc_rho_bytes);
+        usdc_pt_bytes[40..48].copy_from_slice(&1u64.to_be_bytes()); // asset_id = 1
+
+        // Process both plaintexts
+        wallet
+            .process_decrypted_plaintext(&weth_pt_bytes, &shared_secret)
+            .expect("WETH plaintext deserialization must succeed");
+        wallet
+            .process_decrypted_plaintext(&usdc_pt_bytes, &shared_secret)
+            .expect("USDC plaintext deserialization must succeed");
+
+        // Verify partitioned collections
+        assert_eq!(wallet.weth_notes.len(), 1);
+        assert_eq!(wallet.usdc_notes.len(), 1);
+        assert_eq!(wallet.weth_notes[0].asset_id, 0);
+        assert_eq!(wallet.usdc_notes[0].asset_id, 1);
+        assert_eq!(wallet.weth_notes[0].value, weth_val);
+        assert_eq!(wallet.usdc_notes[0].value, usdc_val);
+
+        // Verify balance queries
+        assert_eq!(wallet.get_balance(0).unwrap(), 1_500_000_000);
+        assert_eq!(wallet.get_balance(1).unwrap(), 25_000_000);
+        assert!(matches!(
+            wallet.get_balance(2),
+            Err(WalletError::UnsupportedAssetId(2))
+        ));
+
+        // Verify human formatted balances
+        assert_eq!(wallet.get_human_balance(0).unwrap(), "1.500000 ETH");
+        assert_eq!(wallet.get_human_balance(1).unwrap(), "$25.00 USDC");
+
+        // Verify invalid asset_id in plaintext is rejected
+        let mut invalid_pt_bytes = [0u8; 48];
+        invalid_pt_bytes[40..48].copy_from_slice(&2u64.to_be_bytes()); // asset_id = 2
+        assert!(matches!(
+            wallet.process_decrypted_plaintext(&invalid_pt_bytes, &shared_secret),
+            Err(WalletError::UnsupportedAssetId(2))
+        ));
     }
 }

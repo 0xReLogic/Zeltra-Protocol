@@ -18,6 +18,7 @@ fn mock_wallet_note(cm: &str, val: u64, epoch: u32) -> WalletNote {
     WalletNote {
         commitment_hex: cm.to_string(),
         value: val,
+        asset_id: 1,
         owner_key_hex: "01".repeat(32),
         rho_hex: "02".repeat(32),
         randomness_hex: "03".repeat(32),
@@ -83,6 +84,7 @@ fn test_b6_2_progressive_consolidation_6_notes_to_2_notes() {
         let note = WalletNote {
             commitment_hex: cm.clone(),
             value: 1_000_000, // 1 USDC
+            asset_id: 1,
             owner_key_hex: "01".repeat(32),
             rho_hex: "02".repeat(32),
             randomness_hex: "03".repeat(32),
@@ -151,6 +153,7 @@ fn test_b6_2_progressive_consolidation_6_notes_to_2_notes() {
         let new_note = WalletNote {
             commitment_hex: new_cm.clone(),
             value: fused_value,
+            asset_id: 1,
             owner_key_hex: "01".repeat(32),
             rho_hex: "02".repeat(32),
             randomness_hex: "03".repeat(32),

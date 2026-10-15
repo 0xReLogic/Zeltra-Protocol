@@ -85,14 +85,13 @@ const DEFAULT_DB_KEY: &str = "default-change-in-production";
 fn database_key() -> Result<String> {
     match std::env::var("ZELTRA_DB_KEY") {
         Ok(value) if !value.trim().is_empty() && value != DEFAULT_DB_KEY => Ok(value),
-        Ok(_) | Err(_) if crate::config::runtime_mode().is_strict() => {
+        _ if crate::config::runtime_mode().is_strict() => {
             anyhow::bail!(
                 "ZELTRA_DB_KEY must be explicitly configured in {} mode",
                 crate::config::runtime_mode().label()
             )
         }
-        Ok(value) => Ok(value),
-        Err(_) => Ok(DEFAULT_DB_KEY.to_string()),
+        _ => Ok(DEFAULT_DB_KEY.to_string()),
     }
 }
 

@@ -173,6 +173,11 @@ impl IncomingViewingKey {
     pub fn secret_bytes(&self) -> [u8; 32] {
         self.secret
     }
+
+    /// Returns the public owner key scalar (Fr) derived from the public key bytes.
+    pub fn owner_key(&self) -> Fr {
+        Fr::from_be_bytes_mod_order(&self.public)
+    }
 }
 
 /// Outcoming Viewing Key (OVK) for viewing change and payment history.
