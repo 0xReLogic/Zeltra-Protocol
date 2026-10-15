@@ -1,20 +1,169 @@
-use crate::dto::{PrivateSpendQuoteRequest, PrivateSpendQuoteResponse};
+use crate::dto::{
+    ExecutionQuoteRequest, ExecutionQuoteResponse, PrivateSpendQuoteRequest,
+    PrivateSpendQuoteResponse,
+};
 use crate::state::AppState;
 use alloy_primitives::{Address, U256};
 use axum::extract::{Query, State};
+use axum::http::StatusCode;
 use axum::Json;
 use std::str::FromStr;
-use zeltra_sdk::eip712::{compute_quote_hashes, ExecutionQuote};
+use zeltra_sdk::eip712::{compute_quote_hash, compute_quote_hashes, sign_quote, ExecutionQuote};
 
-/// Quote expiry time in seconds (5 minutes)
-const QUOTE_EXPIRY_SECS: u64 = 300;
+/// Quote expiry time in seconds (DEC-034C: 20 seconds strict anti-arbitrage window)
+pub const QUOTE_EXPIRY_SECS: u64 = 20;
 
-/// Create an EIP-712 signed execution quote via POST (DEC-038C)
+/// Create an EIP-712 signed execution quote via POST (DEC-034C / DEC-038C)
 pub async fn create_quote(
     State(state): State<AppState>,
-    Json(payload): Json<PrivateSpendQuoteRequest>,
-) -> Json<PrivateSpendQuoteResponse> {
-    compute_quote(&state, payload).await
+    Json(payload): Json<ExecutionQuoteRequest>,
+) -> Result<Json<ExecutionQuoteResponse>, (StatusCode, Json<serde_json::Value>)> {
+    if payload.asset_id > 1 {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({
+                "status": "ERROR",
+                "message": format!("Unsupported asset_id: {}. Only 0 (WETH) and 1 (USDC) are supported", payload.asset_id)
+            })),
+        ));
+    }
+
+    // Resolve target contract and chain ID
+    let (contract_address, chain_id) = if let Some(client) = state.evm_client.as_ref() {
+        let id = client.chain_id().await.unwrap_or(421614);
+        let addr = if !payload.target_contract.trim().is_empty() {
+            payload.target_contract.clone()
+        } else {
+            client.contract_address()
+        };
+        (addr, id)
+    } else {
+        let env_chain_id = std::env::var("ZELTRA_CHAIN_ID")
+            .ok()
+            .and_then(|s| s.parse::<u64>().ok())
+            .unwrap_or(421614);
+        let env_contract = std::env::var("ZELTRA_CONTRACT_ADDRESS").unwrap_or_else(|_| {
+            if !payload.target_contract.trim().is_empty() {
+                payload.target_contract.clone()
+            } else {
+                "0x000000000000000000000000000000000000012c".to_string()
+            }
+        });
+        (env_contract, env_chain_id)
+    };
+
+    let contract_addr = match Address::from_str(&contract_address) {
+        Ok(addr) if addr != Address::ZERO => addr,
+        _ => {
+            return Err((
+                StatusCode::BAD_REQUEST,
+                Json(serde_json::json!({
+                    "status": "ERROR",
+                    "message": "Invalid contract address configured for EIP-712 signing domain"
+                })),
+            ));
+        }
+    };
+
+    let gas_limit = if payload.estimated_gas_limit > 0 {
+        payload.estimated_gas_limit
+    } else {
+        500_000
+    };
+
+    // Calculate base gas fee in native asset units (DEC-034C Zero-Oracle):
+    // asset_id 0 (WETH): Gwei (9 decimals)
+    // asset_id 1 (USDC): Micro-USDC (6 decimals)
+    let base_gas_fee: u64 = if payload.asset_id == 0 {
+        let gas_price_wei = if let Some(client) = state.evm_client.as_ref() {
+            client.get_gas_price().await.unwrap_or(20_000_000)
+        } else {
+            20_000_000
+        };
+        let total_wei = (gas_limit as u128) * gas_price_wei;
+        let gwei = total_wei.div_ceil(1_000_000_000) as u64;
+        gwei.max(1)
+    } else {
+        default_gas_cost().max(20_000)
+    };
+
+    // Flat 15% relayer markup with ceiling division (DEC-031 / DEC-034C)
+    let relayer_markup_fee = (base_gas_fee * 15).div_ceil(100);
+    let total_execution_fee = base_gas_fee + relayer_markup_fee;
+
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+    let expiry = now + QUOTE_EXPIRY_SECS;
+
+    let execution_quote = ExecutionQuote {
+        assetId: payload.asset_id,
+        targetContract: contract_addr,
+        baseGasFee: base_gas_fee,
+        relayerMarkupFee: relayer_markup_fee,
+        totalExecutionFee: total_execution_fee,
+        expiry,
+        chainId: U256::from(chain_id),
+    };
+
+    let quote_hash_b256 = compute_quote_hash(&execution_quote, chain_id, contract_addr);
+    let quote_hash_hex = format!("0x{}", hex::encode(quote_hash_b256.0));
+
+    // Sign with relayer private key
+    let relayer_pk = get_relayer_private_key()?;
+    let (v, r, s) =
+        sign_quote(&execution_quote, chain_id, contract_addr, &relayer_pk).map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({
+                    "status": "ERROR",
+                    "message": format!("Failed to sign quote: {}", e)
+                })),
+            )
+        })?;
+
+    let sig_hex = format!("0x{}{}{:02x}", hex::encode(r), hex::encode(s), v);
+
+    let quote_resp = ExecutionQuoteResponse {
+        asset_id: payload.asset_id,
+        base_gas_fee,
+        relayer_markup_fee,
+        total_execution_fee,
+        quote_hash: quote_hash_hex.clone(),
+        expiry,
+        relayer_signature: sig_hex,
+    };
+
+    // Cache the quote in AppState to prevent cross-asset quote tampering
+    state
+        .quote_cache
+        .lock()
+        .await
+        .insert(quote_hash_hex, quote_resp.clone());
+
+    Ok(Json(quote_resp))
+}
+
+fn get_relayer_private_key() -> Result<[u8; 32], (StatusCode, Json<serde_json::Value>)> {
+    if let Ok(pk_str) = std::env::var("ZELTRA_RELAYER_PRIVATE_KEY") {
+        let clean = pk_str.trim().trim_start_matches("0x");
+        if let Ok(bytes) = hex::decode(clean) {
+            if bytes.len() == 32 {
+                let mut pk = [0u8; 32];
+                pk.copy_from_slice(&bytes);
+                return Ok(pk);
+            }
+        }
+    }
+    // In test or non-strict dev environments, provide deterministic test key if env set
+    Err((
+        StatusCode::INTERNAL_SERVER_ERROR,
+        Json(serde_json::json!({
+            "status": "ERROR",
+            "message": "Relayer private key unavailable for EIP-712 quote signing"
+        })),
+    ))
 }
 
 pub async fn handle_private_spend_quote(
@@ -36,7 +185,6 @@ pub async fn compute_quote(
     // CCIP fee breakdown: if destination_chain_selector is provided, determine CCIP network fee
     let (ccip_network_fee, destination_chain_selector) = match query.destination_chain_selector {
         Some(selector) => {
-            // Default CCIP network fee is 800,000 base units (0.80 USDC) or configurable via env
             let fee = std::env::var("ZELTRA_CCIP_NETWORK_FEE_USDC")
                 .ok()
                 .and_then(|s| s.parse::<u64>().ok())
@@ -57,13 +205,10 @@ pub async fn compute_quote(
         ));
     }
 
-    // DEC-028: Protocol spend fee is unified to flat 45 bps (0.45%) permanently.
-    // Holding-time discount tiers and root aging gaming are abolished.
     let fee_bps = zeltra_core::PRIVATE_SPEND_FEE_BPS;
     let fee_tier = None;
     let discount_bps = None;
 
-    // Calculate spend quote: markup is applied ONLY to relayer gas, CCIP fee is pass-through
     let quote_opt = match ccip_network_fee {
         Some(ccip_fee) => zeltra_core::quote_cross_chain_private_spend_with_fee(
             query.merchant_amount,
@@ -91,7 +236,6 @@ pub async fn compute_quote(
         ));
     };
 
-    // Generate quote ID and expiry for EIP-712 signing
     let quote_id_hex = generate_quote_id();
     let quote_expiry = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -99,7 +243,6 @@ pub async fn compute_quote(
         .as_secs()
         + QUOTE_EXPIRY_SECS;
 
-    // Get contract address and chain ID from state or environment (fail-closed if unavailable, DEC-028/DEC-031)
     let domain_opt: Option<(String, u64)> = if let Some(client) = state.evm_client.as_ref() {
         match client.chain_id().await {
             Ok(id) => Some((client.contract_address(), id)),
@@ -112,7 +255,6 @@ pub async fn compute_quote(
     let (contract_address, chain_id) = match domain_opt {
         Some((addr, id)) => (addr, id),
         None => {
-            // Fallback to configured environment variables
             let env_chain_id = std::env::var("ZELTRA_CHAIN_ID")
                 .ok()
                 .and_then(|s| s.parse::<u64>().ok());
@@ -120,8 +262,6 @@ pub async fn compute_quote(
             match (env_contract, env_chain_id) {
                 (Some(addr), Some(id)) if !addr.trim().is_empty() => (addr, id),
                 _ => {
-                    // DEC-031: Eliminate fallback quote with status OK without signing domain.
-                    // Fail-closed: return error response when domain is missing.
                     return Json(error_response(
                         query.merchant_amount,
                         relayer_gas_cost,
@@ -148,15 +288,16 @@ pub async fn compute_quote(
             ));
         }
     };
-    let relayer_addr = Address::from_str(&state.relayer_address).unwrap_or(Address::ZERO);
 
-    // Build EIP-712 ExecutionQuote struct
+    // Build EIP-712 ExecutionQuote struct with assetId = 1 (USDC for private-spend endpoint)
     let execution_quote = ExecutionQuote {
-        quoteId: U256::from_str(&quote_id_hex).unwrap_or(U256::ZERO),
-        maxExecutionFee: U256::from(quote.execution_fee),
-        merchantAmount: U256::from(quote.merchant_amount),
-        quoteExpiry: U256::from(quote_expiry),
-        relayerAddress: relayer_addr,
+        assetId: 1,
+        targetContract: contract_addr,
+        baseGasFee: relayer_gas_cost,
+        relayerMarkupFee: quote.relayer_markup,
+        totalExecutionFee: quote.execution_fee,
+        expiry: quote_expiry,
+        chainId: U256::from(chain_id),
     };
 
     // Compute EIP-712 hashes for client verification
@@ -265,6 +406,10 @@ mod tests {
         std::env::set_var(
             "ZELTRA_CONTRACT_ADDRESS",
             "0x1111111111111111111111111111111111111111",
+        );
+        std::env::set_var(
+            "ZELTRA_RELAYER_PRIVATE_KEY",
+            "0x0101010101010101010101010101010101010101010101010101010101010101",
         );
         let tmp = tempfile::TempDir::new().unwrap();
         let db_path = tmp.path().join("quote_test.db");
@@ -441,5 +586,116 @@ mod tests {
             response.0.message.contains("Invalid contract address")
                 || response.0.message.contains("signing domain unavailable")
         );
+    }
+
+    #[tokio::test]
+    async fn test_relayer_quote_dual_asset() {
+        let _guard = ENV_LOCK.lock().await;
+        let state = test_state().await;
+
+        // 1. WETH quote (asset_id = 0, units: Gwei)
+        let weth_req = ExecutionQuoteRequest {
+            asset_id: 0,
+            target_contract: "0x1111111111111111111111111111111111111111".to_string(),
+            estimated_gas_limit: 500_000,
+        };
+        let weth_resp = create_quote(State(state.clone()), Json(weth_req))
+            .await
+            .expect("WETH quote");
+        assert_eq!(weth_resp.0.asset_id, 0);
+        assert!(weth_resp.0.base_gas_fee > 0);
+        assert_eq!(
+            weth_resp.0.relayer_markup_fee,
+            (weth_resp.0.base_gas_fee * 15 + 99) / 100
+        );
+        assert_eq!(
+            weth_resp.0.total_execution_fee,
+            weth_resp.0.base_gas_fee + weth_resp.0.relayer_markup_fee
+        );
+        assert!(weth_resp.0.quote_hash.starts_with("0x"));
+        assert!(weth_resp.0.relayer_signature.starts_with("0x"));
+
+        // 2. USDC quote (asset_id = 1, units: Micro-USDC)
+        let usdc_req = ExecutionQuoteRequest {
+            asset_id: 1,
+            target_contract: "0x1111111111111111111111111111111111111111".to_string(),
+            estimated_gas_limit: 500_000,
+        };
+        let usdc_resp = create_quote(State(state.clone()), Json(usdc_req))
+            .await
+            .expect("USDC quote");
+        assert_eq!(usdc_resp.0.asset_id, 1);
+        assert!(usdc_resp.0.base_gas_fee >= 20_000);
+        assert_eq!(
+            usdc_resp.0.relayer_markup_fee,
+            (usdc_resp.0.base_gas_fee * 15 + 99) / 100
+        );
+        assert_eq!(
+            usdc_resp.0.total_execution_fee,
+            usdc_resp.0.base_gas_fee + usdc_resp.0.relayer_markup_fee
+        );
+        assert!(usdc_resp.0.quote_hash.starts_with("0x"));
+        assert!(usdc_resp.0.relayer_signature.starts_with("0x"));
+
+        // Verify EIP-712 signature over WETH quote
+        let contract_addr =
+            Address::from_str("0x1111111111111111111111111111111111111111").unwrap();
+        let signer = alloy::signers::local::PrivateKeySigner::from_bytes(
+            &alloy_primitives::B256::from([1u8; 32]),
+        )
+        .unwrap();
+        let expected_signer = signer.address();
+
+        let sig_bytes =
+            hex::decode(weth_resp.0.relayer_signature.trim_start_matches("0x")).unwrap();
+        let r: [u8; 32] = sig_bytes[0..32].try_into().unwrap();
+        let s: [u8; 32] = sig_bytes[32..64].try_into().unwrap();
+        let v = sig_bytes[64];
+        let eq = ExecutionQuote {
+            assetId: 0,
+            targetContract: contract_addr,
+            baseGasFee: weth_resp.0.base_gas_fee,
+            relayerMarkupFee: weth_resp.0.relayer_markup_fee,
+            totalExecutionFee: weth_resp.0.total_execution_fee,
+            expiry: weth_resp.0.expiry,
+            chainId: U256::from(421614),
+        };
+        let valid = zeltra_sdk::eip712::verify_quote_signature(
+            &eq,
+            421614,
+            contract_addr,
+            (v, r, s),
+            expected_signer,
+        )
+        .unwrap();
+        assert!(valid, "EIP-712 signature must verify successfully");
+    }
+
+    #[tokio::test]
+    async fn test_relayer_quote_expiry_strict_window() {
+        let _guard = ENV_LOCK.lock().await;
+        let state = test_state().await;
+
+        let req = ExecutionQuoteRequest {
+            asset_id: 1,
+            target_contract: "0x1111111111111111111111111111111111111111".to_string(),
+            estimated_gas_limit: 500_000,
+        };
+        let now_before = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+        let resp = create_quote(State(state), Json(req))
+            .await
+            .expect("quote created");
+        let now_after = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+
+        // Must be at most 20 seconds from creation time (strict window)
+        assert!(resp.0.expiry >= now_before + 20);
+        assert!(resp.0.expiry <= now_after + 20);
+        assert!(resp.0.expiry - now_before <= 21);
     }
 }

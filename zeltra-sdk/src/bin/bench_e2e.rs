@@ -149,7 +149,9 @@ fn main() {
         contract_address: Some(Fr::from(0x123456u64)),
         expiry: Some(Fr::from(1893456000u64)),
         has_change: Some(Fr::from(1u64)),
+        flags_packed: Some(Fr::from(2u64)),
         is_rollover: Some(Fr::from(0u64)),
+        asset_id: Some(Fr::from(1u64)),
 
         input_value: Some(Fr::from(input_value)),
         input_owner_key: Some(input_owner_key),

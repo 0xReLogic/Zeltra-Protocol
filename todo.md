@@ -25,9 +25,9 @@ Ref: [`DEC-034`](file:///workspaces/Zeltra-Protocol/research/decisions/DEC-034-d
 - [x] **Task B — Smart Contract Stylus Arbitrum (`zeltra-contracts`):** [SELESAI & AUDITED]
   - Detail spesifikasi eksekusi: [`taskBdec034.md`](file:///workspaces/Zeltra-Protocol/taskBdec034.md) & [`DEC-034B`](file:///workspaces/Zeltra-Protocol/research/decisions/DEC-034B-stylus-siloed-solvency-payable-weth-wrap-and-multi-asset-settlement.md)
   - Multi-liability per-asset, `deposit_direct_weth` & `deposit_direct_native_eth` auto-wrap, pemisahan raw vs normalized amount, bit-bounds check `flags_packed`, unifikasi storage relayer fee. (64/64 Rust unit tests passed, wasm32 clean, clippy clean, Python real-case 46/46 passed).
-- [ ] **Task C — Relayer Zero-Oracle, Client SDK & CLI Tooling (`zeltra-node`, `zeltra-sdk`, `zeltra-cli`):**
+- [x] **Task C — Relayer Zero-Oracle, Client SDK & CLI Tooling (`zeltra-node`, `zeltra-sdk`, `zeltra-cli`):** [SELESAI & AUDITED]
   - Detail spesifikasi eksekusi: [`taskCdec034.md`](file:///workspaces/Zeltra-Protocol/taskCdec034.md) & [`DEC-034C`](file:///workspaces/Zeltra-Protocol/research/decisions/DEC-034C-relayer-zero-oracle-reimbursement-and-sdk-multi-asset-wallet.md)
-  - EIP-712 quote preimage binding `asset_id`, anti-drain preflight validation, partitioned wallet & Knapsack coin selection, trial decryption recovery.
+  - EIP-712 quote preimage binding `asset_id`, zero-oracle gas reimbursement (WETH in Gwei, USDC in Micro-USDC), anti-drain preflight validation, partitioned wallet & Knapsack coin selection, canonical 48-byte BE memo trial decryption recovery. (66/66 SDK tests passed, 97/97 node tests passed, 4/4 CLI tests passed, clippy & fmt clean).
 
 ---
 

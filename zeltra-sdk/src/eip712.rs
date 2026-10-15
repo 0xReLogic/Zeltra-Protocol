@@ -8,17 +8,17 @@ use alloy_primitives::{keccak256, Address, B256};
 use alloy_sol_types::{eip712_domain, sol, Eip712Domain, SolStruct};
 use serde::{Deserialize, Serialize};
 
-// Define the ExecutionQuote struct using sol! macro
-// This auto-generates SolStruct with EIP-712 hashing methods
 sol! {
     /// Execution quote that users sign to authorize maximum execution fees
     #[derive(Debug, PartialEq, Serialize, Deserialize)]
     struct ExecutionQuote {
-        uint256 quoteId;
-        uint256 maxExecutionFee;
-        uint256 merchantAmount;
-        uint256 quoteExpiry;
-        address relayerAddress;
+        uint8 assetId;
+        address targetContract;
+        uint64 baseGasFee;
+        uint64 relayerMarkupFee;
+        uint64 totalExecutionFee;
+        uint64 expiry;
+        uint256 chainId;
     }
 }
 
@@ -156,16 +156,17 @@ mod tests {
 
     #[test]
     fn test_eip712_hash_deterministic() {
-        let quote = ExecutionQuote {
-            quoteId: U256::from(123u64),
-            maxExecutionFee: U256::from(5_000_000u64),
-            merchantAmount: U256::from(100_000_000u64),
-            quoteExpiry: U256::from(1718234567u64),
-            relayerAddress: address!("0x1234567890123456789012345678901234567890"),
-        };
-
-        let chain_id = 421614u64; // Arbitrum Sepolia
         let contract_address = address!("0xabcdef1234567890abcdef1234567890abcdef12");
+        let chain_id = 421614u64; // Arbitrum Sepolia
+        let quote = ExecutionQuote {
+            assetId: 1,
+            targetContract: contract_address,
+            baseGasFee: 20_000,
+            relayerMarkupFee: 3_000,
+            totalExecutionFee: 23_000,
+            expiry: 1718234567,
+            chainId: U256::from(chain_id),
+        };
 
         let hash1 = compute_quote_hash(&quote, chain_id, contract_address);
         let hash2 = compute_quote_hash(&quote, chain_id, contract_address);
@@ -175,15 +176,16 @@ mod tests {
 
     #[test]
     fn test_eip712_different_chain_id() {
-        let quote = ExecutionQuote {
-            quoteId: U256::from(123u64),
-            maxExecutionFee: U256::from(5_000_000u64),
-            merchantAmount: U256::from(100_000_000u64),
-            quoteExpiry: U256::from(1718234567u64),
-            relayerAddress: address!("0x1234567890123456789012345678901234567890"),
-        };
-
         let contract_address = address!("0xabcdef1234567890abcdef1234567890abcdef12");
+        let quote = ExecutionQuote {
+            assetId: 1,
+            targetContract: contract_address,
+            baseGasFee: 20_000,
+            relayerMarkupFee: 3_000,
+            totalExecutionFee: 23_000,
+            expiry: 1718234567,
+            chainId: U256::from(421614u64),
+        };
 
         let hash1 = compute_quote_hash(&quote, 421614u64, contract_address);
         let hash2 = compute_quote_hash(&quote, 1u64, contract_address);
@@ -207,16 +209,18 @@ mod tests {
         let verifying_key = signing_key.verifying_key();
         let signer_address = public_key_to_address(verifying_key);
 
-        let quote = ExecutionQuote {
-            quoteId: U256::from(456u64),
-            maxExecutionFee: U256::from(10_000_000u64),
-            merchantAmount: U256::from(200_000_000u64),
-            quoteExpiry: U256::from(1718300000u64),
-            relayerAddress: address!("0x9876543210987654321098765432109876543210"),
-        };
-
         let chain_id = 421614u64;
         let contract_address = address!("0xfedcba0987654321fedcba0987654321fedcba09");
+
+        let quote = ExecutionQuote {
+            assetId: 0, // WETH
+            targetContract: contract_address,
+            baseGasFee: 15_000,
+            relayerMarkupFee: 2_250,
+            totalExecutionFee: 17_250,
+            expiry: 1718300000,
+            chainId: U256::from(chain_id),
+        };
 
         // Sign the quote
         let signature = sign_quote(&quote, chain_id, contract_address, &private_key).unwrap();
@@ -249,16 +253,18 @@ mod tests {
         let signing_key2 = SigningKey::from_bytes((&private_key2).into()).unwrap();
         let wrong_signer = public_key_to_address(signing_key2.verifying_key());
 
-        let quote = ExecutionQuote {
-            quoteId: U256::from(789u64),
-            maxExecutionFee: U256::from(3_000_000u64),
-            merchantAmount: U256::from(50_000_000u64),
-            quoteExpiry: U256::from(1718400000u64),
-            relayerAddress: address!("0x1111111111111111111111111111111111111111"),
-        };
-
         let chain_id = 421614u64;
         let contract_address = address!("0x2222222222222222222222222222222222222222");
+
+        let quote = ExecutionQuote {
+            assetId: 1,
+            targetContract: contract_address,
+            baseGasFee: 10_000,
+            relayerMarkupFee: 1_500,
+            totalExecutionFee: 11_500,
+            expiry: 1718400000,
+            chainId: U256::from(chain_id),
+        };
 
         // Sign with key1
         let signature = sign_quote(&quote, chain_id, contract_address, &private_key1).unwrap();
@@ -281,29 +287,26 @@ mod tests {
         let signing_key = SigningKey::from_bytes((&private_key).into()).unwrap();
         let signer_address = public_key_to_address(signing_key.verifying_key());
 
-        let original_quote = ExecutionQuote {
-            quoteId: U256::from(999u64),
-            maxExecutionFee: U256::from(5_000_000u64),
-            merchantAmount: U256::from(100_000_000u64),
-            quoteExpiry: U256::from(1718500000u64),
-            relayerAddress: address!("0x3333333333333333333333333333333333333333"),
-        };
-
         let chain_id = 421614u64;
         let contract_address = address!("0x4444444444444444444444444444444444444444");
+
+        let original_quote = ExecutionQuote {
+            assetId: 1,
+            targetContract: contract_address,
+            baseGasFee: 20_000,
+            relayerMarkupFee: 3_000,
+            totalExecutionFee: 23_000,
+            expiry: 1718500000,
+            chainId: U256::from(chain_id),
+        };
 
         // Sign the original quote
         let signature =
             sign_quote(&original_quote, chain_id, contract_address, &private_key).unwrap();
 
-        // Tamper with the quote (increase maxExecutionFee)
-        let tampered_quote = ExecutionQuote {
-            quoteId: original_quote.quoteId,
-            maxExecutionFee: U256::from(50_000_000u64), // 10x higher!
-            merchantAmount: original_quote.merchantAmount,
-            quoteExpiry: original_quote.quoteExpiry,
-            relayerAddress: original_quote.relayerAddress,
-        };
+        // Tamper with the quote (increase totalExecutionFee)
+        let mut tampered_quote = original_quote.clone();
+        tampered_quote.totalExecutionFee = 50_000_000; // 10x higher!
 
         // Try to verify the tampered quote with the original signature
         let is_valid = verify_quote_signature(
@@ -316,5 +319,76 @@ mod tests {
         .unwrap();
 
         assert!(!is_valid, "Tampered quote should fail verification");
+    }
+
+    #[test]
+    fn test_eip712_quote_hash_binds_asset_id() {
+        use k256::ecdsa::SigningKey;
+
+        let private_key_bytes = SigningKey::random(&mut rand::thread_rng()).to_bytes();
+        let private_key: [u8; 32] = private_key_bytes.into();
+        let signing_key = SigningKey::from_bytes((&private_key).into()).unwrap();
+        let signer_address = public_key_to_address(signing_key.verifying_key());
+
+        let chain_id = 421614u64;
+        let contract_address = address!("0xabcdef1234567890abcdef1234567890abcdef12");
+
+        // Valid WETH quote (assetId = 0)
+        let weth_quote = ExecutionQuote {
+            assetId: 0,
+            targetContract: contract_address,
+            baseGasFee: 15_000,
+            relayerMarkupFee: 2_250,
+            totalExecutionFee: 17_250,
+            expiry: 1718234567,
+            chainId: U256::from(chain_id),
+        };
+
+        // Sign WETH quote
+        let signature = sign_quote(&weth_quote, chain_id, contract_address, &private_key).unwrap();
+
+        // 1. Valid signature verifies for original quote
+        let is_valid = verify_quote_signature(
+            &weth_quote,
+            chain_id,
+            contract_address,
+            signature,
+            signer_address,
+        )
+        .unwrap();
+        assert!(is_valid, "Valid WETH quote signature must verify");
+
+        // 2. Tampered quote with assetId = 1 (USDC)
+        let mut tampered_quote = weth_quote.clone();
+        tampered_quote.assetId = 1;
+
+        // Signature must fail for tampered quote
+        let is_valid_tampered = verify_quote_signature(
+            &tampered_quote,
+            chain_id,
+            contract_address,
+            signature,
+            signer_address,
+        )
+        .unwrap();
+        assert!(
+            !is_valid_tampered,
+            "Tampering asset_id must fail signature verification"
+        );
+
+        // 3. Circuit quote hash must differ between asset_id 0 and 1
+        let hash_weth = compute_quote_hash(&weth_quote, chain_id, contract_address);
+        let hash_tampered = compute_quote_hash(&tampered_quote, chain_id, contract_address);
+        assert_ne!(
+            hash_weth, hash_tampered,
+            "Asset ID tampering must produce different signing hashes"
+        );
+
+        let (hi_weth, lo_weth) = zeltra_core::split_quote_hash_to_limbs(&hash_weth.0);
+        let (hi_tampered, lo_tampered) = zeltra_core::split_quote_hash_to_limbs(&hash_tampered.0);
+        assert!(
+            hi_weth != hi_tampered || lo_weth != lo_tampered,
+            "Circuit quote hash limbs must be invalidated when asset_id is tampered"
+        );
     }
 }

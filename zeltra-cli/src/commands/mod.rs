@@ -14,9 +14,30 @@ pub fn handle_command<R: Rng>(command: Commands, rng: &mut R) {
 
         Commands::CreateDepositNote {
             amount,
+            asset,
+            recipient,
             spending_key,
         } => {
-            zk::create_deposit_note(amount, spending_key.as_deref(), rng);
+            zk::create_deposit_note(
+                amount,
+                &asset,
+                recipient.as_deref(),
+                spending_key.as_deref(),
+                rng,
+            );
+        }
+
+        Commands::SpendPrivateNote {
+            amount,
+            asset,
+            to,
+            wallet_file,
+        } => {
+            zk::spend_private_note(amount, &asset, &to, wallet_file.as_deref(), rng);
+        }
+
+        Commands::Balance { wallet_file } => {
+            zk::display_balance(wallet_file.as_deref());
         }
 
         Commands::InspectMmr {

@@ -41,6 +41,9 @@ pub struct AppState {
 
     /// Timestamp of the last successful price fetch (Unix seconds)
     pub last_price_fetch_timestamp: Arc<Mutex<u64>>,
+
+    /// In-memory cache for issued execution quotes: quote_hash / quote_id -> ExecutionQuoteResponse
+    pub quote_cache: Arc<Mutex<HashMap<String, crate::dto::ExecutionQuoteResponse>>>,
 }
 
 impl AppState {
@@ -59,6 +62,7 @@ impl AppState {
             pricing_config: pricing_config.clone(),
             current_eth_price_usdc: Arc::new(Mutex::new(pricing_config.fallback_eth_price)),
             last_price_fetch_timestamp: Arc::new(Mutex::new(0)),
+            quote_cache: Arc::new(Mutex::new(HashMap::new())),
         }
     }
 

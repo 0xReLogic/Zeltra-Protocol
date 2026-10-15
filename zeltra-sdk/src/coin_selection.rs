@@ -73,7 +73,19 @@ pub fn evaluate_pair_cost(
     (excess + parity_penalty - age_bonus + noise).max(0.0)
 }
 
-/// Executes the 4-Tier Stochastic Knapsack Coin Selection pipeline (DEC-036B).
+/// Computes protocol fee with flat 45 bps and ceiling division (DEC-034C):
+/// `protocol_fee = (merchant_amount * 45 + 9999) / 10000`
+pub fn calculate_protocol_fee(merchant_amount: u64) -> u64 {
+    if merchant_amount == 0 {
+        return 0;
+    }
+    let num = (merchant_amount as u128)
+        .checked_mul(45)
+        .expect("overflow in protocol fee numerator");
+    num.div_ceil(10000) as u64
+}
+
+/// Executes the 4-Tier Stochastic Knapsack Coin Selection pipeline (DEC-036B, DEC-034C).
 ///
 /// # Arguments
 /// * `candidates` - List of references to candidate wallet notes.
@@ -92,6 +104,21 @@ pub fn select_notes_stochastic_knapsack<'a>(
     current_epoch: u32,
     config: &KnapsackConfig,
 ) -> Result<SelectedSpend, WalletError> {
+    // 0. Verify asset validity and partition uniformity across all candidates (DEC-034C)
+    if let Some(first) = candidates.first() {
+        if first.asset_id > 1 {
+            return Err(WalletError::UnsupportedAssetId(first.asset_id));
+        }
+        for note in candidates.iter() {
+            if note.asset_id > 1 {
+                return Err(WalletError::UnsupportedAssetId(note.asset_id));
+            }
+            if note.asset_id != first.asset_id {
+                return Err(WalletError::MixedAssetSelection);
+            }
+        }
+    }
+
     let total_required = merchant_amount
         .checked_add(protocol_fee)
         .and_then(|v| v.checked_add(execution_fee))
@@ -254,9 +281,20 @@ mod tests {
     use super::*;
 
     fn mock_note(cm: &str, val: u64, epoch: u32, status: NoteStatus) -> WalletNote {
+        mock_note_with_asset(cm, val, 1 /* USDC */, epoch, status)
+    }
+
+    fn mock_note_with_asset(
+        cm: &str,
+        val: u64,
+        asset_id: u8,
+        epoch: u32,
+        status: NoteStatus,
+    ) -> WalletNote {
         WalletNote {
             commitment_hex: cm.to_string(),
             value: val,
+            asset_id,
             owner_key_hex: "0x01".to_string(),
             rho_hex: "0x02".to_string(),
             randomness_hex: "0x03".to_string(),
@@ -421,5 +459,66 @@ mod tests {
         );
 
         assert!(matches!(res, Err(WalletError::InsufficientBalance { .. })));
+    }
+
+    #[test]
+    fn test_knapsack_rejects_mixed_assets() {
+        let n1 = mock_note_with_asset("cm1", 10_000_000, 0 /* WETH */, 1, NoteStatus::Unspent);
+        let n2 = mock_note_with_asset("cm2", 5_000_000, 1 /* USDC */, 1, NoteStatus::Unspent);
+        let candidates = vec![&n1, &n2];
+
+        let res = select_notes_stochastic_knapsack(
+            &candidates,
+            4_000_000,
+            calculate_protocol_fee(4_000_000),
+            100_000,
+            1000,
+            1,
+            &KnapsackConfig::default(),
+        );
+
+        assert!(matches!(res, Err(WalletError::MixedAssetSelection)));
+
+        // Also test invalid asset_id >= 2
+        let n3 = mock_note_with_asset(
+            "cm3",
+            5_000_000,
+            2, /* Invalid */
+            1,
+            NoteStatus::Unspent,
+        );
+        let candidates_invalid = vec![&n3];
+        let res_invalid = select_notes_stochastic_knapsack(
+            &candidates_invalid,
+            4_000_000,
+            calculate_protocol_fee(4_000_000),
+            100_000,
+            1000,
+            1,
+            &KnapsackConfig::default(),
+        );
+        assert!(matches!(
+            res_invalid,
+            Err(WalletError::UnsupportedAssetId(2))
+        ));
+    }
+
+    #[test]
+    fn test_knapsack_ceiling_fee_calculation() {
+        // Zero amount should yield zero fee
+        assert_eq!(calculate_protocol_fee(0), 0);
+
+        // 1 micro-unit: (1 * 45 + 9999) / 10000 = 10044 / 10000 = 1
+        // Must never truncate to zero!
+        assert_eq!(calculate_protocol_fee(1), 1);
+        assert_eq!(calculate_protocol_fee(2), 1);
+        assert_eq!(calculate_protocol_fee(222), 1);
+
+        // Exact multiple of 10000:
+        // 10_000 micro-units (0.01 USDC): (10000 * 45 + 9999) / 10000 = (450000 + 9999) / 10000 = 45
+        assert_eq!(calculate_protocol_fee(10_000), 45);
+
+        // Standard 100 USDC (100_000_000 units): 450_000 units (0.45 USDC)
+        assert_eq!(calculate_protocol_fee(100_000_000), 450_000);
     }
 }
