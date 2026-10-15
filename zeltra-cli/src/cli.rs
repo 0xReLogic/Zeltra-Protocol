@@ -26,7 +26,7 @@ pub enum Commands {
         amount: u64,
 
         /// Asset type: 'usdc' (default), 'eth', or 'weth'
-        #[arg(short, long, default_value = "usdc")]
+        #[arg(short = 'A', long, default_value = "usdc")]
         asset: String,
 
         /// Optional recipient address hex
@@ -45,7 +45,7 @@ pub enum Commands {
         amount: u64,
 
         /// Asset type: 'usdc' (default) or 'weth'
-        #[arg(short, long, default_value = "usdc")]
+        #[arg(short = 'A', long, default_value = "usdc")]
         asset: String,
 
         /// Recipient address hex (0x-prefixed 20 bytes)
