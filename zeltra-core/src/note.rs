@@ -365,6 +365,50 @@ pub fn encrypt_note_memo<R: RecipientViewingKey>(
     result
 }
 
+pub fn encrypt_note_memo_optional<R: RecipientViewingKey>(
+    value: u64,
+    rho: Fr,
+    asset_id: u64,
+    recipient: &R,
+) -> Option<Vec<u8>> {
+    let recipient_pk_bytes = recipient.recipient_pubkey();
+    let plaintext = NotePlaintext {
+        value,
+        rho,
+        asset_id,
+    };
+    let pt_bytes = plaintext.to_bytes();
+
+    let mut eph_bytes = [0u8; 32];
+    rand::rngs::OsRng.fill_bytes(&mut eph_bytes);
+    let ephemeral_secret = x25519_dalek::StaticSecret::from(eph_bytes);
+    let ephemeral_public = x25519_dalek::PublicKey::from(&ephemeral_secret);
+    let recipient_public = x25519_dalek::PublicKey::from(recipient_pk_bytes);
+
+    let shared_secret = ephemeral_secret.diffie_hellman(&recipient_public);
+
+    let hk =
+        hkdf::Hkdf::<sha2::Sha256>::new(Some(b"ZELTRA_NOTE_MEMO_KDF_V1"), shared_secret.as_bytes());
+    let mut okm = [0u8; 44];
+    if hk.expand(INFO_MEMO_CIPHER_V1, &mut okm).is_err() {
+        return None;
+    }
+    let mut key_bytes = [0u8; 32];
+    key_bytes.copy_from_slice(&okm[0..32]);
+    let cipher_key = Key::from(key_bytes);
+    let mut nonce_bytes = [0u8; 12];
+    nonce_bytes.copy_from_slice(&okm[32..44]);
+    let nonce = Nonce::from(nonce_bytes);
+
+    let cipher = ChaCha20Poly1305::new(&cipher_key);
+    let ciphertext_and_tag = cipher.encrypt(&nonce, pt_bytes.as_ref()).ok()?;
+
+    let mut result = Vec::with_capacity(ENCRYPTED_MEMO_SIZE);
+    result.extend_from_slice(ephemeral_public.as_bytes());
+    result.extend_from_slice(&ciphertext_and_tag);
+    Some(result)
+}
+
 /// Decrypts a 96-byte AEAD note memo using the recipient's Incoming Viewing Key (IVK).
 /// Returns Some(NotePlaintext) if authentication succeeds and contents are canonical, or None.
 pub fn decrypt_note_memo(encrypted_memo: &[u8], ivk: &IncomingViewingKey) -> Option<NotePlaintext> {
@@ -1815,6 +1859,24 @@ mod tests {
     }
 
     #[test]
+    fn test_dec039_optional_encryption_graceful_fallback() {
+        let (ivk, _) = derive_viewing_keys(b"optional_encryption_seed");
+
+        let memo = encrypt_note_memo_optional(10_000_000, Fr::from(12345u64), 1, &ivk);
+        assert!(memo.is_some());
+        assert_eq!(memo.unwrap().len(), ENCRYPTED_MEMO_SIZE);
+    }
+
+    #[test]
+    fn test_dec039_empty_memo_handling() {
+        let (ivk, _) = derive_viewing_keys(b"empty_memo_seed");
+
+        let empty_memo: Vec<u8> = vec![];
+        let result = decrypt_note_memo(&empty_memo, &ivk);
+        assert!(result.is_none());
+    }
+
+    #[test]
     fn test_dec037_non_canonical_scalar_rejected() {
         // Construct 48-byte buffer where rho is >= r
         let mut buf = [0u8; 48];
@@ -1877,15 +1939,56 @@ mod tests {
         assert_eq!(
             recovered.len(),
             3,
-            "Exactly 3 valid notes must be recovered out of 1000 scanned"
+            "Exactly 3 notes should decrypt successfully for this IVK"
         );
-        assert_eq!(recovered[0].1.value, 1_000_000);
-        assert_eq!(recovered[1].1.value, 2_500_000);
-        assert_eq!(recovered[2].1.value, 5_000_000);
-        println!(
-            "Scanned 1,000 memos in {:?}, recovered {} notes successfully",
-            elapsed,
-            recovered.len()
+        assert_eq!(recovered[0].0, 100);
+        assert_eq!(recovered[1].0, 500);
+        assert_eq!(recovered[2].0, 999);
+
+        eprintln!("Trial decryption 1000 notes: {} ms", elapsed.as_millis());
+    }
+
+    #[test]
+    fn test_dec037_memo_commitment_mismatch_funds_locked() {
+        let seed = b"victim_wallet_seed";
+        let (ivk, _ovk) = derive_viewing_keys(seed);
+        let master = derive_master_secret(seed);
+        let spending_key = derive_spending_key(&master);
+
+        let value_a = 100_000_000u64;
+        let rho_a = Fr::from(123456789u64);
+        let randomness_a = derive_note_randomness(spending_key, rho_a);
+        let note_a = PrivateNoteV1::new(value_a, spending_key, rho_a, randomness_a);
+        let commitment_a = note_a.commitment();
+
+        let value_b = 50_000_000u64;
+        let rho_b = Fr::from(987654321u64);
+        let asset_id_b = 1u64;
+
+        let mismatched_memo = encrypt_note_memo(value_b, rho_b, asset_id_b, &ivk);
+        let decrypted = decrypt_note_memo(&mismatched_memo, &ivk);
+
+        if let Some(pt) = decrypted {
+            assert_eq!(pt.value, value_b);
+            assert_eq!(pt.rho, rho_b);
+            assert_eq!(pt.asset_id, asset_id_b);
+
+            let reconstructed_note = pt.to_note(spending_key);
+            let reconstructed_commitment = reconstructed_note.commitment();
+
+            assert_ne!(
+                reconstructed_commitment, commitment_a,
+                "Memo plaintext does NOT match on-chain commitment"
+            );
+        }
+
+        let (ivk_attacker, _) = derive_viewing_keys(b"attacker_seed");
+        let memo_attacker = encrypt_note_memo(value_b, rho_b, asset_id_b, &ivk_attacker);
+        let decrypted_attacker = decrypt_note_memo(&memo_attacker, &ivk);
+
+        assert!(
+            decrypted_attacker.is_none(),
+            "Victim cannot decrypt memo encrypted for attacker's viewing key"
         );
     }
 }

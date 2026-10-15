@@ -24,9 +24,10 @@ use std::collections::HashMap;
 use zeltra_core::{
     decrypt_note_memo, derive_joinsplit_dummy_nullifier, derive_joinsplit_nullifier,
     derive_note_randomness, derive_nullifier, derive_nullifier_key, derive_viewing_keys,
-    encrypt_note_memo, extract_joinsplit_public_inputs, fr_from_be_bytes, fr_to_be_bytes,
-    generate_joinsplit_proof, generate_note_proof, note_commitment, split_quote_hash_to_limbs,
-    to_evm_g1, to_evm_g2, IncomingViewingKey, JoinSplitCircuit, OutcomingViewingKey,
+    encrypt_note_memo, encrypt_note_memo_optional, extract_joinsplit_public_inputs,
+    fr_from_be_bytes, fr_to_be_bytes, generate_joinsplit_proof, generate_note_proof,
+    note_commitment, split_quote_hash_to_limbs, to_evm_g1, to_evm_g2, IncomingViewingKey,
+    JoinSplitCircuit, OutcomingViewingKey,
 };
 
 /// Minimum non-dust amount (1000 base units = 0.001 USDC)
@@ -592,6 +593,9 @@ impl PrivateNoteWallet {
         let mut candidates = Vec::new();
 
         for ev in events {
+            if ev.encrypted_memo.is_empty() {
+                continue;
+            }
             if let Some(pt) = decrypt_note_memo(&ev.encrypted_memo, &ivk) {
                 let deterministic_r = derive_note_randomness(sk, pt.rho);
                 let note = pt.to_note(sk);
@@ -766,6 +770,9 @@ impl PrivateNoteWallet {
 
             let mut chunk_candidates = Vec::new();
             for ev in &events {
+                if ev.encrypted_memo.is_empty() {
+                    continue;
+                }
                 if let Some(pt) = decrypt_note_memo(&ev.encrypted_memo, ivk) {
                     let deterministic_r = derive_note_randomness(sk, pt.rho);
                     let note = pt.to_note(sk);
@@ -862,6 +869,35 @@ impl PrivateNoteWallet {
 
         Ok(aggregated_result)
     }
+
+    pub fn recover_note_manual(&mut self, value: u64, rho: Fr) -> Result<WalletNote, WalletError> {
+        let sk = self.spending_key()?;
+        let r = derive_note_randomness(sk, rho);
+        let cm = note_commitment(value, sk, rho, r);
+        let cm_raw_hex = hex::encode(fr_to_be_bytes(&cm));
+        let cm_hex = format!("0x{}", cm_raw_hex);
+
+        let note = WalletNote {
+            commitment_hex: cm_hex.clone(),
+            value,
+            owner_key_hex: hex::encode(fr_to_be_bytes(&sk)),
+            rho_hex: hex::encode(fr_to_be_bytes(&rho)),
+            randomness_hex: hex::encode(fr_to_be_bytes(&r)),
+            leaf_index: None,
+            leaf_count: None,
+            epoch_id: Some(0),
+            merkle_path_hex: None,
+            status: NoteStatus::Unconfirmed,
+            created_at_secs: std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_secs(),
+            session_id: None,
+        };
+
+        self.notes.insert(cm_hex, note.clone());
+        Ok(note)
+    }
 }
 
 /// Standalone recovery function using batch nullifier checking (DEC-037).
@@ -893,6 +929,9 @@ where
     let mut candidates = Vec::new();
 
     for ev in events {
+        if ev.encrypted_memo.is_empty() {
+            continue;
+        }
         if let Some(pt) = decrypt_note_memo(&ev.encrypted_memo, ivk) {
             let (cm_hex, nf_hex) = if let (Some(sk), Some(nk_val)) = (spending_key, nk) {
                 let note = pt.to_note(sk);
@@ -1017,9 +1056,6 @@ impl PrivateNoteWallet {
     }
 
     /// Prepares payload for on-chain `deposit_direct_note` transaction (DEC-038C).
-    /// Computes local Poseidon hash `cm = Poseidon(amount, sk, rho, r)` (< 0.08 ms)
-    /// and encrypts ChaCha20-Poly1305 AEAD memo.
-    /// This operation is 100% local, fast (< 0.1 ms), with zero relayer network dependency.
     pub fn prepare_direct_deposit(
         &mut self,
         amount: u64,
@@ -1042,7 +1078,9 @@ impl PrivateNoteWallet {
             }
             None => self.incoming_viewing_key()?,
         };
-        let memo = encrypt_note_memo(amount, rho, 1 /* USDC */, &ivk);
+
+        let memo =
+            encrypt_note_memo_optional(amount, rho, 1 /* USDC */, &ivk).unwrap_or_else(Vec::new);
 
         self.stage_pending_deposit_note(cm, amount, rho, r)?;
 
@@ -1094,7 +1132,12 @@ impl PrivateNoteWallet {
     /// Finds a pending note mutably by commitment bytes (DEC-038C).
     pub fn find_pending_note_mut(&mut self, commitment: &[u8; 32]) -> Option<&mut WalletNote> {
         let cm_hex = hex::encode(commitment);
-        self.notes.get_mut(&cm_hex)
+        if self.notes.contains_key(&cm_hex) {
+            self.notes.get_mut(&cm_hex)
+        } else {
+            let cm_0x = format!("0x{}", cm_hex);
+            self.notes.get_mut(&cm_0x)
+        }
     }
 
     /// Handles an on-chain NoteCommitmentAppended event (DEC-038C).
@@ -1106,10 +1149,17 @@ impl PrivateNoteWallet {
         root: [u8; 32],
     ) -> Result<bool, WalletError> {
         let cm_hex = hex::encode(commitment);
+        let cm_0x = format!("0x{}", cm_hex);
         let root_hex = hex::encode(root);
         self.current_merkle_root_hex = Some(format!("0x{}", root_hex));
 
-        if let Some(note) = self.notes.get_mut(&cm_hex) {
+        let note = if let Some(n) = self.notes.get_mut(&cm_hex) {
+            Some(n)
+        } else {
+            self.notes.get_mut(&cm_0x)
+        };
+
+        if let Some(note) = note {
             if note.status == NoteStatus::PendingDeposit || note.status == NoteStatus::Unconfirmed {
                 note.leaf_index = Some(leaf_index);
                 note.status = NoteStatus::Unspent;
@@ -1220,10 +1270,16 @@ impl PrivateNoteWallet {
 
         let cm_fr = parse_fr_from_hex(commitment_hex)?;
 
-        let note = self
-            .notes
-            .get_mut(commitment_hex)
-            .ok_or_else(|| WalletError::NoteNotFound(commitment_hex.to_string()))?;
+        let clean = commitment_hex.strip_prefix("0x").unwrap_or(commitment_hex);
+        let with_0x = format!("0x{}", clean);
+        let note = if self.notes.contains_key(commitment_hex) {
+            self.notes.get_mut(commitment_hex)
+        } else if self.notes.contains_key(clean) {
+            self.notes.get_mut(clean)
+        } else {
+            self.notes.get_mut(&with_0x)
+        }
+        .ok_or_else(|| WalletError::NoteNotFound(commitment_hex.to_string()))?;
 
         if self.mmr.leaf_count <= leaf_index as usize {
             while self.mmr.leaf_count < leaf_index as usize {
@@ -1257,7 +1313,12 @@ impl PrivateNoteWallet {
             ));
         }
 
-        if !self.notes.contains_key(commitment_hex) {
+        let clean = commitment_hex.strip_prefix("0x").unwrap_or(commitment_hex);
+        let with_0x = format!("0x{}", clean);
+        if !self.notes.contains_key(commitment_hex)
+            && !self.notes.contains_key(clean)
+            && !self.notes.contains_key(&with_0x)
+        {
             return Err(WalletError::NoteNotFound(commitment_hex.to_string()));
         }
 
@@ -1270,10 +1331,14 @@ impl PrivateNoteWallet {
             self.mmr.append(cm_fr);
         }
 
-        let note = self
-            .notes
-            .get_mut(commitment_hex)
-            .ok_or_else(|| WalletError::NoteNotFound(commitment_hex.to_string()))?;
+        let note = if self.notes.contains_key(commitment_hex) {
+            self.notes.get_mut(commitment_hex)
+        } else if self.notes.contains_key(clean) {
+            self.notes.get_mut(clean)
+        } else {
+            self.notes.get_mut(&with_0x)
+        }
+        .ok_or_else(|| WalletError::NoteNotFound(commitment_hex.to_string()))?;
 
         note.leaf_index = Some(leaf_index);
         note.leaf_count = Some(self.mmr.leaf_count as u64);

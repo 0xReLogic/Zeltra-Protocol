@@ -53,11 +53,11 @@ pub use note::{
     derive_nullifier_v1, derive_spending_key, derive_viewing_keys, derive_viewing_keys_from_secret,
     domain_binding_v1, domain_dummy_nullifier, domain_initial_note, domain_merkle_node,
     domain_mmr_bag, domain_note_commitment, domain_note_randomness, domain_nullifier,
-    domain_quote_binding, domain_scope_v1, encrypt_note_memo, fr_from_be_bytes, fr_to_be_bytes,
-    merkle_hash, note_commitment, split_quote_hash_to_limbs, verify_value_conservation,
-    IncomingViewingKey, MMRProof, MerkleMountainRange, NotePlaintext, OutcomingViewingKey,
-    PrivateNoteV1, RecipientViewingKey, DOMAIN_BINDING_V1_HEX, DOMAIN_MMR_BAG_BYTES,
-    DOMAIN_SCOPE_V1_HEX, ENCRYPTED_MEMO_SIZE,
+    domain_quote_binding, domain_scope_v1, encrypt_note_memo, encrypt_note_memo_optional,
+    fr_from_be_bytes, fr_to_be_bytes, merkle_hash, note_commitment, split_quote_hash_to_limbs,
+    verify_value_conservation, IncomingViewingKey, MMRProof, MerkleMountainRange, NotePlaintext,
+    OutcomingViewingKey, PrivateNoteV1, RecipientViewingKey, DOMAIN_BINDING_V1_HEX,
+    DOMAIN_MMR_BAG_BYTES, DOMAIN_SCOPE_V1_HEX, ENCRYPTED_MEMO_SIZE,
 };
 
 // Re-export accounting state machine (DEC-016A Gate B)

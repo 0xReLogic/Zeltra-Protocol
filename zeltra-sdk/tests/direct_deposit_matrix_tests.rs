@@ -149,6 +149,101 @@ fn test_neg_2_corrupted_memo_ignored_safely_without_panic() {
 }
 
 #[test]
+fn test_dec039_prepare_direct_deposit_memo_fallback() {
+    let mut seed = [0u8; 32];
+    seed[0] = 0xEE;
+    let mut wallet = PrivateNoteWallet::new(&seed);
+
+    let amount = 100_000_000u64;
+    let payload = wallet
+        .prepare_direct_deposit(amount, None)
+        .expect("prepare_direct_deposit must succeed");
+
+    assert_eq!(payload.amount, amount);
+    assert_eq!(payload.commitment_bytes.len(), 32);
+
+    let cm_hex = hex::encode(payload.commitment_bytes);
+    let note = wallet
+        .notes
+        .get(&cm_hex)
+        .expect("Note must be staged in wallet");
+
+    assert_eq!(note.value, amount);
+    assert_eq!(note.status, NoteStatus::PendingDeposit);
+}
+
+#[test]
+fn test_dec039_recover_notes_batch_skips_empty() {
+    let mut seed = [0u8; 32];
+    seed[0] = 0xFF;
+    let mut wallet = PrivateNoteWallet::new(&seed);
+
+    let valid_payload = wallet.prepare_direct_deposit(20_000_000, None).unwrap();
+
+    let events = vec![
+        NoteEvent {
+            leaf_index: 0,
+            commitment_hex: "0x01".to_string(),
+            new_mmr_root_hex: "0x00".to_string(),
+            leaf_count: 1,
+            encrypted_memo: vec![],
+            block_number: Some(100),
+        },
+        NoteEvent {
+            leaf_index: 1,
+            commitment_hex: format!("0x{}", hex::encode(valid_payload.commitment_bytes)),
+            new_mmr_root_hex: "0x00".to_string(),
+            leaf_count: 2,
+            encrypted_memo: valid_payload.encrypted_memo,
+            block_number: Some(101),
+        },
+    ];
+
+    let recovery_res = wallet
+        .recover_notes(&events, |_| false)
+        .expect("Recovery must skip empty memos");
+
+    assert_eq!(recovery_res.scanned_events, 2);
+    assert_eq!(recovery_res.recovered_notes.len(), 1);
+}
+
+#[test]
+fn test_dec039_recover_note_manual() {
+    let mut seed = [0u8; 32];
+    seed[0] = 0x11;
+    let mut wallet = PrivateNoteWallet::new(&seed);
+
+    use ark_bls12_381::Fr;
+
+    let value = 50_000_000u64;
+    let rho = Fr::from(12345u64);
+
+    let note = wallet
+        .recover_note_manual(value, rho)
+        .expect("Manual recovery must succeed");
+
+    assert_eq!(note.value, value);
+    assert_eq!(note.status, NoteStatus::Unconfirmed);
+    assert!(note.commitment_hex.starts_with("0x"));
+    assert!(!note.commitment_hex.starts_with("0x0x"));
+    assert_eq!(note.commitment_hex.len(), 66);
+
+    // Verify on_commitment_appended successfully transitions manual note to Unspent
+    let cm_bytes = hex::decode(note.commitment_hex.strip_prefix("0x").unwrap()).unwrap();
+    let mut cm_arr = [0u8; 32];
+    cm_arr.copy_from_slice(&cm_bytes);
+
+    let transitioned = wallet
+        .on_commitment_appended(5, cm_arr, [0u8; 32])
+        .expect("on_commitment_appended must succeed");
+
+    assert!(transitioned, "Manual note must be transitioned to Unspent");
+    let unspent = wallet.notes.get(&note.commitment_hex).unwrap();
+    assert_eq!(unspent.status, NoteStatus::Unspent);
+    assert_eq!(unspent.leaf_index, Some(5));
+}
+
+#[test]
 fn test_neg_3_double_spend_rejected_preflight_conflict() {
     // Nullifier preflight simulation: duplicate nullifier returns Conflict (409)
     let mut spent_nullifiers: std::collections::HashSet<String> = std::collections::HashSet::new();

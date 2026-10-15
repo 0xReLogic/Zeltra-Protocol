@@ -27,24 +27,20 @@ impl Zeltra {
     ) -> Result<(), Vec<u8>> {
         self.check_not_paused()?;
 
-        // Minimum deposit check: 10 USDC (10_000_000 micro-units)
         if amount < U256::from(10_000_000) {
             return Err(b"AMOUNT_TOO_SMALL".to_vec());
         }
 
-        // Anti-Nomad zero-root exploit prevention
         if note_commitment == FixedBytes::<32>::ZERO {
             return Err(b"ZERO_COMMITMENT_REJECTED".to_vec());
         }
 
-        // Encrypted memo length bound validation [64..=256]
-        if encrypted_memo.len() < 64 || encrypted_memo.len() > 256 {
-            return Err(b"INVALID_MEMO_LENGTH".to_vec());
-        }
-
-        // Canonical scalar field element check (anti-aliasing modulus EIP-2537)
         if crate::types::from_evm_scalar(&note_commitment.0).is_none() {
             return Err(b"INVALID_NOTE_COMMITMENT_SCALAR".to_vec());
+        }
+
+        if !encrypted_memo.is_empty() && encrypted_memo.len() != 96 {
+            return Err(b"INVALID_MEMO_LENGTH".to_vec());
         }
 
         let client = self.msg_sender();

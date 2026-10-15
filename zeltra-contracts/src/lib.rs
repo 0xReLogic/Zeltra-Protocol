@@ -1132,7 +1132,7 @@ mod tests {
         set_msg_sender(client);
         let amount = U256::from(10_000_000);
         let commitment = FixedBytes::repeat_byte(0x01);
-        let memo = vec![0xaa; 64].into();
+        let memo = vec![0xaa; 96].into();
 
         let res = contract.deposit_direct_note(amount, commitment, memo);
         assert!(res.is_ok());
@@ -1170,7 +1170,7 @@ mod tests {
         let res = contract.deposit_direct_note(
             U256::from(10_000_000),
             non_canonical,
-            vec![0xaa; 64].into(),
+            vec![0xaa; 96].into(),
         );
         assert_eq!(res, Err(b"INVALID_NOTE_COMMITMENT_SCALAR".to_vec()));
         assert_eq!(contract.user_note_liability.get(), U256::ZERO);
@@ -1248,7 +1248,7 @@ mod tests {
         let res_short = contract.deposit_direct_note(
             U256::from(10_000_000),
             FixedBytes::repeat_byte(0x01),
-            vec![0xaa; 63].into(),
+            vec![0xaa; 95].into(),
         );
         assert_eq!(res_short, Err(b"INVALID_MEMO_LENGTH".to_vec()));
         assert_eq!(contract.user_note_liability.get(), U256::ZERO);
@@ -1259,13 +1259,42 @@ mod tests {
         let res_long = contract.deposit_direct_note(
             U256::from(10_000_000),
             FixedBytes::repeat_byte(0x01),
-            vec![0xaa; 257].into(),
+            vec![0xaa; 97].into(),
         );
         assert_eq!(res_long, Err(b"INVALID_MEMO_LENGTH".to_vec()));
         assert_eq!(contract.user_note_liability.get(), U256::ZERO);
         assert_eq!(contract.total_deposited_principal.get(), U256::ZERO);
         assert_eq!(contract.mmr_leaf_count.get(), U256::ZERO);
         assert_eq!(contract.note_tree_root.get(), FixedBytes::ZERO);
+    }
+
+    #[test]
+    fn test_deposit_direct_note_with_empty_memo() {
+        reset_test_state();
+        let owner = Address::repeat_byte(0x01);
+        let client = Address::repeat_byte(0x02);
+        set_msg_sender(owner);
+
+        let mut contract = Zeltra::default();
+        contract
+            .init(
+                owner,
+                Address::repeat_byte(0x03),
+                Address::repeat_byte(0x04),
+            )
+            .unwrap();
+
+        set_msg_sender(client);
+        let amount = U256::from(10_000_000);
+        let commitment = FixedBytes::repeat_byte(0x01);
+        let empty_memo: Bytes = vec![].into();
+
+        set_erc20_transfer_from_result(Ok(true));
+        let res = contract.deposit_direct_note(amount, commitment, empty_memo);
+        assert_eq!(res, Ok(()));
+
+        assert_eq!(contract.user_note_liability.get(), amount);
+        assert_eq!(contract.mmr_leaf_count.get(), U256::from(1));
     }
 
     #[test]
@@ -1286,7 +1315,7 @@ mod tests {
         let res = contract.deposit_direct_note(
             U256::from(10_000_000),
             FixedBytes::repeat_byte(0x01),
-            vec![0xaa; 64].into(),
+            vec![0xaa; 96].into(),
         );
         assert_eq!(res, Err(b"CONTRACT_PAUSED".to_vec()));
         assert_eq!(contract.user_note_liability.get(), U256::ZERO);
@@ -1314,7 +1343,7 @@ mod tests {
         set_msg_sender(client);
         let amount = U256::from(10_000_000);
         let commitment = FixedBytes::repeat_byte(0x01);
-        let memo: Bytes = vec![0xaa; 64].into();
+        let memo: Bytes = vec![0xaa; 96].into();
 
         // Subcase A: transfer_from returns boolean false (silent failure token)
         set_erc20_transfer_from_result(Ok(false));
@@ -1333,6 +1362,39 @@ mod tests {
         assert_eq!(contract.total_deposited_principal.get(), U256::ZERO);
         assert_eq!(contract.mmr_leaf_count.get(), U256::ZERO);
         assert_eq!(contract.note_tree_root.get(), FixedBytes::ZERO);
+    }
+
+    #[test]
+    fn test_deposit_direct_note_pos2_unverified_96_byte_memo_accepted() {
+        reset_test_state();
+        let owner = Address::repeat_byte(0x01);
+        let client = Address::repeat_byte(0x02);
+        set_msg_sender(owner);
+
+        let mut contract = Zeltra::default();
+        contract
+            .init(
+                owner,
+                Address::repeat_byte(0x03),
+                Address::repeat_byte(0x04),
+            )
+            .unwrap();
+
+        set_msg_sender(client);
+        let amount = U256::from(10_000_000);
+        let valid_commitment = FixedBytes::from([0x01; 32]);
+        let unverified_memo: Bytes = vec![0xde; 96].into();
+
+        set_erc20_transfer_from_result(Ok(true));
+        let res = contract.deposit_direct_note(amount, valid_commitment, unverified_memo);
+
+        assert_eq!(res, Ok(()));
+        assert_eq!(contract.user_note_liability.get(), amount);
+        assert_eq!(contract.total_deposited_principal.get(), amount);
+        assert_eq!(contract.mmr_leaf_count.get(), U256::from(1));
+
+        let inserted_root = contract.note_tree_root.get();
+        assert_ne!(inserted_root, FixedBytes::ZERO);
     }
 
     #[test]
