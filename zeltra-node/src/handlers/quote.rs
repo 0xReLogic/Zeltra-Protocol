@@ -606,7 +606,7 @@ mod tests {
         assert!(weth_resp.0.base_gas_fee > 0);
         assert_eq!(
             weth_resp.0.relayer_markup_fee,
-            (weth_resp.0.base_gas_fee * 15 + 99) / 100
+            (weth_resp.0.base_gas_fee * 15).div_ceil(100)
         );
         assert_eq!(
             weth_resp.0.total_execution_fee,
@@ -628,7 +628,7 @@ mod tests {
         assert!(usdc_resp.0.base_gas_fee >= 20_000);
         assert_eq!(
             usdc_resp.0.relayer_markup_fee,
-            (usdc_resp.0.base_gas_fee * 15 + 99) / 100
+            (usdc_resp.0.base_gas_fee * 15).div_ceil(100)
         );
         assert_eq!(
             usdc_resp.0.total_execution_fee,

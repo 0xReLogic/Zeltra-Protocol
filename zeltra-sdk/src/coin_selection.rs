@@ -19,10 +19,31 @@ use crate::wallet::note_wallet::{
 };
 use rand::Rng;
 
-/// Minimum non-dust economic change threshold (100,000 base units = 0.10 USDC, DEC-036B).
-/// Any change amount strictly less than this threshold is absorbed into the relayer execution fee markup
-/// to prevent creating unspendable dust notes and linking transaction clusters.
-pub const MIN_DUST_THRESHOLD: u64 = 100_000;
+/// Maximum cap for economic dust absorption (100,000 base units = 0.10 USDC, DEC-036B).
+/// Prevents large amounts from being absorbed even if gas spike quotes are unusually high.
+pub const MAX_DUST_CAP_USDC: u64 = 100_000;
+
+/// Baseline minimum dust floor for low gas environments (10,000 base units = 0.01 USDC).
+pub const MIN_DUST_BASELINE_USDC: u64 = 10_000;
+
+/// Default fallback dust threshold (20,000 base units = 0.02 USDC).
+pub const MIN_DUST_THRESHOLD: u64 = 20_000;
+
+/// Computes the dynamic economic dust threshold based on Marginal Cost to Spend (Bitcoin Core & Zcash ZIP 317).
+///
+/// An output is considered dust if its value is strictly less than the cost to spend it in a subsequent transaction.
+/// - For Asset ID 1 (USDC): The threshold dynamically tracks `execution_fee`, bounded by `[MIN_DUST_BASELINE_USDC, MAX_DUST_CAP_USDC]`.
+/// - For Asset ID 0 (WETH): The threshold dynamically tracks `execution_fee` in Gwei.
+#[inline]
+pub fn compute_dynamic_dust_threshold(execution_fee: u64, asset_id: u8) -> u64 {
+    if asset_id == 0 {
+        // WETH Gwei: dynamic to gas reimbursement directly
+        execution_fee
+    } else {
+        // USDC: dynamic tracking execution_fee clamped between 1 cent ($0.01) and 10 cents ($0.10)
+        execution_fee.clamp(MIN_DUST_BASELINE_USDC, MAX_DUST_CAP_USDC)
+    }
+}
 
 /// Configuration weights for Stochastic Knapsack cost evaluation (DEC-036B Section 4).
 #[derive(Clone, Copy, Debug)]
@@ -178,8 +199,9 @@ pub fn select_notes_stochastic_knapsack<'a>(
         let selected_note = single_notes[0];
         let raw_change = selected_note.value - total_required;
 
-        // Economic Dust Floor Absorption (B1.3)
-        let (adj_exec_fee, change_amount, has_change) = if raw_change < MIN_DUST_THRESHOLD {
+        // Dynamic Economic Dust Floor Absorption (Marginal Cost to Spend)
+        let dust_threshold = compute_dynamic_dust_threshold(execution_fee, selected_note.asset_id);
+        let (adj_exec_fee, change_amount, has_change) = if raw_change < dust_threshold {
             (execution_fee + raw_change, 0u64, false)
         } else {
             (execution_fee, raw_change, true)
@@ -240,8 +262,9 @@ pub fn select_notes_stochastic_knapsack<'a>(
         let sum = chosen.3;
         let raw_change = sum - total_required;
 
-        // Economic Dust Floor Absorption (B1.3)
-        let (adj_exec_fee, change_amount, has_change) = if raw_change < MIN_DUST_THRESHOLD {
+        // Dynamic Economic Dust Floor Absorption (Marginal Cost to Spend)
+        let dust_threshold = compute_dynamic_dust_threshold(execution_fee, note_1.asset_id);
+        let (adj_exec_fee, change_amount, has_change) = if raw_change < dust_threshold {
             (execution_fee + raw_change, 0u64, false)
         } else {
             (execution_fee, raw_change, true)
@@ -520,5 +543,55 @@ mod tests {
 
         // Standard 100 USDC (100_000_000 units): 450_000 units (0.45 USDC)
         assert_eq!(calculate_protocol_fee(100_000_000), 450_000);
+    }
+
+    #[test]
+    fn test_dynamic_dust_threshold_adaptive_behavior() {
+        // USDC Asset ID 1
+        assert_eq!(compute_dynamic_dust_threshold(5_000, 1), 10_000); // Clamped to baseline
+        assert_eq!(compute_dynamic_dust_threshold(15_000, 1), 15_000); // Tracks real-time gas
+        assert_eq!(compute_dynamic_dust_threshold(45_000, 1), 45_000); // Tracks real-time gas
+        assert_eq!(compute_dynamic_dust_threshold(150_000, 1), 100_000); // Clamped to max cap
+
+        // WETH Asset ID 0 (Gwei)
+        assert_eq!(compute_dynamic_dust_threshold(2_500, 0), 2_500);
+        assert_eq!(compute_dynamic_dust_threshold(25_000, 0), 25_000);
+
+        // Adaptive test: A change of 20_000 is preserved when gas is 15_000,
+        // but absorbed when gas is 25_000!
+        let n = mock_note("cm_adaptive", 10_020_000, 1, NoteStatus::Unspent);
+        let candidates = vec![&n];
+
+        // Case A: Low gas (15_000). Total required = 9_900_000 + 45_000 + 15_000 = 9_960_000.
+        // Change = 10_020_000 - 9_960_000 = 60_000. 60_000 >= 15_000 threshold -> change kept!
+        let spend_a = select_notes_stochastic_knapsack(
+            &candidates,
+            9_900_000,
+            45_000,
+            15_000,
+            1000,
+            1,
+            &KnapsackConfig::default(),
+        )
+        .unwrap();
+        assert_eq!(spend_a.change_amount, 60_000);
+        assert!(spend_a.has_change);
+
+        // Case B: Gas is 25_000, note is 10_020_000.
+        // Spend = 9_900_000, fee = 100_000, exec_fee = 15_000. Total required = 10_015_000.
+        // Change = 5_000. 5_000 < 15_000 -> absorbed!
+        let spend_b = select_notes_stochastic_knapsack(
+            &candidates,
+            9_900_000,
+            100_000,
+            15_000,
+            1000,
+            1,
+            &KnapsackConfig::default(),
+        )
+        .unwrap();
+        assert_eq!(spend_b.change_amount, 0);
+        assert!(!spend_b.has_change);
+        assert_eq!(spend_b.execution_fee, 20_000); // 15_000 + 5_000 absorbed
     }
 }

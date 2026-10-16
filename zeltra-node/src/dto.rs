@@ -539,7 +539,7 @@ pub struct HealthResponse {
 }
 
 // x402 Protocol DTOs
-#[derive(Deserialize)]
+#[derive(Clone, Serialize, Deserialize, Debug)]
 pub struct X402VerifyRequest {
     /// Base64-encoded PAYMENT-SIGNATURE header content.
     pub payment_signature_b64: String,
@@ -547,33 +547,94 @@ pub struct X402VerifyRequest {
     pub resource_uri: Option<String>,
 }
 
-#[derive(Deserialize)]
-#[allow(dead_code)]
+#[derive(Clone, Serialize, Deserialize, Debug, PartialEq)]
 pub struct X402ZeltraPayment {
-    pub nullifier: String,
-    pub alpha_neg_hex: String,
-    pub hm_hex: String,
-    pub pk_iss_hex: String,
     #[serde(default)]
-    pub amount: u64,
+    pub asset_id: Option<u8>,
+    pub note_root: String,
     #[serde(default)]
-    pub recipient_or_intent_hash_hex: Option<String>,
+    pub leaf_count: Option<u64>,
+    #[serde(default)]
+    pub note_epoch_id: Option<u32>,
+    #[serde(alias = "nullifier")]
+    pub input_nullifier: String,
+    #[serde(default)]
+    pub output_commitment: Option<String>,
+    pub recipient: String,
+    #[serde(alias = "amount")]
+    pub merchant_amount: u64,
+    #[serde(default)]
+    pub protocol_fee: u64,
+    #[serde(default)]
+    pub execution_fee: u64,
+    #[serde(default)]
+    pub max_execution_fee: u64,
+    #[serde(default)]
+    pub quote_hash: Option<String>,
+    #[serde(default)]
+    pub quote_signature: Option<String>,
+    #[serde(default)]
+    pub quote_id: Option<String>,
     #[serde(default)]
     pub expiry: Option<u64>,
+    pub proof_a_neg: String,
+    pub proof_b: String,
+    pub proof_c: String,
+    pub public_inputs: Vec<String>,
     #[serde(default)]
-    pub nonce_hex: Option<String>,
+    pub change_encrypted_memo: Option<String>,
 }
 
-#[derive(Deserialize)]
+impl From<X402ZeltraPayment> for PrivateNoteSpendRequest {
+    fn from(p: X402ZeltraPayment) -> Self {
+        let has_change = if p.output_commitment.is_some() {
+            Some(serde_json::Value::Number(serde_json::Number::from(1u64)))
+        } else {
+            Some(serde_json::Value::Number(serde_json::Number::from(0u64)))
+        };
+
+        PrivateNoteSpendRequest {
+            session_id: None,
+            note_root: p.note_root,
+            leaf_count: p.leaf_count,
+            note_epoch_id: p.note_epoch_id,
+            is_rollover: None,
+            input_value: None,
+            asset_id: p.asset_id,
+            input_nullifier: p.input_nullifier,
+            output_commitment: p.output_commitment,
+            recipient: p.recipient,
+            merchant_amount: p.merchant_amount,
+            protocol_fee: p.protocol_fee,
+            execution_fee: p.execution_fee,
+            max_execution_fee: p.max_execution_fee,
+            quote_hash: p.quote_hash,
+            quote_signature: p.quote_signature,
+            quote_id: p.quote_id,
+            user_address: None,
+            expiry: p.expiry,
+            has_change,
+            proof_a_neg: p.proof_a_neg,
+            proof_b: p.proof_b,
+            proof_c: p.proof_c,
+            public_inputs: p.public_inputs,
+            idempotency_key: None,
+            change_encrypted_memo: p.change_encrypted_memo,
+        }
+    }
+}
+
+#[derive(Clone, Serialize, Deserialize, Debug)]
 pub struct X402PaymentSignatureInner {
     #[serde(rename = "x402Version")]
     pub x402_version: u32,
     pub scheme: String,
     pub network: String,
+    #[serde(alias = "payload")]
     pub payment: X402ZeltraPayment,
 }
 
-#[derive(Serialize)]
+#[derive(Clone, Serialize, Deserialize, Debug)]
 pub struct X402VerifyResponse {
     pub success: bool,
     pub tx_hash: Option<String>,

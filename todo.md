@@ -47,8 +47,9 @@ Ref: [`docs/roadmap.md`](file:///workspaces/Zeltra-Protocol/docs/roadmap.md) (Fa
 - [x] **In-Browser WebAssembly SDK Prover (DEC-041):** [SELESAI & AUDITED]
   - Detail spesifikasi eksekusi: [`archive/tasks/taskDEC041.md`](file:///workspaces/Zeltra-Protocol/archive/tasks/taskDEC041.md) & [`DEC-041`](file:///workspaces/Zeltra-Protocol/research/decisions/DEC-041-in-browser-wasm-groth16-prover-and-disposable-worker.md)
   - Runner prover Groth16 langsung di browser/mobile via Web Worker dengan siklus isolasi memori (`worker.terminate()`) anti-OOM linear (1-in-1-out, Universal 2-in-2-out JoinSplit, CEX Selective Disclosure) [SELESAI — PR #26].
-- [ ] **HTTP 402 AI Agent Facilitator (x402 Protocol):**
-  - Penyelesaian streaming payment mikro untuk AI Agent via Prepaid Note Pool dan settlement batas ambang.
+- [x] **HTTP 402 AI Agent Facilitator (DEC-042):** [SELESAI & AUDITED]
+  - Detail spesifikasi eksekusi: [`research/decisions/DEC-042-privacy-preserving-x402-facilitator-and-pure-zk-utxo-micropayments.md`](file:///workspaces/Zeltra-Protocol/research/decisions/DEC-042-privacy-preserving-x402-facilitator-and-pure-zk-utxo-micropayments.md)
+  - Modernisasi protokol x402 v2 ke Pure ZK-UTXO (1-in-1-out Groth16), penghapusan total legacy BLS blind signatures (`alpha_neg`, `hm`, `pk_iss`), dynamic economic dust threshold tracking `execution_fee`, fail-closed Groth16 preflight verification di relayer facilitator (`/api/x402/verify`), dual envelope/direct wire compatibility, dan universal merchant payout on-chain.
 
 ---
 

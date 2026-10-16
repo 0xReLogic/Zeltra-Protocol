@@ -67,69 +67,29 @@ pub fn encode_payment_required(req: &X402PaymentRequired) -> Result<String, Stri
     Ok(BASE64_STANDARD.encode(&json))
 }
 
-/// Constructs a complete X402PaymentSignature from Zeltra spend parameters.
+/// Decodes a base64-encoded PAYMENT-SIGNATURE header value into the structured
+/// payment signature.
+pub fn decode_payment_signature(header_value: &str) -> Result<X402PaymentSignature, String> {
+    let bytes = BASE64_STANDARD
+        .decode(header_value.trim())
+        .map_err(|e| format!("Base64 decode error: {}", e))?;
+    serde_json::from_slice(&bytes).map_err(|e| format!("JSON parse error: {}", e))
+}
+
+/// Constructs a complete X402PaymentSignature from Zeltra ZK-UTXO spend parameters (DEC-042).
 ///
-/// This is the primary entry point for AI Agents: given the anonymous token
-/// spend proof (nullifier, alpha_neg, hm, pk_iss), it builds a valid x402
-/// PAYMENT-SIGNATURE payload that can be attached to an HTTP request header.
-#[allow(clippy::too_many_arguments)]
-pub fn build_zeltra_payment_signature(
-    nullifier_hex: &str,
-    alpha_neg_hex: &str,
-    hm_hex: &str,
-    pk_iss_hex: &str,
-    amount: u64,
-    scheme: &str,
+/// This is the primary entry point for AI Agents: given the ZK-UTXO spend proof
+/// (PrivateNoteCircuit / JoinSplitCircuit), it builds a valid x402 PAYMENT-SIGNATURE
+/// payload that can be attached to an HTTP request header.
+pub fn build_x402_zk_payment_signature(
     network: &str,
-    recipient_or_intent_hash_hex: Option<String>,
-    expiry: Option<u64>,
-    nonce_hex: Option<String>,
+    scheme: &str,
+    payment: X402ZeltraPayment,
 ) -> X402PaymentSignature {
     X402PaymentSignature {
         x402_version: 2,
         scheme: scheme.to_string(),
         network: network.to_string(),
-        payment: ZeltraPaymentPayload {
-            nullifier: nullifier_hex.to_string(),
-            alpha_neg_hex: alpha_neg_hex.to_string(),
-            hm_hex: hm_hex.to_string(),
-            pk_iss_hex: pk_iss_hex.to_string(),
-            amount,
-            recipient_or_intent_hash_hex,
-            expiry,
-            nonce_hex,
-        },
+        payment,
     }
-}
-
-/// Builds a payment signature where the caller starts from the merchant's exact
-/// requested amount. The embedded contract amount is grossed up so the on-chain
-/// 0.15% spend fee does not reduce the merchant payout.
-#[allow(clippy::too_many_arguments)]
-pub fn build_zeltra_payment_signature_for_merchant_amount(
-    nullifier_hex: &str,
-    alpha_neg_hex: &str,
-    hm_hex: &str,
-    pk_iss_hex: &str,
-    merchant_amount: u64,
-    scheme: &str,
-    network: &str,
-    recipient_or_intent_hash_hex: Option<String>,
-    expiry: Option<u64>,
-    nonce_hex: Option<String>,
-) -> Result<X402PaymentSignature, String> {
-    let contract_amount = zeltra_core::gross_up_private_spend_amount(merchant_amount)
-        .ok_or_else(|| "Invalid merchant amount".to_string())?;
-    Ok(build_zeltra_payment_signature(
-        nullifier_hex,
-        alpha_neg_hex,
-        hm_hex,
-        pk_iss_hex,
-        contract_amount,
-        scheme,
-        network,
-        recipient_or_intent_hash_hex,
-        expiry,
-        nonce_hex,
-    ))
 }

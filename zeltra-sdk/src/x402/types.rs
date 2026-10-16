@@ -58,27 +58,68 @@ pub struct X402PaymentRequired {
 
 /// Zeltra-specific anonymous payment payload embedded inside the
 /// PAYMENT-SIGNATURE header. Instead of a standard EIP-3009 authorization that
-/// would expose the sender's on-chain address, Zeltra uses a BLS blind
-/// signature spend proof.
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct ZeltraPaymentPayload {
-    /// Nullifier hash (hex) -- prevents double-spend.
-    pub nullifier: String,
-    /// Negated unblinded BLS signature -alpha (hex, 128 bytes EVM).
-    pub alpha_neg_hex: String,
-    /// Hash-to-curve of the ephemeral key H(m) (hex, 128 bytes EVM).
-    pub hm_hex: String,
-    /// Issuer public key pk_iss (hex, 256 bytes EVM).
-    pub pk_iss_hex: String,
-    /// The payment amount.
-    pub amount: u64,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub recipient_or_intent_hash_hex: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+/// would expose the sender's on-chain address, Zeltra uses a Pure ZK-UTXO
+/// Private Note spend proof (DEC-038 / DEC-042).
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+pub struct X402ZeltraPayment {
+    /// Asset ID: 0 for WETH, 1 for USDC (defaults to 1 for USDC)
+    #[serde(default)]
+    pub asset_id: Option<u8>,
+    /// On-chain Merkle Mountain Range (MMR) root
+    pub note_root: String,
+    /// Tree leaf count at time of witness generation
+    #[serde(default)]
+    pub leaf_count: Option<u64>,
+    /// Note epoch ID
+    #[serde(default)]
+    pub note_epoch_id: Option<u32>,
+    /// Input nullifier hash (hex) -- prevents double-spend
+    #[serde(alias = "nullifier")]
+    pub input_nullifier: String,
+    /// Change note commitment (if any)
+    #[serde(default)]
+    pub output_commitment: Option<String>,
+    /// Recipient merchant address
+    pub recipient: String,
+    /// Net merchant amount
+    #[serde(alias = "amount")]
+    pub merchant_amount: u64,
+    /// Protocol spend fee (flat 45 bps)
+    #[serde(default)]
+    pub protocol_fee: u64,
+    /// Relayer execution fee reimbursement
+    #[serde(default)]
+    pub execution_fee: u64,
+    /// Max execution fee user is willing to pay
+    #[serde(default)]
+    pub max_execution_fee: u64,
+    /// EIP-712 quote hash
+    #[serde(default)]
+    pub quote_hash: Option<String>,
+    /// EIP-712 quote signature
+    #[serde(default)]
+    pub quote_signature: Option<String>,
+    /// Quote ID
+    #[serde(default)]
+    pub quote_id: Option<String>,
+    /// Expiry timestamp
+    #[serde(default)]
     pub expiry: Option<u64>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub nonce_hex: Option<String>,
+    /// Groth16 Proof A (negated G1, 128 bytes EVM hex)
+    pub proof_a_neg: String,
+    /// Groth16 Proof B (G2, 256 bytes EVM hex)
+    pub proof_b: String,
+    /// Groth16 Proof C (G1, 128 bytes EVM hex)
+    pub proof_c: String,
+    /// 16 Public Inputs in canonical Big-Endian EVM hex
+    pub public_inputs: Vec<String>,
+    /// 96-byte AEAD encrypted change memo (DEC-037)
+    #[serde(default)]
+    pub change_encrypted_memo: Option<String>,
 }
+
+/// Backward compatibility type alias
+pub type ZeltraPaymentPayload = X402ZeltraPayment;
 
 /// The PAYMENT-SIGNATURE header payload for Zeltra x402 transactions.
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -91,7 +132,8 @@ pub struct X402PaymentSignature {
     /// CAIP-2 network identifier.
     pub network: String,
     /// Zeltra anonymous payment payload (replaces standard EVM transfer auth).
-    pub payment: ZeltraPaymentPayload,
+    #[serde(alias = "payload")]
+    pub payment: X402ZeltraPayment,
 }
 
 /// Settlement receipt returned in the PAYMENT-RESPONSE header.

@@ -95,31 +95,45 @@ mod tests {
 
     #[test]
     fn test_build_and_encode_payment_signature() {
-        let sig = build_zeltra_payment_signature(
-            "0xabc123nullifier",
-            "0xalpha_neg_hex_data",
-            "0xhm_hex_data",
-            "0xpk_iss_hex_data",
-            1000,
-            "exact",
-            "eip155:42161",
-            None,
-            None,
-            None,
-        );
+        let payment = X402ZeltraPayment {
+            asset_id: Some(1),
+            note_root: "0x1234root".to_string(),
+            leaf_count: Some(5),
+            note_epoch_id: Some(1),
+            input_nullifier: "0xabc123nullifier".to_string(),
+            output_commitment: Some("0x5678change".to_string()),
+            recipient: "0xMerchantAddress".to_string(),
+            merchant_amount: 100_000_000,
+            protocol_fee: 450_000,
+            execution_fee: 15_000,
+            max_execution_fee: 25_000,
+            quote_hash: Some("0xquotehash".to_string()),
+            quote_signature: None,
+            quote_id: None,
+            expiry: Some(1740000000),
+            proof_a_neg: "0xproofA".to_string(),
+            proof_b: "0xproofB".to_string(),
+            proof_c: "0xproofC".to_string(),
+            public_inputs: vec!["0xpi1".to_string(), "0xpi2".to_string()],
+            change_encrypted_memo: Some("0xencryptedmemo".to_string()),
+        };
+
+        let sig = build_x402_zk_payment_signature("eip155:42161", "exact", payment);
 
         assert_eq!(sig.x402_version, 2);
         assert_eq!(sig.scheme, "exact");
-        assert_eq!(sig.payment.nullifier, "0xabc123nullifier");
+        assert_eq!(sig.payment.input_nullifier, "0xabc123nullifier");
+        assert_eq!(sig.payment.merchant_amount, 100_000_000);
 
         let encoded = encode_payment_signature(&sig).unwrap();
         assert!(!encoded.is_empty());
 
-        // Verify round-trip via raw base64 decode
-        let decoded_bytes = BASE64_STANDARD.decode(&encoded).unwrap();
-        let decoded: X402PaymentSignature = serde_json::from_slice(&decoded_bytes).unwrap();
-        assert_eq!(decoded.payment.nullifier, "0xabc123nullifier");
+        // Verify round-trip via decode_payment_signature
+        let decoded = decode_payment_signature(&encoded).unwrap();
+        assert_eq!(decoded.payment.input_nullifier, "0xabc123nullifier");
+        assert_eq!(decoded.payment.note_root, "0x1234root");
         assert_eq!(decoded.network, "eip155:42161");
+        assert_eq!(decoded.payment.merchant_amount, 100_000_000);
     }
 
     #[test]
@@ -139,26 +153,22 @@ mod tests {
     }
 
     #[test]
-    fn test_build_payment_signature_grosses_up_merchant_amount() {
-        let sig = build_zeltra_payment_signature_for_merchant_amount(
-            "0xabc123nullifier",
-            "0xalpha_neg_hex_data",
-            "0xhm_hex_data",
-            "0xpk_iss_hex_data",
-            100_000_000,
-            "exact",
-            "eip155:42161",
-            None,
-            None,
-            None,
+    fn test_x402_value_conservation_check() {
+        let input_value: u64 = 105_000_000;
+        let merchant_amount: u64 = 100_000_000;
+        let protocol_fee = zeltra_core::fees::fee_round_up(
+            merchant_amount,
+            zeltra_core::fees::PRIVATE_SPEND_FEE_BPS,
         )
-        .unwrap();
+        .unwrap(); // 450_000 (45 bps)
+        let execution_fee: u64 = 15_000;
+        let change_amount = input_value - merchant_amount - protocol_fee - execution_fee;
 
-        // With 45 bps (0.45%) default spend fee: gross = ceil(100_000_000 * 10000 / 9955) = 100_452_035
-        assert_eq!(sig.payment.amount, 100_452_035);
+        assert_eq!(protocol_fee, 450_000);
+        assert_eq!(change_amount, 4_535_000);
         assert_eq!(
-            zeltra_core::net_after_fee(sig.payment.amount, zeltra_core::PRIVATE_SPEND_FEE_BPS,),
-            Some(100_000_000),
+            input_value,
+            merchant_amount + protocol_fee + execution_fee + change_amount
         );
     }
 }

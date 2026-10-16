@@ -40,8 +40,8 @@ Ref: [`docs/roadmap.md`](file:///workspaces/Zeltra-Protocol/docs/roadmap.md) (Fa
   - Helper otomatis "Export Source of Funds" dengan pembuktian selektif & Verifier Binding untuk bypass freeze deposit bursa terpusat (Binance/Coinbase) (Ref: [`DEC-040C`](file:///workspaces/Zeltra-Protocol/research/decisions/DEC-040C-cex-verifier-engine-and-compliance-cli.md)).
 - [x] **In-Browser WebAssembly SDK Prover (DEC-041):** [SELESAI & AUDITED]
   - Runner prover Groth16 langsung di browser/mobile via Web Worker dengan siklus terminasi memori (`worker.terminate()`) anti-OOM linear (Spesifikasi: [`DEC-041`](file:///workspaces/Zeltra-Protocol/research/decisions/DEC-041-in-browser-wasm-groth16-prover-and-disposable-worker.md)) (Task: [`archive/tasks/taskDEC041.md`](file:///workspaces/Zeltra-Protocol/archive/tasks/taskDEC041.md)) [SELESAI — PR #26].
-- [ ] **Integrasi x402 Facilitator:**
-  - Jalur streaming payment mikro HTTP 402 untuk AI Agent.
+- [ ] **Integrasi x402 Facilitator (DEC-042):**
+  - Jalur mikro-pembayaran HTTP 402 untuk AI Agent berbasis Pure ZK-UTXO (Ref: [`DEC-042`](file:///workspaces/Zeltra-Protocol/research/decisions/DEC-042-privacy-preserving-x402-facilitator-and-pure-zk-utxo-micropayments.md)).
 
 ---
 
