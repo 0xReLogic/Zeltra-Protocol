@@ -25,6 +25,7 @@ chacha20poly1305 = { version = "0.10.1", default-features = false, features = ["
 x25519-dalek = { version = "2.0.1", default-features = false, features = ["static_secrets"] }
 zeroize = { version = "1.8.2", default-features = false, features = ["alloc"] }
 serde = { version = "1.0.228", default-features = false, features = ["alloc", "derive"] }
+bech32 = "0.11"
 
 
 [dev-dependencies]

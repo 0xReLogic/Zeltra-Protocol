@@ -3,7 +3,7 @@
 > **Scope:** `zeltra-core/` (Arkworks BLS12-381, Poseidon-W3, Poseidon-W5, X25519 ECDH, ChaCha20Poly1305, Bech32m)  
 > **Spesifikasi Referensi:** [`research/decisions/DEC-043A-zsa-key-derivation-and-deterministic-ecdh-memo.md`](file:///workspaces/Zeltra-Protocol/research/decisions/DEC-043A-zsa-key-derivation-and-deterministic-ecdh-memo.md) & [`research/decisions/DEC-043-shielded-to-shielded-in-pool-transfer-and-merchant-masking.md`](file:///workspaces/Zeltra-Protocol/research/decisions/DEC-043-shielded-to-shielded-in-pool-transfer-and-merchant-masking.md)  
 > **Prinsip:** *"Zero Spend Authority Leakage, Pure-Field Commitment Parity, Deterministic In-Band Randomness"*  
-> **Status:** **PENDING IMPLEMENTATION**
+> **Status:** **COMPLETED** (All 188 Unit Tests + 7 Integration Tests Passing 100%, clippy & fmt clean)
 
 ---
 
@@ -22,7 +22,7 @@ Menyediakan fondasi primitif kriptografi untuk transfer shielded-to-shielded in-
 ## 2. Checklist Implementasi Rinci
 
 ### A. Derivasi Kunci Pemilik Satu Arah (`zeltra-core/src/note.rs`)
-- [ ] **Domain Separator & Helper Function:**
+- [x] **Domain Separator & Helper Function:**
   - Tambahkan domain separator:
     ```rust
     pub fn domain_owner_key() -> Fr {
@@ -41,7 +41,7 @@ Menyediakan fondasi primitif kriptografi untuk transfer shielded-to-shielded in-
     ```
 
 ### B. Struktur `ZeltraShieldedAddress` (`zeltra-core/src/note.rs`)
-- [ ] **Definisi Struct & Serialisasi (Hex & Bech32m):**
+- [x] **Definisi Struct & Serialisasi (Hex & Bech32m):**
   - Definisikan struct:
     ```rust
     #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -55,15 +55,15 @@ Menyediakan fondasi primitif kriptografi untuk transfer shielded-to-shielded in-
     - `pub fn from_bytes(bytes: &[u8; 64]) -> Option<Self>`
     - `pub fn to_hex(&self) -> String`
     - `pub fn from_hex(hex_str: &str) -> Result<Self, KeyFormatError>`
-    - `pub fn to_bech32m(&self) -> Result<String, bech32::Error>` (HRP: `"zs"`)
+    - `pub fn to_bech32m(&self) -> Result<String, bech32::EncodeError>` (HRP: `"zs"`)
     - `pub fn from_bech32m(s: &str) -> Result<Self, KeyFormatError>`
 
 ### C. Helper Enkripsi Memo Deterministik (`zeltra-core/src/note.rs`)
-- [ ] **Derivasi Randomness ECDH:**
+- [x] **Derivasi Randomness ECDH:**
   ```rust
   pub fn derive_ecdh_note_randomness(shared_secret: &[u8; 32], rho: &Fr) -> Fr
   ```
-- [ ] **Enkripsi Memo Deterministik:**
+- [x] **Enkripsi Memo Deterministik:**
   ```rust
   pub fn encrypt_note_memo_deterministic<R: RecipientViewingKey>(
       value: u64,
@@ -72,7 +72,7 @@ Menyediakan fondasi primitif kriptografi untuk transfer shielded-to-shielded in-
       recipient: &R,
   ) -> Result<(Vec<u8>, Fr), KeyFormatError>
   ```
-- [ ] **Dekripsi Memo Deterministik:**
+- [x] **Dekripsi Memo Deterministik:**
   ```rust
   pub fn decrypt_note_memo_deterministic(
       encrypted_memo: &[u8],
@@ -81,7 +81,7 @@ Menyediakan fondasi primitif kriptografi untuk transfer shielded-to-shielded in-
   ```
 
 ### D. Re-ekspor & Modul (`zeltra-core/src/lib.rs`)
-- [ ] Re-ekspor: `ZeltraShieldedAddress`, `derive_owner_key`, `derive_ecdh_note_randomness`, `encrypt_note_memo_deterministic`, `decrypt_note_memo_deterministic`.
+- [x] Re-ekspor: `ZeltraShieldedAddress`, `derive_owner_key`, `derive_ecdh_note_randomness`, `encrypt_note_memo_deterministic`, `decrypt_note_memo_deterministic`.
 
 ---
 
@@ -90,15 +90,16 @@ Menyediakan fondasi primitif kriptografi untuk transfer shielded-to-shielded in-
 Sesuai aturan engineering Zeltra: **1 Positive Test + Minimal 2x Negative Tests**:
 
 ### Positive Tests:
-- [ ] `test_zsa_roundtrip_hex_and_bech32m`: Serialisasi dan deserialisasi ZSA melalui Hex dan Bech32m menghasilkan tuple yang identik.
-- [ ] `test_deterministic_ecdh_randomness_and_commitment_match`: Pengirim dan penerima menghasilkan $r$ dan komitmen daun $cm$ yang cocok 100%.
+- [x] `test_zsa_roundtrip_hex_and_bech32m`: Serialisasi dan deserialisasi ZSA melalui Hex dan Bech32m menghasilkan tuple yang identik.
+- [x] `test_deterministic_ecdh_randomness_and_commitment_match`: Pengirim dan penerima menghasilkan $r$ dan komitmen daun $cm$ yang cocok 100%.
 
 ### Negative Tests (Minimal 2x Positive = Minimal 4 Tests):
-- [ ] `test_zsa_rejects_non_canonical_owner_key`: Parsing ZSA dengan skalar $owner\_key \ge r$ gagal dengan `NonCanonicalScalar`.
-- [ ] `test_zsa_rejects_corrupted_bech32m_checksum`: Mengubah 1 karakter Bech32m menggagalkan verifikasi checksum.
-- [ ] `test_deterministic_memo_rejects_tampered_ciphertext`: Mengubah 1 bit pada ciphertext menggagalkan otentikasi tag Poly1305.
-- [ ] `test_deterministic_memo_fails_with_wrong_ivk`: Dekripsi dengan IVK yang salah mengembalikan `None`.
-- [ ] `test_deterministic_memo_rejects_invalid_size`: Memo selain 96 byte ditolak seketika.
+- [x] `test_zsa_rejects_non_canonical_owner_key`: Parsing ZSA dengan skalar $owner\_key \ge r$ gagal dengan `NonCanonicalScalar`.
+- [x] `test_zsa_rejects_corrupted_bech32m_checksum`: Mengubah 1 karakter Bech32m menggagalkan verifikasi checksum.
+- [x] `test_deterministic_memo_rejects_tampered_ciphertext`: Mengubah 1 bit pada ciphertext menggagalkan otentikasi tag Poly1305.
+- [x] `test_deterministic_memo_fails_with_wrong_ivk`: Dekripsi dengan IVK yang salah mengembalikan `None`.
+- [x] `test_deterministic_memo_rejects_invalid_size`: Memo selain 96 byte ditolak seketika.
+
 
 ---
 

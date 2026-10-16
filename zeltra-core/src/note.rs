@@ -42,6 +42,11 @@ pub fn domain_note_commitment() -> Fr {
     domain_from_label("zeltra.note.commitment.v1")
 }
 
+/// Domain tag for one-way owner key derivation from spending key (DEC-043A).
+pub fn domain_owner_key() -> Fr {
+    domain_from_label("zeltra.owner.key.v1")
+}
+
 /// Domain tag for nullifier derivation: H(nullifier_key, commitment, leaf_index).
 pub fn domain_nullifier() -> Fr {
     domain_from_label("zeltra.note.nullifier.v1")
@@ -432,6 +437,145 @@ impl RecipientViewingKey for &IncomingViewingKey {
     }
 }
 
+/// Zeltra Shielded Address (ZSA) representing a 64-byte recipient destination (DEC-043A).
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Serialize, Deserialize)]
+pub struct ZeltraShieldedAddress {
+    #[serde(serialize_with = "serialize_fr", deserialize_with = "deserialize_fr")]
+    pub owner_key: Fr,
+    #[serde(
+        serialize_with = "serialize_bytes32",
+        deserialize_with = "deserialize_bytes32"
+    )]
+    pub incoming_viewing_public_key: [u8; 32],
+}
+
+impl ZeltraShieldedAddress {
+    pub const HRP: &'static str = "zs";
+    pub const BYTE_LEN: usize = 64;
+
+    pub fn new(owner_key: Fr, incoming_viewing_public_key: [u8; 32]) -> Self {
+        Self {
+            owner_key,
+            incoming_viewing_public_key,
+        }
+    }
+
+    /// Derives ZSA deterministically from a master spending key and viewing key.
+    pub fn from_keys(spending_key: Fr, incoming_viewing_public_key: [u8; 32]) -> Self {
+        let owner_key = derive_owner_key(spending_key);
+        Self {
+            owner_key,
+            incoming_viewing_public_key,
+        }
+    }
+
+    /// Canonical 64-byte serialization (32B owner_key || 32B pk_ivk).
+    pub fn to_bytes(&self) -> [u8; Self::BYTE_LEN] {
+        let mut bytes = [0u8; Self::BYTE_LEN];
+        bytes[0..32].copy_from_slice(&fr_to_be_bytes(&self.owner_key));
+        bytes[32..64].copy_from_slice(&self.incoming_viewing_public_key);
+        bytes
+    }
+
+    /// Deserializes 64 bytes into ZSA. Rejects non-canonical scalar field elements (>= r).
+    pub fn from_bytes(bytes: &[u8; Self::BYTE_LEN]) -> Option<Self> {
+        let mut ok_bytes = [0u8; 32];
+        ok_bytes.copy_from_slice(&bytes[0..32]);
+        let owner_key = fr_from_be_bytes(&ok_bytes)?;
+        let mut pk = [0u8; 32];
+        pk.copy_from_slice(&bytes[32..64]);
+        Some(Self {
+            owner_key,
+            incoming_viewing_public_key: pk,
+        })
+    }
+
+    /// Encodes ZSA into canonical 128-character hex string.
+    pub fn to_hex(&self) -> String {
+        hex::encode(self.to_bytes())
+    }
+
+    /// Parses ZSA from a 0x-prefixed or raw 128-character hex string.
+    pub fn from_hex(hex_str: &str) -> Result<Self, KeyFormatError> {
+        let clean = hex_str.strip_prefix("0x").unwrap_or(hex_str);
+        if clean.len() != 128 {
+            return Err(KeyFormatError::InvalidLength {
+                expected: 128,
+                actual: clean.len(),
+            });
+        }
+        let bytes = hex::decode(clean).map_err(|_| KeyFormatError::InvalidHexEncoding)?;
+        let mut arr = [0u8; 64];
+        arr.copy_from_slice(&bytes);
+        Self::from_bytes(&arr).ok_or(KeyFormatError::NonCanonicalScalar { field: "owner_key" })
+    }
+
+    /// Encodes ZSA into Bech32m string format with "zs" HRP.
+    pub fn to_bech32m(&self) -> Result<String, bech32::EncodeError> {
+        use bech32::{Bech32m, Hrp};
+        let hrp = Hrp::parse(Self::HRP).expect("valid hrp 'zs'");
+        let data = self.to_bytes();
+        bech32::encode::<Bech32m>(hrp, &data)
+    }
+
+    /// Parses ZSA from a Bech32m string format with "zs" HRP.
+    pub fn from_bech32m(s: &str) -> Result<Self, KeyFormatError> {
+        use bech32::primitives::decode::CheckedHrpstring;
+        use bech32::{Bech32m, Hrp};
+        let checked =
+            CheckedHrpstring::new::<Bech32m>(s).map_err(|_| KeyFormatError::InvalidHexEncoding)?;
+        let expected_hrp = Hrp::parse(Self::HRP).expect("valid hrp 'zs'");
+        if checked.hrp() != expected_hrp {
+            return Err(KeyFormatError::InvalidLength {
+                expected: 64,
+                actual: 0,
+            });
+        }
+        let data: Vec<u8> = checked.byte_iter().collect();
+        if data.len() != 64 {
+            return Err(KeyFormatError::InvalidLength {
+                expected: 64,
+                actual: data.len(),
+            });
+        }
+        let mut arr = [0u8; 64];
+        arr.copy_from_slice(&data);
+        Self::from_bytes(&arr).ok_or(KeyFormatError::NonCanonicalScalar { field: "owner_key" })
+    }
+}
+
+impl core::fmt::Display for ZeltraShieldedAddress {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match self.to_bech32m() {
+            Ok(s) => write!(f, "{}", s),
+            Err(_) => write!(f, "0x{}", self.to_hex()),
+        }
+    }
+}
+
+impl core::str::FromStr for ZeltraShieldedAddress {
+    type Err = KeyFormatError;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        if s.starts_with(Self::HRP) {
+            Self::from_bech32m(s)
+        } else {
+            Self::from_hex(s)
+        }
+    }
+}
+
+impl RecipientViewingKey for ZeltraShieldedAddress {
+    fn recipient_pubkey(&self) -> [u8; 32] {
+        self.incoming_viewing_public_key
+    }
+}
+
+impl RecipientViewingKey for &ZeltraShieldedAddress {
+    fn recipient_pubkey(&self) -> [u8; 32] {
+        self.incoming_viewing_public_key
+    }
+}
+
 /// Derives a 32-byte master secret from an arbitrary client seed or signature (DEC-037).
 pub fn derive_master_secret(seed: &[u8]) -> [u8; 32] {
     let hk = hkdf::Hkdf::<sha2::Sha256>::new(Some(SALT_MASTER_V1), seed);
@@ -448,6 +592,11 @@ pub fn derive_spending_key(master_secret: &[u8; 32]) -> Fr {
     hk.expand(INFO_SPENDING_KEY_V1, &mut okm)
         .expect("32 bytes is valid length for HKDF-Expand");
     Fr::from_be_bytes_mod_order(&okm)
+}
+
+/// Derives the public owner key scalar (Fr) from a master spending key (DEC-043A).
+pub fn derive_owner_key(spending_key: Fr) -> Fr {
+    crate::poseidon::native_poseidon_w3(spending_key, Fr::from(0u64), domain_owner_key())
 }
 
 /// Derives the incoming and outcoming viewing keys from a 32-byte master secret.
@@ -657,6 +806,104 @@ pub fn decrypt_note_memo(encrypted_memo: &[u8], ivk: &IncomingViewingKey) -> Opt
     let mut pt_buf = [0u8; NotePlaintext::SERIALIZED_SIZE];
     pt_buf.copy_from_slice(&decrypted);
     NotePlaintext::from_bytes(&pt_buf)
+}
+
+/// Derives note randomness deterministically from a 32-byte ECDH shared secret and rho (DEC-043A).
+pub fn derive_ecdh_note_randomness(shared_secret: &[u8; 32], rho: &Fr) -> Fr {
+    let secret_fr = Fr::from_be_bytes_mod_order(shared_secret);
+    derive_note_randomness(secret_fr, *rho)
+}
+
+/// Encrypts note plaintext into a 96-byte AEAD memo using ephemeral X25519 ECDH,
+/// and returns the deterministic hiding randomness Fr matching the recipient's derivation (DEC-043A).
+pub fn encrypt_note_memo_deterministic<R: RecipientViewingKey>(
+    value: u64,
+    rho: Fr,
+    asset_id: u64,
+    recipient: &R,
+) -> Result<(Vec<u8>, Fr), KeyFormatError> {
+    let recipient_pk_bytes = recipient.recipient_pubkey();
+    let plaintext = NotePlaintext {
+        value,
+        rho,
+        asset_id,
+    };
+    let pt_bytes = plaintext.to_bytes();
+
+    let mut eph_bytes = [0u8; 32];
+    rand::rngs::OsRng.fill_bytes(&mut eph_bytes);
+    let ephemeral_secret = x25519_dalek::StaticSecret::from(eph_bytes);
+    let ephemeral_public = x25519_dalek::PublicKey::from(&ephemeral_secret);
+    let recipient_public = x25519_dalek::PublicKey::from(recipient_pk_bytes);
+
+    let shared_secret = ephemeral_secret.diffie_hellman(&recipient_public);
+    let randomness = derive_ecdh_note_randomness(shared_secret.as_bytes(), &rho);
+
+    let hk =
+        hkdf::Hkdf::<sha2::Sha256>::new(Some(b"ZELTRA_NOTE_MEMO_KDF_V1"), shared_secret.as_bytes());
+    let mut okm = [0u8; 44];
+    hk.expand(INFO_MEMO_CIPHER_V1, &mut okm)
+        .map_err(|_| KeyFormatError::InvalidHexEncoding)?;
+
+    let mut key_bytes = [0u8; 32];
+    key_bytes.copy_from_slice(&okm[0..32]);
+    let cipher_key = Key::from(key_bytes);
+    let mut nonce_bytes = [0u8; 12];
+    nonce_bytes.copy_from_slice(&okm[32..44]);
+    let nonce = Nonce::from(nonce_bytes);
+
+    let cipher = ChaCha20Poly1305::new(&cipher_key);
+    let ciphertext_and_tag = cipher
+        .encrypt(&nonce, pt_bytes.as_ref())
+        .map_err(|_| KeyFormatError::InvalidHexEncoding)?;
+
+    let mut result = Vec::with_capacity(ENCRYPTED_MEMO_SIZE);
+    result.extend_from_slice(ephemeral_public.as_bytes());
+    result.extend_from_slice(&ciphertext_and_tag);
+    Ok((result, randomness))
+}
+
+/// Decrypts a 96-byte AEAD note memo and simultaneously reconstructs the deterministic randomness (DEC-043A).
+pub fn decrypt_note_memo_deterministic(
+    encrypted_memo: &[u8],
+    ivk: &IncomingViewingKey,
+) -> Option<(NotePlaintext, Fr)> {
+    if encrypted_memo.len() != ENCRYPTED_MEMO_SIZE {
+        return None;
+    }
+
+    let mut epk_bytes = [0u8; 32];
+    epk_bytes.copy_from_slice(&encrypted_memo[0..32]);
+    let epk = x25519_dalek::PublicKey::from(epk_bytes);
+
+    let static_secret = x25519_dalek::StaticSecret::from(ivk.secret_bytes());
+    let shared_secret = static_secret.diffie_hellman(&epk);
+
+    let hk =
+        hkdf::Hkdf::<sha2::Sha256>::new(Some(b"ZELTRA_NOTE_MEMO_KDF_V1"), shared_secret.as_bytes());
+    let mut okm = [0u8; 44];
+    hk.expand(INFO_MEMO_CIPHER_V1, &mut okm).ok()?;
+
+    let mut key_bytes = [0u8; 32];
+    key_bytes.copy_from_slice(&okm[0..32]);
+    let cipher_key = Key::from(key_bytes);
+    let mut nonce_bytes = [0u8; 12];
+    nonce_bytes.copy_from_slice(&okm[32..44]);
+    let nonce = Nonce::from(nonce_bytes);
+
+    let cipher = ChaCha20Poly1305::new(&cipher_key);
+    let decrypted = cipher.decrypt(&nonce, &encrypted_memo[32..96]).ok()?;
+
+    if decrypted.len() != NotePlaintext::SERIALIZED_SIZE {
+        return None;
+    }
+
+    let mut pt_buf = [0u8; NotePlaintext::SERIALIZED_SIZE];
+    pt_buf.copy_from_slice(&decrypted);
+    let pt = NotePlaintext::from_bytes(&pt_buf)?;
+
+    let randomness = derive_ecdh_note_randomness(shared_secret.as_bytes(), &pt.rho);
+    Some((pt, randomness))
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -2319,5 +2566,311 @@ mod tests {
                 note_commitment(val, aid as u8, sk, rho, note.randomness)
             );
         }
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // DEC-043A Test Suite: ZSA & Deterministic ECDH Note Randomness
+    // ═══════════════════════════════════════════════════════════════════════
+
+    #[test]
+    fn test_domain_owner_key_and_derivation() {
+        let domain = domain_owner_key();
+        assert_ne!(domain, Fr::from(0u64), "Domain separator must be non-zero");
+
+        let seed = b"zsa_key_derivation_seed_alice";
+        let master = derive_master_secret(seed);
+        let sk1 = derive_spending_key(&master);
+        let ok1 = derive_owner_key(sk1);
+
+        assert_ne!(
+            ok1, sk1,
+            "Owner key must be one-way separated from spending key (AUD-1)"
+        );
+        assert_ne!(ok1, Fr::from(0u64), "Owner key must be non-zero");
+
+        // Deterministic derivation
+        let ok1_repeat = derive_owner_key(sk1);
+        assert_eq!(ok1, ok1_repeat, "derive_owner_key must be deterministic");
+
+        // Distinct spending keys produce distinct owner keys
+        let sk2 = derive_spending_key(&derive_master_secret(b"zsa_key_derivation_seed_bob"));
+        let ok2 = derive_owner_key(sk2);
+        assert_ne!(
+            ok1, ok2,
+            "Different spending keys must produce different owner keys"
+        );
+    }
+
+    #[test]
+    fn test_zsa_roundtrip_hex_and_bech32m() {
+        let seed = b"zsa_roundtrip_test_master_seed";
+        let master = derive_master_secret(seed);
+        let sk = derive_spending_key(&master);
+        let (ivk, _ovk) = derive_viewing_keys_from_secret(&master);
+
+        let zsa = ZeltraShieldedAddress::from_keys(sk, ivk.public_key());
+        assert_eq!(zsa.owner_key, derive_owner_key(sk));
+        assert_eq!(zsa.incoming_viewing_public_key, ivk.public_key());
+
+        // 1. Raw Bytes Roundtrip
+        let bytes = zsa.to_bytes();
+        assert_eq!(bytes.len(), 64);
+        let from_bytes_zsa = ZeltraShieldedAddress::from_bytes(&bytes).expect("Valid 64-byte ZSA");
+        assert_eq!(zsa, from_bytes_zsa);
+
+        // 2. Hex Roundtrip (both with and without 0x prefix)
+        let hex_str = zsa.to_hex();
+        assert_eq!(hex_str.len(), 128);
+        let from_hex_zsa = ZeltraShieldedAddress::from_hex(&hex_str).expect("Valid 128-char hex");
+        assert_eq!(zsa, from_hex_zsa);
+
+        let hex_0x = format!("0x{}", hex_str);
+        let from_hex_0x = ZeltraShieldedAddress::from_hex(&hex_0x).expect("Valid 0x-prefixed hex");
+        assert_eq!(zsa, from_hex_0x);
+
+        // 3. Bech32m Roundtrip (HRP: "zs")
+        let bech32m_str = zsa.to_bech32m().expect("Bech32m encoding must succeed");
+        assert!(
+            bech32m_str.starts_with("zs1"),
+            "Bech32m string must start with 'zs1'"
+        );
+        let from_bech32m_zsa =
+            ZeltraShieldedAddress::from_bech32m(&bech32m_str).expect("Valid Bech32m string");
+        assert_eq!(zsa, from_bech32m_zsa);
+
+        // 4. FromStr / Display Roundtrip
+        let displayed = format!("{}", zsa);
+        assert_eq!(displayed, bech32m_str);
+        let parsed: ZeltraShieldedAddress = displayed.parse().expect("FromStr must parse bech32m");
+        assert_eq!(zsa, parsed);
+
+        let parsed_hex: ZeltraShieldedAddress = hex_str.parse().expect("FromStr must parse hex");
+        assert_eq!(zsa, parsed_hex);
+    }
+
+    #[test]
+    fn test_deterministic_ecdh_randomness_and_commitment_match() {
+        // Bob is the recipient
+        let bob_seed = b"bob_recipient_secret_seed_v1";
+        let bob_master = derive_master_secret(bob_seed);
+        let bob_sk = derive_spending_key(&bob_master);
+        let (bob_ivk, _) = derive_viewing_keys_from_secret(&bob_master);
+        let bob_zsa = ZeltraShieldedAddress::from_keys(bob_sk, bob_ivk.public_key());
+
+        // Alice is the sender
+        let value = 50_000_000u64; // 50 USDC
+        let rho = Fr::from(4242424242u64);
+        let asset_id = 1u64; // USDC
+
+        // Alice encrypts memo for Bob's ZSA (using Bob's public key)
+        let (encrypted_memo, r_sender) =
+            encrypt_note_memo_deterministic(value, rho, asset_id, &bob_zsa)
+                .expect("Deterministic encryption must succeed");
+        assert_eq!(encrypted_memo.len(), 96, "Memo must be exactly 96 bytes");
+
+        // Alice computes note commitment for the note created for Bob
+        let cm_sender = note_commitment(value, asset_id as u8, bob_zsa.owner_key, rho, r_sender);
+
+        // Bob scans on-chain event, discovers memo, and decrypts using Bob's IVK
+        let (decrypted_pt, r_receiver) = decrypt_note_memo_deterministic(&encrypted_memo, &bob_ivk)
+            .expect("Bob must successfully decrypt note memo");
+
+        assert_eq!(decrypted_pt.value, value);
+        assert_eq!(decrypted_pt.rho, rho);
+        assert_eq!(decrypted_pt.asset_id, asset_id);
+
+        // CRITICAL CHECK (AUD-2): Randomness derived on both sides must match 100%!
+        assert_eq!(
+            r_sender, r_receiver,
+            "Sender and receiver must reconstruct 100% identical randomness r"
+        );
+
+        // Bob computes leaf commitment using his own owner_key derived from his spending key
+        let bob_owner_key = derive_owner_key(bob_sk);
+        assert_eq!(bob_owner_key, bob_zsa.owner_key);
+        let cm_receiver = note_commitment(
+            decrypted_pt.value,
+            decrypted_pt.asset_id as u8,
+            bob_owner_key,
+            decrypted_pt.rho,
+            r_receiver,
+        );
+
+        // CRITICAL CHECK (AUD-1 & AUD-2): Leaf commitment on both sides matches 100%!
+        assert_eq!(
+            cm_sender, cm_receiver,
+            "Sender and receiver leaf commitments must match 100%!"
+        );
+    }
+
+    #[test]
+    fn test_zsa_rejects_non_canonical_owner_key() {
+        // Construct bytes with scalar >= r (e.g. byte 0 = 0xff)
+        let mut non_canonical_bytes = [0xffu8; 64];
+        non_canonical_bytes[32..64].copy_from_slice(&[0x01; 32]); // Valid dummy pk_ivk
+
+        // 1. from_bytes must return None
+        assert!(
+            ZeltraShieldedAddress::from_bytes(&non_canonical_bytes).is_none(),
+            "from_bytes must reject scalar >= r"
+        );
+
+        // 2. from_hex must return NonCanonicalScalar
+        let hex_str = hex::encode(non_canonical_bytes);
+        let err = ZeltraShieldedAddress::from_hex(&hex_str).unwrap_err();
+        assert_eq!(
+            err,
+            KeyFormatError::NonCanonicalScalar { field: "owner_key" },
+            "from_hex must return NonCanonicalScalar error"
+        );
+
+        // 3. from_bech32m must return NonCanonicalScalar if the encoded bytes contain scalar >= r
+        use bech32::{Bech32m, Hrp};
+        let hrp = Hrp::parse("zs").unwrap();
+        let bech32m_str = bech32::encode::<Bech32m>(hrp, &non_canonical_bytes).unwrap();
+        let err_bech = ZeltraShieldedAddress::from_bech32m(&bech32m_str).unwrap_err();
+        assert_eq!(
+            err_bech,
+            KeyFormatError::NonCanonicalScalar { field: "owner_key" },
+            "from_bech32m must return NonCanonicalScalar error for non-canonical scalar"
+        );
+    }
+
+    #[test]
+    fn test_zsa_rejects_corrupted_bech32m_checksum() {
+        let seed = b"checksum_corruption_test";
+        let master = derive_master_secret(seed);
+        let sk = derive_spending_key(&master);
+        let (ivk, _) = derive_viewing_keys_from_secret(&master);
+        let zsa = ZeltraShieldedAddress::from_keys(sk, ivk.public_key());
+
+        let valid_bech32m = zsa.to_bech32m().unwrap();
+
+        // 1. Corrupt the last character (part of checksum)
+        let mut chars: Vec<char> = valid_bech32m.chars().collect();
+        let last_idx = chars.len() - 1;
+        chars[last_idx] = if chars[last_idx] == 'q' { 'p' } else { 'q' };
+        let corrupted_str: String = chars.into_iter().collect();
+
+        assert!(
+            ZeltraShieldedAddress::from_bech32m(&corrupted_str).is_err(),
+            "Corrupted Bech32m checksum must fail decoding"
+        );
+
+        // 2. Wrong HRP (e.g. "zr" instead of "zs")
+        use bech32::{Bech32m, Hrp};
+        let wrong_hrp = Hrp::parse("zr").unwrap();
+        let wrong_hrp_str = bech32::encode::<Bech32m>(wrong_hrp, &zsa.to_bytes()).unwrap();
+        assert!(
+            ZeltraShieldedAddress::from_bech32m(&wrong_hrp_str).is_err(),
+            "Wrong HRP must be rejected by from_bech32m"
+        );
+
+        // 3. Invalid length (e.g. 32 bytes data instead of 64 bytes)
+        let short_data = [0x42u8; 32];
+        let short_bech32m =
+            bech32::encode::<Bech32m>(Hrp::parse("zs").unwrap(), &short_data).unwrap();
+        assert!(
+            ZeltraShieldedAddress::from_bech32m(&short_bech32m).is_err(),
+            "32-byte data Bech32m must be rejected for ZSA"
+        );
+    }
+
+    #[test]
+    fn test_deterministic_memo_rejects_tampered_ciphertext() {
+        let (ivk, _) = derive_viewing_keys(b"tamper_test_seed");
+        let (memo, _r) =
+            encrypt_note_memo_deterministic(1_000_000, Fr::from(999u64), 1, &ivk).unwrap();
+        assert_eq!(memo.len(), 96);
+
+        // Valid memo decrypts fine
+        assert!(decrypt_note_memo_deterministic(&memo, &ivk).is_some());
+
+        // Tamper with ephemeral public key (byte 0..32)
+        let mut tampered_epk = memo.clone();
+        tampered_epk[10] ^= 0x01;
+        assert!(
+            decrypt_note_memo_deterministic(&tampered_epk, &ivk).is_none(),
+            "Tampered EPK must cause Poly1305 MAC tag failure"
+        );
+
+        // Tamper with ciphertext payload (byte 32..80)
+        let mut tampered_ct = memo.clone();
+        tampered_ct[45] ^= 0x01;
+        assert!(
+            decrypt_note_memo_deterministic(&tampered_ct, &ivk).is_none(),
+            "Tampered ciphertext must cause Poly1305 MAC tag failure"
+        );
+
+        // Tamper with MAC tag (byte 80..96)
+        let mut tampered_tag = memo.clone();
+        tampered_tag[90] ^= 0x01;
+        assert!(
+            decrypt_note_memo_deterministic(&tampered_tag, &ivk).is_none(),
+            "Tampered MAC tag must cause authentication failure"
+        );
+    }
+
+    #[test]
+    fn test_deterministic_memo_fails_with_wrong_ivk() {
+        let (bob_ivk, _) = derive_viewing_keys(b"bob_key_seed");
+        let (eve_ivk, _) = derive_viewing_keys(b"eve_attacker_key_seed");
+
+        let (memo_for_bob, _) =
+            encrypt_note_memo_deterministic(75_000_000, Fr::from(123456u64), 1, &bob_ivk).unwrap();
+
+        // Bob succeeds
+        assert!(decrypt_note_memo_deterministic(&memo_for_bob, &bob_ivk).is_some());
+
+        // Eve fails to decrypt Bob's memo
+        assert!(
+            decrypt_note_memo_deterministic(&memo_for_bob, &eve_ivk).is_none(),
+            "Decrypting with wrong IVK must return None (Poly1305 tag mismatch)"
+        );
+    }
+
+    #[test]
+    fn test_deterministic_memo_rejects_invalid_size() {
+        let (ivk, _) = derive_viewing_keys(b"invalid_size_test_seed");
+        let (valid_memo, _) =
+            encrypt_note_memo_deterministic(10_000_000, Fr::from(777u64), 1, &ivk).unwrap();
+        assert_eq!(valid_memo.len(), 96);
+
+        // Test truncated slices (length < 96)
+        let truncated_sizes = [0, 1, 16, 32, 48, 64, 95];
+        for &size in &truncated_sizes {
+            let slice = &valid_memo[..size];
+            assert!(
+                decrypt_note_memo_deterministic(slice, &ivk).is_none(),
+                "Truncated memo with length {} must return None immediately",
+                size
+            );
+        }
+
+        // Test oversized buffers (length > 96)
+        let oversized_sizes = [97, 100, 128, 200];
+        for &size in &oversized_sizes {
+            let mut oversized = valid_memo.clone();
+            oversized.resize(size, 0xaa);
+            assert!(
+                decrypt_note_memo_deterministic(&oversized, &ivk).is_none(),
+                "Oversized memo with length {} must return None immediately",
+                size
+            );
+        }
+    }
+
+    #[test]
+    fn test_zsa_serde_json_roundtrip() {
+        let seed = b"serde_json_zsa_seed";
+        let master = derive_master_secret(seed);
+        let sk = derive_spending_key(&master);
+        let (ivk, _) = derive_viewing_keys_from_secret(&master);
+        let zsa = ZeltraShieldedAddress::from_keys(sk, ivk.public_key());
+
+        let json_str = serde_json::to_string(&zsa).expect("ZSA must serialize to JSON");
+        let deserialized: ZeltraShieldedAddress =
+            serde_json::from_str(&json_str).expect("ZSA must deserialize from JSON");
+        assert_eq!(zsa, deserialized);
     }
 }
