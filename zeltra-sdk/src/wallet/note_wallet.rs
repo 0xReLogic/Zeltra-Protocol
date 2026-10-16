@@ -22,12 +22,13 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use zeltra_core::{
-    decrypt_note_memo, derive_joinsplit_dummy_nullifier, derive_joinsplit_nullifier,
-    derive_nullifier, derive_nullifier_key, derive_viewing_keys, encrypt_note_memo,
+    decrypt_note_memo, decrypt_note_memo_deterministic, derive_joinsplit_dummy_nullifier,
+    derive_joinsplit_nullifier, derive_nullifier, derive_nullifier_key, derive_owner_key,
+    derive_viewing_keys, encrypt_note_memo, encrypt_note_memo_deterministic,
     encrypt_note_memo_optional, extract_joinsplit_public_inputs, fr_from_be_bytes, fr_to_be_bytes,
     generate_joinsplit_proof, generate_note_proof, note_commitment, split_quote_hash_to_limbs,
     to_evm_g1, to_evm_g2, FullViewingKey, IncomingViewingKey, JoinSplitCircuit,
-    OutcomingViewingKey,
+    OutcomingViewingKey, ZeltraShieldedAddress,
 };
 
 use crate::compliance::{
@@ -365,6 +366,10 @@ pub struct JoinSplitSpendProofPayload {
     pub proof_b_hex: String,            // 256 bytes EVM format
     pub proof_c_hex: String,            // 128 bytes EVM format
     pub public_inputs_hex: Vec<String>, // 19 x 32 bytes EVM scalars (DEC-036A)
+    #[serde(alias = "encrypted_memo_1_hex", default)]
+    pub encrypted_memo_1: String, // 192 hex chars (96 bytes)
+    #[serde(alias = "encrypted_memo_2_hex", default)]
+    pub encrypted_memo_2: String, // 192 hex chars (96 bytes)
 }
 
 /// Dual-Witness Assembly for JoinSplit Inputs (DEC-036B Phase 4)
@@ -634,8 +639,32 @@ impl PrivateNoteWallet {
     /// - `asset_id == 1`: USDC total balance in Micro-USDC (6 decimals)
     pub fn get_balance(&self, asset_id: u8) -> Result<u64, WalletError> {
         match asset_id {
-            0 => Ok(self.weth_notes.iter().map(|n| n.value).sum()),
-            1 => Ok(self.usdc_notes.iter().map(|n| n.value).sum()),
+            0 => {
+                let from_notes: u64 = self
+                    .notes
+                    .values()
+                    .filter(|n| n.status == NoteStatus::Unspent && n.asset_id == 0)
+                    .map(|n| n.value)
+                    .sum();
+                if from_notes > 0 {
+                    Ok(from_notes)
+                } else {
+                    Ok(self.weth_notes.iter().map(|n| n.value).sum())
+                }
+            }
+            1 => {
+                let from_notes: u64 = self
+                    .notes
+                    .values()
+                    .filter(|n| n.status == NoteStatus::Unspent && n.asset_id == 1)
+                    .map(|n| n.value)
+                    .sum();
+                if from_notes > 0 {
+                    Ok(from_notes)
+                } else {
+                    Ok(self.usdc_notes.iter().map(|n| n.value).sum())
+                }
+            }
             _ => Err(WalletError::UnsupportedAssetId(asset_id)),
         }
     }
@@ -698,6 +727,19 @@ impl PrivateNoteWallet {
     /// Nullifier key as Fr
     pub fn nullifier_key(&self) -> Result<Fr, WalletError> {
         parse_fr_from_hex(&self.nullifier_key_hex)
+    }
+
+    /// Owner key as Fr (derived from spending key, DEC-043A)
+    pub fn owner_key(&self) -> Result<Fr, WalletError> {
+        let sk = self.spending_key()?;
+        Ok(derive_owner_key(sk))
+    }
+
+    /// Shielded address (ZSA) representing this wallet (DEC-043A)
+    pub fn shielded_address(&self) -> Result<ZeltraShieldedAddress, WalletError> {
+        let sk = self.spending_key()?;
+        let pk = self.incoming_viewing_public_key()?;
+        Ok(ZeltraShieldedAddress::from_keys(sk, pk))
     }
 
     /// Returns the Incoming Viewing Key (IVK) (DEC-037).
@@ -1094,6 +1136,7 @@ impl PrivateNoteWallet {
             asset_id: u64,
             rho: Fr,
             deterministic_r: Fr,
+            owner_key: Fr,
         }
 
         let mut candidates = Vec::new();
@@ -1102,21 +1145,55 @@ impl PrivateNoteWallet {
             if ev.encrypted_memo.is_empty() {
                 continue;
             }
-            if let Some(pt) = decrypt_note_memo(&ev.encrypted_memo, &ivk) {
-                let deterministic_r = zeltra_core::derive_note_randomness(sk, pt.rho);
-                let note = pt.to_note(sk);
-                let cm = note.commitment();
-                let cm_hex = format!("0x{}", hex::encode(fr_to_be_bytes(&cm)));
+            if let Some((pt, deterministic_r)) =
+                decrypt_note_memo_deterministic(&ev.encrypted_memo, &ivk)
+            {
+                // Skip dummy zero-notes to keep active UTXO state clean (AUD-7)
+                if pt.value == 0 {
+                    continue;
+                }
+
                 let ev_cm_clean = ev
                     .commitment_hex
                     .strip_prefix("0x")
                     .unwrap_or(&ev.commitment_hex);
 
-                if hex::encode(fr_to_be_bytes(&cm)).to_lowercase() != ev_cm_clean.to_lowercase() {
-                    continue;
-                }
+                // Reconstruct candidate cm
+                let owner_zsa = derive_owner_key(sk);
+                let cm_zsa = note_commitment(
+                    pt.value,
+                    pt.asset_id as u8,
+                    owner_zsa,
+                    pt.rho,
+                    deterministic_r,
+                );
+                let cm_direct =
+                    note_commitment(pt.value, pt.asset_id as u8, sk, pt.rho, deterministic_r);
+                let r_legacy = zeltra_core::derive_note_randomness(sk, pt.rho);
+                let cm_legacy = note_commitment(pt.value, pt.asset_id as u8, sk, pt.rho, r_legacy);
+                let cm_legacy_zsa =
+                    note_commitment(pt.value, pt.asset_id as u8, owner_zsa, pt.rho, r_legacy);
 
-                let nullifier = derive_nullifier(nk, cm, ev.leaf_index, 0);
+                let (matched_cm, matched_r, matched_owner) = if hex::encode(fr_to_be_bytes(&cm_zsa))
+                    .eq_ignore_ascii_case(ev_cm_clean)
+                {
+                    (cm_zsa, deterministic_r, owner_zsa)
+                } else if hex::encode(fr_to_be_bytes(&cm_direct)).eq_ignore_ascii_case(ev_cm_clean)
+                {
+                    (cm_direct, deterministic_r, sk)
+                } else if hex::encode(fr_to_be_bytes(&cm_legacy)).eq_ignore_ascii_case(ev_cm_clean)
+                {
+                    (cm_legacy, r_legacy, sk)
+                } else if hex::encode(fr_to_be_bytes(&cm_legacy_zsa))
+                    .eq_ignore_ascii_case(ev_cm_clean)
+                {
+                    (cm_legacy_zsa, r_legacy, owner_zsa)
+                } else {
+                    continue;
+                };
+
+                let cm_hex = format!("0x{}", hex::encode(fr_to_be_bytes(&matched_cm)));
+                let nullifier = derive_nullifier(nk, matched_cm, ev.leaf_index, 0);
                 let nf_hex = format!("0x{}", hex::encode(fr_to_be_bytes(&nullifier)));
 
                 candidates.push(Candidate {
@@ -1127,7 +1204,8 @@ impl PrivateNoteWallet {
                     value: pt.value,
                     asset_id: pt.asset_id,
                     rho: pt.rho,
-                    deterministic_r,
+                    deterministic_r: matched_r,
+                    owner_key: matched_owner,
                 });
             }
         }
@@ -1167,7 +1245,7 @@ impl PrivateNoteWallet {
                 commitment_hex: cand.cm_hex.clone(),
                 value: cand.value,
                 asset_id: cand.asset_id as u8,
-                owner_key_hex: hex::encode(fr_to_be_bytes(&sk)),
+                owner_key_hex: hex::encode(fr_to_be_bytes(&cand.owner_key)),
                 rho_hex: hex::encode(fr_to_be_bytes(&cand.rho)),
                 randomness_hex: hex::encode(fr_to_be_bytes(&cand.deterministic_r)),
                 leaf_index: Some(cand.leaf_index),
@@ -1775,20 +1853,44 @@ impl ReadOnlyAuditorSession {
             if ev.encrypted_memo.is_empty() {
                 continue;
             }
-            if let Some(pt) = decrypt_note_memo(&ev.encrypted_memo, &ivk) {
-                let note = pt.to_note(self.fvk.owner_key);
-                let cm = note.commitment();
-                let cm_hex = format!("0x{}", hex::encode(fr_to_be_bytes(&cm)));
+            if let Some((pt, rand)) = decrypt_note_memo_deterministic(&ev.encrypted_memo, &ivk) {
+                if pt.value == 0 {
+                    continue;
+                }
                 let ev_cm_clean = ev
                     .commitment_hex
                     .strip_prefix("0x")
                     .unwrap_or(&ev.commitment_hex);
 
-                if hex::encode(fr_to_be_bytes(&cm)).to_lowercase() != ev_cm_clean.to_lowercase() {
-                    continue;
-                }
+                let cm_ecdh = note_commitment(
+                    pt.value,
+                    pt.asset_id as u8,
+                    self.fvk.owner_key,
+                    pt.rho,
+                    rand,
+                );
+                let r_legacy = zeltra_core::derive_note_randomness(self.fvk.owner_key, pt.rho);
+                let cm_legacy = note_commitment(
+                    pt.value,
+                    pt.asset_id as u8,
+                    self.fvk.owner_key,
+                    pt.rho,
+                    r_legacy,
+                );
 
-                let nullifier = self.fvk.derive_nullifier(cm, ev.leaf_index, 0);
+                let (matched_cm, matched_rand) = if hex::encode(fr_to_be_bytes(&cm_ecdh))
+                    .eq_ignore_ascii_case(ev_cm_clean)
+                {
+                    (cm_ecdh, rand)
+                } else if hex::encode(fr_to_be_bytes(&cm_legacy)).eq_ignore_ascii_case(ev_cm_clean)
+                {
+                    (cm_legacy, r_legacy)
+                } else {
+                    continue;
+                };
+
+                let cm_hex = format!("0x{}", hex::encode(fr_to_be_bytes(&matched_cm)));
+                let nullifier = self.fvk.derive_nullifier(matched_cm, ev.leaf_index, 0);
                 let nf_hex = format!("0x{}", hex::encode(fr_to_be_bytes(&nullifier)));
 
                 candidates.push(Candidate {
@@ -1799,7 +1901,7 @@ impl ReadOnlyAuditorSession {
                     value: pt.value,
                     asset_id: pt.asset_id as u8,
                     rho: pt.rho,
-                    randomness: note.randomness,
+                    randomness: matched_rand,
                 });
             }
         }
@@ -1937,6 +2039,23 @@ impl ReadOnlyAuditorSession {
         _expiry: u64,
         _quote_hash: [u8; 32],
         _current_epoch: u32,
+    ) -> Result<JoinSplitSpendProofPayload, WalletError> {
+        Err(WalletError::SpendAuthorityRequired)
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn prepare_shielded_transfer_proof(
+        &self,
+        _recipient_zsa_bech32m_or_hex: &str,
+        _transfer_amount: u64,
+        _asset_id: u8,
+        _max_execution_fee: u64,
+        _quote_hash_hex: &str,
+        _chain_id: u64,
+        _contract_address_hex: &str,
+        _expiry: u64,
+        _current_time_secs: u64,
+        _joinsplit_pk: &ark_groth16::ProvingKey<Bls12_381>,
     ) -> Result<JoinSplitSpendProofPayload, WalletError> {
         Err(WalletError::SpendAuthorityRequired)
     }
@@ -2499,6 +2618,32 @@ impl PrivateNoteWallet {
             execution_fee,
             current_time_secs,
             current_epoch,
+            &crate::coin_selection::KnapsackConfig::default(),
+        )
+    }
+
+    /// Multi-UTXO Stochastic Knapsack Coin Selection filtered by asset ID (DEC-043C).
+    pub fn select_notes_knapsack_asset(
+        &self,
+        total_required: u64,
+        asset_id: u8,
+    ) -> Result<SelectedSpend, WalletError> {
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs();
+        let candidates: Vec<&WalletNote> = self
+            .notes
+            .values()
+            .filter(|n| n.asset_id == asset_id)
+            .collect();
+        crate::coin_selection::select_notes_stochastic_knapsack(
+            &candidates,
+            total_required,
+            0,
+            0,
+            now,
+            0,
             &crate::coin_selection::KnapsackConfig::default(),
         )
     }
@@ -3837,6 +3982,35 @@ impl PrivateNoteWallet {
             .map(|fr| hex::encode(fr_to_be_bytes(fr)))
             .collect();
 
+        let sender_pk_ivk = self.incoming_viewing_public_key()?;
+        let memo_1 = if selected.has_change {
+            zeltra_core::encrypt_note_memo_deterministic(
+                selected.change_amount,
+                ch1_rho,
+                input_note_1.asset_id as u64,
+                &sender_pk_ivk,
+            )
+            .map(|(m, _)| m)
+            .unwrap_or_else(|_| vec![0u8; 96])
+        } else {
+            zeltra_core::encrypt_note_memo_deterministic(
+                0,
+                ch1_rho,
+                input_note_1.asset_id as u64,
+                &sender_pk_ivk,
+            )
+            .map(|(m, _)| m)
+            .unwrap_or_else(|_| vec![0u8; 96])
+        };
+        let memo_2 = zeltra_core::encrypt_note_memo_deterministic(
+            0,
+            ch2_rho,
+            input_note_1.asset_id as u64,
+            &sender_pk_ivk,
+        )
+        .map(|(m, _)| m)
+        .unwrap_or_else(|_| vec![0u8; 96]);
+
         Ok(JoinSplitSpendProofPayload {
             session_id: session_id.to_string(),
             input_commitment_1_hex: selected.input_commitment_hex.clone(),
@@ -3861,6 +4035,8 @@ impl PrivateNoteWallet {
             proof_b_hex: hex::encode(proof_b),
             proof_c_hex: hex::encode(proof_c),
             public_inputs_hex: public_inputs,
+            encrypted_memo_1: hex::encode(memo_1),
+            encrypted_memo_2: hex::encode(memo_2),
         })
     }
 
@@ -3905,6 +4081,437 @@ impl PrivateNoteWallet {
             current_time_secs,
             joinsplit_pk,
         )
+    }
+
+    /// Prepares a Universal 2-in-2-out JoinSplit Groth16 proof locally for a shielded-to-shielded
+    /// in-pool transfer to a recipient's Zeltra Shielded Address (ZSA) (DEC-043 / DEC-043C).
+    ///
+    /// - Mode 2 Gating: merchant_amount = 0, protocol_fee = 0, recipient = Address::ZERO
+    /// - Output 1: recipient note with deterministic randomness derived from recipient ZSA
+    /// - Output 2: sender change note (or random dummy note if exact payment)
+    /// - Dual-memo (96B each) included in JoinSplitSpendProofPayload
+    #[allow(clippy::too_many_arguments)]
+    pub fn prepare_shielded_transfer_proof(
+        &mut self,
+        recipient_zsa_bech32m_or_hex: &str,
+        transfer_amount: u64,
+        asset_id: u8,
+        max_execution_fee: u64,
+        quote_hash_hex: &str,
+        chain_id: u64,
+        contract_address_hex: &str,
+        expiry: u64,
+        current_time_secs: u64,
+        joinsplit_pk: &ark_groth16::ProvingKey<Bls12_381>,
+    ) -> Result<JoinSplitSpendProofPayload, WalletError> {
+        // 1. Validasi nominal transfer (AUD-6)
+        if transfer_amount == 0 {
+            return Err(WalletError::CryptoError(
+                "Transfer amount must be strictly greater than zero".into(),
+            ));
+        }
+
+        if asset_id > 1 {
+            return Err(WalletError::UnsupportedAssetId(asset_id));
+        }
+
+        // 2. Parsing ZSA penerima (64B) (AUD-1)
+        let recipient_zsa = if recipient_zsa_bech32m_or_hex.starts_with("zs") {
+            ZeltraShieldedAddress::from_bech32m(recipient_zsa_bech32m_or_hex)
+                .map_err(|e| WalletError::CryptoError(format!("Invalid Bech32m ZSA: {e}")))?
+        } else {
+            ZeltraShieldedAddress::from_hex(recipient_zsa_bech32m_or_hex)
+                .map_err(|e| WalletError::CryptoError(format!("Invalid Hex ZSA: {e}")))?
+        };
+
+        // 3. Stochastic Knapsack Coin Selection
+        let total_required = transfer_amount
+            .checked_add(max_execution_fee)
+            .ok_or_else(|| WalletError::CryptoError("Transfer amount overflow".into()))?;
+        let selected = self.select_notes_knapsack_asset(total_required, asset_id)?;
+
+        let session_id = format!(
+            "transfer_{}_{}",
+            current_time_secs,
+            hex::encode(rand::random::<[u8; 8]>())
+        );
+
+        // 4. Reserve Input Note 1
+        self.reserve_note(
+            &selected.input_commitment_hex,
+            &session_id,
+            current_time_secs,
+            DEFAULT_RESERVATION_TTL_SECS,
+        )?;
+
+        // Reserve Input Note 2 if 2-note JoinSplit
+        if let Some(ref cm2_hex) = selected.second_input_commitment_hex {
+            if let Err(e) = self.reserve_note(
+                cm2_hex,
+                &session_id,
+                current_time_secs,
+                DEFAULT_RESERVATION_TTL_SECS,
+            ) {
+                let _ = self.rollback_spend(&session_id);
+                return Err(e);
+            }
+        }
+
+        // 5. Load witnesses for Input Note 1
+        let input_note_1 = self
+            .notes
+            .get(&selected.input_commitment_hex)
+            .ok_or_else(|| WalletError::NoteNotFound(selected.input_commitment_hex.clone()))?
+            .clone();
+
+        let leaf_index_1 = input_note_1
+            .leaf_index
+            .ok_or_else(|| WalletError::NoteMissingWitness("input 1 leaf_index".into()))?;
+
+        let sk = self.spending_key()?;
+        let in1_rho = parse_fr_from_hex(&input_note_1.rho_hex)?;
+        let in1_rand = parse_fr_from_hex(&input_note_1.randomness_hex)?;
+        let in1_owner = parse_fr_from_hex(&input_note_1.owner_key_hex).unwrap_or(sk);
+        let in1_cm = note_commitment(
+            input_note_1.value,
+            input_note_1.asset_id,
+            in1_owner,
+            in1_rho,
+            in1_rand,
+        );
+
+        // Pre-fetch Input Note 2 if present
+        let input_note_2_opt = if let Some(ref cm2_hex) = selected.second_input_commitment_hex {
+            Some(
+                self.notes
+                    .get(cm2_hex)
+                    .ok_or_else(|| WalletError::NoteNotFound(cm2_hex.clone()))?
+                    .clone(),
+            )
+        } else {
+            None
+        };
+
+        // Ensure Note 1 in local MMR
+        if self.mmr.leaf_count <= leaf_index_1 as usize {
+            while self.mmr.leaf_count < leaf_index_1 as usize {
+                self.mmr.append(Fr::from(0u64));
+            }
+            self.mmr.append(in1_cm);
+        }
+
+        // If Note 2 is real, ensure Note 2 in local MMR
+        if let Some(ref input_note_2) = input_note_2_opt {
+            let leaf_index_2 = input_note_2
+                .leaf_index
+                .ok_or_else(|| WalletError::NoteMissingWitness("input 2 leaf_index".into()))?;
+            let rho_2 = parse_fr_from_hex(&input_note_2.rho_hex)?;
+            let rand_2 = parse_fr_from_hex(&input_note_2.randomness_hex)?;
+            let in2_owner = parse_fr_from_hex(&input_note_2.owner_key_hex).unwrap_or(sk);
+            let cm_2 = note_commitment(
+                input_note_2.value,
+                input_note_2.asset_id,
+                in2_owner,
+                rho_2,
+                rand_2,
+            );
+
+            if self.mmr.leaf_count <= leaf_index_2 as usize {
+                while self.mmr.leaf_count < leaf_index_2 as usize {
+                    self.mmr.append(Fr::from(0u64));
+                }
+                self.mmr.append(cm_2);
+            }
+        }
+
+        // Generate MMR proof for Note 1
+        let proof1 = self.mmr.generate_proof(leaf_index_1 as usize);
+        let in1_mountain_height = proof1.mountain_height as u8;
+        let mut in1_mountain_siblings = [Fr::from(0u64); 32];
+        for (i, &s) in proof1.mountain_siblings.iter().take(32).enumerate() {
+            in1_mountain_siblings[i] = s;
+        }
+
+        let nk = self.nullifier_key()?;
+        let nullifier_1 = derive_joinsplit_nullifier(nk, in1_rho, input_note_1.epoch() as u64);
+
+        // 6. Load witnesses or generate canonical dummy witness for Input Note 2
+        let (
+            in2_val,
+            in2_owner,
+            in2_rho,
+            in2_rand,
+            in2_index,
+            in2_mountain_height,
+            in2_mountain_siblings,
+            in2_is_dummy,
+            in2_nonce,
+            nullifier_2,
+            epoch_2,
+        ) = if let Some(ref input_note_2) = input_note_2_opt {
+            let leaf_index_2 = input_note_2
+                .leaf_index
+                .ok_or_else(|| WalletError::NoteMissingWitness("input 2 leaf_index".into()))?;
+
+            let rho_2 = parse_fr_from_hex(&input_note_2.rho_hex)?;
+            let rand_2 = parse_fr_from_hex(&input_note_2.randomness_hex)?;
+            let in2_owner_key = parse_fr_from_hex(&input_note_2.owner_key_hex).unwrap_or(sk);
+
+            let proof2 = self.mmr.generate_proof(leaf_index_2 as usize);
+            let mut in2_siblings = [Fr::from(0u64); 32];
+            for (i, &s) in proof2.mountain_siblings.iter().take(32).enumerate() {
+                in2_siblings[i] = s;
+            }
+            let nf_2 = derive_joinsplit_nullifier(nk, rho_2, input_note_2.epoch() as u64);
+
+            (
+                Fr::from(input_note_2.value),
+                in2_owner_key,
+                rho_2,
+                rand_2,
+                Fr::from(leaf_index_2),
+                proof2.mountain_height as u8,
+                in2_siblings,
+                Fr::from(0u64), // real note
+                Fr::from(0u64),
+                nf_2,
+                input_note_2.epoch(),
+            )
+        } else {
+            // Canonical Dummy Witness Synthesis
+            let mut rng = OsRng;
+            let dummy_nonce = Fr::rand(&mut rng);
+            let dummy_nf = derive_joinsplit_dummy_nullifier(nk, dummy_nonce);
+            (
+                Fr::from(0u64),
+                sk,
+                Fr::from(0u64),
+                Fr::from(0u64),
+                Fr::from(0u64),
+                0u8,
+                [Fr::from(0u64); 32],
+                Fr::from(1u64), // is dummy
+                dummy_nonce,
+                dummy_nf,
+                input_note_1.epoch(),
+            )
+        };
+
+        // Snapshot current MMR peaks and root
+        let mut mmr_peaks = [Fr::from(0u64); 32];
+        for (i, &p) in self.mmr.get_peaks().iter().take(32).enumerate() {
+            mmr_peaks[i] = p;
+        }
+        let note_root = self.mmr.get_root();
+        let total_leaves = self.mmr.leaf_count as u64;
+
+        // 7. Output 1: Recipient Note with Deterministic Randomness (AUD-2)
+        let mut rng = OsRng;
+        let rho_1 = Fr::rand(&mut rng);
+        let (memo_1, rand_1) = encrypt_note_memo_deterministic(
+            transfer_amount,
+            rho_1,
+            asset_id as u64,
+            &recipient_zsa.incoming_viewing_public_key,
+        )
+        .map_err(|e| WalletError::CryptoError(format!("Memo 1 encryption failed: {e}")))?;
+
+        let cm_1 = note_commitment(
+            transfer_amount,
+            asset_id,
+            recipient_zsa.owner_key,
+            rho_1,
+            rand_1,
+        );
+
+        // 8. Output 2: Sender Change Note (AUD-3 & AUD-7)
+        let change_amount = selected.change_amount;
+        let sender_owner_key = self.owner_key()?;
+        let sender_pk_ivk = self.incoming_viewing_public_key()?;
+
+        let (ch2_val, cm_2, memo_2, has_change_2, ch2_rho, ch2_rand) = if change_amount > 0 {
+            let rho_2 = Fr::rand(&mut rng);
+            let (memo_2, rand_2) = encrypt_note_memo_deterministic(
+                change_amount,
+                rho_2,
+                asset_id as u64,
+                &sender_pk_ivk,
+            )
+            .map_err(|e| WalletError::CryptoError(format!("Memo 2 encryption failed: {e}")))?;
+
+            let c_cm = note_commitment(change_amount, asset_id, sender_owner_key, rho_2, rand_2);
+
+            let c_cm_hex = hex::encode(fr_to_be_bytes(&c_cm));
+            let c_rho_hex = hex::encode(fr_to_be_bytes(&rho_2));
+            let c_rand_hex = hex::encode(fr_to_be_bytes(&rand_2));
+            let owner_hex = hex::encode(fr_to_be_bytes(&sender_owner_key));
+
+            // Persist unconfirmed change note (2PC Phase 1)
+            let change_note = WalletNote {
+                commitment_hex: c_cm_hex,
+                value: change_amount,
+                asset_id,
+                owner_key_hex: owner_hex,
+                rho_hex: c_rho_hex,
+                randomness_hex: c_rand_hex,
+                leaf_index: None,
+                leaf_count: None,
+                epoch_id: input_note_1.epoch_id.or(Some(0)),
+                merkle_path_hex: None,
+                status: NoteStatus::Unconfirmed,
+                created_at_secs: current_time_secs,
+                session_id: Some(session_id.clone()),
+            };
+            self.notes
+                .insert(change_note.commitment_hex.clone(), change_note);
+
+            (Fr::from(change_amount), c_cm, memo_2, true, rho_2, rand_2)
+        } else {
+            // Random encryption for dummy memo (AUD-7: anti-topologic leak)
+            let rho_2 = Fr::rand(&mut rng);
+            let (dummy_memo, rand_2) =
+                encrypt_note_memo_deterministic(0, rho_2, asset_id as u64, &sender_pk_ivk)
+                    .map_err(|e| {
+                        WalletError::CryptoError(format!("Dummy memo encryption failed: {e}"))
+                    })?;
+
+            let dummy_cm = note_commitment(0, asset_id, sender_owner_key, rho_2, rand_2);
+
+            (Fr::from(0u64), dummy_cm, dummy_memo, false, rho_2, rand_2)
+        };
+
+        // 9. EVM parameters & domain scope (Mode 2: merchant_amount = 0, protocol_fee = 0, recipient = Address::ZERO)
+        let recipient_fr = Fr::from(0u64);
+        let quote_bytes = parse_bytes32_from_hex(quote_hash_hex, false)?;
+        let (q_hi, q_lo) = split_quote_hash_to_limbs(&quote_bytes);
+
+        let contract_bytes = parse_bytes32_from_hex(contract_address_hex, true)?;
+        let contract_fr = Fr::from_be_bytes_mod_order(&contract_bytes);
+
+        let scope_hash = zeltra_core::compute_scope_hash(
+            recipient_fr,
+            Fr::from(chain_id),
+            contract_fr,
+            Fr::from(expiry),
+        );
+        let expected_binding = zeltra_core::compute_binding_commitment(q_hi, q_lo, scope_hash);
+
+        let has_change_1_fr = Fr::from(1u64); // Output 1 is recipient active note
+        let has_change_2_fr = if has_change_2 {
+            Fr::from(1u64)
+        } else {
+            Fr::from(0u64)
+        };
+        let asset_id_fr = Fr::from(asset_id as u64);
+        let flags_packed_fr =
+            has_change_1_fr + has_change_2_fr * Fr::from(2u64) + asset_id_fr * Fr::from(4u64);
+
+        // 10. Construct JoinSplitCircuit (Mode 2)
+        let circuit = JoinSplitCircuit {
+            note_root: Some(note_root),
+            leaf_count: Some(Fr::from(total_leaves)),
+            input_nullifier_1: Some(nullifier_1),
+            input_nullifier_2: Some(nullifier_2),
+            epoch_id_1: Some(Fr::from(input_note_1.epoch() as u64)),
+            epoch_id_2: Some(Fr::from(epoch_2 as u64)),
+            output_commitment_1: Some(cm_1),
+            output_commitment_2: Some(cm_2),
+            recipient: Some(recipient_fr),
+            merchant_amount: Some(Fr::from(0u64)),
+            protocol_fee: Some(Fr::from(0u64)),
+            execution_fee: Some(Fr::from(max_execution_fee)),
+            quote_hash_hi: Some(q_hi),
+            quote_hash_lo: Some(q_lo),
+            chain_id: Some(Fr::from(chain_id)),
+            contract_address: Some(contract_fr),
+            expiry: Some(Fr::from(expiry)),
+            flags_packed: Some(flags_packed_fr),
+            is_rollover: Some(Fr::from(0u64)),
+
+            in1_value: Some(Fr::from(input_note_1.value)),
+            in1_owner_key: Some(in1_owner),
+            in1_rho: Some(in1_rho),
+            in1_randomness: Some(in1_rand),
+            in1_leaf_index: Some(Fr::from(leaf_index_1)),
+            in1_mountain_height: Some(in1_mountain_height),
+            in1_mountain_siblings: Some(in1_mountain_siblings),
+
+            in2_value: Some(in2_val),
+            in2_owner_key: Some(in2_owner),
+            in2_rho: Some(in2_rho),
+            in2_randomness: Some(in2_rand),
+            in2_leaf_index: Some(in2_index),
+            in2_mountain_height: Some(in2_mountain_height),
+            in2_mountain_siblings: Some(in2_mountain_siblings),
+            in2_is_dummy: Some(in2_is_dummy),
+            in2_session_nonce: Some(in2_nonce),
+
+            mmr_peaks: Some(mmr_peaks),
+
+            out1_value: Some(Fr::from(transfer_amount)),
+            out1_owner_key: Some(recipient_zsa.owner_key),
+            out1_rho: Some(rho_1),
+            out1_randomness: Some(rand_1),
+
+            out2_value: Some(ch2_val),
+            out2_owner_key: Some(sender_owner_key),
+            out2_rho: Some(ch2_rho),
+            out2_randomness: Some(ch2_rand),
+
+            has_change_1: Some(has_change_1_fr),
+            has_change_2: Some(has_change_2_fr),
+            expected_binding: Some(expected_binding),
+
+            public_asset_id: Some(asset_id_fr),
+            in1_asset_id: Some(asset_id_fr),
+            in2_asset_id: Some(asset_id_fr),
+            out1_asset_id: Some(asset_id_fr),
+            out2_asset_id: Some(asset_id_fr),
+        };
+
+        // 11. Generate Groth16 Proof
+        let proof = generate_joinsplit_proof(circuit.clone(), joinsplit_pk).map_err(|e| {
+            WalletError::CryptoError(format!("JoinSplit transfer proof generation failed: {e:?}"))
+        })?;
+
+        // 12. Format EVM Proof Points & Public Inputs
+        let proof_a_neg = to_evm_g1(&-proof.a);
+        let proof_b = to_evm_g2(&proof.b);
+        let proof_c = to_evm_g1(&proof.c);
+
+        let pis = extract_joinsplit_public_inputs(&circuit);
+        let public_inputs: Vec<String> = pis
+            .iter()
+            .map(|fr| hex::encode(fr_to_be_bytes(fr)))
+            .collect();
+
+        Ok(JoinSplitSpendProofPayload {
+            session_id,
+            input_commitment_1_hex: selected.input_commitment_hex.clone(),
+            input_commitment_2_hex: selected.second_input_commitment_hex.clone(),
+            input_nullifier_1_hex: hex::encode(fr_to_be_bytes(&nullifier_1)),
+            input_nullifier_2_hex: hex::encode(fr_to_be_bytes(&nullifier_2)),
+            note_root_hex: hex::encode(fr_to_be_bytes(&note_root)),
+            output_commitment_1_hex: hex::encode(fr_to_be_bytes(&cm_1)),
+            output_commitment_2_hex: hex::encode(fr_to_be_bytes(&cm_2)),
+            recipient_hex: "0x0000000000000000000000000000000000000000".to_string(),
+            merchant_amount: 0,
+            protocol_fee: 0,
+            execution_fee: max_execution_fee,
+            max_execution_fee,
+            quote_hash_hex: quote_hash_hex.to_string(),
+            chain_id,
+            contract_address_hex: contract_address_hex.to_string(),
+            expiry,
+            has_change_1: true,
+            has_change_2,
+            proof_a_neg_hex: hex::encode(proof_a_neg),
+            proof_b_hex: hex::encode(proof_b),
+            proof_c_hex: hex::encode(proof_c),
+            public_inputs_hex: public_inputs,
+            encrypted_memo_1: hex::encode(memo_1),
+            encrypted_memo_2: hex::encode(memo_2),
+        })
     }
 
     /// In-Pool Autonomous Consolidation (DEC-030 Branch 4).
@@ -5663,5 +6270,288 @@ mod tests {
             wallet.process_decrypted_plaintext(&invalid_pt_bytes, &shared_secret),
             Err(WalletError::UnsupportedAssetId(2))
         ));
+    }
+
+    #[test]
+    fn test_prepare_transfer_rejects_zero_amount() {
+        let seed = [11u8; 32];
+        let mut wallet = PrivateNoteWallet::new(&seed);
+        let recipient_seed = [12u8; 32];
+        let recipient_wallet = PrivateNoteWallet::new(&recipient_seed);
+        let zsa = recipient_wallet.shielded_address().unwrap();
+        let zsa_str = zsa.to_bech32m().unwrap();
+        let keys = zeltra_core::generate_joinsplit_circuit_keys().unwrap();
+
+        let err = wallet.prepare_shielded_transfer_proof(
+            &zsa_str,
+            0, // zero amount
+            1,
+            20_000,
+            "0x1111111111111111111111111111111111111111111111111111111111111111",
+            421614,
+            "0x2222222222222222222222222222222222222222",
+            2000,
+            1000,
+            &keys.proving_key,
+        );
+        assert!(matches!(err, Err(WalletError::CryptoError(_))));
+    }
+
+    #[test]
+    fn test_prepare_transfer_rejects_insufficient_balance() {
+        let seed = [13u8; 32];
+        let mut wallet = PrivateNoteWallet::new(&seed);
+        let (_, cm) = wallet.create_deposit_note(5_000_000, 1000).unwrap();
+        wallet
+            .confirm_deposit(&cm, 0, dummy_merkle_path(), "0xroot")
+            .unwrap();
+
+        let recipient_wallet = PrivateNoteWallet::new(&[14u8; 32]);
+        let zsa = recipient_wallet.shielded_address().unwrap();
+        let zsa_str = zsa.to_bech32m().unwrap();
+        let keys = zeltra_core::generate_joinsplit_circuit_keys().unwrap();
+
+        // 5M in wallet, trying to transfer 5M with 20_000 fee requires 5_020_000
+        let err = wallet.prepare_shielded_transfer_proof(
+            &zsa_str,
+            5_000_000,
+            1,
+            20_000,
+            "0x1111111111111111111111111111111111111111111111111111111111111111",
+            421614,
+            "0x2222222222222222222222222222222222222222",
+            2000,
+            1000,
+            &keys.proving_key,
+        );
+        assert!(matches!(err, Err(WalletError::InsufficientBalance { .. })));
+    }
+
+    #[test]
+    fn test_prepare_transfer_rejects_corrupted_zsa() {
+        let seed = [15u8; 32];
+        let mut wallet = PrivateNoteWallet::new(&seed);
+        let (_, cm) = wallet.create_deposit_note(10_000_000, 1000).unwrap();
+        wallet
+            .confirm_deposit(&cm, 0, dummy_merkle_path(), "0xroot")
+            .unwrap();
+
+        let recipient_wallet = PrivateNoteWallet::new(&[16u8; 32]);
+        let zsa = recipient_wallet.shielded_address().unwrap();
+        let mut zsa_str = zsa.to_bech32m().unwrap();
+        // Corrupt the last character
+        let last_char = if zsa_str.ends_with('0') { '1' } else { '0' };
+        zsa_str.pop();
+        zsa_str.push(last_char);
+
+        let keys = zeltra_core::generate_joinsplit_circuit_keys().unwrap();
+
+        let err = wallet.prepare_shielded_transfer_proof(
+            &zsa_str,
+            5_000_000,
+            1,
+            20_000,
+            "0x1111111111111111111111111111111111111111111111111111111111111111",
+            421614,
+            "0x2222222222222222222222222222222222222222",
+            2000,
+            1000,
+            &keys.proving_key,
+        );
+        assert!(matches!(err, Err(WalletError::CryptoError(_))));
+    }
+
+    #[test]
+    fn test_e2e_shielded_transfer_flow() {
+        let alice_seed = [21u8; 32];
+        let mut alice = PrivateNoteWallet::new(&alice_seed);
+        let bob_seed = [22u8; 32];
+        let mut bob = PrivateNoteWallet::new(&bob_seed);
+
+        // 1. Alice deposits 10 USDC (10_000_000)
+        let (_, cm_alice) = alice.create_deposit_note(10_000_000, 1000).unwrap();
+        alice
+            .confirm_deposit(&cm_alice, 0, dummy_merkle_path(), "0xroot")
+            .unwrap();
+        assert_eq!(alice.balance(), 10_000_000);
+        assert_eq!(bob.balance(), 0);
+
+        // 2. Bob exports shielded address
+        let bob_zsa = bob.shielded_address().unwrap();
+        let bob_zsa_bech32m = bob_zsa.to_bech32m().unwrap();
+
+        // 3. Alice prepares shielded transfer proof: 5 USDC with 20_000 fee
+        let keys = zeltra_core::generate_joinsplit_circuit_keys().unwrap();
+        let payload = alice
+            .prepare_shielded_transfer_proof(
+                &bob_zsa_bech32m,
+                5_000_000, // 5 USDC
+                1,         // USDC
+                20_000,    // fee
+                "0x1111111111111111111111111111111111111111111111111111111111111111",
+                421614,
+                "0x2222222222222222222222222222222222222222",
+                2000,
+                1000,
+                &keys.proving_key,
+            )
+            .unwrap();
+
+        // Verify dual memo 96 bytes (192 hex chars)
+        assert_eq!(payload.encrypted_memo_1.len(), 192);
+        assert_eq!(payload.encrypted_memo_2.len(), 192);
+        assert_eq!(
+            payload.recipient_hex,
+            "0x0000000000000000000000000000000000000000"
+        );
+        assert_eq!(payload.merchant_amount, 0);
+        assert_eq!(payload.protocol_fee, 0);
+        assert!(payload.has_change_1);
+        assert!(payload.has_change_2);
+
+        // 4. Verify Groth16 proof
+        let mut pis = Vec::new();
+        for h in &payload.public_inputs_hex {
+            pis.push(parse_fr_from_hex(h).unwrap());
+        }
+        let from_evm_a = zeltra_core::from_evm_g1(
+            &hex::decode(&payload.proof_a_neg_hex)
+                .unwrap()
+                .try_into()
+                .unwrap(),
+        )
+        .unwrap();
+        let from_evm_b = zeltra_core::from_evm_g2(
+            &hex::decode(&payload.proof_b_hex)
+                .unwrap()
+                .try_into()
+                .unwrap(),
+        )
+        .unwrap();
+        let from_evm_c = zeltra_core::from_evm_g1(
+            &hex::decode(&payload.proof_c_hex)
+                .unwrap()
+                .try_into()
+                .unwrap(),
+        )
+        .unwrap();
+        let proof = ark_groth16::Proof {
+            a: -from_evm_a,
+            b: from_evm_b,
+            c: from_evm_c,
+        };
+        assert!(
+            zeltra_core::verify_joinsplit_proof(&keys.verifying_key, &proof, &pis).unwrap(),
+            "Groth16 Mode 2 transfer proof must be valid"
+        );
+
+        // 5. Alice commits spend -> Alice balance = 10_000_000 - 5_000_000 - 20_000 = 4_980_000
+        alice
+            .commit_spend(
+                &payload.session_id,
+                &payload.input_nullifier_1_hex,
+                1005,
+                Some(2),
+                Some(dummy_merkle_path()),
+                Some("0xnew_root"),
+            )
+            .unwrap();
+        assert_eq!(alice.balance(), 4_980_000);
+
+        // 6. Bob scans MMR logs with trial decryption
+        let memo_1_bytes = hex::decode(&payload.encrypted_memo_1).unwrap();
+        let event_bob = NoteEvent {
+            leaf_index: 1,
+            commitment_hex: payload.output_commitment_1_hex.clone(),
+            new_mmr_root_hex: "0xroot2".into(),
+            leaf_count: 2,
+            encrypted_memo: memo_1_bytes,
+            block_number: Some(101),
+        };
+        let rec_bob = bob
+            .recover_notes_batch(&[event_bob], |_| Ok(vec![false]))
+            .unwrap();
+        assert_eq!(rec_bob.recovered_notes.len(), 1);
+        assert_eq!(bob.balance(), 5_000_000);
+    }
+
+    #[test]
+    fn test_exact_shielded_transfer_without_change() {
+        let alice_seed = [31u8; 32];
+        let mut alice = PrivateNoteWallet::new(&alice_seed);
+        let bob_seed = [32u8; 32];
+        let mut bob = PrivateNoteWallet::new(&bob_seed);
+
+        // Alice has 10 USDC (10_000_000)
+        let (_, cm_alice) = alice.create_deposit_note(10_000_000, 1000).unwrap();
+        alice
+            .confirm_deposit(&cm_alice, 0, dummy_merkle_path(), "0xroot")
+            .unwrap();
+
+        let bob_zsa = bob.shielded_address().unwrap();
+        let bob_zsa_bech32m = bob_zsa.to_bech32m().unwrap();
+        let keys = zeltra_core::generate_joinsplit_circuit_keys().unwrap();
+
+        // Exact transfer: 9_980_000 + 20_000 fee = 10_000_000 (change_amount == 0)
+        let payload = alice
+            .prepare_shielded_transfer_proof(
+                &bob_zsa_bech32m,
+                9_980_000,
+                1,
+                20_000,
+                "0x1111111111111111111111111111111111111111111111111111111111111111",
+                421614,
+                "0x2222222222222222222222222222222222222222",
+                2000,
+                1000,
+                &keys.proving_key,
+            )
+            .unwrap();
+
+        assert!(!payload.has_change_2);
+        assert_eq!(payload.encrypted_memo_2.len(), 192); // Still 96 bytes random dummy
+
+        // Alice commits spend
+        alice
+            .commit_spend(
+                &payload.session_id,
+                &payload.input_nullifier_1_hex,
+                1005,
+                None,
+                None,
+                None,
+            )
+            .unwrap();
+        assert_eq!(alice.balance(), 0);
+
+        // Bob scans Output 1
+        let memo_1_bytes = hex::decode(&payload.encrypted_memo_1).unwrap();
+        let event_bob = NoteEvent {
+            leaf_index: 1,
+            commitment_hex: payload.output_commitment_1_hex.clone(),
+            new_mmr_root_hex: "0xroot2".into(),
+            leaf_count: 2,
+            encrypted_memo: memo_1_bytes,
+            block_number: Some(101),
+        };
+        bob.recover_notes_batch(&[event_bob], |_| Ok(vec![false]))
+            .unwrap();
+        assert_eq!(bob.balance(), 9_980_000);
+
+        // Alice scans Output 2 (dummy zero note) -> must be skipped, not adding phantom note
+        let memo_2_bytes = hex::decode(&payload.encrypted_memo_2).unwrap();
+        let event_dummy = NoteEvent {
+            leaf_index: 2,
+            commitment_hex: payload.output_commitment_2_hex.clone(),
+            new_mmr_root_hex: "0xroot3".into(),
+            leaf_count: 3,
+            encrypted_memo: memo_2_bytes,
+            block_number: Some(102),
+        };
+        let rec_alice = alice
+            .recover_notes_batch(&[event_dummy], |_| Ok(vec![false]))
+            .unwrap();
+        assert_eq!(rec_alice.recovered_notes.len(), 0);
+        assert_eq!(alice.balance(), 0);
     }
 }

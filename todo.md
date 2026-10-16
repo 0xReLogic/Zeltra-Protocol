@@ -34,12 +34,12 @@ Ref: [`DEC-034`](file:///workspaces/Zeltra-Protocol/research/decisions/DEC-034-d
 ## 1. SDK, Ekosistem Fitur & Tooling (Fokus Aktif Saat Ini)
 Ref: [`docs/roadmap.md`](file:///workspaces/Zeltra-Protocol/docs/roadmap.md) (Fase 1) & [`docs/todos/private-note-balance.md`](file:///workspaces/Zeltra-Protocol/docs/todos/private-note-balance.md)
 
-- [ ] **Shielded-to-Shielded In-Pool Transfer (DEC-043):**
+- [x] **Shielded-to-Shielded In-Pool Transfer (DEC-043):** [SELESAI & AUDITED]
   - Pengiriman private note langsung antar akun/merchant Zeltra (`output_commitment_1` penerima, `output_commitment_2` kembalian) tanpa penarikan token publik on-chain (Merchant Masking). Ref: [`DEC-043`](file:///workspaces/Zeltra-Protocol/research/decisions/DEC-043-shielded-to-shielded-in-pool-transfer-and-merchant-masking.md).
   - Sub-spesifikasi:
-    * [ ] [`DEC-043A: ZSA Key Derivation & Deterministic ECDH Randomness`](file:///workspaces/Zeltra-Protocol/research/decisions/DEC-043A-zsa-key-derivation-and-deterministic-ecdh-memo.md) (Task: [`taskADEC043.md`](file:///workspaces/Zeltra-Protocol/taskADEC043.md))
-    * [ ] [`DEC-043B: Stylus Smart Contract Strict Three-Mode Settlement`](file:///workspaces/Zeltra-Protocol/research/decisions/DEC-043B-stylus-strict-three-mode-settlement-and-dual-memo-mmr.md) (Task: [`taskBDEC043.md`](file:///workspaces/Zeltra-Protocol/taskBDEC043.md))
-    * [ ] [`DEC-043C: Relayer Ingress & Client Note Wallet In-Pool`](file:///workspaces/Zeltra-Protocol/research/decisions/DEC-043C-relayer-dual-memo-ingress-and-sdk-in-pool-wallet.md) (Task: [`taskCDEC043.md`](file:///workspaces/Zeltra-Protocol/taskCDEC043.md))
+    * [x] [`DEC-043A: ZSA Key Derivation & Deterministic ECDH Randomness`](file:///workspaces/Zeltra-Protocol/research/decisions/DEC-043A-zsa-key-derivation-and-deterministic-ecdh-memo.md) (Task: [`taskADEC043.md`](file:///workspaces/Zeltra-Protocol/taskADEC043.md)) [SELESAI & AUDITED]
+    * [x] [`DEC-043B: Stylus Smart Contract Strict Three-Mode Settlement`](file:///workspaces/Zeltra-Protocol/research/decisions/DEC-043B-stylus-strict-three-mode-settlement-and-dual-memo-mmr.md) (Task: [`taskBDEC043.md`](file:///workspaces/Zeltra-Protocol/taskBDEC043.md)) [SELESAI & AUDITED]
+    * [x] [`DEC-043C: Relayer Ingress & Client Note Wallet In-Pool`](file:///workspaces/Zeltra-Protocol/research/decisions/DEC-043C-relayer-dual-memo-ingress-and-sdk-in-pool-wallet.md) (Task: [`taskCDEC043.md`](file:///workspaces/Zeltra-Protocol/taskCDEC043.md)) [SELESAI & AUDITED]
 - [x] **Viewing Key Export Suite & CEX Selective Disclosure (DEC-040):** [SELESAI & AUDITED]
   - Tooling UI/CLI bagi akuntan B2B untuk export laporan audit transaksi kas privat, rekonsiliasi double-entry, dan pembuktian kepemilikan note ke bursa terpusat (Binance/Coinbase) dengan Verifier Binding.
   - Sub-spesifikasi:

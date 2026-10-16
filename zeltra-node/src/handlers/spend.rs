@@ -1390,6 +1390,31 @@ pub async fn handle_spend_joinsplit(
         });
     }
 
+    // 0a. Calldata Memo Length Guard (AUD-5: exactly 96 bytes / 192 hex chars)
+    let clean_m1 = payload
+        .encrypted_memo_1
+        .strip_prefix("0x")
+        .unwrap_or(&payload.encrypted_memo_1);
+    let clean_m2 = payload
+        .encrypted_memo_2
+        .strip_prefix("0x")
+        .unwrap_or(&payload.encrypted_memo_2);
+    if clean_m1.len() != 192
+        || clean_m2.len() != 192
+        || hex::decode(clean_m1).is_err()
+        || hex::decode(clean_m2).is_err()
+    {
+        return Json(JoinSplitSpendResponse {
+            status: "REJECTED".to_string(),
+            message:
+                "encrypted_memo_1 and encrypted_memo_2 must be exactly 96 bytes (192 hex chars)"
+                    .to_string(),
+            tx_hash: None,
+            queue_position: 0,
+            estimated_gas_usdc: None,
+        });
+    }
+
     // Anti-Cross-Asset Fee Drain (DEC-034C Section 2.B)
     let cached_quote_opt = {
         let cache = state.quote_cache.lock().await;
@@ -1486,32 +1511,8 @@ pub async fn handle_spend_joinsplit(
         }
     }
 
-    // 4. Amount and fee invariant checks
+    // 4. Strict 3-Mode State Machine Validation (AUD-4)
     let is_rollover_req = payload.is_rollover == Some(1);
-    if payload.merchant_amount == 0 && !is_rollover_req {
-        return Json(JoinSplitSpendResponse {
-            status: "REJECTED".to_string(),
-            message: "merchant_amount must be greater than zero for normal spend".to_string(),
-            tx_hash: None,
-            queue_position: 0,
-            estimated_gas_usdc: None,
-        });
-    }
-
-    if payload.execution_fee > payload.max_execution_fee {
-        return Json(JoinSplitSpendResponse {
-            status: "REJECTED".to_string(),
-            message: format!(
-                "Execution fee ({}) exceeds max execution fee ({})",
-                payload.execution_fee, payload.max_execution_fee
-            ),
-            tx_hash: None,
-            queue_position: 0,
-            estimated_gas_usdc: None,
-        });
-    }
-
-    // 5. Change flags and flags_packed validation
     let hc1 = match payload.has_change_1 {
         Some(serde_json::Value::Bool(b)) => {
             if b {
@@ -1534,6 +1535,62 @@ pub async fn handle_spend_joinsplit(
         Some(serde_json::Value::Number(ref n)) => n.as_u64().unwrap_or(0) as u8,
         _ => 0u8,
     };
+    let has_change_1 = hc1 == 1;
+
+    let clean_recipient = payload.recipient.trim_start_matches("0x");
+    let is_zero_rec = clean_recipient.is_empty() || clean_recipient.chars().all(|c| c == '0');
+
+    if is_rollover_req {
+        // Mode 1: Rollover Mode
+        if payload.merchant_amount != 0 || payload.protocol_fee != 0 || !is_zero_rec {
+            return Json(JoinSplitSpendResponse {
+                status: "REJECTED".to_string(),
+                message: "Rollover transactions must have merchant_amount=0, protocol_fee=0, recipient=0x0".to_string(),
+                tx_hash: None,
+                queue_position: 0,
+                estimated_gas_usdc: None,
+            });
+        }
+    } else if payload.merchant_amount == 0 {
+        // Mode 2: In-Pool Transfer Mode
+        if !has_change_1 || payload.protocol_fee != 0 || !is_zero_rec {
+            return Json(JoinSplitSpendResponse {
+                status: "REJECTED".to_string(),
+                message:
+                    "In-Pool Transfer requires has_change_1=1, protocol_fee=0, and recipient=0x0"
+                        .to_string(),
+                tx_hash: None,
+                queue_position: 0,
+                estimated_gas_usdc: None,
+            });
+        }
+    } else {
+        // Mode 3: Public Outflow Mode
+        if is_zero_rec {
+            return Json(JoinSplitSpendResponse {
+                status: "REJECTED".to_string(),
+                message: "Public spend cannot have zero recipient address".to_string(),
+                tx_hash: None,
+                queue_position: 0,
+                estimated_gas_usdc: None,
+            });
+        }
+    }
+
+    if payload.execution_fee > payload.max_execution_fee {
+        return Json(JoinSplitSpendResponse {
+            status: "REJECTED".to_string(),
+            message: format!(
+                "Execution fee ({}) exceeds max execution fee ({})",
+                payload.execution_fee, payload.max_execution_fee
+            ),
+            tx_hash: None,
+            queue_position: 0,
+            estimated_gas_usdc: None,
+        });
+    }
+
+    // 5. Change flags and flags_packed validation
     let expected_flags = hc1 + 2 * hc2 + 4 * req_asset_id;
     let flags_packed = payload.flags_packed.unwrap_or(expected_flags);
     if flags_packed != expected_flags {
@@ -1551,49 +1608,55 @@ pub async fn handle_spend_joinsplit(
 
     // 6. Recipient address validation & Sanctions screening (DEC-026)
     use alloy_primitives::U256;
-    let recipient_addr = match Address::from_str(&payload.recipient) {
-        Ok(addr) if payload.recipient.trim_start_matches("0x").len() == 40 => addr,
-        _ => {
-            return Json(JoinSplitSpendResponse {
-                status: "REJECTED".to_string(),
-                message: format!("Invalid recipient address: {}", payload.recipient),
-                tx_hash: None,
-                queue_position: 0,
-                estimated_gas_usdc: None,
-            });
+    let recipient_addr = if is_zero_rec {
+        Address::ZERO
+    } else {
+        match Address::from_str(&payload.recipient) {
+            Ok(addr) if clean_recipient.len() == 40 => addr,
+            _ => {
+                return Json(JoinSplitSpendResponse {
+                    status: "REJECTED".to_string(),
+                    message: format!("Invalid recipient address: {}", payload.recipient),
+                    tx_hash: None,
+                    queue_position: 0,
+                    estimated_gas_usdc: None,
+                });
+            }
         }
     };
 
-    let limits = crate::validation::SafetyLimits::default();
-    if limits.is_sanctioned(&recipient_addr) {
-        return Json(JoinSplitSpendResponse {
-            status: "REJECTED".to_string(),
-            message: format!(
-                "Recipient address {} is restricted under public sanctions policy (DEC-026)",
-                payload.recipient
-            ),
-            tx_hash: None,
-            queue_position: 0,
-            estimated_gas_usdc: None,
-        });
-    }
-
-    if let Some(ref client) = state.evm_client {
-        if client
-            .is_sanctioned_on_chain(&recipient_addr)
-            .await
-            .unwrap_or(false)
-        {
+    if !is_zero_rec {
+        let limits = crate::validation::SafetyLimits::default();
+        if limits.is_sanctioned(&recipient_addr) {
             return Json(JoinSplitSpendResponse {
                 status: "REJECTED".to_string(),
                 message: format!(
-                    "Recipient address {} is sanctioned per on-chain Chainalysis Oracle (DEC-026)",
+                    "Recipient address {} is restricted under public sanctions policy (DEC-026)",
                     payload.recipient
                 ),
                 tx_hash: None,
                 queue_position: 0,
                 estimated_gas_usdc: None,
             });
+        }
+
+        if let Some(ref client) = state.evm_client {
+            if client
+                .is_sanctioned_on_chain(&recipient_addr)
+                .await
+                .unwrap_or(false)
+            {
+                return Json(JoinSplitSpendResponse {
+                    status: "REJECTED".to_string(),
+                    message: format!(
+                        "Recipient address {} is sanctioned per on-chain Chainalysis Oracle (DEC-026)",
+                        payload.recipient
+                    ),
+                    tx_hash: None,
+                    queue_position: 0,
+                    estimated_gas_usdc: None,
+                });
+            }
         }
     }
 
@@ -2146,6 +2209,8 @@ pub async fn handle_spend_joinsplit(
                 payload.expiry.unwrap_or(0),
                 flags_packed,
                 is_rollover_u64,
+                &payload.encrypted_memo_1,
+                &payload.encrypted_memo_2,
             )
             .await
         {
@@ -2907,6 +2972,8 @@ mod tests {
                     proof_c: format!("0x{}", hex::encode(c)),
                     public_inputs,
                     idempotency_key: Some("idem_js_valid_1".to_string()),
+                    encrypted_memo_1: "00".repeat(96),
+                    encrypted_memo_2: "00".repeat(96),
                 }
             })
             .clone()
@@ -3139,6 +3206,41 @@ mod tests {
         assert!(
             resp.0.message.contains("CrossAssetFeeMismatch"),
             "Expected CrossAssetFeeMismatch, got: {}",
+            resp.0.message
+        );
+    }
+
+    #[tokio::test]
+    async fn test_relayer_rejects_invalid_memo_hex_length() {
+        let (state, _tmp) = setup_test_state().await;
+        let mut req = sample_valid_joinsplit_request();
+        // Encrypted memo must be exactly 96 bytes = 192 hex chars
+        req.encrypted_memo_1 = "01020304".to_string(); // Invalid length
+
+        let resp = handle_spend_joinsplit(State(state), Json(req)).await;
+        assert_eq!(resp.0.status, "REJECTED");
+        assert!(
+            resp.0.message.contains("192 hex chars"),
+            "Expected 192 hex error, got: {}",
+            resp.0.message
+        );
+    }
+
+    #[tokio::test]
+    async fn test_relayer_rejects_non_zero_recipient_in_pool() {
+        let (state, _tmp) = setup_test_state().await;
+        let mut req = sample_valid_joinsplit_request();
+        // In-pool mode: merchant_amount == 0, protocol_fee == 0
+        req.merchant_amount = 0;
+        req.protocol_fee = 0;
+        // Non-zero recipient in in-pool mode must be rejected
+        req.recipient = "0x0000000000000000000000000000000000001234".to_string();
+
+        let resp = handle_spend_joinsplit(State(state), Json(req)).await;
+        assert_eq!(resp.0.status, "REJECTED");
+        assert!(
+            resp.0.message.contains("recipient=0x0"),
+            "Expected zero address error, got: {}",
             resp.0.message
         );
     }

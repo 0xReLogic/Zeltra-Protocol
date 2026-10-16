@@ -262,6 +262,10 @@ pub struct JoinSplitSpendRequest {
     pub public_inputs: Vec<String>,
     #[serde(default)]
     pub idempotency_key: Option<String>,
+    #[serde(alias = "encrypted_memo_1_hex", default)]
+    pub encrypted_memo_1: String,
+    #[serde(alias = "encrypted_memo_2_hex", default)]
+    pub encrypted_memo_2: String,
 }
 
 /// Response DTO for JoinSplit Spend (DEC-036C)
