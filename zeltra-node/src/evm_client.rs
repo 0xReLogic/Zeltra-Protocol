@@ -64,7 +64,9 @@ sol! {
         bytes32 quote_hash,
         uint256 expiry,
         uint256 flags_packed,
-        uint256 is_rollover
+        uint256 is_rollover,
+        bytes calldata encrypted_memo_1,
+        bytes calldata encrypted_memo_2
     ) external returns (bool);
 
     function getCurrentEpoch() external view returns (uint32);
@@ -855,6 +857,8 @@ impl EvmClient {
         expiry: u64,
         flags_packed: u8,
         is_rollover: u64,
+        encrypted_memo_1_hex: &str,
+        encrypted_memo_2_hex: &str,
     ) -> Result<TransactionOutcome> {
         println!("RELAYER: Broadcasting Universal JoinSplit spend transaction (DEC-036, DEC-036C)");
         println!(
@@ -949,6 +953,12 @@ impl EvmClient {
             expiry: U256::from(expiry),
             flags_packed: U256::from(flags_packed),
             is_rollover: U256::from(is_rollover),
+            encrypted_memo_1: hex::decode(encrypted_memo_1_hex.trim_start_matches("0x"))
+                .context("Invalid encrypted_memo_1 hex")?
+                .into(),
+            encrypted_memo_2: hex::decode(encrypted_memo_2_hex.trim_start_matches("0x"))
+                .context("Invalid encrypted_memo_2 hex")?
+                .into(),
         }
         .abi_encode();
 
