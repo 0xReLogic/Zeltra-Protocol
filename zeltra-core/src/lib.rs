@@ -7,6 +7,7 @@ pub mod joinsplit_circuit;
 pub mod note;
 pub mod note_circuit;
 pub mod poseidon;
+pub mod selective_disclosure_circuit;
 pub mod serialization;
 
 pub use ark_bls12_381::{Bls12_381, Fr, G1Projective, G2Projective};
@@ -14,10 +15,10 @@ pub use ark_ec::pairing::Pairing;
 pub use ark_ec::PrimeGroup;
 pub use ark_ff::{Field, PrimeField, UniformRand};
 
-// Re-export circuit gadgets (DEC-034A)
+// Re-export circuit gadgets (DEC-034A & DEC-040A)
 pub use circuit_gadgets::{
-    enforce_joinsplit_flags_packed, enforce_packed_value_and_asset,
-    enforce_private_note_flags_packed,
+    enforce_dummy_range_binding, enforce_joinsplit_flags_packed, enforce_packed_value_and_asset,
+    enforce_private_note_flags_packed, poseidon_w3_gadget, poseidon_w5_gadget,
 };
 
 // Re-export serialization helpers
@@ -62,10 +63,10 @@ pub use note::{
     domain_mmr_bag, domain_note_commitment, domain_note_randomness, domain_nullifier,
     domain_quote_binding, domain_scope_v1, encrypt_note_memo, encrypt_note_memo_optional,
     fr_from_be_bytes, fr_to_be_bytes, merkle_hash, note_commitment, note_commitment_packed,
-    split_quote_hash_to_limbs, verify_value_conservation, IncomingViewingKey, MMRProof,
-    MerkleMountainRange, NotePlaintext, OutcomingViewingKey, PrivateNoteV1, RecipientViewingKey,
-    ASSET_ID_USDC, ASSET_ID_WETH, DOMAIN_BINDING_V1_HEX, DOMAIN_MMR_BAG_BYTES, DOMAIN_SCOPE_V1_HEX,
-    ENCRYPTED_MEMO_SIZE,
+    split_quote_hash_to_limbs, verify_value_conservation, FullViewingKey, IncomingViewingKey,
+    KeyFormatError, MMRProof, MerkleMountainRange, NotePlaintext, OutcomingViewingKey,
+    PrivateNoteV1, RecipientViewingKey, ASSET_ID_USDC, ASSET_ID_WETH, DOMAIN_BINDING_V1_HEX,
+    DOMAIN_MMR_BAG_BYTES, DOMAIN_SCOPE_V1_HEX, ENCRYPTED_MEMO_SIZE,
 };
 
 // Re-export accounting state machine (DEC-016A Gate B)
@@ -86,6 +87,13 @@ pub use joinsplit_circuit::{
     generate_joinsplit_circuit_keys, generate_joinsplit_proof, get_or_init_joinsplit_circuit_keys,
     verify_joinsplit_proof, JoinSplitCircuit, JoinSplitCircuitKeys, JOINSPLIT_CIRCUIT_SETUP_SEED,
     NUM_JOINSPLIT_PUBLIC_INPUTS,
+};
+
+// Re-export Selective Disclosure Circuit (DEC-040A)
+pub use selective_disclosure_circuit::{
+    decompose_challenge_to_limbs, generate_disclosure_proof, setup_disclosure_circuit_params,
+    verify_disclosure_proof, verify_disclosure_proof_unprepared, SelectiveDisclosureCircuit,
+    NUM_DISCLOSURE_PUBLIC_INPUTS,
 };
 
 #[cfg(test)]
