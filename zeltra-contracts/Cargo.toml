@@ -19,7 +19,7 @@ ark-bls12-381 = "0.6.0"
 ark-ec = "0.6.0"
 ark-ff = "0.6.0"
 ark-serialize = "0.6.0"
-sha2 = { version = "0.10.9", default-features = false }
+sha2 = { version = "0.11.0", default-features = false }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 getrandom = { workspace = true, features = ["custom"] }
