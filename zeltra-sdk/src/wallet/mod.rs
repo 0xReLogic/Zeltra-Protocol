@@ -6,9 +6,10 @@
 pub mod note_wallet;
 
 pub use note_wallet::{
-    check_nullifiers_spent_batch, recover_from_viewing_key, recover_from_viewing_key_batch,
-    ConsolidationEstimate, ConsolidationRoundResult, ConsolidationSummary, DirectDepositPayload,
+    build_audit_report_inner, check_nullifiers_spent_batch, get_or_init_disclosure_keys,
+    recover_from_viewing_key, recover_from_viewing_key_batch, ConsolidationEstimate,
+    ConsolidationRoundResult, ConsolidationSummary, DirectDepositPayload,
     JoinSplitSpendProofPayload, NoteEpochStatus, NoteEvent, NoteStatus, PrivateNoteWallet,
-    PrivateNoteWitness, RecoveredNote, RecoveryResult, SelectedSpend, SpendProofPayload,
-    WalletError, WalletNote,
+    PrivateNoteWitness, ReadOnlyAuditorSession, RecoveredNote, RecoveryResult, SelectedSpend,
+    SpendProofPayload, WalletError, WalletNote,
 };
