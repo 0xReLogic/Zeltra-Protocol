@@ -6,13 +6,15 @@
 
 pub mod exporter;
 pub mod models;
+pub mod verifier;
 
 pub use exporter::*;
 pub use models::*;
+pub use verifier::*;
 
 use std::collections::HashMap;
 
-/// Compliance and accounting verification errors.
+/// Compliance and accounting verification errors (DEC-040B & DEC-040C).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ComplianceError {
     /// An outflow spend or consolidation violates exact UTXO value conservation.
@@ -38,8 +40,30 @@ pub enum ComplianceError {
     InvalidRecord(String),
     /// Unsupported asset identifier (only 0 for WETH and 1 for USDC).
     UnsupportedAssetId(u8),
-    /// Cryptographic or RPC verification failure.
+    /// Cryptographic or general verification failure.
     VerificationError(String),
+    /// Commitment preimage does not match expected commitment (Tahap 1, DEC-040C).
+    CommitmentPreimageMismatch,
+    /// Merkle Mountain Range inclusion proof or peak bagging calculation failed (Tahap 2, DEC-040C).
+    InvalidMmrInclusionProof,
+    /// MMR Root is not accepted on-chain by the smart contract (Tahap 2, DEC-040C).
+    MmrRootNotAcceptedOnChain,
+    /// Verifier ID in proof does not match the inspecting verifier's identity (Tahap 3, DEC-040C).
+    VerifierIdMismatch { expected: String, actual: String },
+    /// Proof timestamp has expired (> 24 hours or past expires_at) (Tahap 3, DEC-040C).
+    ProofExpired,
+    /// Blake2s verifier binding challenge hash does not match computed digest (Tahap 3, DEC-040C).
+    ChallengeHashMismatch,
+    /// Malformed or non-canonical Groth16 proof bytes (Tahap 4, DEC-040C).
+    InvalidProofBytes,
+    /// Groth16 zero-knowledge proof verification failed against public inputs (Tahap 4, DEC-040C).
+    InvalidDisclosureZkProof,
+    /// Note nullifier has not been spent on-chain (Tahap 5, DEC-040C).
+    NullifierNotSpentOnChain,
+    /// Transaction receipt recipient or asset does not match expected payout (Tahap 5, DEC-040C).
+    InvalidRecipientOrTx(String),
+    /// RPC or network connectivity failure (Fail-Closed, DEC-040C).
+    RpcError(String),
 }
 
 impl std::fmt::Display for ComplianceError {
@@ -75,11 +99,78 @@ impl std::fmt::Display for ComplianceError {
                 write!(f, "Unsupported asset ID {id} (expected 0 or 1)")
             }
             Self::VerificationError(msg) => write!(f, "Verification error: {msg}"),
+            Self::CommitmentPreimageMismatch => {
+                write!(f, "Commitment preimage mismatch: recomputed Poseidon-W5 commitment does not match note commitment")
+            }
+            Self::InvalidMmrInclusionProof => {
+                write!(f, "Invalid MMR inclusion proof: reconstructed peak or bagged root does not match claimed MMR root")
+            }
+            Self::MmrRootNotAcceptedOnChain => {
+                write!(f, "MMR root is not accepted on-chain by the smart contract")
+            }
+            Self::VerifierIdMismatch { expected, actual } => {
+                write!(
+                    f,
+                    "Verifier ID mismatch: expected '{expected}', actual '{actual}'"
+                )
+            }
+            Self::ProofExpired => {
+                write!(f, "Selective disclosure proof has expired")
+            }
+            Self::ChallengeHashMismatch => {
+                write!(f, "Blake2s verifier binding challenge hash mismatch")
+            }
+            Self::InvalidProofBytes => {
+                write!(f, "Invalid or non-canonical Groth16 proof bytes")
+            }
+            Self::InvalidDisclosureZkProof => {
+                write!(
+                    f,
+                    "Groth16 zero-knowledge proof verification failed against public inputs"
+                )
+            }
+            Self::NullifierNotSpentOnChain => {
+                write!(f, "Note nullifier is not marked spent on-chain")
+            }
+            Self::InvalidRecipientOrTx(msg) => {
+                write!(f, "Invalid spend transaction or recipient mismatch: {msg}")
+            }
+            Self::RpcError(msg) => {
+                write!(f, "RPC connectivity failure (Fail-Closed): {msg}")
+            }
         }
     }
 }
 
 impl std::error::Error for ComplianceError {}
+
+/// Computes non-malleable Blake2s-256 verifier challenge hash (DEC-040 Section 4.B & DEC-040C).
+#[allow(clippy::too_many_arguments)]
+pub fn compute_verifier_challenge(
+    verifier_id: &str,
+    account_uid: &str,
+    generated_at: u64,
+    expires_at: u64,
+    nonce: &str,
+    cm: &ark_bls12_381::Fr,
+    nullifier: &ark_bls12_381::Fr,
+    spent_tx_hash: &str,
+    payout_recipient: &str,
+) -> [u8; 32] {
+    use blake2::{Blake2s256, Digest};
+    let mut hasher = Blake2s256::new();
+    hasher.update(b"ZELTRA_CEX_DISCLOSURE_V1");
+    hasher.update(verifier_id.as_bytes());
+    hasher.update(account_uid.as_bytes());
+    hasher.update(generated_at.to_be_bytes());
+    hasher.update(expires_at.to_be_bytes());
+    hasher.update(nonce.as_bytes());
+    hasher.update(zeltra_core::fr_to_be_bytes(cm));
+    hasher.update(zeltra_core::fr_to_be_bytes(nullifier));
+    hasher.update(spent_tx_hash.as_bytes());
+    hasher.update(payout_recipient.as_bytes());
+    hasher.finalize().into()
+}
 
 /// Returns the circuit decimal places for an asset (DEC-034A).
 /// - Asset 0 (WETH): 9 decimals (Gwei)
