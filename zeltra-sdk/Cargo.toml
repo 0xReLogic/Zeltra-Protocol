@@ -19,7 +19,7 @@ base64 = "0.22.1"
 blake2 = "0.10.6"
 hex = "0.4.3"
 js-sys = "0.3"
-k256 = { version = "0.13", features = ["ecdsa", "arithmetic"] }
+k256 = { version = "0.14", features = ["ecdsa", "arithmetic"] }
 zeltra-core = { path = "../zeltra-core" }
 rand = "0.8.6"
 serde = { version = "1.0.228", features = ["derive"] }
