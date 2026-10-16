@@ -36,16 +36,16 @@ Ref: [`docs/roadmap.md`](file:///workspaces/Zeltra-Protocol/docs/roadmap.md) (Fa
 
 - [ ] **Shielded-to-Shielded In-Pool Transfer:**
   - Pengiriman private note langsung antar akun/merchant Zeltra (`output_commitment_1` penerima, `output_commitment_2` kembalian) tanpa penarikan USDC publik on-chain (Merchant Masking).
-- [ ] **Viewing Key Export Suite & CEX Selective Disclosure (DEC-040):**
+- [x] **Viewing Key Export Suite & CEX Selective Disclosure (DEC-040):** [SELESAI & AUDITED]
   - Tooling UI/CLI bagi akuntan B2B untuk export laporan audit transaksi kas privat, rekonsiliasi double-entry, dan pembuktian kepemilikan note ke bursa terpusat (Binance/Coinbase) dengan Verifier Binding.
   - Sub-spesifikasi:
-    * [`DEC-040A: Cryptographic Key Separation (sk/nk/fvk) & Groth16 Circuit`](file:///workspaces/Zeltra-Protocol/research/decisions/DEC-040A-selective-disclosure-circuit-and-key-separation.md) (Task: [`taskAdec040.md`](file:///workspaces/Zeltra-Protocol/taskAdec040.md))
-    * [`DEC-040B: Client SDK Compliance & Double-Entry Audit Trail`](file:///workspaces/Zeltra-Protocol/research/decisions/DEC-040B-client-sdk-compliance-and-double-entry-audit-trail.md) (Task: [`taskBdec040.md`](file:///workspaces/Zeltra-Protocol/taskBdec040.md))
-    * [`DEC-040C: CEX Verifier Engine & Compliance CLI Tooling`](file:///workspaces/Zeltra-Protocol/research/decisions/DEC-040C-cex-verifier-engine-and-compliance-cli.md) (Task: [`taskCdec040.md`](file:///workspaces/Zeltra-Protocol/taskCdec040.md))
-- [ ] **SDK CEX Helper (DEC-040C):**
+    * [x] [`DEC-040A: Cryptographic Key Separation (sk/nk/fvk) & Groth16 Circuit`](file:///workspaces/Zeltra-Protocol/research/decisions/DEC-040A-selective-disclosure-circuit-and-key-separation.md) (Task: [`archive/tasks/taskAdec040.md`](file:///workspaces/Zeltra-Protocol/archive/tasks/taskAdec040.md)) [SELESAI — PR #23]
+    * [x] [`DEC-040B: Client SDK Compliance & Double-Entry Audit Trail`](file:///workspaces/Zeltra-Protocol/research/decisions/DEC-040B-client-sdk-compliance-and-double-entry-audit-trail.md) (Task: [`archive/tasks/taskBdec040.md`](file:///workspaces/Zeltra-Protocol/archive/tasks/taskBdec040.md)) [SELESAI — PR #24]
+    * [x] [`DEC-040C: CEX Verifier Engine & Compliance CLI Tooling`](file:///workspaces/Zeltra-Protocol/research/decisions/DEC-040C-cex-verifier-engine-and-compliance-cli.md) (Task: [`archive/tasks/taskCdec040.md`](file:///workspaces/Zeltra-Protocol/archive/tasks/taskCdec040.md)) [SELESAI — PR #25]
+- [x] **SDK CEX Helper (DEC-040C):** [SELESAI & AUDITED]
   - Helper otomatis "Export Source of Funds" dengan bukti kriptografis selektif & Verifier Binding untuk bypass freeze bursa (Binance/Coinbase) (Ref: [`DEC-040C`](file:///workspaces/Zeltra-Protocol/research/decisions/DEC-040C-cex-verifier-engine-and-compliance-cli.md)).
-- [ ] **In-Browser WebAssembly SDK Prover:**
-  - Optimasi runner prover Groth16 langsung di browser/mobile via Web Worker dengan siklus isolasi memori (`worker.terminate()`) anti-OOM linear.
+- [ ] **In-Browser WebAssembly SDK Prover (DEC-041):**
+  - Runner prover Groth16 langsung di browser/mobile via Web Worker dengan siklus isolasi memori (`worker.terminate()`) anti-OOM linear (Spesifikasi: [`DEC-041`](file:///workspaces/Zeltra-Protocol/research/decisions/DEC-041-in-browser-wasm-groth16-prover-and-disposable-worker.md)).
 - [ ] **HTTP 402 AI Agent Facilitator (x402 Protocol):**
   - Penyelesaian streaming payment mikro untuk AI Agent via Prepaid Note Pool dan settlement batas ambang.
 
