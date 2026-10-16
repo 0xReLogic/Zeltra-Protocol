@@ -613,7 +613,7 @@ impl Zeltra {
         )
     }
 
-    /// Executes a Universal 2-in-2-out JoinSplit private spend or consolidation using Groth16 (DEC-036 / DEC-036C).
+    /// Executes a Universal 2-in-2-out JoinSplit private spend or consolidation using Groth16 (DEC-036 / DEC-036C / DEC-043B).
     pub fn spend_joinsplit(
         &mut self,
         proof_a_neg: Bytes,
@@ -636,6 +636,8 @@ impl Zeltra {
         expiry: U256,
         flags_packed: U256,
         is_rollover: U256,
+        encrypted_memo_1: Bytes,
+        encrypted_memo_2: Bytes,
     ) -> Result<bool, Vec<u8>> {
         self._spend_joinsplit(
             proof_a_neg,
@@ -658,6 +660,8 @@ impl Zeltra {
             expiry,
             flags_packed,
             is_rollover,
+            encrypted_memo_1,
+            encrypted_memo_2,
         )
     }
 
@@ -763,7 +767,7 @@ impl Zeltra {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use alloy_primitives::address;
     use ark_bls12_381::{Fr, G1Affine, G2Affine};
@@ -788,7 +792,7 @@ mod tests {
         static LAST_RETURN_DATA_SIZE: RefCell<usize> = const { RefCell::new(32) };
     }
 
-    fn reset_test_state() {
+    pub(crate) fn reset_test_state() {
         STORAGE.with(|s| s.borrow_mut().clear());
         MSG_SENDER.with(|s| *s.borrow_mut() = Address::ZERO);
         BLOCK_TIMESTAMP.with(|t| *t.borrow_mut() = 0);
@@ -801,33 +805,33 @@ mod tests {
         LAST_RETURN_DATA_SIZE.with(|s| *s.borrow_mut() = 32);
     }
 
-    fn set_msg_sender(sender: Address) {
+    pub(crate) fn set_msg_sender(sender: Address) {
         MSG_SENDER.with(|s| *s.borrow_mut() = sender);
     }
 
-    fn set_msg_value(value: U256) {
+    pub(crate) fn set_msg_value(value: U256) {
         MSG_VALUE.with(|v| *v.borrow_mut() = value);
     }
 
-    fn set_block_timestamp(ts: u64) {
+    pub(crate) fn set_block_timestamp(ts: u64) {
         BLOCK_TIMESTAMP.with(|t| *t.borrow_mut() = ts);
     }
 
-    fn set_erc20_transfer_from_result(res: Result<bool, Vec<u8>>) {
+    pub(crate) fn set_erc20_transfer_from_result(res: Result<bool, Vec<u8>>) {
         ERC20_TRANSFER_FROM_RESULT.with(|r| *r.borrow_mut() = res);
     }
 
-    fn set_erc20_transfer_result(res: Result<bool, Vec<u8>>) {
+    pub(crate) fn set_erc20_transfer_result(res: Result<bool, Vec<u8>>) {
         ERC20_TRANSFER_RESULT.with(|r| *r.borrow_mut() = res);
     }
 
-    fn set_mock_asset_balance(asset_id: u8, balance: U256) {
+    pub(crate) fn set_mock_asset_balance(asset_id: u8, balance: U256) {
         MOCK_ASSET_BALANCES.with(|m| {
             m.borrow_mut().insert(asset_id, balance);
         });
     }
 
-    fn set_pairing_result(result: bool) {
+    pub(crate) fn set_pairing_result(result: bool) {
         PAIRING_RESULT.with(|value| *value.borrow_mut() = u8::from(result));
     }
 
@@ -2793,6 +2797,8 @@ mod tests {
             U256::from(2000), // expiry
             U256::from(1),    // flags_packed: 1 change note, 1 dummy
             U256::ZERO,       // is_rollover: 0
+            vec![0u8; 96].into(),
+            vec![0u8; 96].into(),
         );
 
         assert_eq!(result, Ok(true));
@@ -2862,6 +2868,8 @@ mod tests {
             U256::from(2000),
             U256::ZERO,
             U256::ZERO,
+            vec![0u8; 96].into(),
+            vec![0u8; 96].into(),
         );
 
         assert_eq!(result, Err(b"DuplicateNullifierInSameTx".to_vec()));
@@ -2921,6 +2929,8 @@ mod tests {
             U256::from(2000),
             U256::ZERO,
             U256::ZERO,
+            vec![0u8; 96].into(),
+            vec![0u8; 96].into(),
         );
 
         assert_eq!(result, Err(b"Nullifier1AlreadySpent".to_vec()));
@@ -2979,6 +2989,8 @@ mod tests {
             U256::from(2000),
             U256::ZERO,
             U256::ZERO,
+            vec![0u8; 96].into(),
+            vec![0u8; 96].into(),
         );
 
         assert_eq!(result, Err(b"Nullifier2AlreadySpent".to_vec()));
@@ -3034,6 +3046,8 @@ mod tests {
             U256::from(4999), // expiry < 5000
             U256::ZERO,
             U256::ZERO,
+            vec![0u8; 96].into(),
+            vec![0u8; 96].into(),
         );
 
         assert_eq!(result, Err(b"QuoteExpired".to_vec()));
@@ -3085,6 +3099,8 @@ mod tests {
             U256::from(2000),
             U256::ZERO,
             U256::ZERO,
+            vec![0u8; 96].into(),
+            vec![0u8; 96].into(),
         );
 
         assert_eq!(result, Err(b"INSUFFICIENT_NOTE_LIABILITY".to_vec()));
@@ -3137,6 +3153,8 @@ mod tests {
             U256::from(2000),
             U256::ZERO,
             U256::ZERO,
+            vec![0u8; 96].into(),
+            vec![0u8; 96].into(),
         );
 
         assert_eq!(result, Err(b"INVALID_GROTH16_JOINSPLIT_PROOF".to_vec()));
@@ -3188,6 +3206,8 @@ mod tests {
             U256::from(2000),
             U256::ZERO,
             U256::ZERO,
+            vec![0u8; 96].into(),
+            vec![0u8; 96].into(),
         );
 
         assert_eq!(result, Err(b"NON_CANONICAL_PUBLIC_INPUT_SCALAR".to_vec()));
@@ -3555,6 +3575,8 @@ mod tests {
             U256::from(2000),
             U256::from(8), // MALLEABLE BIT (> 7)
             U256::ZERO,
+            vec![0u8; 96].into(),
+            vec![0u8; 96].into(),
         );
         assert_eq!(res_js_8, Err(b"FLAGS_PACKED_MALLEABLE_BITS".to_vec()));
 
@@ -3580,6 +3602,8 @@ mod tests {
             U256::from(2000),
             U256::from(255), // MALLEABLE BITS (> 7)
             U256::ZERO,
+            vec![0u8; 96].into(),
+            vec![0u8; 96].into(),
         );
         assert_eq!(res_js_255, Err(b"FLAGS_PACKED_MALLEABLE_BITS".to_vec()));
     }

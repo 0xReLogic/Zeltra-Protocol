@@ -3,7 +3,7 @@
 > **Scope:** `zeltra-contracts/` (Arbitrum Stylus WASM, EIP-2537 Precompiles, MMR Accumulator, CEI & Invariant Checks)  
 > **Spesifikasi Referensi:** [`research/decisions/DEC-043B-stylus-strict-three-mode-settlement-and-dual-memo-mmr.md`](file:///workspaces/Zeltra-Protocol/research/decisions/DEC-043B-stylus-strict-three-mode-settlement-and-dual-memo-mmr.md) & [`research/decisions/DEC-043-shielded-to-shielded-in-pool-transfer-and-merchant-masking.md`](file:///workspaces/Zeltra-Protocol/research/decisions/DEC-043-shielded-to-shielded-in-pool-transfer-and-merchant-masking.md)  
 > **Prinsip:** *"Strict State Segregation, Anti-Silent-Burn, Fixed-Length Calldata Verification, Perfect Solvency Conservation"*  
-> **Status:** **PENDING IMPLEMENTATION**
+> **Status:** **COMPLETED** (75/75 Tests Passed, 100% Soundness, Clean Clippy & Fmt)
 
 ---
 
@@ -22,29 +22,29 @@ Menerapkan penyelesaian on-chain untuk shielded-to-shielded in-pool transfer di 
 ## 2. Checklist Implementasi Rinci
 
 ### A. Modifikasi Entrypoint Kontrak (`zeltra-contracts/src/lib.rs`)
-- [ ] **Pembaruan Interface `spend_joinsplit`:**
+- [x] **Pembaruan Interface `spend_joinsplit`:**
   - Tambahkan parameter `encrypted_memo_1: Bytes, encrypted_memo_2: Bytes` ke entrypoint publik `spend_joinsplit`.
   - Teruskan kedua memo ke pemanggilan fungsi internal `self._spend_joinsplit(...)`.
 
 ### B. Implementasi Strict 3-Mode State Machine (`zeltra-contracts/src/spend.rs`)
-- [ ] **Pemisahan Mode Transaksi:**
+- [x] **Pemisahan Mode Transaksi:**
   - **Mode 1 (Rollover):** `is_rollover == 1`. Wajib `merchant_amount == 0`, `protocol_fee == 0`, `recipient == Address::ZERO`. Revert jika salah satu dilanggar.
   - **Mode 2 (In-Pool Transfer):** `is_rollover == 0 && merchant_amount == 0`. Wajib `has_change_1 == 1`, `protocol_fee == 0`, `recipient == Address::ZERO`. Revert `b"IN_POOL_TRANSFER_REQUIRES_OUTPUT_1"`, `b"PROTOCOL_FEE_MUST_BE_ZERO_FOR_IN_POOL_TRANSFER"`, atau `b"RECIPIENT_MUST_BE_ZERO_FOR_IN_POOL_TRANSFER"`.
   - **Mode 3 (Public Outflow Spend):** `is_rollover == 0 && merchant_amount > 0`. Wajib `recipient != Address::ZERO`. Revert `b"ZERO_RECIPIENT_ON_PUBLIC_SPEND"` jika `recipient == Address::ZERO` (Anti-Silent-Burn!).
-- [ ] **Validasi Panjang Memo Tepat 96 Byte:**
+- [x] **Validasi Panjang Memo Tepat 96 Byte:**
   - Tegakkan guard:
     ```rust
     if encrypted_memo_1.len() != 96 || encrypted_memo_2.len() != 96 {
         return Err(b"INVALID_MEMO_LENGTH".to_vec());
     }
     ```
-- [ ] **Penyisipan Dual Memo ke MMR:**
+- [x] **Penyisipan Dual Memo ke MMR:**
   - Gantikan `Vec::new()` pada baris 565–566 dengan memo riil:
     ```rust
     self._mmr_insert(output_cm_1, encrypted_memo_1.to_vec())?;
     self._mmr_insert(output_cm_2, encrypted_memo_2.to_vec())?;
     ```
-- [ ] **Bypass Transfer ERC-20:**
+- [x] **Bypass Transfer ERC-20:**
   - Pastikan blok interaksi transfer token ERC-20 hanya dieksekusi pada Mode 3:
     ```rust
     if is_rollover == U256::ZERO && merchant_amount > U256::ZERO && recipient != Address::ZERO {
@@ -59,15 +59,15 @@ Menerapkan penyelesaian on-chain untuk shielded-to-shielded in-pool transfer di 
 Sesuai aturan engineering Zeltra: **1 Positive Test + Minimal 2x Negative Tests**:
 
 ### Positive Tests:
-- [ ] `test_spend_joinsplit_in_pool_usdc_success`: Eksekusi Mode 2 untuk USDC dengan dual memo 96 byte. MMR bertambah 2 daun, nullifier terbakar, saldo kas kontrak utuh, liabilitas terdebit tepat sebesar execution fee, dan invariant solvensi terpenuhi.
-- [ ] `test_spend_joinsplit_in_pool_weth_success`: Eksekusi Mode 2 untuk WETH dengan dual memo 96 byte.
+- [x] `test_spend_joinsplit_in_pool_usdc_success`: Eksekusi Mode 2 untuk USDC dengan dual memo 96 byte. MMR bertambah 2 daun, nullifier terbakar, saldo kas kontrak utuh, liabilitas terdebit tepat sebesar execution fee, dan invariant solvensi terpenuhi.
+- [x] `test_spend_joinsplit_in_pool_weth_success`: Eksekusi Mode 2 untuk WETH dengan dual memo 96 byte.
 
 ### Negative Tests (Minimal 2x Positive = Minimal 4 Tests):
-- [ ] `test_in_pool_rejects_non_zero_recipient`: Mode 2 me-revert jika menyertakan alamat penerima non-zero.
-- [ ] `test_in_pool_rejects_non_zero_protocol_fee`: Mode 2 me-revert jika `protocol_fee > 0`.
-- [ ] `test_in_pool_rejects_missing_output_1`: Mode 2 me-revert jika `has_change_1 == 0`.
-- [ ] `test_public_spend_rejects_zero_recipient`: Mode 3 (`merchant_amount > 0`) me-revert jika `recipient == Address::ZERO` (mencegah silent fund burn).
-- [ ] `test_spend_joinsplit_rejects_invalid_memo_length`: Me-revert jika memo 1 atau memo 2 tidak berukuran tepat 96 byte.
+- [x] `test_in_pool_rejects_non_zero_recipient`: Mode 2 me-revert jika menyertakan alamat penerima non-zero.
+- [x] `test_in_pool_rejects_non_zero_protocol_fee`: Mode 2 me-revert jika `protocol_fee > 0`.
+- [x] `test_in_pool_rejects_missing_output_1`: Mode 2 me-revert jika `has_change_1 == 0`.
+- [x] `test_public_spend_rejects_zero_recipient`: Mode 3 (`merchant_amount > 0`) me-revert jika `recipient == Address::ZERO` (mencegah silent fund burn).
+- [x] `test_spend_joinsplit_rejects_invalid_memo_length`: Me-revert jika memo 1 atau memo 2 tidak berukuran tepat 96 byte.
 
 ---
 

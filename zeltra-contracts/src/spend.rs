@@ -356,7 +356,7 @@ impl Zeltra {
         Ok(true)
     }
 
-    /// Executes a Universal 2-in-2-out JoinSplit private spend or consolidation (DEC-036 / DEC-036C).
+    /// Executes a Universal 2-in-2-out JoinSplit private spend or consolidation (DEC-036 / DEC-036C / DEC-043B).
     pub(crate) fn _spend_joinsplit(
         &mut self,
         proof_a_neg: Bytes,
@@ -379,9 +379,16 @@ impl Zeltra {
         expiry: U256,
         flags_packed: U256,
         is_rollover: U256,
+        encrypted_memo_1: Bytes,
+        encrypted_memo_2: Bytes,
     ) -> Result<bool, Vec<u8>> {
         // 1. CHECKS
         self.check_not_paused()?;
+
+        // Calldata Length Guard (AUD-5 - Anti Relayer Gas Griefing)
+        if encrypted_memo_1.len() != 96 || encrypted_memo_2.len() != 96 {
+            return Err(b"INVALID_MEMO_LENGTH".to_vec());
+        }
 
         // Execution fee validation
         if execution_fee > max_execution_fee {
@@ -429,28 +436,6 @@ impl Zeltra {
             return Err(b"Nullifier2AlreadySpent".to_vec());
         }
 
-        // Rollover mode validation
-        if is_rollover != U256::ZERO && is_rollover != U256::from(1) {
-            return Err(b"INVALID_IS_ROLLOVER_FLAG".to_vec());
-        }
-        if is_rollover == U256::ZERO {
-            if merchant_amount == U256::ZERO {
-                return Err(b"MERCHANT_AMOUNT_ZERO".to_vec());
-            }
-        } else {
-            if merchant_amount != U256::ZERO {
-                return Err(b"MERCHANT_AMOUNT_MUST_BE_ZERO_IN_ROLLOVER".to_vec());
-            }
-            if protocol_fee != U256::ZERO {
-                return Err(b"PROTOCOL_FEE_MUST_BE_ZERO_IN_ROLLOVER".to_vec());
-            }
-        }
-
-        // leaf_count validation
-        if leaf_count == U256::ZERO {
-            return Err(b"INVALID_LEAF_COUNT".to_vec());
-        }
-
         // Strict bit-bounds check on flags_packed
         // Bit 0: has_change_1, Bit 1: has_change_2, Bit 2: asset_id => valid range: 0..=7
         if flags_packed > U256::from(7) {
@@ -459,6 +444,44 @@ impl Zeltra {
         let has_change_1 = flags_packed & U256::from(1);
         let has_change_2 = (flags_packed >> 1usize) & U256::from(1);
         let asset_id: u8 = ((flags_packed >> 2usize) & U256::from(1)).byte(0);
+
+        // Rollover mode validation & Strict 3-Mode Mutually Exclusive State Machine (AUD-4 - Anti Silent Burn)
+        if is_rollover != U256::ZERO && is_rollover != U256::from(1) {
+            return Err(b"INVALID_IS_ROLLOVER_FLAG".to_vec());
+        }
+        if is_rollover == U256::from(1) {
+            // Mode 1: Epoch Rollover (DEC-033)
+            if merchant_amount != U256::ZERO {
+                return Err(b"MERCHANT_AMOUNT_MUST_BE_ZERO_IN_ROLLOVER".to_vec());
+            }
+            if protocol_fee != U256::ZERO {
+                return Err(b"PROTOCOL_FEE_MUST_BE_ZERO_IN_ROLLOVER".to_vec());
+            }
+            if recipient != Address::ZERO {
+                return Err(b"RECIPIENT_MUST_BE_ZERO_IN_ROLLOVER".to_vec());
+            }
+        } else if merchant_amount == U256::ZERO {
+            // Mode 2: In-Pool Transfer (DEC-043)
+            if has_change_1 == U256::ZERO {
+                return Err(b"IN_POOL_TRANSFER_REQUIRES_OUTPUT_1".to_vec());
+            }
+            if protocol_fee != U256::ZERO {
+                return Err(b"PROTOCOL_FEE_MUST_BE_ZERO_FOR_IN_POOL_TRANSFER".to_vec());
+            }
+            if recipient != Address::ZERO {
+                return Err(b"RECIPIENT_MUST_BE_ZERO_FOR_IN_POOL_TRANSFER".to_vec());
+            }
+        } else {
+            // Mode 3: Public Outflow Spend (DEC-036) - Anti-Silent-Burn!
+            if recipient == Address::ZERO {
+                return Err(b"ZERO_RECIPIENT_ON_PUBLIC_SPEND".to_vec());
+            }
+        }
+
+        // leaf_count validation
+        if leaf_count == U256::ZERO {
+            return Err(b"INVALID_LEAF_COUNT".to_vec());
+        }
 
         // Note root must be recorded in accepted_note_roots
         let root_timestamp = self.accepted_note_roots.get(note_root);
@@ -561,9 +584,9 @@ impl Zeltra {
         self.note_nullifiers.insert(nullifier_1, true);
         self.note_nullifiers.insert(nullifier_2, true);
 
-        // C5.2: Direction B Constant-Arity MMR Appends (Always execute exactly 2 MMR insertions)
-        self._mmr_insert(output_cm_1, Vec::new())?;
-        self._mmr_insert(output_cm_2, Vec::new())?;
+        // C5.2: Direction B Constant-Arity MMR Appends with Real Memos (DEC-043B)
+        self._mmr_insert(output_cm_1, encrypted_memo_1.to_vec())?;
+        self._mmr_insert(output_cm_2, encrypted_memo_2.to_vec())?;
 
         // Multi-liability accounting per asset (DEC-034B & DEC-038B)
         self.user_note_liabilities
@@ -586,8 +609,8 @@ impl Zeltra {
             .setter(asset_key)
             .set(new_realized);
 
-        // 3. INTERACTIONS (Token transfer to recipient with scaling)
-        if recipient != Address::ZERO && merchant_amount > U256::ZERO {
+        // 3. INTERACTIONS (Token transfer to recipient with scaling - Mode 3 only)
+        if is_rollover == U256::ZERO && merchant_amount > U256::ZERO && recipient != Address::ZERO {
             self.ensure_asset_liquidity(asset_id, merchant_amount)?;
             let raw_payout = if asset_id == 0 {
                 merchant_amount
@@ -632,5 +655,553 @@ impl Zeltra {
         self._check_asset_solvency_invariant(asset_id)?;
 
         Ok(true)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::tests::*;
+    use alloy_primitives::{address, Address, FixedBytes, U256};
+    use stylus_sdk::abi::Bytes;
+
+    #[test]
+    fn test_spend_joinsplit_in_pool_usdc_success() {
+        reset_test_state();
+        let owner = address!("1111111111111111111111111111111111111111");
+        let stablecoin = address!("3333333333333333333333333333333333333333");
+        let weth9 = address!("4444444444444444444444444444444444444444");
+        set_msg_sender(owner);
+        set_block_timestamp(1000);
+
+        let mut contract = Zeltra::default();
+        contract
+            .init_multi_asset(owner, weth9, stablecoin, Address::ZERO)
+            .unwrap();
+
+        let initial_root =
+            FixedBytes::<32>::from_slice(&crate::poseidon_w5_constants::EMPTY_TREE_ROOT_BYTES);
+        contract
+            .accepted_note_roots
+            .insert(initial_root, U256::from(1000));
+
+        // Setup 100 USDC liability and backing balance (asset_id = 1)
+        let initial_liab = U256::from(100_000_000); // 100 USDC
+        contract
+            .user_note_liabilities
+            .setter(U256::from(1))
+            .set(initial_liab);
+        set_mock_asset_balance(1, initial_liab);
+
+        let nullifier_1 = FixedBytes::<32>::from_slice(&[0x1a; 32]);
+        let nullifier_2 = FixedBytes::<32>::from_slice(&[0x1b; 32]);
+        let transfer_cm_1 = FixedBytes::<32>::from_slice(&[0x2a; 32]);
+        let change_cm_2 = FixedBytes::<32>::from_slice(&[0x2b; 32]);
+        let quote_hash = FixedBytes::<32>::from_slice(&[0x3a; 32]);
+
+        let proof_a = vec![0x11; 128].into();
+        let proof_b = vec![0x22; 256].into();
+        let proof_c = vec![0x33; 128].into();
+
+        // Dual 96-byte AEAD memos (DEC-043B / AUD-5)
+        let memo_1: Bytes = vec![0xaa; 96].into();
+        let memo_2: Bytes = vec![0xbb; 96].into();
+
+        let execution_fee = U256::from(20_000); // 0.02 USDC execution fee
+        let max_execution_fee = U256::from(25_000);
+
+        // flags_packed = 7: has_change_1 = 1, has_change_2 = 1, asset_id = 1 (USDC)
+        let flags_packed = U256::from(7);
+
+        // Mode 2 (In-Pool Transfer): is_rollover = 0, merchant_amount = 0, protocol_fee = 0, recipient = ZERO
+        let result = contract.spend_joinsplit(
+            proof_a,
+            proof_b,
+            proof_c,
+            initial_root,
+            U256::from(1),
+            nullifier_1,
+            nullifier_2,
+            U256::ZERO,
+            U256::ZERO,
+            transfer_cm_1,
+            change_cm_2,
+            Address::ZERO,
+            U256::ZERO, // merchant_amount == 0
+            U256::ZERO, // protocol_fee == 0
+            execution_fee,
+            max_execution_fee,
+            quote_hash,
+            U256::from(2000), // expiry
+            flags_packed,
+            U256::ZERO, // is_rollover == 0
+            memo_1,
+            memo_2,
+        );
+
+        assert_eq!(result, Ok(true));
+        assert!(contract.note_nullifiers.get(nullifier_1));
+        assert!(contract.note_nullifiers.get(nullifier_2));
+
+        // MMR leaf count incremented by 2
+        assert_eq!(contract.mmr_leaf_count.get(), U256::from(2));
+
+        // Liability debited by exactly execution fee
+        assert_eq!(
+            contract.user_note_liabilities.get(U256::from(1)),
+            initial_liab - execution_fee
+        );
+        assert_eq!(
+            contract
+                .accrued_execution_fee_liabilities
+                .get(U256::from(1)),
+            execution_fee
+        );
+        assert_eq!(
+            contract.realized_protocol_fees.get(U256::from(1)),
+            U256::ZERO
+        );
+    }
+
+    #[test]
+    fn test_spend_joinsplit_in_pool_weth_success() {
+        reset_test_state();
+        let owner = address!("1111111111111111111111111111111111111111");
+        let stablecoin = address!("3333333333333333333333333333333333333333");
+        let weth9 = address!("4444444444444444444444444444444444444444");
+        set_msg_sender(owner);
+        set_block_timestamp(1000);
+
+        let mut contract = Zeltra::default();
+        contract
+            .init_multi_asset(owner, weth9, stablecoin, Address::ZERO)
+            .unwrap();
+
+        let initial_root =
+            FixedBytes::<32>::from_slice(&crate::poseidon_w5_constants::EMPTY_TREE_ROOT_BYTES);
+        contract
+            .accepted_note_roots
+            .insert(initial_root, U256::from(1000));
+
+        // Setup 50 WETH liability and backing balance (asset_id = 0)
+        let initial_liab = U256::from(50_000_000_000u64); // 50 Gwei / WETH note units
+        contract
+            .user_note_liabilities
+            .setter(U256::ZERO)
+            .set(initial_liab);
+        set_mock_asset_balance(0, initial_liab);
+
+        let nullifier_1 = FixedBytes::<32>::from_slice(&[0x2a; 32]);
+        let nullifier_2 = FixedBytes::<32>::from_slice(&[0x2b; 32]);
+        let transfer_cm_1 = FixedBytes::<32>::from_slice(&[0x3a; 32]);
+        let change_cm_2 = FixedBytes::<32>::from_slice(&[0x3b; 32]);
+        let quote_hash = FixedBytes::<32>::from_slice(&[0x4a; 32]);
+
+        let proof_a = vec![0x11; 128].into();
+        let proof_b = vec![0x22; 256].into();
+        let proof_c = vec![0x33; 128].into();
+
+        let memo_1: Bytes = vec![0xcc; 96].into();
+        let memo_2: Bytes = vec![0xdd; 96].into();
+
+        let execution_fee = U256::from(10_000_000);
+        let max_execution_fee = U256::from(15_000_000);
+
+        // flags_packed = 3: has_change_1 = 1, has_change_2 = 1, asset_id = 0 (WETH)
+        let flags_packed = U256::from(3);
+
+        let result = contract.spend_joinsplit(
+            proof_a,
+            proof_b,
+            proof_c,
+            initial_root,
+            U256::from(1),
+            nullifier_1,
+            nullifier_2,
+            U256::ZERO,
+            U256::ZERO,
+            transfer_cm_1,
+            change_cm_2,
+            Address::ZERO,
+            U256::ZERO,
+            U256::ZERO,
+            execution_fee,
+            max_execution_fee,
+            quote_hash,
+            U256::from(2000),
+            flags_packed,
+            U256::ZERO,
+            memo_1,
+            memo_2,
+        );
+
+        assert_eq!(result, Ok(true));
+        assert!(contract.note_nullifiers.get(nullifier_1));
+        assert!(contract.note_nullifiers.get(nullifier_2));
+        assert_eq!(contract.mmr_leaf_count.get(), U256::from(2));
+
+        assert_eq!(
+            contract.user_note_liabilities.get(U256::ZERO),
+            initial_liab - execution_fee
+        );
+        assert_eq!(
+            contract.accrued_execution_fee_liabilities.get(U256::ZERO),
+            execution_fee
+        );
+        assert_eq!(contract.realized_protocol_fees.get(U256::ZERO), U256::ZERO);
+    }
+
+    #[test]
+    fn test_in_pool_rejects_non_zero_recipient() {
+        reset_test_state();
+        let owner = address!("1111111111111111111111111111111111111111");
+        let non_zero_recipient = address!("9999999999999999999999999999999999999999");
+        set_msg_sender(owner);
+        set_block_timestamp(1000);
+
+        let mut contract = Zeltra::default();
+        contract.init(owner, Address::ZERO, Address::ZERO).unwrap();
+
+        let initial_root =
+            FixedBytes::<32>::from_slice(&crate::poseidon_w5_constants::EMPTY_TREE_ROOT_BYTES);
+        contract
+            .accepted_note_roots
+            .insert(initial_root, U256::from(1000));
+        contract
+            .user_note_liabilities
+            .setter(U256::from(1))
+            .set(U256::from(100_000_000));
+
+        let nf1 = FixedBytes::<32>::from_slice(&[0x51; 32]);
+        let nf2 = FixedBytes::<32>::from_slice(&[0x52; 32]);
+
+        // Mode 2 with recipient != Address::ZERO must revert RECIPIENT_MUST_BE_ZERO_FOR_IN_POOL_TRANSFER
+        let result = contract.spend_joinsplit(
+            vec![0x11; 128].into(),
+            vec![0x22; 256].into(),
+            vec![0x33; 128].into(),
+            initial_root,
+            U256::from(1),
+            nf1,
+            nf2,
+            U256::ZERO,
+            U256::ZERO,
+            FixedBytes::ZERO,
+            FixedBytes::ZERO,
+            non_zero_recipient,
+            U256::ZERO, // merchant_amount == 0
+            U256::ZERO, // protocol_fee == 0
+            U256::from(10_000),
+            U256::from(20_000),
+            FixedBytes::ZERO,
+            U256::from(2000),
+            U256::from(5), // has_change_1 = 1, asset_id = 1
+            U256::ZERO,    // is_rollover == 0
+            vec![0xaa; 96].into(),
+            vec![0xbb; 96].into(),
+        );
+
+        assert_eq!(
+            result,
+            Err(b"RECIPIENT_MUST_BE_ZERO_FOR_IN_POOL_TRANSFER".to_vec())
+        );
+        assert!(!contract.note_nullifiers.get(nf1));
+        assert!(!contract.note_nullifiers.get(nf2));
+        assert_eq!(contract.mmr_leaf_count.get(), U256::ZERO);
+    }
+
+    #[test]
+    fn test_spend_joinsplit_rejects_non_zero_recipient() {
+        test_in_pool_rejects_non_zero_recipient();
+    }
+
+    #[test]
+    fn test_in_pool_rejects_non_zero_protocol_fee() {
+        reset_test_state();
+        let owner = address!("1111111111111111111111111111111111111111");
+        set_msg_sender(owner);
+        set_block_timestamp(1000);
+
+        let mut contract = Zeltra::default();
+        contract.init(owner, Address::ZERO, Address::ZERO).unwrap();
+
+        let initial_root =
+            FixedBytes::<32>::from_slice(&crate::poseidon_w5_constants::EMPTY_TREE_ROOT_BYTES);
+        contract
+            .accepted_note_roots
+            .insert(initial_root, U256::from(1000));
+        contract
+            .user_note_liabilities
+            .setter(U256::from(1))
+            .set(U256::from(100_000_000));
+
+        let nf1 = FixedBytes::<32>::from_slice(&[0x61; 32]);
+        let nf2 = FixedBytes::<32>::from_slice(&[0x62; 32]);
+
+        // Mode 2 with protocol_fee > 0 must revert PROTOCOL_FEE_MUST_BE_ZERO_FOR_IN_POOL_TRANSFER
+        let result = contract.spend_joinsplit(
+            vec![0x11; 128].into(),
+            vec![0x22; 256].into(),
+            vec![0x33; 128].into(),
+            initial_root,
+            U256::from(1),
+            nf1,
+            nf2,
+            U256::ZERO,
+            U256::ZERO,
+            FixedBytes::ZERO,
+            FixedBytes::ZERO,
+            Address::ZERO,
+            U256::ZERO,         // merchant_amount == 0
+            U256::from(22_500), // protocol_fee > 0
+            U256::from(10_000),
+            U256::from(20_000),
+            FixedBytes::ZERO,
+            U256::from(2000),
+            U256::from(5), // has_change_1 = 1, asset_id = 1
+            U256::ZERO,    // is_rollover == 0
+            vec![0xaa; 96].into(),
+            vec![0xbb; 96].into(),
+        );
+
+        assert_eq!(
+            result,
+            Err(b"PROTOCOL_FEE_MUST_BE_ZERO_FOR_IN_POOL_TRANSFER".to_vec())
+        );
+        assert!(!contract.note_nullifiers.get(nf1));
+        assert!(!contract.note_nullifiers.get(nf2));
+        assert_eq!(contract.mmr_leaf_count.get(), U256::ZERO);
+    }
+
+    #[test]
+    fn test_spend_joinsplit_rejects_non_zero_protocol_fee() {
+        test_in_pool_rejects_non_zero_protocol_fee();
+    }
+
+    #[test]
+    fn test_in_pool_rejects_missing_output_1() {
+        reset_test_state();
+        let owner = address!("1111111111111111111111111111111111111111");
+        set_msg_sender(owner);
+        set_block_timestamp(1000);
+
+        let mut contract = Zeltra::default();
+        contract.init(owner, Address::ZERO, Address::ZERO).unwrap();
+
+        let initial_root =
+            FixedBytes::<32>::from_slice(&crate::poseidon_w5_constants::EMPTY_TREE_ROOT_BYTES);
+        contract
+            .accepted_note_roots
+            .insert(initial_root, U256::from(1000));
+        contract
+            .user_note_liabilities
+            .setter(U256::from(1))
+            .set(U256::from(100_000_000));
+
+        let nf1 = FixedBytes::<32>::from_slice(&[0x71; 32]);
+        let nf2 = FixedBytes::<32>::from_slice(&[0x72; 32]);
+
+        // Mode 2 with has_change_1 == 0 (flags_packed = 4: asset_id = 1, has_change_1 = 0, has_change_2 = 0)
+        // must revert IN_POOL_TRANSFER_REQUIRES_OUTPUT_1
+        let result = contract.spend_joinsplit(
+            vec![0x11; 128].into(),
+            vec![0x22; 256].into(),
+            vec![0x33; 128].into(),
+            initial_root,
+            U256::from(1),
+            nf1,
+            nf2,
+            U256::ZERO,
+            U256::ZERO,
+            FixedBytes::ZERO,
+            FixedBytes::ZERO,
+            Address::ZERO,
+            U256::ZERO,
+            U256::ZERO,
+            U256::from(10_000),
+            U256::from(20_000),
+            FixedBytes::ZERO,
+            U256::from(2000),
+            U256::from(4), // has_change_1 = 0!
+            U256::ZERO,    // is_rollover == 0
+            vec![0xaa; 96].into(),
+            vec![0xbb; 96].into(),
+        );
+
+        assert_eq!(result, Err(b"IN_POOL_TRANSFER_REQUIRES_OUTPUT_1".to_vec()));
+        assert!(!contract.note_nullifiers.get(nf1));
+        assert!(!contract.note_nullifiers.get(nf2));
+        assert_eq!(contract.mmr_leaf_count.get(), U256::ZERO);
+    }
+
+    #[test]
+    fn test_spend_joinsplit_rejects_missing_output_1() {
+        test_in_pool_rejects_missing_output_1();
+    }
+
+    #[test]
+    fn test_public_spend_rejects_zero_recipient() {
+        reset_test_state();
+        let owner = address!("1111111111111111111111111111111111111111");
+        set_msg_sender(owner);
+        set_block_timestamp(1000);
+
+        let mut contract = Zeltra::default();
+        contract.init(owner, Address::ZERO, Address::ZERO).unwrap();
+
+        let initial_root =
+            FixedBytes::<32>::from_slice(&crate::poseidon_w5_constants::EMPTY_TREE_ROOT_BYTES);
+        contract
+            .accepted_note_roots
+            .insert(initial_root, U256::from(1000));
+        contract
+            .user_note_liabilities
+            .setter(U256::from(1))
+            .set(U256::from(100_000_000));
+
+        let nf1 = FixedBytes::<32>::from_slice(&[0x81; 32]);
+        let nf2 = FixedBytes::<32>::from_slice(&[0x82; 32]);
+
+        // Mode 3 (merchant_amount > 0) with recipient == Address::ZERO (Anti Silent Burn AUD-4)
+        // must revert ZERO_RECIPIENT_ON_PUBLIC_SPEND
+        let result = contract.spend_joinsplit(
+            vec![0x11; 128].into(),
+            vec![0x22; 256].into(),
+            vec![0x33; 128].into(),
+            initial_root,
+            U256::from(1),
+            nf1,
+            nf2,
+            U256::ZERO,
+            U256::ZERO,
+            FixedBytes::ZERO,
+            FixedBytes::ZERO,
+            Address::ZERO,         // RECIPIENT ZERO ON PUBLIC SPEND!
+            U256::from(5_000_000), // merchant_amount > 0
+            U256::from(22_500),
+            U256::from(10_000),
+            U256::from(20_000),
+            FixedBytes::ZERO,
+            U256::from(2000),
+            U256::from(5), // asset_id = 1
+            U256::ZERO,
+            vec![0xaa; 96].into(),
+            vec![0xbb; 96].into(),
+        );
+
+        assert_eq!(result, Err(b"ZERO_RECIPIENT_ON_PUBLIC_SPEND".to_vec()));
+        assert!(!contract.note_nullifiers.get(nf1));
+        assert!(!contract.note_nullifiers.get(nf2));
+        assert_eq!(contract.mmr_leaf_count.get(), U256::ZERO);
+    }
+
+    #[test]
+    fn test_spend_joinsplit_rejects_zero_recipient_on_public_spend() {
+        test_public_spend_rejects_zero_recipient();
+    }
+
+    #[test]
+    fn test_spend_joinsplit_rejects_invalid_memo_length() {
+        reset_test_state();
+        let owner = address!("1111111111111111111111111111111111111111");
+        set_msg_sender(owner);
+        set_block_timestamp(1000);
+
+        let mut contract = Zeltra::default();
+        contract.init(owner, Address::ZERO, Address::ZERO).unwrap();
+
+        let initial_root =
+            FixedBytes::<32>::from_slice(&crate::poseidon_w5_constants::EMPTY_TREE_ROOT_BYTES);
+        contract
+            .accepted_note_roots
+            .insert(initial_root, U256::from(1000));
+        contract
+            .user_note_liabilities
+            .setter(U256::from(1))
+            .set(U256::from(100_000_000));
+
+        let nf1 = FixedBytes::<32>::from_slice(&[0x91; 32]);
+        let nf2 = FixedBytes::<32>::from_slice(&[0x92; 32]);
+
+        // Memo 1 is 95 bytes (not 96)
+        let res_95 = contract.spend_joinsplit(
+            vec![0x11; 128].into(),
+            vec![0x22; 256].into(),
+            vec![0x33; 128].into(),
+            initial_root,
+            U256::from(1),
+            nf1,
+            nf2,
+            U256::ZERO,
+            U256::ZERO,
+            FixedBytes::ZERO,
+            FixedBytes::ZERO,
+            Address::ZERO,
+            U256::ZERO,
+            U256::ZERO,
+            U256::from(10_000),
+            U256::from(20_000),
+            FixedBytes::ZERO,
+            U256::from(2000),
+            U256::from(5),
+            U256::ZERO,
+            vec![0xaa; 95].into(), // 95 BYTES
+            vec![0xbb; 96].into(),
+        );
+        assert_eq!(res_95, Err(b"INVALID_MEMO_LENGTH".to_vec()));
+
+        // Memo 2 is 120 bytes (not 96)
+        let res_120 = contract.spend_joinsplit(
+            vec![0x11; 128].into(),
+            vec![0x22; 256].into(),
+            vec![0x33; 128].into(),
+            initial_root,
+            U256::from(1),
+            nf1,
+            nf2,
+            U256::ZERO,
+            U256::ZERO,
+            FixedBytes::ZERO,
+            FixedBytes::ZERO,
+            Address::ZERO,
+            U256::ZERO,
+            U256::ZERO,
+            U256::from(10_000),
+            U256::from(20_000),
+            FixedBytes::ZERO,
+            U256::from(2000),
+            U256::from(5),
+            U256::ZERO,
+            vec![0xaa; 96].into(),
+            vec![0xbb; 120].into(), // 120 BYTES
+        );
+        assert_eq!(res_120, Err(b"INVALID_MEMO_LENGTH".to_vec()));
+
+        // Memo 1 is 0 bytes (empty)
+        let res_empty = contract.spend_joinsplit(
+            vec![0x11; 128].into(),
+            vec![0x22; 256].into(),
+            vec![0x33; 128].into(),
+            initial_root,
+            U256::from(1),
+            nf1,
+            nf2,
+            U256::ZERO,
+            U256::ZERO,
+            FixedBytes::ZERO,
+            FixedBytes::ZERO,
+            Address::ZERO,
+            U256::ZERO,
+            U256::ZERO,
+            U256::from(10_000),
+            U256::from(20_000),
+            FixedBytes::ZERO,
+            U256::from(2000),
+            U256::from(5),
+            U256::ZERO,
+            vec![].into(), // 0 BYTES
+            vec![0xbb; 96].into(),
+        );
+        assert_eq!(res_empty, Err(b"INVALID_MEMO_LENGTH".to_vec()));
     }
 }
