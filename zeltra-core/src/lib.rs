@@ -50,23 +50,26 @@ pub use compliance_circuit::{
 
 // Re-export Poseidon hash & canonical Grain LFSR (DEC-021)
 pub use poseidon::{
-    compute_nullifier, generate_grain_round_constants, native_poseidon_w5, GrainLfsr,
+    compute_nullifier, generate_grain_round_constants, native_poseidon_w3, native_poseidon_w5,
+    GrainLfsr,
 };
 
-// Re-export Private Note V1 (DEC-016A & DEC-032 & DEC-035A & DEC-035B)
+// Re-export Private Note V1 (DEC-016A & DEC-032 & DEC-035A & DEC-035B & DEC-043A)
 pub use note::{
     combine_limbs_to_quote_hash, compute_binding_commitment, compute_scope_hash, decrypt_note_memo,
-    derive_joinsplit_dummy_nullifier, derive_joinsplit_nullifier, derive_master_secret,
-    derive_note_randomness, derive_nullifier, derive_nullifier_epoch, derive_nullifier_key,
-    derive_nullifier_v1, derive_spending_key, derive_viewing_keys, derive_viewing_keys_from_secret,
-    domain_binding_v1, domain_dummy_nullifier, domain_initial_note, domain_merkle_node,
-    domain_mmr_bag, domain_note_commitment, domain_note_randomness, domain_nullifier,
-    domain_quote_binding, domain_scope_v1, encrypt_note_memo, encrypt_note_memo_optional,
-    fr_from_be_bytes, fr_to_be_bytes, merkle_hash, note_commitment, note_commitment_packed,
-    split_quote_hash_to_limbs, verify_value_conservation, FullViewingKey, IncomingViewingKey,
-    KeyFormatError, MMRProof, MerkleMountainRange, NotePlaintext, OutcomingViewingKey,
-    PrivateNoteV1, RecipientViewingKey, ASSET_ID_USDC, ASSET_ID_WETH, DOMAIN_BINDING_V1_HEX,
-    DOMAIN_MMR_BAG_BYTES, DOMAIN_SCOPE_V1_HEX, ENCRYPTED_MEMO_SIZE,
+    decrypt_note_memo_deterministic, derive_ecdh_note_randomness, derive_joinsplit_dummy_nullifier,
+    derive_joinsplit_nullifier, derive_master_secret, derive_note_randomness, derive_nullifier,
+    derive_nullifier_epoch, derive_nullifier_key, derive_nullifier_v1, derive_owner_key,
+    derive_spending_key, derive_viewing_keys, derive_viewing_keys_from_secret, domain_binding_v1,
+    domain_dummy_nullifier, domain_initial_note, domain_merkle_node, domain_mmr_bag,
+    domain_note_commitment, domain_note_randomness, domain_nullifier, domain_owner_key,
+    domain_quote_binding, domain_scope_v1, encrypt_note_memo, encrypt_note_memo_deterministic,
+    encrypt_note_memo_optional, fr_from_be_bytes, fr_to_be_bytes, merkle_hash, note_commitment,
+    note_commitment_packed, split_quote_hash_to_limbs, verify_value_conservation, FullViewingKey,
+    IncomingViewingKey, KeyFormatError, MMRProof, MerkleMountainRange, NotePlaintext,
+    OutcomingViewingKey, PrivateNoteV1, RecipientViewingKey, ZeltraShieldedAddress, ASSET_ID_USDC,
+    ASSET_ID_WETH, DOMAIN_BINDING_V1_HEX, DOMAIN_MMR_BAG_BYTES, DOMAIN_SCOPE_V1_HEX,
+    ENCRYPTED_MEMO_SIZE,
 };
 
 // Re-export accounting state machine (DEC-016A Gate B)

@@ -391,6 +391,15 @@ pub fn compute_nullifier(secret: Fr, randomness: Fr) -> Fr {
     state[0]
 }
 
+/// Native width-3 Poseidon hash: H(input1, input2; domain_tag) → output (DEC-040A, DEC-043A).
+/// Applies Poseidon permutation to state [input1, domain_tag, input2] and returns state[0].
+pub fn native_poseidon_w3(input1: Fr, input2: Fr, domain_tag: Fr) -> Fr {
+    let (rc, mds) = &*CACHED_W3_PARAMS;
+    let mut state = [input1, domain_tag, input2];
+    native_poseidon_permutation(&mut state, rc, mds);
+    state[0]
+}
+
 // ═══════════════════════════════════════════════════════════════════════════
 // Width-5 Poseidon (for note commitments, nullifier derivation, Merkle nodes)
 // ═══════════════════════════════════════════════════════════════════════════
