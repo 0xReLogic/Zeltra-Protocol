@@ -28,8 +28,8 @@
 ## 1. Fitur Ekosistem Lanjutan SDK & B2B (Fokus Aktif Lokal)
 Ref: [`docs/roadmap.md`](file:///workspaces/Zeltra-Protocol/docs/roadmap.md) (Fase 1)
 
-- [ ] **Shielded-to-Shielded In-Pool Transfer:**
-  - Pengiriman private note langsung antar akun/merchant Zeltra (`output_commitment_1` penerima, `output_commitment_2` kembalian) tanpa penarikan USDC publik on-chain (Merchant Masking).
+- [ ] **Shielded-to-Shielded In-Pool Transfer (DEC-043):**
+  - Pengiriman private note langsung antar akun/merchant Zeltra (`output_commitment_1` penerima, `output_commitment_2` kembalian) tanpa penarikan token publik on-chain (Merchant Masking). Ref: [`DEC-043`](file:///workspaces/Zeltra-Protocol/research/decisions/DEC-043-shielded-to-shielded-in-pool-transfer-and-merchant-masking.md).
 - [x] **Viewing Key Export Suite & CEX Selective Disclosure (DEC-040):** [SELESAI & AUDITED]
   - Tooling UI/CLI bagi akuntan B2B untuk export laporan audit transaksi kas privat, rekonsiliasi double-entry, dan pembuktian kepemilikan note ke bursa terpusat (Binance/Coinbase) dengan Verifier Binding.
   - Sub-spesifikasi:
