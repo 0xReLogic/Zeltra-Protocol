@@ -44,8 +44,9 @@ Ref: [`docs/roadmap.md`](file:///workspaces/Zeltra-Protocol/docs/roadmap.md) (Fa
     * [x] [`DEC-040C: CEX Verifier Engine & Compliance CLI Tooling`](file:///workspaces/Zeltra-Protocol/research/decisions/DEC-040C-cex-verifier-engine-and-compliance-cli.md) (Task: [`archive/tasks/taskCdec040.md`](file:///workspaces/Zeltra-Protocol/archive/tasks/taskCdec040.md)) [SELESAI — PR #25]
 - [x] **SDK CEX Helper (DEC-040C):** [SELESAI & AUDITED]
   - Helper otomatis "Export Source of Funds" dengan bukti kriptografis selektif & Verifier Binding untuk bypass freeze bursa (Binance/Coinbase) (Ref: [`DEC-040C`](file:///workspaces/Zeltra-Protocol/research/decisions/DEC-040C-cex-verifier-engine-and-compliance-cli.md)).
-- [ ] **In-Browser WebAssembly SDK Prover (DEC-041):**
-  - Runner prover Groth16 langsung di browser/mobile via Web Worker dengan siklus isolasi memori (`worker.terminate()`) anti-OOM linear (Spesifikasi: [`DEC-041`](file:///workspaces/Zeltra-Protocol/research/decisions/DEC-041-in-browser-wasm-groth16-prover-and-disposable-worker.md)).
+- [x] **In-Browser WebAssembly SDK Prover (DEC-041):** [SELESAI & AUDITED]
+  - Detail spesifikasi eksekusi: [`archive/tasks/taskDEC041.md`](file:///workspaces/Zeltra-Protocol/archive/tasks/taskDEC041.md) & [`DEC-041`](file:///workspaces/Zeltra-Protocol/research/decisions/DEC-041-in-browser-wasm-groth16-prover-and-disposable-worker.md)
+  - Runner prover Groth16 langsung di browser/mobile via Web Worker dengan siklus isolasi memori (`worker.terminate()`) anti-OOM linear (1-in-1-out, Universal 2-in-2-out JoinSplit, CEX Selective Disclosure) [SELESAI — PR #26].
 - [ ] **HTTP 402 AI Agent Facilitator (x402 Protocol):**
   - Penyelesaian streaming payment mikro untuk AI Agent via Prepaid Note Pool dan settlement batas ambang.
 
