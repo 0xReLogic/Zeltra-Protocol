@@ -15,6 +15,7 @@
 
 use serde::{Deserialize, Serialize};
 use std::fmt;
+#[cfg(not(target_arch = "wasm32"))]
 use std::path::Path;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]

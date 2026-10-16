@@ -18,6 +18,7 @@ use std::collections::{HashMap, HashSet};
 use crate::compliance::models::{CexProofPayload, VerificationSummary};
 use crate::compliance::{compute_verifier_challenge, ComplianceError};
 
+#[cfg(not(target_arch = "wasm32"))]
 /// Blockchain RPC client trait for on-chain state attestation (DEC-040C).
 pub trait BlockchainRpcClient: Send + Sync {
     /// Checks if a root hash is currently accepted on the smart contract.
@@ -39,6 +40,30 @@ pub trait BlockchainRpcClient: Send + Sync {
         asset_id: u8,
         expected_recipient: &str,
     ) -> impl std::future::Future<Output = Result<bool, ComplianceError>> + Send;
+}
+
+#[cfg(target_arch = "wasm32")]
+/// Blockchain RPC client trait for on-chain state attestation on single-threaded WASM (DEC-040C).
+pub trait BlockchainRpcClient {
+    /// Checks if a root hash is currently accepted on the smart contract.
+    fn is_accepted_note_root(
+        &self,
+        root: [u8; 32],
+    ) -> impl std::future::Future<Output = Result<bool, ComplianceError>>;
+
+    /// Checks if a nullifier is marked spent on the smart contract.
+    fn is_nullifier_spent(
+        &self,
+        nullifier: [u8; 32],
+    ) -> impl std::future::Future<Output = Result<bool, ComplianceError>>;
+
+    /// Verifies that a transaction receipt exists, succeeded, and transferred to expected recipient.
+    fn verify_spend_receipt_recipient(
+        &self,
+        tx_hash: &str,
+        asset_id: u8,
+        expected_recipient: &str,
+    ) -> impl std::future::Future<Output = Result<bool, ComplianceError>>;
 }
 
 /// Standalone CEX Proof Verifier executing 5-stage deterministic validation.
