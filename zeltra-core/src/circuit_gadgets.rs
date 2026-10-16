@@ -164,3 +164,63 @@ pub fn enforce_joinsplit_flags_packed(
 
     Ok(())
 }
+
+/// Enforces range constraints on challenge limbs (DEC-035A, DEC-035B, DEC-040A).
+/// Constrains challenge_hi and challenge_lo to 128-bit integers via boolean bit decomposition,
+/// ensuring both wires are actively constrained in R1CS and never pruned by the optimizer.
+pub fn enforce_dummy_range_binding(
+    cs: ConstraintSystemRef<Fr>,
+    challenge_hi: &FpVar<Fr>,
+    challenge_lo: &FpVar<Fr>,
+) -> Result<(), SynthesisError> {
+    use ark_r1cs_std::GR1CSVar;
+    let hi_witness = challenge_hi.value().ok();
+    let lo_witness = challenge_lo.value().ok();
+    enforce_u128_range(&cs, challenge_hi, hi_witness)?;
+    enforce_u128_range(&cs, challenge_lo, lo_witness)?;
+    Ok(())
+}
+
+/// Width-3 Poseidon sponge gadget for key derivation (DEC-040A).
+/// Applies Poseidon permutation to state [inputs[0], domain, inputs[1]].
+pub fn poseidon_w3_gadget(
+    _cs: ConstraintSystemRef<Fr>,
+    inputs: &[FpVar<Fr>],
+    domain: FpVar<Fr>,
+) -> Result<FpVar<Fr>, SynthesisError> {
+    assert_eq!(
+        inputs.len(),
+        2,
+        "poseidon_w3_gadget expects 2 inputs [sk, 0]"
+    );
+    let (w3_rc, w3_mds) = &*crate::poseidon::CACHED_W3_PARAMS;
+    let mut state = [inputs[0].clone(), domain, inputs[1].clone()];
+    crate::poseidon::poseidon_permutation(&mut state, w3_rc, w3_mds)?;
+    Ok(state[0].clone())
+}
+
+/// Width-5 Poseidon hash gadget for nullifier and note derivation (DEC-040A).
+/// State layout: [inputs[0], inputs[1], inputs[2], inputs[3], domain].
+pub fn poseidon_w5_gadget(
+    _cs: ConstraintSystemRef<Fr>,
+    inputs: &[FpVar<Fr>],
+    domain: FpVar<Fr>,
+) -> Result<FpVar<Fr>, SynthesisError> {
+    use ark_r1cs_std::GR1CSVar;
+    assert_eq!(
+        inputs.len(),
+        4,
+        "poseidon_w5_gadget expects 4 inputs [nk, rho, epoch, 0]"
+    );
+    let (w5_rc, w5_mds) = &*crate::poseidon::CACHED_W5_PARAMS;
+    let domain_val = domain
+        .value()
+        .unwrap_or_else(|_| crate::note::domain_nullifier());
+    let arr = [
+        inputs[0].clone(),
+        inputs[1].clone(),
+        inputs[2].clone(),
+        inputs[3].clone(),
+    ];
+    crate::poseidon::poseidon_w5_hash(&arr, domain_val, w5_rc, w5_mds)
+}
