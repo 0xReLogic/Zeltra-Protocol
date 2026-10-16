@@ -180,3 +180,14 @@ pub struct OwnershipZkProofPayload {
     pub public_inputs: Vec<String>,
     pub proof_bytes: String,
 }
+
+/// Summary result of successful 5-stage deterministic verification by CexProofVerifier (DEC-040C).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct VerificationSummary {
+    pub status: String,
+    pub asset_symbol: String,
+    pub amount_human: String,
+    pub recipient: String,
+    pub account_uid: String,
+    pub verified_at: u64,
+}

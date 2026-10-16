@@ -105,4 +105,96 @@ pub enum Commands {
         #[arg(long)]
         inputs_file: Option<String>,
     },
+
+    /// Export double-entry audit trail report (DEC-040B / DEC-040C) in JSON or CSV
+    ExportAudit {
+        /// Format: 'json' or 'csv'
+        #[arg(short = 'f', long, default_value = "json")]
+        format: String,
+
+        /// Asset filter: 'all', 'usdc', or 'weth'
+        #[arg(short = 'A', long, default_value = "all")]
+        asset: String,
+
+        /// Starting date filter (YYYY-MM-DD)
+        #[arg(long)]
+        from: Option<String>,
+
+        /// Ending date filter (YYYY-MM-DD)
+        #[arg(long)]
+        to: Option<String>,
+
+        /// Optional wallet file path containing notes or master credentials
+        #[arg(short = 'w', long)]
+        wallet_file: Option<String>,
+
+        /// Output file path (written with strict 0600 permissions)
+        #[arg(short = 'o', long)]
+        out: String,
+    },
+
+    /// Export single-note CEX selective disclosure proof (DEC-040C Tier 1)
+    ExportCexProof {
+        /// 32-byte hex commitment of the note to disclose
+        #[arg(short = 'c', long)]
+        commitment: String,
+
+        /// Verifier identifier (e.g. "BINANCE_KYC_DESK")
+        #[arg(short = 'v', long)]
+        verifier: String,
+
+        /// Exchange account UID (e.g. "USER-98124712")
+        #[arg(short = 'u', long)]
+        account_uid: String,
+
+        /// On-chain withdrawal / spend transaction hash
+        #[arg(long)]
+        spent_tx: String,
+
+        /// User deposit recipient address on the exchange
+        #[arg(short = 'r', long)]
+        recipient: String,
+
+        /// Optional wallet file path containing credentials
+        #[arg(short = 'w', long)]
+        wallet_file: Option<String>,
+
+        /// Output proof JSON file path
+        #[arg(short = 'o', long)]
+        out: String,
+    },
+
+    /// Verify a CEX selective disclosure proof independently (DEC-040C)
+    VerifyCexProof {
+        /// Path to zeltra_cex_proof_v1.json file
+        #[arg(short = 'f', long)]
+        file: String,
+
+        /// Expected verifier identifier (e.g. "BINANCE_KYC_DESK")
+        #[arg(short = 'v', long)]
+        expected_verifier: String,
+
+        /// Arbitrum RPC URL (Arbitrum Sepolia/One)
+        #[arg(long)]
+        rpc: Option<String>,
+
+        /// Stylus contract address override (optional)
+        #[arg(long)]
+        contract: Option<String>,
+    },
+
+    /// Export viewing keys for compliance delegation (DEC-040A / DEC-040C)
+    ExportViewingKey {
+        /// Viewing key type: 'ivk', 'ovk', or 'fvk'
+        #[arg(short = 't', long, default_value = "fvk")]
+        key_type: String,
+
+        /// Optional wallet file path containing credentials
+        #[arg(short = 'w', long)]
+        wallet_file: Option<String>,
+
+        /// Output file path
+        #[arg(short = 'o', long)]
+        out: String,
+    },
 }
