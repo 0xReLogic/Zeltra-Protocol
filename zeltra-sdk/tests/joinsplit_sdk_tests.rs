@@ -53,13 +53,13 @@ fn test_b6_1_knapsack_boundary_and_dust_markup() {
     assert_eq!(res.change_amount, 0);
     assert!(!res.has_change);
 
-    // 2. Dust floor absorption (< 100,000 units absorbed into execution fee)
-    // T = 4_950_000 (merchant) + 0 (protocol fee) + 20_000 (exec fee) = 4_970_000.
-    // Note value is 5_000_000 -> change is 30_000 < 100_000 floor -> absorbed into execution fee.
-    // Final execution fee = 20_000 + 30_000 = 50_000.
+    // 2. Dynamic Dust floor absorption (< dynamic threshold absorbed into execution fee)
+    // T = 4_965_000 (merchant) + 0 (protocol fee) + 20_000 (exec fee) = 4_985_000.
+    // Note value is 5_000_000 -> raw change is 15_000 < 20_000 dynamic floor -> absorbed into execution fee.
+    // Final execution fee = 20_000 + 15_000 = 35_000.
     let res_dust = select_notes_stochastic_knapsack(
         &candidates,
-        4_950_000,
+        4_965_000,
         0,
         20_000,
         1000,
@@ -70,7 +70,24 @@ fn test_b6_1_knapsack_boundary_and_dust_markup() {
     assert_eq!(res_dust.input_commitment_hex, "cm1");
     assert_eq!(res_dust.change_amount, 0);
     assert!(!res_dust.has_change);
-    assert_eq!(res_dust.execution_fee, 50_000); // 20_000 initial + 30_000 absorbed
+    assert_eq!(res_dust.execution_fee, 35_000); // 20_000 initial + 15_000 absorbed
+
+    // 3. Change above dynamic dust floor is preserved
+    // T = 4_950_000 + 20_000 = 4_970_000 -> change is 30_000 > 20_000 floor -> change preserved.
+    let res_change = select_notes_stochastic_knapsack(
+        &candidates,
+        4_950_000,
+        0,
+        20_000,
+        1000,
+        1,
+        &KnapsackConfig::default(),
+    )
+    .unwrap();
+    assert_eq!(res_change.input_commitment_hex, "cm1");
+    assert_eq!(res_change.change_amount, 30_000);
+    assert!(res_change.has_change);
+    assert_eq!(res_change.execution_fee, 20_000);
 }
 
 #[test]

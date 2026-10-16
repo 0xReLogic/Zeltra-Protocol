@@ -6,7 +6,6 @@
 //! - Idempotency key support for request deduplication -- Finding #16
 
 use crate::database::QueuedSpend;
-use crate::evm_client::BatchSpendItem;
 use crate::{dto::*, state::AppState};
 use alloy::primitives::Address;
 use axum::Json;
@@ -1019,8 +1018,6 @@ pub async fn process_spend_batch(state: &AppState) {
         return;
     }
 
-    let mut same_chain = Vec::new();
-    let mut direct = Vec::new();
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default()
@@ -1038,179 +1035,8 @@ pub async fn process_spend_batch(state: &AppState) {
                 .db
                 .fail_spend(item.id, None, "deadline or expiry expired before broadcast")
                 .await;
-        } else if item.request.cross_chain.is_some() || item.request.is_private_note() {
-            direct.push(item);
         } else {
-            // Check if deadline/expiry is approaching (near is defined as <= 30 seconds remaining)
-            let is_near = item
-                .request
-                .deadline
-                .is_some_and(|d| d.saturating_sub(now) <= 30)
-                || item
-                    .request
-                    .expiry
-                    .is_some_and(|e| e > 0 && e.saturating_sub(now) <= 30);
-
-            if is_near {
-                println!(
-                    "RELAYER: Deadline/expiry is near for item {}. Bypassing batching.",
-                    item.id
-                );
-                direct.push(item);
-            } else {
-                same_chain.push(item);
-            }
-        }
-    }
-
-    let batch_enabled = std::env::var("ZELTRA_BATCH_ENABLED")
-        .map(|value| value == "true" || value == "1")
-        .unwrap_or(false);
-    if batch_enabled {
-        while same_chain.len() >= 2 {
-            let take = same_chain.len().min(8);
-            let batch: Vec<_> = same_chain.drain(..take).collect();
-            process_same_chain_batch(state, batch).await;
-        }
-    }
-    direct.extend(same_chain);
-    for item in direct {
-        process_single_spend(state, item).await;
-    }
-}
-
-fn batch_item(item: &QueuedSpend) -> BatchSpendItem {
-    const ZERO_WORD: &str = "0x0000000000000000000000000000000000000000000000000000000000000000";
-    BatchSpendItem {
-        root_hex: item
-            .request
-            .association_root_hex
-            .clone()
-            .unwrap_or_else(|| ZERO_WORD.to_string()),
-        nullifier: item.request.nullifier.clone(),
-        alpha_neg_hex: item.request.alpha_neg_hex.clone(),
-        pk_iss_hex: item.request.pk_iss_hex.clone(),
-        recipient: item.request.recipient.clone(),
-        amount: item.request.amount,
-        recipient_or_intent_hash_hex: item
-            .request
-            .recipient_or_intent_hash_hex
-            .clone()
-            .unwrap_or_else(|| ZERO_WORD.to_string()),
-        expiry: item.request.expiry.unwrap_or(0),
-        nonce_hex: item
-            .request
-            .nonce_hex
-            .clone()
-            .unwrap_or_else(|| ZERO_WORD.to_string()),
-    }
-}
-
-async fn process_same_chain_batch(state: &AppState, items: Vec<QueuedSpend>) {
-    let Some(ref evm_client) = state.evm_client else {
-        for item in &items {
-            let _ = state
-                .db
-                .retry_spend(item.id, "EVM client unavailable", item.retry_count)
-                .await;
-        }
-        return;
-    };
-
-    // --- ETH balance validation ---
-    let current_bal = evm_client.get_relayer_balance_eth().await.unwrap_or(0.0);
-    *state.relayer_wallet_balance_eth.lock().await = current_bal;
-
-    let gas_price = evm_client.get_gas_price().await.unwrap_or(20_000_000);
-    let gas_limit = 250_000f64 + 850_000f64 * items.len() as f64;
-    let estimated_cost_eth = (gas_limit * gas_price as f64) / 1_000_000_000_000_000_000.0;
-
-    if let Err(msg) = state.check_balance_for_batch(estimated_cost_eth).await {
-        eprintln!("SETTLEMENT BATCH REJECTED: {}", msg);
-        for item in &items {
-            let _ = state.db.retry_spend(item.id, &msg, item.retry_count).await;
-        }
-        return;
-    }
-
-    let payload: Vec<_> = items.iter().map(batch_item).collect();
-    match evm_client.broadcast_spend_batch(&payload).await {
-        Ok(outcome) if outcome.success => {
-            // Atomic DB confirmation
-            let confirm_items: Vec<_> = items
-                .iter()
-                .map(|item| (item.id, item.request.nullifier.clone()))
-                .collect();
-            if let Err(e) = state
-                .db
-                .mark_batch_spend_confirmed(confirm_items, &outcome.tx_hash, outcome.block_number)
-                .await
-            {
-                eprintln!("SETTLEMENT: failed to confirm batch in DB: {}", e);
-            }
-
-            // Storing batch metadata & margin calculation (Finding #10)
-            let mut total_revenue_usdc = 0.0;
-            let mut total_execution_fee_usdc = 0u64;
-            for item in &items {
-                let amount_usdc = item.request.amount as f64 / 1_000_000.0;
-                let fee_usdc = amount_usdc * 0.0025; // 0.25% standard fee
-                total_revenue_usdc += fee_usdc;
-                // Sum execution fees from signed quotes
-                if let Some(max_fee) = item.request.max_execution_fee {
-                    total_execution_fee_usdc += max_fee;
-                }
-            }
-
-            let total_cost_eth = (outcome.gas_used as f64 * outcome.effective_gas_price as f64)
-                / 1_000_000_000_000_000_000.0;
-            let eth_price = state.get_eth_price().await;
-            let actual_gas_cost_usdc = total_cost_eth * eth_price;
-            let margin_usdc = total_revenue_usdc - actual_gas_cost_usdc;
-
-            if let Err(e) = state
-                .db
-                .store_batch_metadata(
-                    &outcome.tx_hash,
-                    items.len(),
-                    &outcome.tx_hash,
-                    outcome.gas_used,
-                    outcome.effective_gas_price,
-                    total_cost_eth,
-                    margin_usdc,
-                    total_execution_fee_usdc,
-                )
-                .await
-            {
-                eprintln!("SETTLEMENT: failed to store batch metadata: {}", e);
-            }
-        }
-        Ok(outcome) => {
-            // Batch transaction reverted on-chain. Splitting batch for individual execution
-            println!("RELAYER WARNING: Batch reverted on-chain (tx: {}). Splitting batch to process items individually...", outcome.tx_hash);
-            for item in items {
-                let _ = state
-                    .db
-                    .mark_spend_submitted(item.id, &outcome.tx_hash)
-                    .await;
-                // Retry individual execution
-                process_single_spend(state, item).await;
-            }
-        }
-        Err(error) => {
-            // Broadcast error. Splitting batch for individual execution
-            let message = error.to_string();
-            println!("RELAYER WARNING: Batch broadcast failed: {}. Splitting batch to process items individually...", message);
-            for item in items {
-                if item.retry_count >= 7 {
-                    let _ = state.db.fail_spend(item.id, None, &message).await;
-                } else {
-                    let _ = state
-                        .db
-                        .retry_spend(item.id, &message, item.retry_count)
-                        .await;
-                }
-            }
+            process_single_spend(state, item).await;
         }
     }
 }
@@ -1332,25 +1158,15 @@ async fn process_single_spend(state: &AppState, item: QueuedSpend) {
             )
             .await
     } else {
-        let root = request.association_root_hex.as_deref().unwrap_or(ZERO_WORD);
-        evm_client
-            .broadcast_spend_transaction(
-                root,
-                &request.nullifier,
-                &request.alpha_neg_hex,
-                &request.pk_iss_hex,
-                &request.recipient,
-                request.amount,
-                request
-                    .recipient_or_intent_hash_hex
-                    .as_deref()
-                    .unwrap_or(ZERO_WORD),
-                request.expiry.unwrap_or(0),
-                request.nonce_hex.as_deref().unwrap_or(ZERO_WORD),
-                request.max_execution_fee.unwrap_or(0),
-                request.execution_fee.unwrap_or(0),
-            )
-            .await
+        eprintln!(
+            "SETTLEMENT: unrecognized spend type for item {} (nullifier={})",
+            item.id, request.nullifier
+        );
+        let _ = state
+            .db
+            .fail_spend(item.id, None, "unrecognized spend type")
+            .await;
+        return;
     };
 
     let is_ccip = request.cross_chain.is_some();

@@ -141,7 +141,7 @@ fn create_valid_joinsplit_witness() -> (JoinSplitWitnessInput, Vec<u8>) {
 
     let witness = JoinSplitWitnessInput {
         note_root_hex: scalar_to_hex(&root),
-        leaf_count: mmr.leaf_count() as u64,
+        leaf_count: mmr.leaf_count(),
         recipient_hex: "0x0000000000000000000000000000000000001234".to_string(),
         merchant_amount: merch,
         protocol_fee: pfee,

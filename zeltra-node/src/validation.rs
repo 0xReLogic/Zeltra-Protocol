@@ -82,6 +82,7 @@ pub fn update_sanctioned_addresses(new_set: HashSet<Address>) -> usize {
 
 /// Configurable safety limits for spend operations
 #[derive(Clone, Debug)]
+#[allow(dead_code)]
 pub struct SafetyLimits {
     pub min_spend_usdc: u64,
     pub max_spend_usdc: u64,
@@ -133,6 +134,7 @@ impl Default for SafetyLimits {
 
 /// Validation errors for spend requests
 #[derive(Debug, PartialEq, Eq)]
+#[allow(dead_code)]
 pub enum ValidationError {
     InvalidRecipientAddress(String),
     ZeroRecipientAddress,
@@ -207,6 +209,7 @@ impl std::fmt::Display for ValidationError {
 impl std::error::Error for ValidationError {}
 
 /// Validate spend request recipient, amount, and cross-chain routing
+#[allow(dead_code)]
 pub fn validate_spend_request(
     recipient: &str,
     amount: u64,

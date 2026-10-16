@@ -1,11 +1,12 @@
-//! x402 protocol facilitator handler
+//! x402 protocol facilitator handler (DEC-042 Pure ZK-UTXO Micropayments)
 
-use crate::{dto::*, state::AppState};
+use crate::{dto::*, handlers::spend::handle_private_note_spend, state::AppState};
 use axum::Json;
 use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
 use base64::Engine;
 
-// x402 Facilitator handler
+/// x402 Facilitator verification endpoint
+/// POST /api/x402/verify
 pub async fn handle_x402_verify(
     axum::extract::State(state): axum::extract::State<AppState>,
     Json(payload): Json<X402VerifyRequest>,
@@ -22,135 +23,72 @@ pub async fn handle_x402_verify(
         }
     };
 
-    let sig: X402PaymentSignatureInner = match serde_json::from_slice(&sig_bytes) {
-        Ok(s) => s,
-        Err(e) => {
+    // 2. Parse payload: Support standard x402 v2 envelope (X402PaymentSignatureInner)
+    // with fallback to direct X402ZeltraPayment for maximum interop.
+    let (payment, scheme_info, network_info) =
+        if let Ok(envelope) = serde_json::from_slice::<X402PaymentSignatureInner>(&sig_bytes) {
+            if envelope.x402_version != 2 {
+                return Json(X402VerifyResponse {
+                    success: false,
+                    tx_hash: None,
+                    message: format!("Unsupported x402 version: {}", envelope.x402_version),
+                });
+            }
+            (envelope.payment, envelope.scheme, envelope.network)
+        } else if let Ok(direct_payment) = serde_json::from_slice::<X402ZeltraPayment>(&sig_bytes) {
+            (direct_payment, "exact".to_string(), "unknown".to_string())
+        } else {
             return Json(X402VerifyResponse {
                 success: false,
                 tx_hash: None,
-                message: format!("JSON parse error: {}", e),
+                message: "JSON parse error: invalid x402 payment signature format".to_string(),
             });
-        }
-    };
+        };
 
-    // 2. Validate protocol version
-    if sig.x402_version != 2 {
-        return Json(X402VerifyResponse {
-            success: false,
-            tx_hash: None,
-            message: format!("Unsupported x402 version: {}", sig.x402_version),
-        });
-    }
-
-    // 3. Check nullifier for double-spend using persistent database
-    match state.db.is_nullifier_spent(&sig.payment.nullifier).await {
-        Ok(true) => {
+    // 3. Optional facilitator recipient restriction (if ZELTRA_X402_RECIPIENT is configured)
+    if let Ok(expected_recipient) = std::env::var("ZELTRA_X402_RECIPIENT") {
+        if !payment.recipient.eq_ignore_ascii_case(&expected_recipient) {
             return Json(X402VerifyResponse {
                 success: false,
                 tx_hash: None,
-                message: "Double-spending detected: nullifier already exists".to_string(),
-            });
-        }
-        Ok(false) => {
-            // Nullifier not spent, proceed
-        }
-        Err(e) => {
-            eprintln!("X402 ERROR: Database nullifier check failed: {}", e);
-            return Json(X402VerifyResponse {
-                success: false,
-                tx_hash: None,
-                message: "Database error".to_string(),
+                message: format!(
+                    "Payment recipient {} does not match facilitator recipient {}",
+                    payment.recipient, expected_recipient
+                ),
             });
         }
     }
 
-    // 4. Validate configured facilitator recipient and spend request parameters
-    let recipient = match std::env::var("ZELTRA_X402_RECIPIENT") {
-        Ok(value) => value,
-        Err(_) => {
-            return Json(X402VerifyResponse {
-                success: false,
-                tx_hash: None,
-                message: "ZELTRA_X402_RECIPIENT is not configured".to_string(),
-            });
-        }
-    };
+    // 4. Convert to PrivateNoteSpendRequest for canonical preflight checks & settlement queueing
+    let note_spend_req = PrivateNoteSpendRequest::from(payment);
 
-    let limits = crate::validation::SafetyLimits::default();
-    if let Err(val_err) =
-        crate::validation::validate_spend_request(&recipient, sig.payment.amount, None, &limits)
-    {
-        return Json(X402VerifyResponse {
-            success: false,
-            tx_hash: None,
-            message: format!("x402 recipient validation failed: {}", val_err),
-        });
-    }
-
-    let spend_req = SpendRequest {
-        nullifier: sig.payment.nullifier.clone(),
-        sig_hex: sig.payment.alpha_neg_hex.clone(),
-        recipient,
-        amount: sig.payment.amount,
-        eip7702_auth: None,
-        cross_chain: None,
-        association_root_hex: None,
-        alpha_neg_hex: sig.payment.alpha_neg_hex.clone(),
-        hm_hex: sig.payment.hm_hex.clone(),
-        pk_iss_hex: sig.payment.pk_iss_hex.clone(),
-        recipient_or_intent_hash_hex: sig.payment.recipient_or_intent_hash_hex.clone(),
-        expiry: sig.payment.expiry,
-        nonce_hex: sig.payment.nonce_hex.clone(),
-        min_payout: None,
-        deadline: None,
-        idempotency_key: None,
-        max_execution_fee: None,
-        execution_fee: None,
-        quote_id: None,
-        quote_expiry: None,
-        quote_signature: None,
-        user_address: None,
-        ..Default::default()
-    };
-
-    let queue_id = match state.db.enqueue_spend(&spend_req).await {
-        Ok(Some(id)) => id,
-        Ok(None) => {
-            return Json(X402VerifyResponse {
-                success: false,
-                tx_hash: None,
-                message: "Payment nullifier already has an active settlement".to_string(),
-            });
-        }
-        Err(e) => {
-            return Json(X402VerifyResponse {
-                success: false,
-                tx_hash: None,
-                message: format!("Failed to persist settlement: {}", e),
-            });
-        }
-    };
-    let position = state.db.queued_spend_count().await.unwrap_or(1);
+    let res = handle_private_note_spend(axum::extract::State(state), Json(note_spend_req))
+        .await
+        .0;
 
     let resource_info = payload
         .resource_uri
         .unwrap_or_else(|| "<unknown>".to_string());
-    println!("X402 FACILITATOR: Verified anonymous payment");
-    println!("  Scheme     : {}", sig.scheme);
-    println!("  Network    : {}", sig.network);
-    println!(
-        "  Nullifier  : {}...",
-        &sig.payment.nullifier[..core::cmp::min(8, sig.payment.nullifier.len())]
-    );
-    println!("  Resource   : {}", resource_info);
-    println!("  Queue Pos  : {}", position);
 
-    Json(X402VerifyResponse {
-        success: true,
-        tx_hash: None,
-        message: format!(
-            "Zeltra payment persisted as settlement {}; awaiting receipt confirmation",
-            queue_id
-        ),
-    })
+    if res.status == "QUEUED" {
+        println!(
+            "X402 FACILITATOR: Successfully verified and enqueued payment (scheme: {}, net: {}) for resource: {}",
+            scheme_info, network_info, resource_info
+        );
+        Json(X402VerifyResponse {
+            success: true,
+            tx_hash: None,
+            message: res.message,
+        })
+    } else {
+        println!(
+            "X402 FACILITATOR: Payment rejected for resource: {}. Reason: {}",
+            resource_info, res.message
+        );
+        Json(X402VerifyResponse {
+            success: false,
+            tx_hash: None,
+            message: res.message,
+        })
+    }
 }
