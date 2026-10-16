@@ -1,5 +1,6 @@
 pub mod client;
 pub mod coin_selection;
+pub mod compliance;
 pub mod eip712;
 mod fee_wasm;
 pub mod storage;
@@ -10,6 +11,7 @@ mod zk_wasm;
 
 pub use client::*;
 pub use coin_selection::*;
+pub use compliance::*;
 pub use eip712::*;
 pub use fee_wasm::*;
 pub use storage::*;
