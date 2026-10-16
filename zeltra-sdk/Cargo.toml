@@ -28,7 +28,7 @@ sha2 = "0.10.9"
 sha3 = "0.10.9"
 wasm-bindgen = "0.2.122"
 zeroize = { version = "1.8.2", features = ["alloc", "zeroize_derive", "serde"] }
-argon2 = { version = "0.5.3", default-features = false, features = ["alloc"] }
+argon2 = { version = "0.6.0", default-features = false, features = ["alloc"] }
 chacha20poly1305 = { version = "0.10.1", default-features = false, features = ["alloc"] }
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json"] }
 serde-wasm-bindgen = "0.6.5"
