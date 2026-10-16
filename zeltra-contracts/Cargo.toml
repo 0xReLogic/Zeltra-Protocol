@@ -29,5 +29,5 @@ export-abi = ["stylus-sdk/export-abi"]
 contract-client-gen = []
 
 [dev-dependencies]
-rand = "0.8.6"
+rand = "0.10.3"
 tiny-keccak = { version = "2.0.2", features = ["keccak"] }
