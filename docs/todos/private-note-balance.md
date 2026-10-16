@@ -38,8 +38,8 @@ Ref: [`docs/roadmap.md`](file:///workspaces/Zeltra-Protocol/docs/roadmap.md) (Fa
     * [x] [`DEC-040C: CEX Verifier Engine & Compliance CLI Tooling`](file:///workspaces/Zeltra-Protocol/research/decisions/DEC-040C-cex-verifier-engine-and-compliance-cli.md) (Task: [`archive/tasks/taskCdec040.md`](file:///workspaces/Zeltra-Protocol/archive/tasks/taskCdec040.md)) [SELESAI — PR #25]
 - [x] **SDK CEX Helper (DEC-040C):** [SELESAI & AUDITED]
   - Helper otomatis "Export Source of Funds" dengan pembuktian selektif & Verifier Binding untuk bypass freeze deposit bursa terpusat (Binance/Coinbase) (Ref: [`DEC-040C`](file:///workspaces/Zeltra-Protocol/research/decisions/DEC-040C-cex-verifier-engine-and-compliance-cli.md)).
-- [ ] **In-Browser WebAssembly SDK Prover (DEC-041):**
-  - Runner prover Groth16 langsung di browser/mobile via Web Worker dengan siklus terminasi memori (`worker.terminate()`) anti-OOM linear (Spesifikasi: [`DEC-041`](file:///workspaces/Zeltra-Protocol/research/decisions/DEC-041-in-browser-wasm-groth16-prover-and-disposable-worker.md)).
+- [x] **In-Browser WebAssembly SDK Prover (DEC-041):** [SELESAI & AUDITED]
+  - Runner prover Groth16 langsung di browser/mobile via Web Worker dengan siklus terminasi memori (`worker.terminate()`) anti-OOM linear (Spesifikasi: [`DEC-041`](file:///workspaces/Zeltra-Protocol/research/decisions/DEC-041-in-browser-wasm-groth16-prover-and-disposable-worker.md)) (Task: [`archive/tasks/taskDEC041.md`](file:///workspaces/Zeltra-Protocol/archive/tasks/taskDEC041.md)) [SELESAI — PR #26].
 - [ ] **Integrasi x402 Facilitator:**
   - Jalur streaming payment mikro HTTP 402 untuk AI Agent.
 
