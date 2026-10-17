@@ -1,3 +1,4 @@
+mod batch_processor;
 mod ccip_monitor;
 mod config;
 mod database;
