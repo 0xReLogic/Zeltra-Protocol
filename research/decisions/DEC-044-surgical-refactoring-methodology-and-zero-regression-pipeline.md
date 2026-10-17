@@ -1,8 +1,8 @@
-# DEC-044: Surgical Architecture Refactoring Methodology, Three-Stage Decomposition & Zero-Regression Verification Workflow
+# DEC-044: Surgical Architecture Refactoring Methodology, Four-Stage Decomposition & Zero-Regression Verification Workflow
 
 **Status:** APPROVED  
 **Date:** 2026-10-17  
-**Domain:** Cross-Crate Architecture (`zeltra-sdk`, `zeltra-node`, `zeltra-contracts`), Codebase Modularity & Integrity  
+**Domain:** Cross-Crate Architecture (`zeltra-sdk`, `zeltra-node`, `zeltra-contracts`, `zeltra-core`), Codebase Modularity & Integrity  
 **Security Level:** CRITICAL (Preservasi Invariant Finansial, Proteksi Freeze Kriptografi, Zero-Breaking-Change API)  
 **Related Decisions:**
 - [`DEC-034: Dual Sovereign Rails & Isolated Solvency Invariants`](file:///workspaces/Zeltra-Protocol/research/decisions/DEC-034-dual-sovereign-rails-weth-usdc-and-unified-settlement.md)
@@ -19,10 +19,11 @@
 
 Protokol Zeltra telah berhasil mencapai kematangan fungsional penuh pada seluruh pilar inti: arsitektur murni ZK-UTXO, dual sovereign rails (USDC & WETH), deposit direct MMR 0 bps, transfer in-pool shielded 0 bps (Strict 3-Mode JoinSplit), export kepatuhan CEX, dan prover in-browser WASM. Seluruh rangkaian tes (162 unit tests Rust dan 44/44 Python test harness) berstatus 100% lulus.
 
-Namun, kecepatan inovasi yang masif menghasilkan **akumulasi kompleksitas struktural** di mana total codebase telah mencapai **39.269 LoC kode murni (48.591 total baris)** pada 88 file `.rs`. Berdasarkan audit topologi sistem menggunakan Graphify, teridentifikasi 3 "God Files" / Monolith raksasa:
+Namun, kecepatan inovasi yang masif menghasilkan **akumulasi kompleksitas struktural** di mana total codebase telah mencapai **39.269 LoC kode murni (48.591 total baris)** pada 88 file `.rs`. Berdasarkan audit topologi sistem menggunakan Graphify, teridentifikasi 4 "God Files" / Monolith raksasa di workspace:
 1. `zeltra-sdk/src/wallet/note_wallet.rs` (**5.476 LoC murni / 6.557 total baris**) — God Node sentral (91 edges), mencampur manajemen kunci, sinkronisasi MMR, persiapan bukti Groth16, state machine 2PC, dan ekspor CEX dalam satu file tunggal.
 2. `zeltra-node/src/handlers/spend.rs` (**2.834 LoC**) dan `zeltra-node/src/database.rs` (**2.453 LoC**) — Mencampur HTTP ingress, klasifikasi mode JoinSplit, validasi memo 192 hex char, Groth16 preflight, dan puluhan kueri SQLCipher heterogen.
 3. `zeltra-contracts/src/lib.rs` (**3.064 LoC murni / 3.656 total baris**) — God Node on-chain (63 edges), menampung entrypoint Stylus, validasi invariant, helper bitwise, dan logika dispatcher dalam satu unit kompilasi.
+4. `zeltra-core/src/note.rs` (**2.132 LoC murni / 2.876 total baris**) — Monolith primitif kriptografi, menampung derivasi kunci ZSA Bech32m, protokol memo ChaCha20Poly1305, in-memory Merkle Mountain Range, struct `PrivateNoteV1`, dan 1.404 baris unit test embedded.
 
 **Tujuan DEC-044:** Menetapkan metodologi refaktor bedah (*surgical refactoring*) dan alur kerja verifikasi presisi agar seluruh modul monolitik di atas dapat didekomposisi menjadi unit-unit domain yang bersih, modular, dan mudah diaudit, dengan **garansi mutlak 0% breaking change pada Public API** dan **nol regresi fungsional (tidak ada wire/koneksi yang terlepas)**.
 
@@ -39,82 +40,88 @@ Refaktor yang presisi menuntut kejelasan batas wilayah yang boleh disentuh dan w
 2. **Layout Storage Kontrak Stylus (`zeltra-contracts`):**
    - File: `src/storage.rs` (`sol_storage!`).
    - *Rasional:* Urutan slot penyimpanan on-chain, ring buffer 100 accepted roots, dan bit-packing multi-asset adalah pondasi konsistensi L2. Struktur ini tidak boleh digeser atau diubah tipe datanya.
+3. **Domain Separator Constants (`zeltra-core`):**
+   - Seluruh konstanta domain Poseidon (`DOMAIN_NOTE_COMMITMENT`, `DOMAIN_NULLIFIER`, `DOMAIN_SCOPE_V1`, `DOMAIN_BINDING_V1`, `DOMAIN_MMR_BAG`, dll.) **dilarang dimodifikasi nilai string / byte-nya**.
 
 ### B. Zona Hijau: Target Restrukturisasi Struktural
-- Dekomposisi organisasi kode internal pada `zeltra-sdk` (submodul internal).
-- Modularisasi database queries dan HTTP ingress pipeline pada `zeltra-node`.
-- Perampingan dispatcher entrypoint pada `zeltra-contracts/src/lib.rs` melalui pendelegasian ke submodul internal tanpa mengubah selector ABI Stylus.
+- Dekomposisi organisasi kode internal pada `zeltra-sdk` (submodul internal `impl PrivateNoteWallet`).
+- Modularisasi database queries (Repository Pattern) dan HTTP ingress pipeline pada `zeltra-node`.
+- Perampingan dispatcher entrypoint pada `zeltra-contracts/src/lib.rs` (Thin Dispatcher) dan isolasi test suite ke `src/tests.rs`.
+- Dekomposisi domain non-sirkuit pada `zeltra-core/src/note.rs` (`keys`, `memo`, `merkle`, `note`).
 
 ---
 
-## 3. Strategi Dekomposisi Tiga Tahap (Three-Stage Strategy)
+## 3. Strategi Dekomposisi Empat Tahap (Four-Stage Strategy)
 
-Refaktor dilakukan secara sekuensial dari lapisan terluar (klien) menuju lapisan terdalam (kontrak):
+Refaktor dilakukan secara sekuensial dari lapisan terluar (klien) menuju lapisan terdalam (kontrak dan core):
 
 ```
 +-------------------------------------------------------------------------------+
-|                        ALUR EKSEKUSI TIGA TAHAP                               |
+|                        ALUR EKSEKUSI EMPAT TAHAP                              |
 +-------------------------------------------------------------------------------+
 |                                                                               |
-|  [TAHAP 1: SDK Monolith]                                                     |
+|  [TAHAP 1: SDK Monolith] (SELESAI - 100%)                                     |
 |  zeltra-sdk/src/wallet/note_wallet.rs (5.4k LoC)                              |
 |  --> Dekomposisi multi-file 'impl PrivateNoteWallet' per domain               |
 |      (keys, deposit, spend, joinsplit, sync, 2pc, compliance)                 |
 |                                                                               |
-|                                     |                                         |
-|                                     v                                         |
-|  [TAHAP 2: Relayer Node Pipeline]                                             |
+|                                     │                                         |
+|                                     ▼                                         |
+|  [TAHAP 2: Relayer Node Pipeline] (SELESAI - 100%)                            |
 |  zeltra-node/src/database.rs (2.4k LoC) & handlers/spend.rs (2.8k LoC)        |
 |  --> Pemisahan Repository Pattern domain DB & isolasi Ingress Validation      |
 |                                                                               |
-|                                     |                                         |
-|                                     v                                         |
-|  [TAHAP 3: Contract Thin Dispatcher]                                          |
+|                                     │                                         |
+|                                     ▼                                         |
+|  [TAHAP 3: Contract Thin Dispatcher] (SELESAI - 100%)                         |
 |  zeltra-contracts/src/lib.rs (3.0k LoC)                                       |
 |  --> Pendelegasian fungsi eksternal ke internal modules (deposit, spend, view)|
-|      Mempertahankan 100% ABI selector dan storage layout                      |
+|      serta isolasi 2.800 baris tests ke src/tests.rs                          |
+|                                                                               |
+|                                     │                                         |
+|                                     ▼                                         |
+|  [TAHAP 4: Core Primitives Decomposition]                                     |
+|  zeltra-core/src/note.rs (2.8k LoC)                                           |
+|  --> Dekomposisi domain non-sirkuit (keys, memo, merkle, note)                |
+|      serta isolasi 1.400 baris tests tanpa menyentuh R1CS constraints         |
 |                                                                               |
 +-------------------------------------------------------------------------------+
 ```
 
-### Tahap 1: Dekomposisi God Object `PrivateNoteWallet` (`zeltra-sdk`)
-- **Masalah:** File `note_wallet.rs` menampung lebih dari 5.400 LoC kode murni yang menangani 7 domain fungsional berbeda.
+### Tahap 1: Dekomposisi God Object `PrivateNoteWallet` (`zeltra-sdk`) — Status: SELESAI
+- Memanfaatkan fitur Rust di mana blok `impl PrivateNoteWallet` dipecah per file domain (`keys.rs`, `deposit.rs`, `spend.rs`, `joinsplit.rs`, `sync.rs`, `state_2pc.rs`, `compliance.rs`, `types.rs`). 100% backward compatible.
+
+### Tahap 2: Dekomposisi Pipeline Relayer Node (`zeltra-node`) — Status: SELESAI
+- Penerapan Repository Pattern terpisah per domain (`nullifiers.rs`, `spends.rs`, `mmr.rs`, `quotes.rs`, `relayer_tx.rs`, `ccip.rs`, `idempotency.rs`) di bawah struct sentral `Database`.
+- Isolasi validasi berat (memo calldata 192 hex, canonical scalar $< r$, Groth16 local preflight) ke `validation/spend_preflight.rs`, menjadikan `handlers/spend.rs` murni sebagai Thin HTTP Controller.
+
+### Tahap 3: Perampingan Entrypoint Smart Contract (`zeltra-contracts`) — Status: SELESAI
+- Menerapkan Thin Dispatcher Pattern pada `lib.rs`: memindahkan 2.880 baris test ke `src/tests.rs`, serta mendelegasikan view dan governance ke `src/views.rs` dan `src/governance.rs`.
+- `lib.rs` menyusut dari 3.656 baris menjadi 532 baris tanpa mengubah satu byte pun dari selector Keccak-256 ABI atau storage layout.
+
+### Tahap 4: Dekomposisi Primitif Kriptografi Non-Sirkuit (`zeltra-core`) — Status: SELESAI
+- **Masalah:** File `zeltra-core/src/note.rs` menampung 2.132 LoC murni dan 1.404 baris test embedded (total 2.876 baris), mencampuradukkan derivasi kunci ZSA, enkripsi memo, akumulator MMR, dan primitive note.
 - **Metode Refaktor:**
-  Memanfaatkan fitur bahasa Rust di mana satu struct dapat memiliki beberapa blok `impl` yang tersebar di beberapa file dalam modul yang sama.
-  Struktur struct `PrivateNoteWallet` dan tipe pendukungnya tetap didefinisikan secara publik pada `wallet/mod.rs` atau `wallet/types.rs`, sedangkan implementasi metodenya dipisah menjadi sub-file domain:
-  - `wallet/keys.rs`: Khusus derivasi kunci spending, nullifier key, viewing key hierarchy, dan alamat ZSA Bech32m (`zs1...`).
-  - `wallet/deposit.rs`: Khusus lifecycle pembuatan note direct deposit, staging, dan konfirmasi indexer.
-  - `wallet/spend.rs`: Khusus seleksi note, kalkulasi fee, pembuatan single note proof, dan in-flight rollover.
-  - `wallet/joinsplit.rs`: Khusus alur Mode 2 (in-pool transfer) dan Mode 3 (public outflow spend) dengan dual memo 96-byte.
-  - `wallet/sync.rs`: Khusus background worker indexer sync, batch trial decryption, dan MMR proof fetching.
-  - `wallet/state_2pc.rs`: Khusus manajemen note reservation, crash-safe 2-phase commit, dan rollback.
-  - `wallet/compliance.rs`: Khusus integrasi ekspor audit trail B2B dan pembuatan bukti selektif CEX.
+  Pecah `note.rs` menjadi submodul mandiri di bawah `zeltra-core/src/`:
+  - `src/keys.rs` (~450 LoC):
+    * Derivasi kunci hierarki: `derive_master_secret`, `derive_spending_key`, `derive_owner_key`, `derive_nullifier_key`, `derive_viewing_keys`.
+    * Viewing Key structs: `IncomingViewingKey`, `OutcomingViewingKey`, `FullViewingKey`.
+    * Alamat ZSA: `ZeltraShieldedAddress` (codec Bech32m `zs1...`), `KeyFormatError`.
+  - `src/memo.rs` (~350 LoC):
+    * Plaintext DTO: `NotePlaintext`.
+    * Enkripsi/Dekripsi Memo: `encrypt_note_memo`, `decrypt_note_memo`, `encrypt_note_memo_deterministic`, `decrypt_note_memo_deterministic`, `derive_ecdh_note_randomness` (ChaCha20Poly1305 + X25519 ECDH).
+  - `src/merkle.rs` (~300 LoC):
+    * In-memory MMR: struct `MerkleMountainRange`, `MMRProof`, `bag_peaks`, `generate_proof`, `verify_proof`, `merkle_hash`.
+  - `src/note.rs` (Dirampingkan menjadi ~400 LoC):
+    * Domain separators Poseidon (`domain_note_commitment`, `domain_nullifier`, dll.).
+    * Note Primitive: `PrivateNoteV1`, `value_packed`, `commitment`, `note_commitment`, `note_commitment_packed`.
+    * Derivasi nullifier: `derive_nullifier`, `derive_nullifier_epoch`, `derive_joinsplit_nullifier`, `derive_joinsplit_dummy_nullifier`.
+    * Field serialization utilities: `fr_to_be_bytes`, `fr_from_be_bytes`, `split_quote_hash_to_limbs`, `combine_limbs_to_quote_hash`.
+  - `src/tests/note_tests.rs` (~1.400 LoC):
+    * Pindahkan seluruh blok `#[cfg(test)] mod tests { ... }` keluar dari `src/note.rs` ke file test khusus.
 - **Jaminan Zero-Breaking-Change:**
-  Nama struct, method signature, tipe error (`WalletError`), visibilitas `pub`, dan path import (`zeltra_sdk::wallet::PrivateNoteWallet`) tetap identik 100%. Kode eksternal (CLI, browser WASM bindings, dan integration tests) tidak mengalami perubahan sintaks satu karakter pun.
-
-### Tahap 2: Dekomposisi Pipeline Relayer Node (`zeltra-node`)
-- **Masalah:**
-  - `database.rs` menumpuk 76 koneksi dependency untuk kueri tabel yang sangat heterogen.
-  - `handlers/spend.rs` menggabungkan parsing request HTTP, verifikasi integritas memo (192 hex char), klasifikasi Strict 3-Mode, eksekusi Groth16 local preflight, reservasi nullifier, hingga antrian broadcast EVM.
-- **Metode Refaktor:**
-  1. *Database Repository Pattern:* Struct `Database` dipertahankan sebagai wrapper terpusat dari pool koneksi SQLCipher terenkripsi, tetapi implementasi kueri didelegasikan ke sub-domain traits/modules:
-     - `database/nullifiers.rs`: Kueri reservasi, deduplikasi, dan pengecekan status double-spend nullifier.
-     - `database/spends.rs`: Kueri antrian transaksi spend, state transition, dan histori receipt.
-     - `database/mmr.rs`: Kueri leaf commitments, dynamic root cache, dan MMR peak tracking.
-     - `database/quotes.rs`: Kueri EIP-712 signed execution quotes dan anti-replay nonce.
-  2. *Ingress Validation Isolation:* Memisahkan logika verifikasi komputasi dari handler HTTP:
-     - Logika validasi memo calldata, batasan canonical scalar ($< r$), dan verifikasi bukti Groth16 lokal dipindahkan ke `validation/spend_preflight.rs`.
-     - Handler `handlers/spend.rs` murni berfungsi sebagai HTTP controller tipis: menerima DTO Axum $\rightarrow$ memanggil preflight validator $\rightarrow$ menyisipkan ke antrian database $\rightarrow$ mengembalikan response status.
-
-### Tahap 3: Perampingan Entrypoint Smart Contract (`zeltra-contracts`)
-- **Masalah:** File `lib.rs` memiliki 3.064 LoC murni karena mengimplementasikan logika eksekusi langsung di dalam blok antarmuka Stylus `#[external]`.
-- **Metode Refaktor (Thin Dispatcher Pattern):**
-  - Seluruh fungsi bertanda `#[external]` pada struct `Zeltra` dipertahankan persis tanpa mengubah nama fungsi, tipe parameter, atau nilai balik (agar function selector EVM / Keccak-256 ABI tidak berubah).
-  - Badan fungsi (*function body*) di dalam `lib.rs` dirampingkan menjadi delegasi panggilan 1–3 baris ke modul logika internal yang sudah terisolasi:
-    - Logika deposit didelegasikan ke `deposit.rs` (`_handle_deposit_direct_note`, `_handle_native_eth_deposit`).
-    - Logika spend dan JoinSplit didelegasikan ke `spend.rs` (`_handle_spend_joinsplit`, `_handle_spend_private_note`).
-    - Kueri view MMR dan root ring buffer didelegasikan ke modul baru `views.rs`.
-    - Pengecekan invariant solvensi terisolasi multi-aset (`_check_asset_solvency_invariant`) dipanggil sebagai guard penutup sebelum transaksi selesai.
+  Seluruh tipe, fungsi, dan konstanta di atas wajib di-reexport secara transparan pada `zeltra-core/src/lib.rs` (misal: `pub use keys::*; pub use memo::*; pub use merkle::*; pub use note::*;`).
+  Akibatnya, seluruh modul pemanggil di `zeltra-sdk`, `zeltra-node`, `zeltra-contracts`, dan `zeltra-cli` tetap meng-import dengan path yang sama persis (misal: `zeltra_core::PrivateNoteV1`, `zeltra_core::MerkleMountainRange`, `zeltra_core::fr_to_be_bytes`).
 
 ---
 
@@ -188,6 +195,7 @@ Refaktor dinyatakan sukses secara definitif jika memenuhi kriteria objektif beri
    - `note_wallet.rs` berkurang dari 5.476 LoC menjadi kumpulan modul $\le 700$ LoC per domain.
    - `lib.rs` kontrak Stylus berkurang dari 3.064 LoC menjadi $\le 600$ LoC (murni thin dispatcher).
    - `database.rs` dan `spend.rs` terurai menjadi repositori dan modul validasi modular.
+   - `note.rs` di `zeltra-core` terurai dari 2.876 baris menjadi modul-modul ramping (`keys.rs`, `memo.rs`, `merkle.rs`, `note.rs`) $\le 450$ LoC per domain.
 2. **Zero Breaking Changes:**
    - Seluruh integrasi eksternal (`zeltra-cli`, script automasi Python, dan web worker WASM) berjalan normal tanpa perubahan kode pemanggil.
 3. **Verifikasi Lulus 100%:**
