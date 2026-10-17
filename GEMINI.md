@@ -9,62 +9,64 @@ Dokumen ini adalah memori konteks persisten untuk agen AI saat bekerja di reposi
 * **Nama:** **Zeltra Protocol** *(codebase transisi: Zeltra)*.
 * **Manifesto Lengkap:** Baca [`VISION.md`](file:///workspaces/Zeltra-Protocol/VISION.md).
 * **Visi & Posisi:** **"The Stripe of Web3 with Absolute Privacy."** Rel pembayaran dan settlement universal untuk AI Agent, retail, whale, korporat B2B, dan merchant tanpa diskriminasi.
-* **Mantra Produk:** **Privasi 9.5/10, Produk 10/10.** User experience secepat dan seringan Apple Pay / QRIS dengan mental model kas nyata ($10 bayar $3 kembali $7 lewat ZK-UTXO Private Note). Beban komputasi kriptografi berat diselesaikan di belakang layar.
+* **Dual Sovereign Rails:** USDC (Micro-USDC, 6 desimal) dan WETH / Native ETH (Gwei, 9 desimal ter-normalisasi) dengan payable auto-wrapping di kontrak.
+* **Mantra Produk:** **Privasi 9.5/10, Produk 10/10.** User experience secepat dan seringan Apple Pay / QRIS dengan mental model kas nyata ($10 bayar $3 kembali $7 lewat ZK-UTXO Private Note, atau transfer langsung antar ZSA tanpa token publik keluar). Beban komputasi kriptografi berat diselesaikan di latar belakang.
 * **Filosofi Finansial:**
-  * *Zero-Friction Inflow:* Deposit 0 bps (0.00%) permanen.
-  * *Volume Over TVL:* Monetisasi berbasis kecepatan perputaran uang (velocity), bukan mengunci modal diam.
-  * *Mathematical Solvency:* Invariant mutlak `Assets >= Liabilities` (anti-fractional reserve).
-  * *Etika Kepatuhan:* *"Permissionless Privacy, Permissioned Acceptance"* via Receiver-Enforced Modular ASP & Low-Cost Sanctions Screening ([`DEC-026`](file:///workspaces/Zeltra-Protocol/research/decisions/DEC-026-receiver-enforced-compliance-zero-cost-sanctions-filtering-relayer-protection.md)).
+  * *Zero-Friction Inflow:* Deposit 0 bps (0.00%) permanen untuk USDC & WETH/ETH.
+  * *Volume Over TVL & Zero In-Pool Fee:* In-pool shielded transfer **0 bps (0.00%)**, public outflow spend **flat 45 bps (0.45%)**.
+  * *Mathematical Solvency:* Invariant mutlak `Balance(asset) >= total_liabilities(asset)` (siloed per-asset solvency, anti-fractional reserve, anti-cross contamination).
+  * *Etika Kepatuhan:* *"Permissionless Privacy, Permissioned Acceptance"* via Receiver-Enforced Modular ASP ([`DEC-026`](file:///workspaces/Zeltra-Protocol/research/decisions/DEC-026-receiver-enforced-compliance-zero-cost-sanctions-filtering-relayer-protection.md)), OFAC local screening, dan CEX Selective Disclosure ([`DEC-040`](file:///workspaces/Zeltra-Protocol/research/decisions/DEC-040-viewing-key-export-suite-and-cex-selective-disclosure.md)).
 * **Stack Utama:** Rust (Stylus SDK 0.10.7, Alloy 2.0, Arkworks 0.6.0 `ark-bls12-381` & `ark-groth16`), Axum 0.8, SQLite dengan SQLCipher AES-256 (`bundled-sqlcipher`), OpenBao/Vault KMS.
 
 ---
 
 ## 2. Status Terkini & Keputusan Arsitektur
 
-### A. Evolusi Arsitektur: Migrasi Penuh ke Pure ZK-UTXO (DEC-038)
-1. **Pemusnahan Total Legacy Threshold BLS (DEC-038A):** Seluruh kode blind signing, guardian network, session storage (11 storage slot kontrak), dan alur refund timelock 24 jam telah dihapus bersih. Arsitektur kini 100% murni ZK-UTXO.
-2. **Direct MMR Deposit (DEC-038B):** Deposit langsung via `deposit_direct_note(...)` menyisipkan komitmen note ke Merkle Mountain Range (`_mmr_insert`), memancarkan event `NoteCommitmentAppended` berisi 96-byte AEAD memo, dan seketika berstatus unspent tanpa perantara kunci $k$.
-3. **Stateless Sequencer Relayer (DEC-038C):** Cluster 1 leader + 4 guardian digantikan oleh single stateless sequencer node (`scripts/start_relayer.sh`), murni melayani ingress ZK spend, preflight verification, dan MMR dynamic sync.
+### A. Arsitektur Murni ZK-UTXO & Dual-Asset (DEC-034 & DEC-038)
+1. **Pemusnahan Total Legacy Threshold BLS (DEC-038A):** Seluruh kode blind signing, guardian network, session storage (11 storage slot kontrak), dan alur refund timelock 24 jam telah dihapus bersih. Arsitektur 100% murni ZK-UTXO.
+2. **Direct MMR Deposit (DEC-038B / DEC-034B):** Deposit langsung via `deposit_direct_note` (USDC) atau `deposit_direct_native_eth` (ETH payable auto-wrap) menyisipkan komitmen note ke Merkle Mountain Range (`_mmr_insert`), memancarkan event `NoteCommitmentAppended` berisi 96-byte AEAD memo, dan seketika berstatus unspent tanpa perantara kunci $k$.
+3. **Stateless Sequencer Relayer (DEC-038C):** Single stateless sequencer node (`scripts/start_relayer.sh`), murni melayani ingress ZK spend, preflight verification, Zero-Oracle gas reimbursement (Gwei untuk WETH, Micro-USDC untuk USDC), dan dynamic MMR sync.
 
-### B. Pondasi Kriptografi & Sirkuit ZK (Gate C, D, E, F, H, I)
+### B. Pondasi Kriptografi, Sirkuit ZK & Ekosistem Lengkap (DEC-034 s/d DEC-043)
 * **Sirkuit Groth16 (zeltra-core):**
   - **1-in-1-out (`PrivateNoteCircuit`):** 16 Public Inputs (DEC-035A), 128-bit Two-Limb quote hash, Formal Scope Binding Gadget (DEC-035B), Poseidon Grain-128 LFSR (DEC-021), 64-bit integer range constraints, dan evolusi nullifier 2-Epoch (DEC-033).
-  - **Universal 2-in-2-out (`JoinSplitCircuit`):** 19 Public Inputs (DEC-036A), constant-arity topology, canonical dummy input/output slots, dan 448 quadratic range gates.
-* **Akumulator MMR (DEC-032):** In-memory dan on-chain Merkle Mountain Range dengan canonical peak bagging backward fold (`DOMAIN_MMR_BAG`) dan mitigasi Hyperbridge out-of-bounds ($leaf\_index < leaf\_count$).
+  - **Universal 2-in-2-out (`JoinSplitCircuit`):** 19 Public Inputs (DEC-036A), constant-arity topology, canonical dummy input/output slots, multi-asset bit-packing (`flags_packed`), dan 448 quadratic range gates.
+  - **CEX Selective Disclosure (`SelectiveDisclosureCircuit` - DEC-040A):** Sirkuit kepatuhan Groth16 dengan Verifier Binding (mengikat alamat bursa CEX & challenge nonce) untuk membuktikan asal dana note secara selektif ke Binance/Coinbase tanpa mengekspos kunci belanja ($sk$).
+* **Akumulator MMR (DEC-032):** In-memory dan on-chain Merkle Mountain Range dengan canonical peak bagging backward fold (`DOMAIN_MMR_BAG`) dan ring buffer 100 accepted roots.
 * **Smart Contract Stylus (zeltra-contracts):**
   - Verifikasi Groth16 BLS12-381 via EIP-2537 (`0x0c` MSM + `0x0f` Pairing Check) di WASM Stylus.
-  - State MMR terintegrasi, history accepted roots bounded ring, dan entrypoints `deposit_direct_note`, `spend_private_note`, serta `spend_joinsplit`.
-  - Invariant solvensi absolut: `USDC Balance >= user_note_liability + accrued_execution_fee_liability + realized_protocol_fees`.
+  - **Strict 3-Mode State Machine (DEC-043B):**
+    * Mode 1: Mint / Consolidation / Rollover.
+    * Mode 2: In-Pool Transfer & Merchant Masking (`recipient == 0x0`, `protocol_fee == 0`, dual 96B memos disisipkan ke MMR on-chain).
+    * Mode 3: Public Spend (`recipient != 0x0`, protocol fee flat 45 bps).
+  - Invariant solvensi terisolasi multi-aset (`_check_asset_solvency_invariant`).
 * **Client SDK & Wallet State (zeltra-sdk):**
-  - `PrivateNoteWallet`: Tiered Stochastic Knapsack Coin Selection (DEC-030/036B), in-pool `consolidate_notes()`, 2PC crash-safe note store (DEC-024), Argon2id + ChaCha20Poly1305 encrypted storage, dan zeroize memory safety.
-  - Viewing Key Recovery Protocol (DEC-037): Derivasi kunci HKDF (`IncomingViewingKey`, `OutcomingViewingKey`), 48-byte `NotePlaintext`, compact 96-byte AEAD memo, dan pemulihan saldo on-chain (`recover_notes`).
-* **Relayer Pipeline (zeltra-node):**
-  - Endpoints `/api/v1/spend-private-note`, `/api/v1/spend-joinsplit`, `/api/v1/mmr/proof/:leaf_index`.
-  - Fail-closed local Groth16 preflight verification (DEC-026 C-01 anti gas-griefing).
-  - Three-Way Reconciliation Engine (`reconcile_execution_fees`) dan solvency observability pada `/health` (DEC-031).
+  - `PrivateNoteWallet`: Tiered Stochastic Knapsack Coin Selection multi-aset, in-pool shielded transfer (`prepare_shielded_transfer_proof`), trial decryption scanner multi-aset (`recover_notes_batch`), alamat ZSA Bech32m (`zs1...` - DEC-043A), dan 2PC crash-safe storage.
+  - **B2B Double-Entry Compliance & CEX Verifier Engine (DEC-040B/C):** Modul `compliance/` untuk ekspor laporan audit pajak dan verifikasi independen oleh bursa.
+  - **In-Browser Web Worker Prover (DEC-041):** Runner prover Groth16 langsung di browser via Web Worker dengan isolasi memori sekali pakai (`worker.terminate()`) anti-OOM linear.
+  - **Pure ZK-UTXO HTTP 402 Facilitator (DEC-042):** Mikropembayaran AI Agent sub-sen murni ZK-UTXO.
 
 ---
 
 ## 3. Prioritas Aktif Selanjutnya
 
-Mengacu pada master checklist [`todo.md`](file:///workspaces/Zeltra-Protocol/todo.md) dan [`docs/roadmap.md`](file:///workspaces/Zeltra-Protocol/docs/roadmap.md):
+Seluruh task di **Fase 0 (Dual-Asset)** dan **Fase 1 (SDK, Browser Prover & Ekosistem Fitur)** telah **100% SELESAI, DIAUDIT & TERVERIFIKASI**.
 
-1. **Fase 1 — SDK, Browser Prover & Ekosistem Fitur (Fokus Aktif Lokal):**
-   * Shielded-to-Shielded In-Pool Transfer (Merchant Masking tanpa penarikan USDC publik).
-   * Viewing Key Export Suite (laporan audit SPT/pajak B2B berbasis `ovk`/`ivk`).
-   * SDK Helper CEX ("Export Source of Funds" bypass bursa).
-   * Web Worker in-browser WASM Groth16 prover runner (`worker.terminate()` isolasi anti-OOM).
-   * HTTP 402 Facilitator mikro-pembayaran AI Agent.
-2. **Fase 2 — Circuit Freeze, Security Audit & Trusted Setup MPC:**
-   * Kunci mati constraints R1CS 16 PI & 19 PI beserta public-input ABI.
-   * Review keamanan sirkuit independen & persiapan MPC Phase 2 ceremony.
-3. **Fase 3 — Unified Hard-Test Arbitrum Sepolia (Gladi Bersih Akhir — Deploy Sekali):**
-   * Deploy kontrak Stylus dan relayer node **sekali saja** menggunakan verifying keys resmi hasil MPC.
-   * Full testnet lifecycle matrix (deposit direct $\rightarrow$ spend $\rightarrow$ change note $\rightarrow$ second spend $\rightarrow$ withdraw-all).
+Mengacu pada master checklist [`todo.md`](file:///workspaces/Zeltra-Protocol/todo.md) dan [`docs/roadmap.md`](file:///workspaces/Zeltra-Protocol/docs/roadmap.md), prioritas aktif saat ini adalah:
+
+1. **Fase 2 — Circuit Freeze, Security Audit & Trusted Setup MPC:**
+   * Kunci mati constraints R1CS 16 PI (`PrivateNoteCircuit`) & 19 PI (`JoinSplitCircuit`) beserta public-input ABI.
+   * Isolasi artifact versioning untuk proving/verifying keys dev vs production.
+   * Persiapan harness upacara MPC Phase 2 Trusted Setup.
+   * Review keamanan sirkuit independen & smart contract Stylus.
+2. **Fase 3 — Keamanan & Sanitasi Kredensial:**
+   * Rotasi seluruh secret/private key dev historis dan pembersihan git commit history.
+3. **Fase 4 — Unified Hard-Test Arbitrum Sepolia (Gladi Bersih Akhir — Deploy Sekali):**
+   * Deploy kontrak Stylus dan relayer node **sekali saja** menggunakan verifying keys resmi hasil MPC setelah Tahap 2 & 3 tuntas.
+   * Full testnet lifecycle matrix (deposit direct $\rightarrow$ in-pool transfer $\rightarrow$ change note $\rightarrow$ second spend $\rightarrow$ withdraw-all).
    * Cross-Chain CCIP testnet flow & boundary crash recovery testing.
-4. **Fase 4 — Mainnet Arbitrum One Launch & Adopsi Pasar:**
+4. **Fase 5 — Mainnet Arbitrum One Launch & Adopsi Pasar:**
    * Deploy production, bug bounty, dan integrasi merchant checkout widget.
-
 
 ---
 
@@ -74,45 +76,48 @@ Mengacu pada master checklist [`todo.md`](file:///workspaces/Zeltra-Protocol/tod
 /workspaces/Zeltra-Protocol/
 ├── zeltra-contracts/         — Smart Contract Arbitrum Stylus WASM (EIP-2537 BLS12-381 Precompiles)
 │   ├── src/lib.rs            — Entrypoint #[entrypoint] contract Zeltra:
-│   │                           • Inflow: deposit_direct_note, deposit
-│   │                           • Outflow: spend_private_note, spend_joinsplit
-│   │                           • Solvensi: check_liability_invariant, user_note_liability, accrued_execution_fee_liability, realized_protocol_fees
-│   │                           • Nullifier: is_nullifier_spent, is_note_nullifier_spent, are_nullifiers_spent, is_generational_nullifier_spent
+│   │                           • Inflow: deposit_direct_note, deposit_direct_weth, deposit_direct_native_eth
+│   │                           • Outflow/Transfer: spend_joinsplit (Strict 3-Mode), spend_private_note
+│   │                           • Solvensi: check_asset_solvency_invariant, check_liability_invariant
+│   │                           • Nullifier: is_nullifier_spent, is_note_nullifier_spent, is_generational_nullifier_spent
 │   │                           • MMR Tree: note_tree_root, mmr_leaf_count, mmr_peak, is_accepted_note_root, get_root_history
-│   │                           • Epoch & Admin: get_current_epoch, rotate_epoch, init, propose_owner, claim_ownership, pause, unpause
-│   ├── src/deposit.rs        — Logika deposit direct note (verifikasi skalar kanonikal from_evm_scalar < r, min amount 10 USDC, _mmr_insert)
-│   ├── src/spend.rs          — Logika eksekusi spend private note & JoinSplit (Groth16 verify, nullifier burning, fee accrual, change MMR append)
+│   │                           • Epoch & Admin: get_current_epoch, rotate_epoch, init, init_multi_asset, pause, unpause
+│   ├── src/deposit.rs        — Logika deposit direct note ERC20 & native ETH auto-wrap (_mmr_insert)
+│   ├── src/spend.rs          — Logika eksekusi Strict 3-Mode JoinSplit & private spend (Groth16 verify, nullifier burning, dual 96B memo append)
 │   ├── src/merkle.rs         — Akumulator on-chain Merkle Mountain Range (_mmr_insert, canonical peak bagging, bounded root history ring)
-│   ├── src/storage.rs        — Stylus sol_storage! Zeltra layout (MMR state, accepted roots, nullifiers, epoch slots, governance)
+│   ├── src/storage.rs        — Stylus sol_storage! Zeltra layout (MMR state, accepted roots, nullifiers, epoch slots, multi-asset storage)
 │   ├── src/groth16_note_verifier.rs — Verifier Groth16 BLS12-381 untuk PrivateNoteCircuit (16 public inputs) via precompile 0x0c & 0x0f
 │   ├── src/groth16_joinsplit_verifier.rs — Verifier Groth16 BLS12-381 untuk JoinSplitCircuit (19 public inputs) via precompile 0x0c & 0x0f
 │   ├── src/poseidon_w5_constants.rs — Konstanta round constants & MDS matrix Poseidon width-5 in-contract
-│   ├── src/events.rs         — Event NoteCommitmentAppended (memo terenkripsi 96-byte), PrivateNoteSpent, DepositFee, dll.
+│   ├── src/events.rs         — Event NoteCommitmentAppended (memo terenkripsi 96-byte), JoinSplitSpendExecuted, DepositFee, dll.
 │   ├── src/verification.rs   — Wrapper pemanggilan host precompile EIP-2537 (call_msm_g1 0x0c, call_pairing 0x0f)
-│   ├── src/vault.rs          — Akuntansi yield & collateral solvensi (total_assets, claim_accumulated_yield)
+│   ├── src/vault.rs          — Akuntansi solvensi multi-aset terisolasi (_check_asset_solvency_invariant, total_assets)
 │   └── src/interfaces.rs, types.rs, constants.rs, helpers.rs — Interface ERC-20 / CCIP & konversi tipe EVM
 │
 ├── zeltra-core/              — Primitif Kriptografi & Sirkuit ZK (Arkworks 0.6.0 ark-bls12-381 / ark-groth16)
 │   ├── src/lib.rs            — Re-export utama BLS12-381, Poseidon, EVM, fees, MMR, dan sirkuit
 │   ├── src/note_circuit.rs   — PrivateNoteCircuit (1-in-1-out Groth16, 16 public inputs, Two-Limb quote hash, formal scope binding DEC-035B)
 │   ├── src/joinsplit_circuit.rs — JoinSplitCircuit (Universal 2-in-2-out Groth16, 19 public inputs, constant topology, 448 range gates)
-│   ├── src/note.rs           — Primitif note (PrivateNoteV1, NotePlaintext, MerkleMountainRange, MMRProof, viewing keys, AEAD memo)
+│   ├── src/selective_disclosure_circuit.rs — SelectiveDisclosureCircuit (CEX compliance Groth16 dengan Verifier Binding, DEC-040A)
+│   ├── src/circuit_gadgets.rs — R1CS Gadgets (flags_packed multi-asset, range checks, Poseidon gadgets)
+│   ├── src/note.rs           — Primitif note (PrivateNoteV1 dengan asset_id, NotePlaintext, ZSA key derivation, deterministic ECDH, ChaCha20Poly1305)
 │   ├── src/poseidon.rs       — Native Poseidon width-3 & width-5, Grain-128 LFSR parameter generator (DEC-021)
 │   ├── src/accounting.rs     — State machine ContractAccounting & validasi invariant matematis
-│   ├── src/fees.rs           — Kalkulasi fee (0 bps deposit, flat 45 bps spend, 15% relayer markup, rollover rules)
+│   ├── src/fees.rs           — Kalkulasi fee (0 bps deposit, 0 bps in-pool transfer, 45 bps spend, 15% relayer markup)
 │   ├── src/evm.rs            — Serialisasi & formatting EVM untuk G1, G2, skalar, dan proof BLS12-381
 │   ├── src/formal_tests.rs   — Test suite formal verifikasi integritas matematis sirkuit
 │   └── src/bin/bench.rs      — Binary benchmark mikro-kriptografi
 │
 ├── zeltra-node/              — Stateless Single-Sequencer Relayer Node (Axum 0.8)
 │   ├── src/main.rs           — Boot server, router Axum, orkestrator worker background, rate limiter
+│   ├── src/bin/inpool_interop.rs — Test harness CLI untuk pengujian independen lintas bahasa (Python suite)
 │   ├── src/handlers/
 │   │   ├── health.rs         — Endpoint /health, /live, /ready dengan observabilitas solvensi makro
-│   │   ├── quote.rs          — Endpoint penawaran fee eksekusi tertandatangani EIP-712 (/api/v1/quote, /api/quote/private-spend)
-│   │   ├── spend.rs          — Ingress spend ZK (/api/v1/spend-private-note, /api/v1/spend-joinsplit)
+│   │   ├── quote.rs          — Endpoint fee eksekusi tertandatangani EIP-712 (/api/v1/quote) dengan zero-oracle reimbursement
+│   │   ├── spend.rs          — Strict 3-Mode spend ingress (/api/v1/spend-joinsplit, /api/v1/spend-private-note) dengan validasi memo 192 hex
 │   │   ├── mmr.rs            — Dynamic MMR sync (/api/v1/mmr/proof/:leaf_index, /api/v1/mmr/leaves, /api/v1/mmr/tip, /api/v1/notes/sync)
 │   │   ├── tx_status.rs      — Query status transaksi (/api/tx-status)
-│   │   └── x402.rs           — Gateway HTTP 402 Facilitator (/api/x402/verify)
+│   │   └── x402.rs           — Pure ZK-UTXO HTTP 402 Facilitator gateway (/api/x402/verify)
 │   ├── src/database.rs       — SQLite + SQLCipher AES-256 database, WAL mode, queue spend, tabel MMR & idempotency
 │   ├── src/evm_client.rs     — Client Alloy untuk broadcast transaksi L2, konfirmasi receipt, nonce lock, dan +15% gas bump
 │   ├── src/mmr_indexer.rs    — Background worker mengindeks event on-chain NoteCommitmentAppended & memo
@@ -125,26 +130,29 @@ Mengacu pada master checklist [`todo.md`](file:///workspaces/Zeltra-Protocol/tod
 │
 ├── zeltra-sdk/               — Client SDK & Private Note Wallet (WASM + Native)
 │   ├── src/lib.rs            — Re-export SDK, memory security (secure_zeroize, Zeroize)
-│   ├── src/wallet/note_wallet.rs — PrivateNoteWallet: prepare_direct_deposit, Knapsack coin selection, Groth16 prover, 2PC store
-│   ├── src/coin_selection.rs — Algoritma Stochastic Knapsack Coin Selection (1-note & 2-note JoinSplit)
+│   ├── src/wallet/note_wallet.rs — PrivateNoteWallet: prepare_shielded_transfer_proof, Knapsack multi-asset, Groth16 prover, recover_notes_batch, 2PC store
+│   ├── src/compliance/       — Modul audit B2B & verifikasi bursa CEX (exporter.rs, verifier.rs, models.rs)
+│   ├── src/coin_selection.rs — Algoritma Stochastic Knapsack Coin Selection multi-aset
 │   ├── src/storage.rs        — Store note 2PC crash-safe terenkripsi Argon2id + ChaCha20Poly1305
 │   ├── src/client.rs         — HTTP client komunikasi ke relayer node
 │   ├── src/eip712.rs         — Penandatangan EIP-712 typed data untuk quote eksekusi
-│   ├── src/zk_wasm.rs, fee_wasm.rs — Binding WASM untuk eksekusi sirkuit & fee di browser klien
+│   ├── src/zk_wasm.rs, fee_wasm.rs — In-browser WASM Groth16 prover runner dengan disposable Web Worker memory lifecycle (DEC-041)
 │   ├── src/wasm_types.rs     — DTO serializable untuk interop JS/TS
-│   ├── src/x402/             — Modul client protokol pembayaran x402 (codec.rs, types.rs)
+│   ├── src/x402/             — Pure ZK-UTXO x402 payment client codec & types (DEC-042)
 │   └── src/bin/bench_e2e.rs  — Binary benchmark performa end-to-end deposit & spend client
 │
 ├── zeltra-cli/               — Pure ZK CLI Utility
-│   ├── src/main.rs, cli.rs   — Parser Clap: GenerateWallet, CreateDepositNote, InspectMmr, VerifyProof
-│   └── src/commands/zk.rs    — Implementasi perintah CLI pembuatan wallet, deposit note, inspeksi MMR, dan verifikasi proof
+│   ├── src/main.rs, cli.rs   — Parser Clap: GenerateWallet, CreateDepositNote, InspectMmr, VerifyProof, Compliance
+│   ├── src/commands/zk.rs    — Implementasi perintah CLI pembuatan wallet, deposit note, inspeksi MMR, dan verifikasi proof
+│   └── src/commands/compliance.rs — Ekspor audit compliance, verifikasi bukti CEX independen
 │
 ├── scripts/                  — Script Otomasi, Deployment & Pengujian
 │   ├── scripts/start_relayer.sh  — Daemon runner relayer sequencer tunggal (start|status|stop|restart)
 │   ├── scripts/deploy_testnet.sh — Deployment smart contract Stylus ke Arbitrum Sepolia
+│   ├── scripts/test_real_case_dec043c_inpool_wallet.py — Test suite Python independen 44/44 lolos
 │   └── scripts/check_balance.py, ht01_init_verification.py, ht04_spend_negative_tests.py, ht05_refund_tests.py, ht10_signed_quote_tests.py
 │
-├── research/decisions/       — 50 Dokumen Arsitektur & Keputusan Desain Resmi (DEC-001 s/d DEC-038C)
+├── research/decisions/       — 64 Dokumen Arsitektur & Keputusan Desain Resmi (DEC-001 s/d DEC-043C)
 ├── todo.md                   — Master Active Backlog (murni task pending [ ])
 └── docs/                     — Dokumentasi Analisis & Panduan Modular (bisnis.md, analisis/, contract/, core/, relayer/, sdk/, cli/)
 ```
@@ -184,3 +192,4 @@ Mengacu pada master checklist [`todo.md`](file:///workspaces/Zeltra-Protocol/tod
   - **Best Practice Integrasi:** Gunakan Tavily untuk membaca gambaran lanskap/status rilis terkini secara cepat, lalu gunakan Exa untuk deep-dive ke detail teknis atau spesifikasi formalnya. Jika kedua endpoint limit, gunakan `parallel-search` (`web_search`, `web_fetch`) sebagai fallback.
 * **Browser Agent:** Tersedia `browser_subagent` jika butuh navigasi interaktif atau visual inspection.
 * **Environment:** Codespace Linux dengan Git, Curl, dan tool eksekusi shell. Selalu verifikasi sintaks dan tipe secara ketat pada crate `zeltra-core` dan `zeltra-contracts`.
+
