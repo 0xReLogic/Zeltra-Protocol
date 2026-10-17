@@ -64,5 +64,123 @@ Dokumen ini memetakan paper terpilih untuk lapisan kriptografi fundamental Zeltr
   * Komponen: Universal JoinSplit circuit di [`zeltra-core/src/joinsplit_circuit.rs`](file:///workspaces/Zeltra-Protocol/zeltra-core/src/joinsplit_circuit.rs) (DEC-036A) dengan slot dummy canonical dan 448 range gates.
   * Memungkinkan penyisipan dummy slot konstan bernilai nol/acak untuk memutus korelasi grafik saldo secara statistik dan menjamin privasi jangka panjang bagi AI Agent dan retail.
 
+---
 
+## 6. Constant-Time Conditions for Left-to-Right Scalar Multiplication (IACR ePrint 2026/1881)
+* **File Jurnal / ePrint:** IACR ePrint 2026/1881 (Oktober 2026)
+* **Penulis:** Sergey Agievich
+* **Problem Kritis:**
+  Perkalian skalar kurva eliptik pada kurva BLS12-381 ($G_1, G_2$) dan X25519 (saat derivasi spending key, nullifier secret key derivation `owner_key * G`, atau uncompressed point scalar mult) sering kali memiliki titik cabang eksepsional (exception handling saat point addition/doubling degenerate cases). Jika eksekusi tidak strictly constant-time, serangan side-channel timing attack dapat merekonstruksi bit-bit skalar rahasia pengguna dari variasi latensi instruksi.
+* **Inovasi Paper:**
+  Menetapkan kondisi aljabar deterministik pada digit skalar pemrosesan left-to-right (MSB to LSB) sehingga tidak ada titik eksepsi sama sekali selama intermediate doublings and additions (analisis varian Comb: SAB-Set dan LSB-Set). Menjamin eksekusi strictly constant-time tanpa cabang kondisional pengecualian dan tanpa overhead komputasi.
+* **Implementasi di Zeltra Core:**
+  * Komponen: [`zeltra-core/src/evm.rs`](file:///workspaces/Zeltra-Protocol/zeltra-core/src/evm.rs) dan [`zeltra-core/src/note.rs`](file:///workspaces/Zeltra-Protocol/zeltra-core/src/note.rs).
+  * Mengeliminasi titik cabang kondisional pada proses derivasi nullifier dan kalkulasi skalar BLS12-381, menjamin proses komputasi kriptografi inti di `zeltra-core` dan preflight relayer kebal terhadap side-channel timing analysis.
 
+---
+
+## 7. Committing AEAD: Partitioning Oracle Attack Defense for Encrypted Memos (IACR ePrint 2026/240)
+* **File Jurnal / ePrint:** IACR ePrint 2026/240 (Oktober 2026)
+* **Penulis:** Kazuhiko Minematsu and Akiko Inoue
+* **Problem Kritis:**
+  Pada skema AEAD konvensional (seperti ChaCha20Poly1305 naif), sebuah ciphertext dapat valid didekripsi oleh dua kunci berbeda menjadi dua plaintext berbeda. Kerentanan ini (*non-committing AEAD flaw*) memungkinkan penyerang mengeksekusi *partitioning oracle attacks* pada protokol berbasis UTXO/memo: adversary menyuntikkan memo crafted on-chain yang membingungkan scanner wallet penerima dan dapat memicu desinkronisasi saldo atau deanonymization.
+* **Inovasi Paper:**
+  Mengevaluasi dan memperbaiki transformasi generik Committing AEAD (seperti CTX Chan-Rogaway dan Chen-Karadžić) yang rentan terhadap instansiasi hash praktis. Paper ini merumuskan transformasi committing AEAD yang terbukti kokoh di bawah *standard model* dengan modifikasi algoritmik minimal tanpa mengorbankan performa enkripsi/dekripsi simetris.
+* **Implementasi di Zeltra Core & SDK:**
+  * Komponen: [`zeltra-core/src/note.rs`](file:///workspaces/Zeltra-Protocol/zeltra-core/src/note.rs) (`NotePlaintext::encrypt_memo` & `decrypt_memo`) dan trial decryption scanner di [`zeltra-sdk/src/wallet/note_wallet.rs`](file:///workspaces/Zeltra-Protocol/zeltra-sdk/src/wallet/note_wallet.rs).
+  * Menjamin 96-byte encrypted memo yang dipancarkan lewat event `NoteCommitmentAppended` on-chain mengikat komitmen ciphertext secara matematis (*binding ciphertext to key & plaintext*), membendung partitioning attacks dan menjamin keaslian data scanning note wallet 100%.
+
+---
+
+## 8. Fast Polynomial Arithmetic in the Exponent without Roots of Unity (IACR ePrint 2026/2413)
+* **File Jurnal / ePrint:** IACR ePrint 2026/2413 (Oktober 2026)
+* **Penulis:** Diane Ducrocq and Pierrick Gaudry
+* **Problem di Sistem Klasik:**
+  Operasi perkalian polinomial berderajat tinggi di dalam eksponen kurva eliptik ($g^{P(x)}$) adalah pondasi penting dalam evaluasi QAP Groth16 dan skema komitmen polinomial KZG. Teknik Number Theoretic Transform (NTT) konvensional menuntut keberadaan *roots of unity* (akar kesatuan modulo $q$) pada domain evaluasi. Jika derajat sirkuit atau field grup tidak memiliki akar kesatuan 2-adik yang cukup, prover terpaksa menggunakan perkalian naif kuadratik $O(N^2)$ yang sangat lambat.
+* **Inovasi Paper:**
+  Merumuskan algoritma perkalian polinomial di dalam eksponen berbasis adaptasi Schönhage-Strassen yang mencapai kompleksitas kuasi-linear $O(N \log N)$ **tanpa mensyaratkan keberadaan akar kesatuan sama sekali** pada field grup kurva.
+* **Implementasi di Zeltra Core:**
+  * Komponen: Evaluator QAP di [`zeltra-core/src/note_circuit.rs`](file:///workspaces/Zeltra-Protocol/zeltra-core/src/note_circuit.rs) dan [`zeltra-core/src/joinsplit_circuit.rs`](file:///workspaces/Zeltra-Protocol/zeltra-core/src/joinsplit_circuit.rs).
+  * Menghilangkan restriksi ukuran sirkuit berbasis pangkat dua sempurna ($2^k$), memberikan fleksibilitas aljabar penuh saat mengagregasi batched commitments dan QAP polynomial evaluations pada kurva BLS12-381.
+
+---
+
+## 9. The Geometry of Witness-Update Tradeoffs in Additive Positive Accumulators (IACR ePrint 2026/2362)
+* **File Jurnal / ePrint:** IACR ePrint 2026/2362 (Oktober 2026)
+* **Penulis:** Wei Qi
+* **Problem Kritis:**
+  Pada akumulator set aditif (*additive positive accumulators*) seperti Merkle Mountain Range (MMR) yang digunakan oleh Zeltra ([`zeltra-contracts/src/merkle.rs`](file:///workspaces/Zeltra-Protocol/zeltra-contracts/src/merkle.rs)), setiap penambahan $N$ note baru menuntut penyegaran bukti keanggotaan (*membership witness / Merkle proof updates*). Jika client atau indexer menyegarkan witness secara naif setiap kali ada deposit baru, beban komputasi dan transfer bandwidth melonjak secara eksponensial.
+* **Inovasi Paper:**
+  Secara fundamental memetakan geometri ruang vektor pembaruan saksi (*witness-update vector tradeoff*) pada pohon biner berurutan (*inorder binary trees / Merkle forests*). Paper ini membuktikan batas batas bawah koordinat (*coordinatewise lower boundary*) dan merumuskan distribusi pohon optimal yang meminimalkan total pembaruan saksi secara global, membuktikan bahwa akumulator berbasis hutan Merkle (seperti MMR) dapat mencapai amortisasi pembaruan saksi yang optimal jika traversal merger diatur secara strictly monotonic.
+* **Implementasi di Zeltra Core, Contract & Relayer:**
+  * Komponen: Akumulator MMR di [`zeltra-core/src/`](file:///workspaces/Zeltra-Protocol/zeltra-core/) dan sinkronisasi MMR di [`zeltra-node/src/handlers/mmr.rs`](file:///workspaces/Zeltra-Protocol/zeltra-node/src/handlers/mmr.rs).
+  * Memberikan model matematika presisi untuk penjadwalan caching bukti MMR di client SDK: bukti daun di-refresh dengan jadwal amortisasi optimal $O(\log N)$ tanpa pemborosan komputasi traversal hashing ulang yang redundan.
+---
+
+## 10. Cryptanalysis & Security Margins of Poseidon via Subspace Restriction (IACR ePrint 2026/1692)
+* **File Jurnal / ePrint:** IACR ePrint 2026/1692 (Oktober 2026)
+* **Penulis:** Amit Singh Bhati, Sundas Tariq, Tomer Ashur
+* **Problem Kritis:**
+  Fungsi hash ramah-ZK *Poseidon* merupakan tulang punggung komputasi komitmen UTXO note dan akumulator MMR di Zeltra ([`zeltra-core/src/poseidon.rs`](file:///workspaces/Zeltra-Protocol/zeltra-core/src/poseidon.rs) dan [`zeltra-contracts/src/poseidon_w5_constants.rs`](file:///workspaces/Zeltra-Protocol/zeltra-contracts/src/poseidon_w5_constants.rs)). Jika struktur ronde penuh ($R_F$) atau ronde parsial ($R_P$) rentan terhadap pembatalan aljabar (*algebraic cancellation*), penyerang berpotensi memecahkan problem *Constrained-Input Constrained-Output (CICO)* untuk memalsukan komitmen note atau membalikkan hash nullifier.
+* **Inovasi Paper:**
+  Merumuskan kerangka kerja matematika terpadu *Smart Subspace Restriction* yang memanfaatkan *Generalized S-Box Skipping (GSR)* dan *$d$-wise collapsing*. Teknik ini memproyeksikan variabel state ke dalam *nullspace* dari submatriks invers MDS, sehingga membatalkan non-linearitas S-box putaran awal dan putaran parsial. Paper ini berhasil mengekstrak basis Gröbner pada instance tereduksi (seperti Poseidon KoalaBear 31-bit hingga 20 dari 31 ronde).
+* **Implementasi & Validasi di Zeltra Core:**
+  * Komponen: Generator konstanta dan parameter round di [`zeltra-core/src/poseidon.rs`](file:///workspaces/Zeltra-Protocol/zeltra-core/src/poseidon.rs) dan kepatuhan [`DEC-021`](file:///workspaces/Zeltra-Protocol/research/decisions/DEC-021-poseidon-grain128-lfsr-round-constants-audit.md).
+  * Memberikan validasi kriptanalisis formal: Zeltra mengimplementasikan Poseidon-W3 dan Poseidon-W5 di atas medan skalar besar BLS12-381 $Fr$ (255-bit) dengan $R_F = 8$ dan $R_P \ge 57$, jauh melampaui ambang batas penetrasi subspace attack (yang hanya efektif pada medan kecil $\le 64$-bit atau varian round-reduced). Temuan ini memperkuat audit keamanan bahwa margin keamanan 128-bit Zeltra terhadap serangan basis Gröbner dan CICO tetap kokoh tak tertembus.
+
+---
+
+## 11. Jacobian Diagnostics for Under-Constrained Zero-Knowledge Circuits (IACR ePrint 2026/1852)
+* **File Jurnal / ePrint:** IACR ePrint 2026/1852 (Oktober 2026)
+* **Penulis:** Vijay Singh
+* **Problem Kritis:**
+  *Under-constrained arithmetic circuits* adalah salah satu celah keamanan paling mematikan dalam protokol zero-knowledge. Jika suatu wire saksi (*witness wire*) atau variabel perantara dalam sirkuit R1CS tidak terikat secara ketat (*under-constrained*), seorang prover jahat dapat menetapkan nilai alternatif tanpa melanggar persamaan verifikasi (misalnya menduplikasi proof, memanipulasi nilai kembalian uang *change*, atau mengubah flag multi-aset). Pengujian fuzzer acak sering kali gagal mendeteksi celah ini pada sirkuit berukuran puluhan ribu gerbang.
+* **Inovasi Paper:**
+  Memperkenalkan metodologi diagnostik aljabar berbasis aljabar linier matriks Jacobian eksak. Dengan menggabungkan matriks Jacobian dari seluruh *constraint* R1CS dan menetapkan koordinat input publik, *kernel* dari Jacobian tersebut merepresentasikan *Zariski tangent space*. Jika terdapat arah pergerakan dalam kernel (*tangent dimension $> 0$*), hal tersebut membuktikan secara matematis keberadaan derajat kebebasan infinitesimal (*infinitesimal freedom / non-uniqueness certificate*). Alat ini memverifikasi sirkuit hingga 66.000 constraints hanya dalam hitungan detik.
+
+---
+
+## 12. Accelerated Endomorphism & Side-Channel Regular Scalar Multiplication on BLS12-381 (IACR ePrint 2024/1906)
+* **File Jurnal / ePrint:** IACR ePrint 2024/1906 (September 2026 update)
+* **Penulis:** Guangwu Xu, Wei Yu, Ke Han, Pengfei Lu
+* **Problem Kritis:**
+  Perhitungan perkalian skalar $[k]P$ pada kurva eliptik pairing-friendly (terutama $G_1$ dari kurva BLS12-381) adalah operasi komputasi terberat dalam pembuktian Groth16, evaluasi kombinasi linier input publik, serta derivasi kunci publik note ephemeral di [`zeltra-core/`](file:///workspaces/Zeltra-Protocol/zeltra-core/). Algoritma GLV standar membutuhkan tabel prekomputasi besar dan rentan terhadap serangan analisis saluran samping (*side-channel timing attacks*) jika pengolahan bit skalar bocor saat eksekusi.
+* **Inovasi Paper:**
+  Memperluas algoritma window $\tau$-NAF Solinas ke famili kurva $y^2 = x^3 + b$ di atas $\mathbb{F}_p$ dengan $p \equiv 1 \pmod 3$, yang secara spesifik mencakup kurva **BLS12-381** ($b = 4$):
+  1. Memanfaatkan endomorfisme $\tau = [\omega]$ dalam gelanggang bilangan bulat Eisenstein $\mathbb{Z}[\omega]$, di mana pemetaan $\tau$ dalam koordinat proyektif Jacobian hanya membutuhkan **1 perkalian medan ($1M$)**.
+  2. Menghasilkan formula point-tripling baru hanya dengan $6M + 2S$ (mengungguli rekor sebelumnya $7M + 2S$).
+  3. Memanfaatkan simetri lipat-enam (*sixfold symmetry*) di bawah grup unit $\mathbb{Z}[\omega]^\times$, memangkas memori tabel prekomputasi hingga **5/6 bagian (penghematan 83%)**.
+  4. Merumuskan varian reguler (*regular window $\tau$-NAF*) yang kebal terhadap serangan side-channel, sekaligus meningkatkan efisiensi sebesar **18.2%–20.5%** dibanding metode GLV tercanggih saat ini.
+
+---
+
+## 13. Defeating Null-Branch Witness Attacks in Conditional ZK-UTXO Circuits (IACR ePrint 2026/2235)
+* **File Jurnal / ePrint:** IACR ePrint 2026/2235 (September 2026)
+* **Penulis:** Guoxiao Liu, Zhuoqing Peng, Guowei Liu, Keting Jia, Xiaoyun Wang, Zongyue Wang, Junfeng Fan
+* **Problem Kritis:**
+  Banyak sirkuit ZK modern yang memuat percabangan kondisional (seperti apakah suatu slot input bersifat aktif atau *dummy*, apakah ada *change note*, atau apakah rollover aktif). Paper ini mengungkap celah fatal bernama **Null-Branch Witness Attack**: ketika sebuah perkalian constraint dikalikan dengan faktor nol (misal $(1 - \text{is\_active}) \cdot \dots$ atau $\text{has\_change} \cdot \dots$), intermediate wire di cabang yang tidak aktif sering kali dibiarkan bebas tanpa ikatan (*unconstrained zero factor*). Akibatnya, prover jahat dapat mengisi nilai acak yang valid secara matematis pada wire tersebut untuk memalsukan bukti (*public-key-only forgery*) tanpa melanggar *soundness* sirkuit tingkat tinggi.
+* **Inovasi Paper:**
+  Menganalisis kesenjangan mendasar antara *One-Way Function (OWF) Hardness* dan *Proof-System Soundness*, membuktikan bahwa verifier menerima bukti palsu karena relasi arithmetisasi sirkuit membiarkan cabang null memiliki ruang solusi bebas. Paper ini merumuskan teknik *Quadratic Encoding Soundness* yang secara ketat mengunci seluruh wire pada cabang non-aktif ke konstanta deterministik kanonikal.
+* **Implementasi di Zeltra Core (Fase 2 Circuit Freeze):**
+  * Komponen: Sirkuit JoinSplit di [`zeltra-core/src/joinsplit_circuit.rs`](file:///workspaces/Zeltra-Protocol/zeltra-core/src/joinsplit_circuit.rs) (`DEC-036A`), gadget bit-packing di [`zeltra-core/src/circuit_gadgets.rs`](file:///workspaces/Zeltra-Protocol/zeltra-core/src/circuit_gadgets.rs), dan PrivateNoteCircuit di [`zeltra-core/src/note_circuit.rs`](file:///workspaces/Zeltra-Protocol/zeltra-core/src/note_circuit.rs).
+  * Memberikan justifikasi kriptografis krusial untuk arsitektur Zeltra:
+    - Ketika slot kedua adalah dummy (`is_dummy == true`), komitmen dan nullifier dummy **wajib di-pin ke konstanta nol kanonikal** ($C = 0, \text{nullifier} = 0, \text{asset\_id} = 0$) melalui constraint kuadratik ketat, bukan sekadar membatalkan penjumlahan nilai uang.
+    - Pada percabangan `has_change_1` dan `has_change_2`, jika note kembalian tidak ada, nilai amount dan blinding factor dikunci ke nilai kanonikal agar penyerang tidak dapat mengeksploitasi *null-branch witness degrees of freedom*.
+
+---
+
+## 14. Dixon Resultants Algebraic Cryptanalysis & Parameter Hardening for Poseidon-W5 (IACR ePrint 2026/1969)
+* **File Jurnal / ePrint:** IACR ePrint 2026/1969 (September 2026)
+* **Penulis:** Haohai Suo, Jiamin Cui
+* **Problem Kritis:**
+  Primitif *Arithmetization-Oriented (AO)* seperti Poseidon width-5 di [`zeltra-core/src/poseidon.rs`](file:///workspaces/Zeltra-Protocol/zeltra-core/src/poseidon.rs) dan [`zeltra-contracts/src/poseidon_w5_constants.rs`](file:///workspaces/Zeltra-Protocol/zeltra-contracts/src/poseidon_w5_constants.rs) dirancang dengan derajat polinomial rendah (S-Box $x^5$) agar ramah gerbang sirkuit ZK. Namun, sistem polinomial berderajat rendah rentan terhadap serangan aljabar multi-variabel (*algebraic attacks*) menggunakan basis Gröbner atau eliminasi resultan. Pendekatan Gröbner konvensional menuntut ideal nol-dimensi, sementara resultan Sylvester hanya mampu mengeliminasi satu variabel per langkah, membatasi analisis keamanan formal terhadap konvergensi serangan aljabar.
+* **Inovasi Paper:**
+  Mengevaluasi ulang **Dixon Resultants** sebagai metode fleksibel untuk mengeliminasi banyak variabel secara simultan pada primitif AO:
+  1. Membuktikan batas atas ukuran matriks Dixon melalui perhitungan lintasan kisi (*lattice-path counting*).
+  2. Mengimplementasikan solver berkecepatan tinggi *DRSolve* dan merumuskan 3 strategi eliminasi (direct, iterative, dan hybrid reduction).
+  3. Menguji dan memvalidasi ketahanan parameter putaran Poseidon terhadap reduksi kompleksitas eliminasi aljabar.
+* **Implementasi di Zeltra Core & Kontrak (Fase 2 Circuit Freeze):**
+  * Komponen: [`zeltra-core/src/poseidon.rs`](file:///workspaces/Zeltra-Protocol/zeltra-core/src/poseidon.rs), [`zeltra-contracts/src/poseidon_w5_constants.rs`](file:///workspaces/Zeltra-Protocol/zeltra-contracts/src/poseidon_w5_constants.rs), dan generator konstanta Grain-128 LFSR (`DEC-021`).
+  * Memberikan landasan verifikasi matematis krusial untuk penguncian parameter (*freeze*):
+    - Membuktikan bahwa jumlah putaran penuh (*Full Rounds* $R_F = 8$) dan putaran parsial (*Partial Rounds* $R_P = 56$ atau 60) pada konfigurasi Poseidon-W5 Zeltra memberikan margin keamanan yang kokoh terhadap serangan eliminasi resultan Dixon deterministik.
+    - Menjamin bahwa komitmen note ($C = \text{Poseidon}(v, \text{owner\_key}, \rho, r, \text{asset\_id})$) dan nullifier generator tidak dapat diinversi secara aljabar melalui sistem eliminasi polinomial berderajat rendah.

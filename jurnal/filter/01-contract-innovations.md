@@ -16,6 +16,19 @@ Dokumen ini memetakan paper terpilih untuk arsitektur smart contract Zeltra ([`z
 
 ---
 
+## 2. FlatMerkle: In-Contract Arbitrum Accumulator & Gas-Cost Optimization (IACR ePrint 2026/2468)
+* **File Jurnal / ePrint:** IACR ePrint 2026/2468 (Oktober 2026)
+* **Penulis:** Sergio Demian Lerner
+* **Problem di Sistem Klasik:**
+  Pembaruan pohon Merkle biner konvensional di smart contract L2 sering kali memakan biaya gas storage write (`SSTORE`) yang membengkak per transaksi deposit. Selain itu, verifikasi bukti inklusi membutuhkan transmisi rantai node saudara ($O(\log N)$ hashes) yang membebani calldata.
+* **Inovasi Paper:**
+  Merumuskan *FlatMerkle*, struktur akumulator berbasis re-injeksi checkpoint status internal fungsi hash secara periodik ke dalam linear hash stream. Menghasilkan digest tunggal tanpa format komitmen yang terpisah, sambil mempertahankan bukti inklusi kompak $O(\log N)$ dan pembuktian malformasi logaritmik. Paper ini menyajikan analisis komparasi gas in-contract nyata secara komparatif di **Arbitrum Nitro, Ethereum, dan Rootstock**, menyingkap bagaimana arsitektur kompresi calldata dan eksekusi WASM di Arbitrum mengubah efisiensi pemrosesan state on-chain.
+* **Implementasi di Zeltra Stylus:**
+  * Komponen: [`zeltra-contracts/src/merkle.rs`](file:///workspaces/Zeltra-Protocol/zeltra-contracts/src/merkle.rs) (Merkle Mountain Range & ring buffer storage).
+  * Menjadi landasan optimasi arsitektur Merkle Mountain Range (MMR) Stylus WASM Zeltra: memanfaatkan keunggulan eksekusi komputasi Arbitrum Nitro untuk meminimalkan write storage slot, menjaga konsumsi gas deposit langsung (`deposit_direct_note`) tetap flat dan ultra-murah.
+
+---
+
 ## 3. zk-Rollup Verification on BLS12-381 (IACR ePrint 2025/1390)
 * **File Jurnal:** [`jurnal/zk-Rollup-Verification-BLS12-381.md`](file:///workspaces/Zeltra-Protocol/jurnal/zk-Rollup-Verification-BLS12-381.md)
 * **Problem di Sistem Klasik:**

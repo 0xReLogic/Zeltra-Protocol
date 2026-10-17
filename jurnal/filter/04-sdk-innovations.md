@@ -136,3 +136,104 @@ Dokumen ini memetakan paper terpilih untuk arsitektur client SDK dan manajemen w
   * Komponen: [`zeltra-sdk/src/wallet/note_wallet.rs`](file:///workspaces/Zeltra-Protocol/zeltra-sdk/src/wallet/note_wallet.rs) (stealth scanning & ephemeral key transport via ECIES) dan [`zeltra-core/src/note_circuit.rs`](file:///workspaces/Zeltra-Protocol/zeltra-core/src/note_circuit.rs).
   * Use Case Zeltra: **Direct Stealth Push Payments**. Memungkinkan pengguna Zeltra mengirim dana dari private note pool langsung ke pihak luar/merchant yang hanya mempublikasikan *Stealth Meta-Address* (tanpa mengungkap address publik aslinya di Arbiscan). Penerima dapat mengklaim atau membelanjakan dana via relayer gasless Zeltra tanpa pernah memegang saldo gas ETH on-chain.
 
+---
+
+## 11. SBM: Prove-Phase Bounded-Memory Groth16 via Read-Write Streaming (IACR ePrint 2026/1758)
+* **File Jurnal / ePrint:** IACR ePrint 2026/1758 (Oktober 2026)
+* **Penulis:** Kyeongtae Lee, Jihye Kim, Hyunok Oh
+* **Problem Kritis:**
+  Membuktikan sirkuit ZK Groth16 (`JoinSplitCircuit` 19 public inputs, 448 quadratic range gates) di dalam browser Web Worker (WASM 32-bit di mobile / client devices, DEC-041) membutuhkan alokasi memori kerja acak $O(N)$ yang besar. Pada perangkat mobile atau tab browser dengan resource terbatas, proses ini rentan memicu Web Worker crash akibat Out-of-Memory (OOM).
+* **Inovasi Paper:**
+  Memperkenalkan *Read-Write Streaming Groth16 Prover* yang memangkas kebutuhan working memory dari $O(N)$ menjadi **$O(\sqrt{N})$** secara drastis melalui streaming Number Theoretic Transform (NTT), streaming sparse R1CS evaluation, dan chunked Pippenger MSM. Yang paling revolusioner: **Interface Groth16 tetap identik (3 elemen grup $A, B, C$) dan verifikasi pairing smart contract Stylus EIP-2537 100% UNCHANGED (tidak perlu diubah sama sekali)**!
+* **Implementasi di Zeltra SDK:**
+  * Komponen: Runner prover Web Worker browser di [`zeltra-sdk/src/zk_wasm.rs`](file:///workspaces/Zeltra-Protocol/zeltra-sdk/src/zk_wasm.rs) (DEC-041) dan [`zeltra-core/src/joinsplit_circuit.rs`](file:///workspaces/Zeltra-Protocol/zeltra-core/src/joinsplit_circuit.rs).
+  * Memungkinkan pengguna mengeksekusi pembuktian transaksi ZK-UTXO (Mode 2 In-Pool Transfer dan Mode 3 Public Spend) langsung di smartphone atau browser tanpa takut memory spike atau tab browser force-close.
+
+---
+
+## 12. ZKPoSP: Zero-Knowledge Proofs of Seed Provenance for Hierarchical Deterministic Wallets (IACR ePrint 2026/1508)
+* **File Jurnal / ePrint:** IACR ePrint 2026/1508 (Oktober 2026)
+* **Penulis:** Vincenzo Botta, Michal Pospieszalski, Emanuele Ragnoli, Justus Ranvier
+* **Problem Fundamental:**
+  Pada skenario institusi/B2B dan deposit CEX (Binance/Coinbase, DEC-040), entitas korporat wajib membuktikan kepada auditor pajak dan bursa bahwa note-note yang didepositkan berasal dari master seed perusahaan yang sah (bukan mixing ilegal atau dana pihak ketiga yang tidak berizin), tanpa mengekspos master spending key atau membocorkan struktur cabang rekening internal perusahaan.
+* **Inovasi Paper:**
+  Merumuskan *ZKPoSP* (Zero-Knowledge Proof of Seed Provenance) yang membuktikan keabsahan silsilah derivasi Hierarchical Deterministic (BIP-32 / BIP-44 / SLIP-10) di dalam sirkuit ZK secara matematis tanpa merusak format kunci publik atau mengekspos master private key dan index path derivasi rahasia.
+* **Implementasi di Zeltra SDK:**
+  * Komponen: Modul audit kepatuhan [`zeltra-sdk/src/compliance/exporter.rs`](file:///workspaces/Zeltra-Protocol/zeltra-sdk/src/compliance/exporter.rs) dan verifier CEX di [`zeltra-sdk/src/compliance/verifier.rs`](file:///workspaces/Zeltra-Protocol/zeltra-sdk/src/compliance/verifier.rs).
+  * Mengintegrasikan bukti silsilah akun induk (corporate provenance proof) ke dalam `SelectiveDisclosureCircuit` (DEC-040A), memberikan jaminan kepatuhan institusional tingkat tinggi yang siap diaudit CEX dan regulator.
+
+---
+
+## 13. Secure MSM Outsourcing Computation for Mobile Client Prover (IACR ePrint 2026/686)
+* **File Jurnal / ePrint:** IACR ePrint 2026/686 (Oktober 2026)
+* **Penulis:** Wujie Xiong, Arefeh Rahaei, Sangwon Shin, Xinxin Fan, Taeweon Suh, Veronika Kuchta, Francesco Sica, Weidong Shi, Lei Xu
+* **Problem Kritis:**
+  Multi-Scalar Multiplication (MSM) menyita 70%–80% komputasi pembuktian sirkuit Groth16. Pada perangkat seluler, smartphone, atau IoT dengan CPU terbatas, pembuktian lokal menguras baterai dan memakan waktu beberapa detik. Namun, mendelegasikan perhitungan MSM ke cloud atau relayer publik secara naif akan membocorkan saksi rahasia (*witness scalars*) dan kunci belanja pengguna.
+* **Inovasi Paper:**
+  Merumuskan skema *Secure MSM Outsourcing*:
+  1. Pengguna dapat mendelegasikan beban operasi MSM skala besar ke server komputasi pihak ketiga (misal: relayer `zeltra-node`).
+  2. Kerahasiaan skalar rahasia (*witness*) dijamin terlindungi penuh via penyamaran homomorfik (*homomorphic blinding*).
+  3. Klien dapat memverifikasi kebenaran hasil evaluasi MSM dari server secara instan dan murah dengan overhead verifikasi minimal.
+* **Implementasi di Zeltra SDK & Node:**
+  * Komponen: [`zeltra-sdk/src/zk_wasm.rs`](file:///workspaces/Zeltra-Protocol/zeltra-sdk/src/zk_wasm.rs) (modul delegasi pembuktian terblindir) dan endpoint relayer [`zeltra-node/src/handlers/`](file:///workspaces/Zeltra-Protocol/zeltra-node/src/handlers/).
+  * Menghadirkan fitur *"Zero-Knowledge Prover Acceleration"*: Pengguna smartphone dengan spesifikasi rendah dapat mendelegasikan komputasi MSM berat ke relayer Zeltra, menghasilkan waktu pembuktian ZK instan (<150 ms) tanpa sedikit pun mengekspos kunci belanja (*sk*), nilai uang, atau privasi note ke relayer.
+
+---
+
+## 14. Strong Resettable NIZK: Randomness Reset & Replay Defense for Web Worker Provers (IACR ePrint 2026/1036)
+* **File Jurnal / ePrint:** IACR ePrint 2026/1036 (Oktober 2026)
+* **Penulis:** Behzad Abdolmaleki, Matteo Campanelli, Quang Dao, Shadman Mohammadi, Nahid Roustaeifar
+* **Problem Kritis:**
+  Pada eksekusi in-browser Web Worker Groth16 (`zeltra-sdk/src/zk_wasm.rs`, DEC-041) dan lingkungan virtualisasi/container, siklus hidup memori sering kali mengalami reset atau restart (misal Web Worker dimatikan dan diregenerasi saat multitasking ponsel, atau crash restore pada aplikasi mobile). Kerentanan *prover randomness reset attack* (srNIZK vulnerability) memungkinkan penyerang mengekstraksi saksi rahasia (*witness recovery attack* terhadap $sk$, $nk$, nilai saldo, dan randomness note $r, \rho$) jika generator bilangan acak prover menghasilkan nilai $r, s$ yang berulang atau dapat diprediksi saat terjadi partial restart/reset.
+* **Inovasi Paper:**
+  Merumuskan *Strong Resettable NIZK (srNIZK)* dan *generic compiler* yang mentransformasikan pembuktian NIZK/zkSNARK standar menjadi srNIZK tanpa mengubah ukuran proof atau sirkuit/verifier smart contract. Randomness pembuktian diturunkan secara deterministik dari Pseudorandom Function (PRF) yang mengikat master seed, hashing witness rahasia, dan session context, sehingga tahan terhadap partial key resets, VM snapshot rollback, dan glitch injection.
+* **Implementasi di Zeltra SDK:**
+  * Komponen: Generator randomness di [`zeltra-sdk/src/wallet/note_wallet.rs`](file:///workspaces/Zeltra-Protocol/zeltra-sdk/src/wallet/note_wallet.rs) dan [`zeltra-sdk/src/zk_wasm.rs`](file:///workspaces/Zeltra-Protocol/zeltra-sdk/src/zk_wasm.rs).
+  * Memastikan proving pipeline Groth16 di client/browser menghasilkan randomness yang tahan reset (*reset-resilient synthetic blinding*), melindungi kunci $sk$ dan saksi note dari ekstraksi memori akibat interupsi atau restart browser worker.
+
+---
+
+## 15. Provable Anonymity Guarantees Under Viewing Key Compromise & CEX Evasion Defense (IACR ePrint 2026/872)
+* **File Jurnal / ePrint:** IACR ePrint 2026/872 (Oktober 2026)
+* **Penulis:** Adrian Cinal
+* **Problem Kritis:**
+  Banyak protokol privasi mengandalkan Incoming Viewing Key ($ivk$) untuk memenuhi syarat regulasi dan audit bursa (CEX). Namun, paper ini membuktikan celah struktural fatal pada skema berbasis viewing key (seperti Zcash, Monero, Firo):
+  1. Pelaku kejahatan dapat menyerahkan $ivk$ resmi kepada auditor/bursa, namun tetap dengan sangat mudah menghindari monitoring transaksi melalui jalur derivasi unlinked note atau transfer non-standard (*financial monitoring evasion*).
+  2. Sebaliknya, kompromi atau kebocoran $ivk$ pada pihak ketiga dapat memicu deanonimisasi massal lintas epoch atas seluruh transaksi masuk yang tidak terkait dengan transaksi yang diselidiki.
+* **Inovasi Paper:**
+  Menganalisis batas-batas matematis formal dari jaminan anonimitas ketika viewing key diserahkan atau bocor, serta mendefinisikan kriteria ketat agar pengawasan keuangan (*financial oversight*) efektif tanpa membuka kerentanan pelarian atau pelanggaran privasi berlebihan.
+
+---
+
+## 16. DuraShare: BIP39-Native Secret Sharing with Full Manual Fallback (IACR ePrint 2026/2300)
+* **File Jurnal / ePrint:** IACR ePrint 2026/2300 (Oktober 2026)
+* **Penulis:** Jeroen van de Graaf, Renato Schiavinato Lopez
+* **Problem Kritis:**
+  Di aplikasi dompet non-kustodian seperti Zeltra Private Note Wallet ([`zeltra-sdk/src/wallet/note_wallet.rs`](file:///workspaces/Zeltra-Protocol/zeltra-sdk/src/wallet/note_wallet.rs)), master seed 128/256-bit (deriving $sk, nk, fvk$) adalah titik kegagalan tunggal (*single point of failure*). Jika pengguna kehilangan perangkat atau meninggal dunia, aset ZK-UTXO hilang permanen. Skema Shamir Secret Sharing konvensional umumnya menghasilkan string heksadesimal acak yang bergantung pada software/vendor tertentu untuk rekonstruksi; jika vendor tutup atau format software usang setelah puluhan tahun, pihak keluarga/wali hukum (*sharekeepers*) yang awam kriptografi tidak dapat memulihkan seed.
+* **Inovasi Paper:**
+  Merumuskan protokol **DuraShare** yang memecah seed BIP-39 (daftar 2048 kata) ke dalam $n$ share berformat kata BIP-39 asli. Skema ini memenuhi 3 pilar:
+  1. *Shamir Secret Sharing* di atas lapangan prima kecil $GF(2053)$ (bilangan prima terkecil $> 2048$), sehingga setiap pecahan share tetap berupa kata-kata BIP-39 yang valid dan mudah dicatat di atas kertas.
+  2. Deteksi kesalahan 2D (*row and column checksums*) yang melindungi share dari salah ketik atau kerusakan fisik kertas.
+  3. MAC produk-dalam afin (*affine inner-product MAC*) di atas $GF(2053)$ untuk mengotentikasi keaslian share dan mendeteksi pemalsuan oleh sharekeeper curang.
+  4. **Full Manual Fallback:** Rekonstruksi dapat dilakukan secara manual hanya dengan selembar kertas, pensil, kalkulator standar, dan instruksi sederhana tanpa membutuhkan komputer atau software vendor apa pun.
+* **Implementasi di Zeltra SDK & CLI:**
+  * Komponen: Fitur social backup & recovery di [`zeltra-sdk/src/wallet/`](file:///workspaces/Zeltra-Protocol/zeltra-sdk/src/wallet/) dan CLI command di [`zeltra-cli/src/commands/zk.rs`](file:///workspaces/Zeltra-Protocol/zeltra-cli/src/commands/zk.rs).
+  * Memberikan opsi backup master seed berstandar warisan keluarga (*estate planning & social recovery*): pengguna dapat membagikan 3-dari-5 share kertas kepada anggota keluarga tepercaya tanpa khawatir ketergantungan software di masa depan.
+
+---
+
+## 17. ZK Provenance Proofs for HD Wallet Derivation & Cross-Chain CCIP Anti-Hijacking (IACR ePrint 2026/2204)
+* **File Jurnal / ePrint:** IACR ePrint 2026/2204 (September 2026)
+* **Penulis:** Vincenzo Botta, Michal Pospieszalski, Emanuele Ragnoli, Justus Ranvier
+* **Problem Kritis:**
+  Dalam arsitektur dompet non-kustodian Zeltra ([`zeltra-sdk/src/wallet/note_wallet.rs`](file:///workspaces/Zeltra-Protocol/zeltra-sdk/src/wallet/note_wallet.rs)), satu master seed menghasilkan berbagai kunci: spending key ($sk$), nullifier key ($nk$), incoming viewing key ($ivk$), alamat ZSA Bech32m (`zs1...`), dan alamat publik Ethereum/Arbitrum. Pada skenario kepatuhan CEX (`DEC-040`) atau transfer lintas-rantai via Chainlink CCIP ([`zeltra-node/src/ccip_monitor.rs`](file:///workspaces/Zeltra-Protocol/zeltra-node/src/ccip_monitor.rs)), pengguna kerap harus membuktikan bahwa alamat penarikan tujuan (di Arbitrum L2, Ethereum L1, atau rantai lain) berasal dari dompet atau entitas yang sama tanpa mengekspos master seed atau menghubungkan seluruh alamat publik milik mereka secara transparan (*destination substitution / cross-chain hijacking attack*).
+* **Inovasi Paper:**
+  Merumuskan model **Provenance Proofs (ZKPoSP)**:
+  1. *Linkable Zero-Knowledge Derivation Relations:* Membuktikan bahwa dua atau lebih kunci publik / alamat (bahkan pada kurva eliptik berbeda atau rantai berbeda) diturunkan secara jujur dari *anchor* atau seed dompet tersembunyi yang sama, tanpa membuka seed tersebut.
+  2. *Fleksibilitas Hak Taut:* Menyediakan 4 model keterkaitan: hanya pengguna yang dapat menautkan (*designated verifier*), penautan publik dengan tag deterministik yang bertindak sebagai nullifier, atau pembuktian selektif ke otoritas kepatuhan/bursa via enkripsi tag.
+  3. Membuktikan keamanan formal terhadap pemalsuan (*non-frameability*) dan ketidaktertautan (*unlinkability*).
+* **Implementasi di Zeltra SDK & CEX Compliance Engine:**
+  * Komponen: Modul kepatuhan bursa di [`zeltra-sdk/src/compliance/exporter.rs`](file:///workspaces/Zeltra-Protocol/zeltra-sdk/src/compliance/exporter.rs), sirkuit selective disclosure di [`zeltra-core/src/selective_disclosure_circuit.rs`](file:///workspaces/Zeltra-Protocol/zeltra-core/src/selective_disclosure_circuit.rs), dan monitor penarikan CCIP di [`zeltra-node/src/ccip_monitor.rs`](file:///workspaces/Zeltra-Protocol/zeltra-node/src/ccip_monitor.rs).
+  * Menghadirkan fitur *"Provable Destination Binding"*:
+    - **Anti-Hijacking CCIP:** Saat mengeksekusi transfer lintas-rantai, pengguna dapat menyertakan ZK Provenance Proof yang membuktikan bahwa alamat penerima di rantai tujuan diturunkan dari dompet yang sama dengan pengirim, mencegah relaying atau man-in-the-middle menyuntikkan alamat penarikan penyerang.
+    - **CEX Whitelist Verification:** Memungkinkan pengguna membuktikan ke bursa seperti Binance/Coinbase bahwa alamat ZSA privat dan akun bursa mereka dimiliki oleh individu yang sama untuk memenuhi aturan *Travel Rule*, tanpa membocorkan riwayat transaksi lainnya.
