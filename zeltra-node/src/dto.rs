@@ -2,16 +2,6 @@
 
 use serde::{Deserialize, Serialize};
 
-#[allow(dead_code)]
-#[derive(Clone, Serialize, Deserialize)]
-pub struct Session {
-    pub session_id: String,
-    pub com_k: String,
-    pub amount: u64,
-    pub resolved: bool,
-    pub masking_key: Option<String>,
-}
-
 #[derive(Clone, Serialize, Deserialize, Debug)]
 pub struct CrossChainParams {
     pub destination_chain_selector: u64,
@@ -27,15 +17,8 @@ pub struct SpendRequest {
     pub amount: u64,
     pub eip7702_auth: Option<Eip7702Auth>,
     pub cross_chain: Option<CrossChainParams>,
-    // BLS signature components for contract verification
     #[serde(default)]
     pub association_root_hex: Option<String>,
-    #[serde(default)]
-    pub alpha_neg_hex: String,
-    #[serde(default)]
-    pub hm_hex: String,
-    #[serde(default)]
-    pub pk_iss_hex: String,
     #[serde(default)]
     pub recipient_or_intent_hash_hex: Option<String>,
     #[serde(default)]
@@ -362,9 +345,6 @@ impl From<PrivateNoteSpendRequest> for SpendRequest {
             eip7702_auth: None,
             cross_chain: None,
             association_root_hex: None,
-            alpha_neg_hex: String::new(),
-            hm_hex: String::new(),
-            pk_iss_hex: String::new(),
             recipient_or_intent_hash_hex: None,
             expiry: req.expiry,
             nonce_hex: None,

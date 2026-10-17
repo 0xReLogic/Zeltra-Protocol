@@ -213,6 +213,7 @@ WITHOUT exposing spending authority (sk), unspent notes, or total account balanc
    - *Sinergi Alur:* Saat menghadapi problem kritis (finansial, kriptografi, upgrade contract), gunakan Tavily untuk memetakan situasi/status terkini, lalu gunakan Exa untuk menyelami referensi teknis dan paper primernya. Catat temuan kunci di `research/decisions/`.
 6. **Context Tools (Context-Mode):** Prioritaskan `ctx_execute`, `ctx_search`, dan `ctx_batch_execute` saat inspeksi data/log besar (>200 lines) atau multi-sumber agar raw bytes tidak membebani context window LLM.
 7. **Build & Compiler Output (RTK):** Gunakan tooling RTK/tokless untuk memangkas output cargo/compiler dan trace command yang panjang demi efisiensi token dan feedback loop cepat.
+8. **Groq LPU Acceleration (`qwen/qwen3.8-27b`):** Engine komputasi inferensi ultra-cepat (~200–400+ tok/s) via endpoint OpenAI-compatible (`OPENAI_BASE_URL="https://api.groq.com/openai/v1"`). Digunakan untuk semantic extraction Graphify tanpa delay dan benchmarking cepat.
 
 ### While Coding
 
