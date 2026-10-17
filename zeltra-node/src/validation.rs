@@ -10,6 +10,8 @@ use std::collections::HashSet;
 use std::str::FromStr;
 use std::sync::{Arc, OnceLock, RwLock};
 
+pub mod spend_preflight;
+
 /// On-chain Stylus minimum spend amount is 5 USDC (5_000_000 micro-USDC).
 pub const MIN_SPEND_AMOUNT_USDC: u64 = 5_000_000;
 
