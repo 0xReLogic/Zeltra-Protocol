@@ -23,8 +23,7 @@ pub const NUM_PUBLIC_INPUTS: usize = 16;
 
 /// Private note spend circuit for Groth16 proof generation.
 ///
-/// This circuit is independent from `ComplianceCircuit` — it uses different
-/// Poseidon widths, different nullifier derivation, and different public inputs.
+/// Implements 16 public inputs, Poseidon widths 3 and 5, two-limb quote hash, and formal scope binding (DEC-035A/B).
 #[derive(Clone)]
 pub struct PrivateNoteCircuit {
     // ── Public inputs (16 scalar field elements, DEC-035A) ──
@@ -572,7 +571,6 @@ pub struct NoteCircuitKeys {
 }
 
 /// Deterministic seed for PrivateNoteCircuit trusted setup.
-/// Distinct from ComplianceCircuit seed.
 pub const NOTE_CIRCUIT_SETUP_SEED: u64 = 0x4e696d6275734e43; // "ZeltraNC"
 
 /// Generate proving and verifying keys for the PrivateNoteCircuit.

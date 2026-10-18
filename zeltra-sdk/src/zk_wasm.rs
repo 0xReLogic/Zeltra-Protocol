@@ -11,15 +11,12 @@
 //! - Fail-closed error handling with structured diagnostics (Invariant 5)
 //! - Cryptographically secure randomness via OS/WASM CSPRNG (Invariant 6)
 
-#![allow(deprecated)]
-
 use ark_bls12_381::{Bls12_381, Fr};
 use ark_ec::{CurveGroup, PrimeGroup};
 use ark_ff::{PrimeField, UniformRand};
 use ark_relations::gr1cs::{ConstraintSynthesizer, ConstraintSystem};
 use ark_serialize::CanonicalDeserialize;
 use rand::rngs::OsRng;
-use std::sync::OnceLock;
 use wasm_bindgen::prelude::*;
 
 use zeltra_core::{
@@ -27,15 +24,15 @@ use zeltra_core::{
     decompose_challenge_to_limbs, derive_joinsplit_dummy_nullifier, derive_joinsplit_nullifier,
     derive_note_randomness, derive_nullifier, derive_nullifier_key,
     extract_joinsplit_public_inputs, extract_public_inputs, from_evm_scalar,
-    generate_compliance_keys, generate_compliance_proof, generate_disclosure_proof,
-    generate_joinsplit_proof, generate_note_proof, note_commitment, to_evm_g1, to_evm_g2,
-    to_evm_scalar, G1Projective, JoinSplitCircuit, PrivateNoteCircuit, SelectiveDisclosureCircuit,
-    NUM_DISCLOSURE_PUBLIC_INPUTS, NUM_JOINSPLIT_PUBLIC_INPUTS, NUM_PUBLIC_INPUTS,
+    generate_disclosure_proof, generate_joinsplit_proof, generate_note_proof, note_commitment,
+    to_evm_g1, to_evm_g2, to_evm_scalar, JoinSplitCircuit, PrivateNoteCircuit,
+    SelectiveDisclosureCircuit, NUM_DISCLOSURE_PUBLIC_INPUTS, NUM_JOINSPLIT_PUBLIC_INPUTS,
+    NUM_PUBLIC_INPUTS,
 };
 
 use crate::wasm_types::{
     JoinSplitWitnessInput, PrivateNoteWitnessInput, SelectiveDisclosureWitnessInput,
-    WasmProverError, WasmProverResult, ZkComplianceProof,
+    WasmProverError, WasmProverResult,
 };
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -829,110 +826,3 @@ pub fn wasm_prove_selective_disclosure(
     }
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
-// Legacy Compliance Proof Generator (Retained for Backward Compatibility)
-// ═══════════════════════════════════════════════════════════════════════════
-
-static PROVING_KEY: OnceLock<ark_groth16::ProvingKey<Bls12_381>> = OnceLock::new();
-static VERIFYING_KEY: OnceLock<ark_groth16::VerifyingKey<Bls12_381>> = OnceLock::new();
-
-#[wasm_bindgen]
-pub fn init_compliance_keys() -> Result<(), JsValue> {
-    if let Ok(keys) = generate_compliance_keys() {
-        let _ = PROVING_KEY.set(keys.proving_key);
-        let _ = VERIFYING_KEY.set(keys.verifying_key);
-    }
-    Ok(())
-}
-
-#[wasm_bindgen]
-pub fn client_generate_compliance_proof(
-    root_hex: &str,
-    nullifier_hex: &str,
-    recipient_hex: &str,
-    amount_hex: &str,
-) -> Result<ZkComplianceProof, JsValue> {
-    init_compliance_keys()?;
-
-    let mut root_bytes =
-        hex::decode(root_hex).map_err(|_| JsValue::from_str("Invalid input data"))?;
-    let mut nullifier_bytes =
-        hex::decode(nullifier_hex).map_err(|_| JsValue::from_str("Invalid input data"))?;
-    let mut recipient_bytes_decoded =
-        hex::decode(recipient_hex).map_err(|_| JsValue::from_str("Invalid input data"))?;
-    let mut amount_bytes =
-        hex::decode(amount_hex).map_err(|_| JsValue::from_str("Invalid input data"))?;
-
-    if root_bytes.len() != 32 || nullifier_bytes.len() != 32 || amount_bytes.len() != 32 {
-        crate::secure_zeroize_vec(&mut root_bytes);
-        crate::secure_zeroize_vec(&mut nullifier_bytes);
-        crate::secure_zeroize_vec(&mut recipient_bytes_decoded);
-        crate::secure_zeroize_vec(&mut amount_bytes);
-        return Err(JsValue::from_str("Invalid input data"));
-    }
-
-    let mut recipient_bytes = [0u8; 32];
-    if recipient_bytes_decoded.len() == 20 {
-        recipient_bytes[12..].copy_from_slice(&recipient_bytes_decoded);
-    } else if recipient_bytes_decoded.len() == 32 {
-        recipient_bytes.copy_from_slice(&recipient_bytes_decoded);
-    } else {
-        crate::secure_zeroize_vec(&mut root_bytes);
-        crate::secure_zeroize_vec(&mut nullifier_bytes);
-        crate::secure_zeroize_vec(&mut recipient_bytes_decoded);
-        crate::secure_zeroize_vec(&mut amount_bytes);
-        return Err(JsValue::from_str("Invalid input data"));
-    }
-
-    let mut root_fr = Fr::from_be_bytes_mod_order(&root_bytes);
-    let mut recipient_fr = Fr::from_be_bytes_mod_order(&recipient_bytes);
-    let mut amount_fr = Fr::from_be_bytes_mod_order(&amount_bytes);
-
-    let mut rng = OsRng;
-    let mut secret = Fr::rand(&mut rng);
-    let mut randomness = Fr::rand(&mut rng);
-    let mut nullifier_fr = compute_nullifier(secret, randomness);
-
-    let pk = PROVING_KEY
-        .get()
-        .ok_or_else(|| JsValue::from_str("Proving key not initialized"))?;
-
-    let proof = generate_compliance_proof(
-        root_fr,
-        nullifier_fr,
-        recipient_fr,
-        amount_fr,
-        secret,
-        randomness,
-        pk,
-    )
-    .map_err(|_| JsValue::from_str("Proof generation failed"))?;
-
-    let g1 = G1Projective::generator();
-    let pub_inputs = g1 * (root_fr + nullifier_fr + recipient_fr + amount_fr);
-    let pub_inputs_evm = to_evm_g1(&pub_inputs.into_affine());
-
-    crate::secure_zeroize(&mut root_fr);
-    crate::secure_zeroize(&mut nullifier_fr);
-    crate::secure_zeroize(&mut recipient_fr);
-    crate::secure_zeroize(&mut amount_fr);
-    crate::secure_zeroize(&mut secret);
-    crate::secure_zeroize(&mut randomness);
-    crate::secure_zeroize_vec(&mut root_bytes);
-    crate::secure_zeroize_vec(&mut nullifier_bytes);
-    crate::secure_zeroize_vec(&mut recipient_bytes_decoded);
-    crate::secure_zeroize_vec(&mut amount_bytes);
-    crate::secure_zeroize(&mut recipient_bytes);
-
-    let proof_a_neg = -proof.a;
-    let proof_a_neg_evm = to_evm_g1(&proof_a_neg);
-    let proof_b_evm = to_evm_g2(&proof.b);
-    let proof_c_evm = to_evm_g1(&proof.c);
-
-    Ok(ZkComplianceProof::new(
-        hex::encode(proof_a_neg_evm),
-        hex::encode(proof_b_evm),
-        hex::encode(proof_c_evm),
-        hex::encode(pub_inputs_evm),
-    ))
-}
