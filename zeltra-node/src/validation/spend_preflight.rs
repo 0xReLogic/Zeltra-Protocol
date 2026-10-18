@@ -81,7 +81,6 @@ pub async fn validate_private_note_spend_preflight(
         }
     }
 
-
     // 2. Expiry check
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -1012,8 +1011,6 @@ pub async fn validate_joinsplit_spend_preflight(
         }
     }
 
-
-
     // 2. Anti-Aliasing Guard (Zellic 2024 / Singularity Defense)
     if payload.input_nullifier_1 == payload.input_nullifier_2 {
         let response = JoinSplitSpendResponse {
@@ -1692,7 +1689,6 @@ pub async fn validate_joinsplit_spend_preflight(
             estimated_gas_usdc: None,
         });
     }
-
 
     Ok(ValidatedJoinSplitPreflight {
         parsed_inputs,

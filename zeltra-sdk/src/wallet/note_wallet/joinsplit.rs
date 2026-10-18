@@ -2,10 +2,9 @@ use ark_bls12_381::{Bls12_381, Fr};
 use ark_ff::{PrimeField, UniformRand};
 use rand::rngs::OsRng;
 use zeltra_core::{
-    derive_joinsplit_dummy_nullifier, derive_joinsplit_nullifier,
-    encrypt_note_memo_deterministic, extract_joinsplit_public_inputs,
-    fr_to_be_bytes, generate_joinsplit_proof, note_commitment, split_quote_hash_to_limbs,
-    to_evm_g1, to_evm_g2, JoinSplitCircuit, ZeltraShieldedAddress,
+    derive_joinsplit_dummy_nullifier, derive_joinsplit_nullifier, encrypt_note_memo_deterministic,
+    extract_joinsplit_public_inputs, fr_to_be_bytes, generate_joinsplit_proof, note_commitment,
+    split_quote_hash_to_limbs, to_evm_g1, to_evm_g2, JoinSplitCircuit, ZeltraShieldedAddress,
 };
 
 use super::types::*;
@@ -226,7 +225,6 @@ impl PrivateNoteWallet {
             rounds: round_results,
         })
     }
-
 
     /// Prepares a Universal 2-in-2-out JoinSplit Groth16 proof locally using `zeltra-core` JoinSplitCircuit (DEC-030).
     ///
@@ -1294,5 +1292,4 @@ impl PrivateNoteWallet {
 
         Ok(payloads)
     }
-
 }

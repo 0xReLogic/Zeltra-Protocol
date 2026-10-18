@@ -1,7 +1,7 @@
 use ark_bls12_381::Fr;
 use zeltra_core::{
-    decrypt_note_memo, decrypt_note_memo_deterministic, derive_nullifier,
-    derive_owner_key, fr_to_be_bytes, note_commitment, IncomingViewingKey,
+    decrypt_note_memo, decrypt_note_memo_deterministic, derive_nullifier, derive_owner_key,
+    fr_to_be_bytes, note_commitment, IncomingViewingKey,
 };
 
 use super::types::*;
@@ -45,7 +45,6 @@ impl PrivateNoteWallet {
 
         Ok(())
     }
-
 
     /// Recovers notes from on-chain NoteEvent logs, checking nullifiers on-chain (DEC-037).
     /// Recovers notes from on-chain NoteEvent logs using batch nullifier checks (DEC-037).
@@ -625,5 +624,4 @@ impl PrivateNoteWallet {
 
         Ok(self.mmr.leaf_count as u64)
     }
-
 }

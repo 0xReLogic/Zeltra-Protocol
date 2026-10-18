@@ -1,7 +1,7 @@
 use ark_bls12_381::Fr;
 use zeltra_core::{
-    derive_nullifier_key, derive_owner_key, FullViewingKey,
-    IncomingViewingKey, OutcomingViewingKey, ZeltraShieldedAddress,
+    derive_nullifier_key, derive_owner_key, FullViewingKey, IncomingViewingKey,
+    OutcomingViewingKey, ZeltraShieldedAddress,
 };
 
 use super::compliance::ReadOnlyAuditorSession;
@@ -106,5 +106,4 @@ impl PrivateNoteWallet {
         let fvk = self.export_full_viewing_key()?;
         Ok(ReadOnlyAuditorSession::new(fvk))
     }
-
 }

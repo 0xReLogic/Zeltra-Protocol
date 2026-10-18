@@ -299,4 +299,3 @@ async fn process_single_spend(state: &AppState, item: QueuedSpend) {
         }
     }
 }
-

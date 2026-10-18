@@ -2,8 +2,8 @@ use ark_bls12_381::{Bls12_381, Fr};
 use ark_ff::{PrimeField, UniformRand};
 use rand::rngs::OsRng;
 use zeltra_core::{
-    derive_nullifier, encrypt_note_memo, fr_to_be_bytes, generate_note_proof,
-    note_commitment, to_evm_g1, to_evm_g2,
+    derive_nullifier, encrypt_note_memo, fr_to_be_bytes, generate_note_proof, note_commitment,
+    to_evm_g1, to_evm_g2,
 };
 
 use super::types::*;
@@ -131,7 +131,6 @@ impl PrivateNoteWallet {
             &crate::coin_selection::KnapsackConfig::default(),
         )
     }
-
 
     /// Prepares a Groth16 spend proof locally using `zeltra-core` PrivateNoteCircuit.
     ///
@@ -679,5 +678,4 @@ impl PrivateNoteWallet {
             pk,
         )
     }
-
 }

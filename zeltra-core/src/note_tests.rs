@@ -1,4 +1,3 @@
-
 use super::*;
 use ark_std::rand::SeedableRng;
 use ark_std::UniformRand;

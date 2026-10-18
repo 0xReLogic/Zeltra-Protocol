@@ -36,7 +36,6 @@ impl PrivateNoteWallet {
         Ok(())
     }
 
-
     /// Finalizes transaction receipt (2PC Phase 2 - Commit).
     ///
     /// Transitions input note to `Spent` and change note to `Unspent`
@@ -228,5 +227,4 @@ impl PrivateNoteWallet {
     pub fn sync_mempool_expiry(&mut self, session_id: &str) -> Result<(), WalletError> {
         self.rollback_spend(session_id)
     }
-
 }

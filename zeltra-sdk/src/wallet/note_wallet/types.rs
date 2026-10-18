@@ -2,10 +2,7 @@ use ark_bls12_381::Fr;
 use ark_ff::{PrimeField, UniformRand};
 use rand::rngs::OsRng;
 use serde::{Deserialize, Serialize};
-use zeltra_core::{
-    derive_joinsplit_dummy_nullifier, derive_joinsplit_nullifier,
-    fr_from_be_bytes,
-};
+use zeltra_core::{derive_joinsplit_dummy_nullifier, derive_joinsplit_nullifier, fr_from_be_bytes};
 
 /// Minimum non-dust amount (1000 base units = 0.001 USDC)
 pub const DUST_THRESHOLD: u64 = 1_000;
@@ -531,4 +528,3 @@ pub struct MmrProofResponse {
     pub bagged_root: String,
     pub block_number: u64,
 }
-

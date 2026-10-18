@@ -21,29 +21,27 @@ use rand::rngs::OsRng;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
-use zeltra_core::{
-    derive_nullifier_key, derive_viewing_keys, fr_to_be_bytes,
-};
+use zeltra_core::{derive_nullifier_key, derive_viewing_keys, fr_to_be_bytes};
 
 use crate::compliance::AuditRecord;
 
-pub mod types;
-pub mod keys;
-pub mod deposit;
-pub mod spend;
-pub mod joinsplit;
-pub mod sync;
-pub mod state_2pc;
 pub mod compliance;
+pub mod deposit;
+pub mod joinsplit;
+pub mod keys;
+pub mod spend;
+pub mod state_2pc;
+pub mod sync;
+pub mod types;
 
 #[cfg(test)]
 mod tests;
 
-pub use types::*;
 pub use compliance::{
     build_audit_report_inner, check_nullifiers_spent_batch, get_or_init_disclosure_keys,
     recover_from_viewing_key, recover_from_viewing_key_batch, ReadOnlyAuditorSession,
 };
+pub use types::*;
 
 /// Private Note Wallet State
 #[derive(Clone, Serialize, Deserialize)]
@@ -78,7 +76,6 @@ impl Drop for PrivateNoteWallet {
         crate::secure_zeroize_string(&mut self.outcoming_viewing_key_hex);
     }
 }
-
 
 impl PrivateNoteWallet {
     /// Initialize a new wallet deterministically from a 32-byte master seed.
@@ -164,7 +161,6 @@ impl PrivateNoteWallet {
         }
     }
 
-
     /// Returns the exact unspent balance in base integer units for the specified asset.
     pub fn get_unspent_balance(&self, asset_id: u8) -> u64 {
         let from_notes: u64 = self
@@ -179,7 +175,6 @@ impl PrivateNoteWallet {
             self.get_balance(asset_id).unwrap_or(0)
         }
     }
-
 
     /// Aggregate balance of all fully confirmed, spendable notes.
     pub fn balance(&self) -> u64 {
@@ -208,7 +203,6 @@ impl PrivateNoteWallet {
     pub fn total_balance(&self, current_time_secs: u64) -> u64 {
         self.balance() + self.reserved_balance(current_time_secs)
     }
-
 
     /// Calculates the effective spendable balance, treating expired reservations as unspent (DEC-027).
     pub fn effective_balance(&self, current_time_secs: u64) -> u64 {

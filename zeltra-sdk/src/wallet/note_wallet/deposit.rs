@@ -2,8 +2,7 @@ use ark_bls12_381::Fr;
 use ark_ff::UniformRand;
 use rand::rngs::OsRng;
 use zeltra_core::{
-    derive_viewing_keys, encrypt_note_memo_optional, fr_to_be_bytes,
-    note_commitment,
+    derive_viewing_keys, encrypt_note_memo_optional, fr_to_be_bytes, note_commitment,
 };
 
 use super::types::*;
@@ -311,5 +310,4 @@ impl PrivateNoteWallet {
 
         Ok(())
     }
-
 }

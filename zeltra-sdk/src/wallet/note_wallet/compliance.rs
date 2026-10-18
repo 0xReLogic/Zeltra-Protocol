@@ -3,13 +3,13 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use zeltra_core::{
     decrypt_note_memo, decrypt_note_memo_deterministic, derive_joinsplit_nullifier,
-    derive_nullifier, derive_nullifier_key, fr_to_be_bytes,
-    note_commitment, FullViewingKey, IncomingViewingKey,
+    derive_nullifier, derive_nullifier_key, fr_to_be_bytes, note_commitment, FullViewingKey,
+    IncomingViewingKey,
 };
 
-use crate::compliance::*;
 use super::types::*;
 use super::PrivateNoteWallet;
+use crate::compliance::*;
 
 impl PrivateNoteWallet {
     /// Records an audit journal entry into the wallet's double-entry transaction trail.
@@ -284,7 +284,6 @@ impl PrivateNoteWallet {
             ownership_zk_proof: ownership_zk_proof_payload,
         })
     }
-
 }
 
 static DISCLOSURE_KEYS: std::sync::OnceLock<(
@@ -994,4 +993,3 @@ where
 {
     is_spent_query(nullifiers)
 }
-

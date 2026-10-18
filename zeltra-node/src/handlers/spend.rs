@@ -5,11 +5,11 @@
 //! - Minimum balance checks before batch processing -- Finding #10
 //! - Idempotency key support for request deduplication -- Finding #16
 
-use crate::{dto::*, state::AppState};
+pub use crate::batch_processor::process_spend_batch;
 use crate::validation::spend_preflight::{
     validate_joinsplit_spend_preflight, validate_private_note_spend_preflight,
 };
-pub use crate::batch_processor::process_spend_batch;
+use crate::{dto::*, state::AppState};
 use axum::Json;
 
 /// Handler for ZK Private Note Spend (DEC-025 Gate F)
@@ -158,7 +158,10 @@ pub async fn handle_ccip_refund(
         Ok(false) => Json(CcipRefundResponse {
             status: "REJECTED".to_string(),
             nullifier: payload.nullifier,
-            error: Some("Refund not eligible: destination spend not failed or timeout not elapsed".to_string()),
+            error: Some(
+                "Refund not eligible: destination spend not failed or timeout not elapsed"
+                    .to_string(),
+            ),
         }),
         Err(e) => {
             eprintln!("CCIP_REFUND: Error authorizing refund: {}", e);
@@ -177,7 +180,11 @@ pub async fn handle_spend_joinsplit(
 ) -> Json<JoinSplitSpendResponse> {
     // 1. Idempotency check
     if let Some(ref idem_key) = payload.idempotency_key {
-        match state.db.check_idempotency(idem_key, "joinsplit_spend").await {
+        match state
+            .db
+            .check_idempotency(idem_key, "joinsplit_spend")
+            .await
+        {
             Ok(Some(cached_json)) => {
                 if let Ok(cached_resp) =
                     serde_json::from_str::<JoinSplitSpendResponse>(&cached_json)
@@ -252,12 +259,12 @@ pub async fn handle_spend_joinsplit(
 
     // 4. Broadcast transaction to chain or accept in pool
     if let Some(ref client) = state.evm_client {
-        let epoch_1 = payload
-            .epoch_id_1
-            .unwrap_or_else(|| alloy_primitives::U256::from_be_bytes(preflight.parsed_inputs[4]).to::<u32>());
-        let epoch_2 = payload
-            .epoch_id_2
-            .unwrap_or_else(|| alloy_primitives::U256::from_be_bytes(preflight.parsed_inputs[5]).to::<u32>());
+        let epoch_1 = payload.epoch_id_1.unwrap_or_else(|| {
+            alloy_primitives::U256::from_be_bytes(preflight.parsed_inputs[4]).to::<u32>()
+        });
+        let epoch_2 = payload.epoch_id_2.unwrap_or_else(|| {
+            alloy_primitives::U256::from_be_bytes(preflight.parsed_inputs[5]).to::<u32>()
+        });
         let quote_hash_hex = payload.quote_hash.as_deref().unwrap_or("0x00");
 
         match client

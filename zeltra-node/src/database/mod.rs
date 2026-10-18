@@ -366,5 +366,4 @@ impl Database {
 
         Ok(Self { path: path_str })
     }
-
 }
