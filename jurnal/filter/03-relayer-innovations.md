@@ -293,3 +293,40 @@ Dokumen ini memetakan paper terpilih untuk lapisan relayer dan cluster konsensus
 * **Implementasi di Zeltra Node:**
   * Komponen: Sinkronisasi daun MMR di [`zeltra-node/src/handlers/mmr.rs`](file:///workspaces/Zeltra-Protocol/zeltra-node/src/handlers/mmr.rs) dan worker pengindeks di [`zeltra-node/src/mmr_indexer.rs`](file:///workspaces/Zeltra-Protocol/zeltra-node/src/mmr_indexer.rs).
   * Memungkinkan klien Zeltra mengunduh bukti atau daun MMR baru secara instan dan privat menggunakan PIR server-tunggal berkecepatan tinggi: relayer dapat menyisipkan komitmen note baru ke tabel database tanpa perlu mengkalkulasi ulang matriks PIR dari nol.
+
+---
+
+## 19. Batched and Weighted Threshold Encryption with Silent Setup for Decentralized Mempool (IACR ePrint 2026/2087)
+> [!NOTE]
+> **DESENTRALISASI MASA DEPAN (ROADMAP):**
+> Paper ini ditandai khusus sebagai fondasi kriptografi mempool terenkripsi berbasis batched threshold encryption untuk transisi arsitektur menuju **Decentralized Multi-Relayer Network**.
+
+* **File Jurnal / ePrint:** IACR ePrint 2026/2087 (September 2026)
+* **Penulis:** Amit Agarwal, Rutchathon Chairattana-Apirom, Sourav Das, Babak Poorebrahim Gilkalaye
+* **Problem di Sistem Desentralisasi:**
+  Batched Threshold Encryption (BTE) memungkinkan komite relayer terdesentralisasi mendekripsi subset transaksi terpilih secara bersama-sama sambil menjaga kerahasiaan transaksi lainnya untuk mengeliminasi serangan MEV dan frontrunning di mempool. Namun, skema BTE yang ada menghadapi kendala usability besar: (a) ketergantungan pada protokol Distributed Key Generation (DKG) interaktif yang mahal dan lambat, (b) ketergantungan pada batch label saat enkripsi, (c) ciphertexts hanya bisa didekripsi jika sesuai indeks non-konflik, atau (d) ketiadaan dukungan terhadap kebijakan ambang batas berbobot (*weighted threshold*).
+* **Inovasi Paper:**
+  Menyajikan skema BTE pertama yang menyelesaikan keempat masalah di atas secara simultan:
+  1. *Silent Setup:* Kunci publik terbentuk tanpa interaksi DKG antar-relayer.
+  2. *Batch & Index Independent:* Bebas dari keterikatan label batch dan indeks posisi.
+  3. *Weighted Threshold Support:* Mendukung kebijakan threshold berbobot proporsional terhadap stake relayer di jaringan PoS.
+  4. Berbasis grup prima dengan pairing bilinear di Generic Group Model (GGM), menghasilkan ukuran ciphertext terpendek di dunia (hanya 2 elemen grup di luar panjang pesan).
+* **Implementasi di Roadmap Zeltra Node:**
+  * Komponen Roadmap: Ingress mempool terenkripsi anti-MEV di [`zeltra-node/src/handlers/spend.rs`](file:///workspaces/Zeltra-Protocol/zeltra-node/src/handlers/spend.rs) dan agregasi relayer terdesentralisasi di [`zeltra-node/`](file:///workspaces/Zeltra-Protocol/zeltra-node/).
+  * Menyempurnakan roadmap desentralisasi relayer Zeltra: memungkinkan jaringan multi-relayer mengoperasikan mempool terenkripsi tanpa overhead upacara DKG interaktif yang rumit, di mana transaksi spend pengguna didekripsi secara atomik setelah urutan blok dikunci.
+
+---
+
+## 20. RisePIR: Incremental Keyword PIR with Segmented Cuckoo Filters for Real-Time State Sync (IACR ePrint 2026/2082)
+* **File Jurnal / ePrint:** IACR ePrint 2026/2082 (September 2026)
+* **Penulis:** Bao Ninh
+* **Problem Kritis:**
+  Pada sinkronisasi status koin privat dan pengecekan saldo di node RPC/relayer, protokol Private Information Retrieval (PIR) konvensional mengharuskan pemrosesan ulang (*re-preprocessing*) database dari awal setiap kali terjadi mutasi (insert, update, delete). Pada blockchain berkecepatan tinggi di mana daun MMR bertambah terus-menerus, skema statis seperti ChalametPIR memakan waktu 56–686 detik per pembaruan database, tidak layak untuk pemrosesan waktu nyata.
+* **Inovasi Paper:**
+  Memperkenalkan *RisePIR*, skema preprocessing keyword PIR pertama yang mampu menyerap operasi insert, update, dan delete pada penyimpanan key-value dengan biaya komputasi yang proporsional murni terhadap jumlah mutasi saja:
+  1. Menggunakan struktur data baru *$d$-ary Segmented Cuckoo Filter* yang mengurung kandidat bucket dan dinamis di bawah *partial-key cuckoo hashing*.
+  2. Diinstansiasi di atas FrodoPIR dan SimplePIR dengan patch in-place hanya dalam 0.06–4.7 ms per mutasi (5 hingga 6 orde magnitudo lebih cepat daripada re-run statis).
+  3. Teruji nyata pada layanan `eth_getBalance` privat di mainnet dengan waktu respons query 0.69 detik dan absorpsi mutasi per-blok hanya 5.6 ms.
+* **Implementasi di Zeltra Node:**
+  * Komponen: Handler query daun MMR di [`zeltra-node/src/handlers/mmr.rs`](file:///workspaces/Zeltra-Protocol/zeltra-node/src/handlers/mmr.rs) dan database relayer di [`zeltra-node/src/database/mmr.rs`](file:///workspaces/Zeltra-Protocol/zeltra-node/src/database/mmr.rs).
+  * Memungkinkan Zeltra Relayer melayani query pengecekan status note dan saldo komitmen secara *oblivious* (klien memeriksa status nullifier/leaf tanpa membocorkan indeks atau alamat kepada relayer) secara real-time, di mana relayer dapat memperbarui database MMR daun secara instan (<5 ms) seiring bertambahnya transaksi baru tanpa mengorbankan performa query privat.

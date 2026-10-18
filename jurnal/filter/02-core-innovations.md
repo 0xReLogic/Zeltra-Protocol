@@ -184,3 +184,42 @@ Dokumen ini memetakan paper terpilih untuk lapisan kriptografi fundamental Zeltr
   * Memberikan landasan verifikasi matematis krusial untuk penguncian parameter (*freeze*):
     - Membuktikan bahwa jumlah putaran penuh (*Full Rounds* $R_F = 8$) dan putaran parsial (*Partial Rounds* $R_P = 56$ atau 60) pada konfigurasi Poseidon-W5 Zeltra memberikan margin keamanan yang kokoh terhadap serangan eliminasi resultan Dixon deterministik.
     - Menjamin bahwa komitmen note ($C = \text{Poseidon}(v, \text{owner\_key}, \rho, r, \text{asset\_id})$) dan nullifier generator tidak dapat diinversi secara aljabar melalui sistem eliminasi polinomial berderajat rendah.
+
+---
+
+## 15. Forkcipher-Based Committing Security & Context-Binding AEAD (IACR ePrint 2026/2110)
+* **File Jurnal / ePrint:** IACR ePrint 2026/2110 (September 2026)
+* **Penulis:** Elena Andreeva, Maria Eichlseder, Simon Gerhalter, Marcel Nageler, Oliver Christoph Popa, Andreas Weninger
+* **Problem Kritis:**
+  Banyak skema Authenticated Encryption (AE/AEAD) konvensional tidak memberikan jaminan *context-committing security*—yaitu mengikat ciphertext secara kriptografis unik ke konteks enkripsinya. Ketiadaan jaminan ini membuka celah keamanan di mana ciphertext valid dapat dipindahkan atau didekripsi dalam konteks domain yang berbeda tanpa terdeteksi (*ciphertext recycling / multi-context malleability*), seperti menukar memo antar-transaksi atau antar-epoch.
+* **Inovasi Paper:**
+  Mengembangkan committing AE dari properti resistensi tabrakan eksplisit pada *forkcipher*. Mengonstruksi FHashN dan skema AEaH-2K yang menggabungkan AE aman dengan variable-input-length collision-resistant PRF. Memperkenalkan mode AEAD berbasis forkcipher tunggal yang mencapai kerahasiaan, keaslian (*authenticity*), dan keamanan komitmen CMT-4 dalam model standar terbukti.
+* **Implementasi di Zeltra Core:**
+  * Komponen: Enkripsi memo 96-byte di [`zeltra-core/src/note.rs`](file:///workspaces/Zeltra-Protocol/zeltra-core/src/note.rs) (`DEC-037`), ChaCha20-Poly1305 AEAD, dan domain tagging Poseidon.
+  * Menjadi fondasi pengikatan konteks (*context-committing binding*) pada enkripsi memo: ciphertext memo 96-byte diikat langsung dengan komitmen note ($C$) dan epoch ID ($E$) sebagai *Associated Data (AAD)*, memastikan memo terenkripsi tidak dapat dipalsukan, ditukar, atau di-replay ke transaksi koin lain (*CMT-4 security level*).
+
+---
+
+## 16. Top Gun: Degree Annihilation Attacks on Poseidon & Security Margins (IACR ePrint 2026/1254)
+* **File Jurnal / ePrint:** IACR ePrint 2026/1254 (September 2026)
+* **Penulis:** Antonio Sanso, Giuseppe Vitto
+* **Problem Kritis:**
+  Poseidon adalah permutasi arithmetization-oriented yang paling banyak dipakai pada sistem ZK modern. Paper ini memperkenalkan *Degree Annihilation*, teknik serangan aljabar yang memperluas pembatalan koefisien (*coefficient cancellation*) pada serangan round-skipping. Dengan memaksakan kendala aljabar yang membuat suku derajat dominan lenyap (*degree terms vanish*), penyerang dapat menurunkan derajat efektif sistem polinomial secara drastis dan meluncurkan serangan CICO-2 (*Constrained-Input Constrained-Output*) pada varian Poseidon berputaran tereduksi.
+* **Inovasi Paper:**
+  Merumuskan kerangka kerja *multivariate degree annihilation* menggunakan teknik eliminasi, resultan, dan basis Gröbner untuk membatalkan kontribusi derajat putaran parsial secara berturut-turut. Menunjukkan bahwa pada S-box kubik dengan 6 putaran penuh, membuat input putaran parsial pertama menjadi affine memangkas batas derajat akhir hingga faktor tiga.
+* **Implementasi di Zeltra Core & Kontrak:**
+  * Komponen: Parameter putaran Poseidon di [`zeltra-core/src/poseidon.rs`](file:///workspaces/Zeltra-Protocol/zeltra-core/src/poseidon.rs), [`zeltra-contracts/src/poseidon_w5_constants.rs`](file:///workspaces/Zeltra-Protocol/zeltra-contracts/src/poseidon_w5_constants.rs), dan generator konstanta Grain-128 LFSR (`DEC-021`).
+  * Memvalidasi margin keamanan Zeltra: membuktikan bahwa konfigurasi Poseidon Width-5 Zeltra (menggunakan S-box pangkat lima $x^5$, 8 putaran penuh $R_F = 8$, dan 60 putaran parsial $R_P = 60$) memiliki margin derajat aljabar yang eksponensial di atas ambang batas *degree annihilation*, memastikan serangan CICO-2 atau pembatalan derajat aljabar tidak dapat menembus komitmen koin Zeltra.
+
+---
+
+## 17. Slipway: Accessing Finite Subspace Trails & Full-Round Absorption in Poseidon (IACR ePrint 2026/1579)
+* **File Jurnal / ePrint:** IACR ePrint 2026/1579 (September 2026)
+* **Penulis:** Giuseppe Vitto
+* **Problem Kritis:**
+  Analisis ketahanan Poseidon terhadap *finite subspace trails* (jejak sub-ruang hingga) pada putaran parsial. Jika suatu arah konstan melintasi beberapa putaran parsial berturut-turut, S-box tidak menambah derajat aljabar. Paper ini mengungkap fenomena *full-round absorption*: jika matriks linier MDS dan konstanta putaran memiliki relasi aljabar tersembunyi, penyerang dapat mengonstruksi keluarga input khusus yang melintasi 4 putaran penuh awal tanpa mengalami pertumbuhan derajat aljabar, membuka akses langsung ke subspace trail dan menghasilkan serangan CICO-2/CICO-3 penuh pada instansiasi Poseidon tertentu.
+* **Inovasi Paper:**
+  Mendemonstrasikan bahwa matriks MDS yang memenuhi kriteria uji standar desainer Poseidon pun masih bisa memiliki sifat *reachability* ke subspace trail jika terdapat relasi aljabar dengan putaran penuh prefix. Merumuskan batas matematis pada dimensi trail dan citra matriks (*matrix-image bound*) untuk mendeteksi serta mencegah fenomena full-round absorption.
+* **Implementasi di Zeltra Core:**
+  * Komponen: Generator matriks Cauchy MDS di [`zeltra-core/src/poseidon.rs`](file:///workspaces/Zeltra-Protocol/zeltra-core/src/poseidon.rs) dan generator Grain-128 LFSR (`DEC-021`).
+  * Menjadi panduan verifikasi formal untuk matriks MDS Poseidon Zeltra: memastikan matriks MDS $5 \times 5$ (W5) dan $3 \times 3$ (W3) di-generate murni dari ekspansi Grain-128 LFSR yang independen secara statistik dari round constants, memutus total kemungkinan *full-round absorption* dan menjamin tidak ada subspace trail yang dapat diakses dari input manapun.
