@@ -1,6 +1,5 @@
 pub mod accounting;
 pub mod circuit_gadgets;
-pub mod compliance_circuit;
 pub mod evm;
 pub mod fees;
 pub mod joinsplit_circuit;
@@ -43,13 +42,6 @@ pub use fees::{
     THIRTY_DAYS_SECS, WEI_PER_GWEI,
 };
 
-// Re-export compliance circuit (deprecated prototype)
-#[allow(deprecated)]
-pub use compliance_circuit::{
-    generate_compliance_keys, generate_compliance_proof, generate_evm_vk_constants,
-    serialize_vk_bytes, verify_compliance_proof, ComplianceCircuit, ComplianceKeys,
-    TRUSTED_SETUP_SEED,
-};
 
 // Re-export Poseidon hash & canonical Grain LFSR (DEC-021)
 pub use poseidon::{
