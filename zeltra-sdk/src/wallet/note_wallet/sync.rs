@@ -427,7 +427,6 @@ impl PrivateNoteWallet {
         Ok(note)
     }
 
-
     /// Deserializes sibling hex strings from MmrProofResponse into Fr scalar arrays (C4.2).
     pub fn deserialize_mmr_siblings(
         proof_data: &MmrProofResponse,

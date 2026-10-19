@@ -22,6 +22,11 @@
 ## 1. Kriptografi, Circuit Freeze & MPC Trusted Setup (Fase 2)
 Ref: [`docs/roadmap.md`](file:///workspaces/Zeltra-Protocol/docs/roadmap.md) (Fase 2) & [`research/decisions/DEC-035`](file:///workspaces/Zeltra-Protocol/research/decisions/DEC-035-cryptographic-canonicality-public-input-binding-and-mmr.md)
 
+- [ ] **In-Memory Incremental MMR Engine & Relayer Proof Acceleration (DEC-045):**
+  - Implementasikan `Arc<tokio::sync::RwLock<MerkleMountainRange>>` pada `AppState`.
+  - Refaktor `handle_mmr_proof` agar melayani proof murni dari in-memory state ($O(\log N)$ tanpa disk I/O & tanpa full tree rebuild).
+  - Refaktor background worker `mmr_indexer` agar mengonsumsi leaf secara inkremental via `append_leaf` ($O(1)$ amortized).
+  - Implementasikan 1-byte View Tag pada SDK (`zeltra-sdk`) untuk akselerasi scanning memo client (23.6x speedup).
 - [ ] **Circuit ABI & Constraints Freeze:**
   - Kunci mati parameter R1CS dan public-input ABI pada 16 PI (`PrivateNoteCircuit`) dan 19 PI (`JoinSplitCircuit`).
   - Finalisasi parameter Two-Limb quote hash, Formal Scope Binding Gadget, dan 448 quadratic range gates.

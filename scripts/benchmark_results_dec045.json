@@ -1,0 +1,113 @@
+{
+  "timestamp": 1792389867.2331228,
+  "load_scaling": [
+    {
+      "leaf_count": 100,
+      "populate_ms": 69.87,
+      "load_time_ms": 54.425,
+      "leaves_per_sec": 1837.3909049150209
+    },
+    {
+      "leaf_count": 500,
+      "populate_ms": 272.97,
+      "load_time_ms": 241.853,
+      "leaves_per_sec": 2067.3715025242604
+    },
+    {
+      "leaf_count": 1000,
+      "populate_ms": 662.89,
+      "load_time_ms": 534.989,
+      "leaves_per_sec": 1869.1973105989093
+    },
+    {
+      "leaf_count": 2500,
+      "populate_ms": 1546.61,
+      "load_time_ms": 1435.342,
+      "leaves_per_sec": 1741.7451729274276
+    },
+    {
+      "leaf_count": 5000,
+      "populate_ms": 3373.95,
+      "load_time_ms": 3130.399,
+      "leaves_per_sec": 1597.2404795682596
+    }
+  ],
+  "proof_decomposition": [
+    {
+      "leaf_count": 1000,
+      "load_time_ms": 522.8365980000001,
+      "proof_gen_time_us": 43442,
+      "total_current_ms": 566.279054,
+      "cached_proof_time_us": 46235,
+      "speedup_factor": 12.247725986818768,
+      "wasted_percent": 92.32843671452487
+    },
+    {
+      "leaf_count": 2500,
+      "load_time_ms": 1455.047542,
+      "proof_gen_time_us": 173178,
+      "total_current_ms": 1628.227457,
+      "cached_proof_time_us": 182848,
+      "speedup_factor": 8.904769764492928,
+      "wasted_percent": 89.36389911277611
+    },
+    {
+      "leaf_count": 5000,
+      "load_time_ms": 3151.257471,
+      "proof_gen_time_us": 377757,
+      "total_current_ms": 3529.01569,
+      "cached_proof_time_us": 366365,
+      "speedup_factor": 9.632486053016496,
+      "wasted_percent": 89.29564920693225
+    }
+  ],
+  "indexer_append": [
+    {
+      "leaf_count": 1001,
+      "rebuild_and_append_us": 553385,
+      "pure_incremental_append_us": 584,
+      "speedup_factor": 947.58
+    },
+    {
+      "leaf_count": 2501,
+      "rebuild_and_append_us": 1458707,
+      "pure_incremental_append_us": 504,
+      "speedup_factor": 2894.26
+    },
+    {
+      "leaf_count": 5001,
+      "rebuild_and_append_us": 3173967,
+      "pure_incremental_append_us": 523,
+      "speedup_factor": 6068.77
+    }
+  ],
+  "http_concurrency": {
+    "current": {
+      "total_requests": 60,
+      "concurrency": 10,
+      "total_time_sec": 75.91379038199966,
+      "rps": 0.7903702304690471,
+      "p50_ms": 12383.015104000151,
+      "p95_ms": 14414.045758000157,
+      "p99_ms": 15556.941275999634
+    },
+    "cached": {
+      "total_requests": 200,
+      "concurrency": 20,
+      "total_time_sec": 25.420717821999915,
+      "rps": 7.867598444718721,
+      "p50_ms": 2580.220743999689,
+      "p95_ms": 3539.250497000012,
+      "p99_ms": 3847.3459370002274
+    },
+    "rps_speedup": 9.954320319035391,
+    "latency_reduction": 4.799207638647542
+  },
+  "view_tag_simulation": {
+    "num_memos": 2000,
+    "full_scan_ms": 2.7157499998793355,
+    "tag_scan_ms": 0.11514600009832066,
+    "speedup": 23.585274326163443,
+    "filter_efficiency_pct": 99.5
+  }
+}

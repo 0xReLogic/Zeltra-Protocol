@@ -825,4 +825,3 @@ pub fn wasm_prove_selective_disclosure(
         }
     }
 }
-

@@ -42,7 +42,6 @@ pub use fees::{
     THIRTY_DAYS_SECS, WEI_PER_GWEI,
 };
 
-
 // Re-export Poseidon hash & canonical Grain LFSR (DEC-021)
 pub use poseidon::{
     compute_nullifier, generate_grain_round_constants, native_poseidon_w3, native_poseidon_w5,
