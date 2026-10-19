@@ -40,6 +40,38 @@ impl Database {
         .await?
     }
 
+    /// Batch insert multiple indexed MMR leaf commitments inside a single transaction (DEC-035C / DEC-044)
+    pub async fn batch_insert_mmr_leaves(
+        &self,
+        leaves: Vec<(u64, String, String, u64, Vec<u8>)>,
+    ) -> Result<()> {
+        let path = self.path.clone();
+        let db_key = database_key()?;
+
+        task::spawn_blocking(move || -> Result<()> {
+            let mut conn = open_connection(&path, &db_key)?;
+            let tx = conn.transaction()?;
+            {
+                let mut stmt = tx.prepare(
+                    "INSERT INTO mmr_leaves (leaf_index, commitment, tx_hash, block_number, encrypted_memo)
+                     VALUES (?, ?, ?, ?, ?)",
+                )?;
+                for (leaf_index, commitment, tx_hash, block_number, memo) in leaves {
+                    stmt.execute(params![
+                        leaf_index as i64,
+                        commitment,
+                        tx_hash,
+                        block_number as i64,
+                        memo
+                    ])?;
+                }
+            }
+            tx.commit()?;
+            Ok(())
+        })
+        .await?
+    }
+
     /// Retrieve an MMR leaf record by leaf index (DEC-035C / DEC-037)
     pub async fn get_mmr_leaf(&self, leaf_index: u64) -> Result<Option<MmrLeafRecord>> {
         let path = self.path.clone();
