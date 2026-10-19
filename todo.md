@@ -22,12 +22,10 @@
 ## 1. Kriptografi, Circuit Freeze & MPC Trusted Setup (Fase 2)
 Ref: [`docs/roadmap.md`](file:///workspaces/Zeltra-Protocol/docs/roadmap.md) (Fase 2) & [`research/decisions/DEC-035`](file:///workspaces/Zeltra-Protocol/research/decisions/DEC-035-cryptographic-canonicality-public-input-binding-and-mmr.md)
 
-- [ ] **In-Memory Incremental MMR Engine & Zero-Hash Proof Acceleration (DEC-045):**
-  - Implementasikan Flat Post-Order MMR Node Array (`nodes: Vec<Fr>`) pada `zeltra-core` (menyimpan intermediate parent nodes saat append).
-  - Jadikan `generate_proof()` murni $O(\log N)$ array read tanpa kalkulasi Poseidon hash on-the-fly (memangkas latensi dari 366 ms ke < 20 µs).
-  - Pasang `Arc<tokio::sync::RwLock<FlatMerkleMountainRange>>` pada `AppState`.
-  - Refaktor background worker `mmr_indexer` agar mengonsumsi leaf secara inkremental via `append_leaf` ($O(1)$ amortized / ~500 µs).
-  - Implementasikan 1-byte View Tag pada SDK (`zeltra-sdk`) untuk akselerasi scanning memo client (23.6x speedup).
+- [ ] **In-Memory Incremental MMR Engine & Zero-Hash Proof Acceleration (DEC-045 Series):**
+  - **DEC-045A (`zeltra-core`):** Implementasikan Flat Post-Order MMR Node Array (`nodes: Vec<Fr>`) dengan formula Peter Todd, simpan intermediate parent nodes saat append, dan jadikan `generate_proof()` murni $O(\log N)$ array read (0 Poseidon Hash, latensi < 20 µs).
+  - **DEC-045B (`zeltra-node`):** Integrasikan `Arc<tokio::sync::RwLock<FlatMerkleMountainRange>>` pada `AppState`, refaktor `handle_mmr_proof` read-path, implementasikan single-writer inkremental append di `mmr_indexer` (~500 µs), dan definisikan abstraksi trait `MMRStore` (siap RocksDB/mmap).
+  - **DEC-045C (`zeltra-sdk`):** Implementasikan 1-byte View Tag protocol derivasi HKDF pada memo 96-byte dan refaktor loop scanner dompet agar memfilter 99.5% note asing sebelum AEAD (23.6x speedup).
 - [ ] **Circuit ABI & Constraints Freeze:**
   - Kunci mati parameter R1CS dan public-input ABI pada 16 PI (`PrivateNoteCircuit`) dan 19 PI (`JoinSplitCircuit`).
   - Finalisasi parameter Two-Limb quote hash, Formal Scope Binding Gadget, dan 448 quadratic range gates.
