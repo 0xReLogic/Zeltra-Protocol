@@ -5,6 +5,10 @@
 **Domain:** `zeltra-node`, `zeltra-core`, `zeltra-sdk`  
 **Security Level:** CRITICAL (Proof Availability, DoS Immunity, Sub-Millisecond Latency, Zero CPU Starvation)  
 **Related Decisions:**
+- Sub-Specifications:
+  - [`DEC-045A: Flat Post-Order MMR Array, Bitwise Sibling Navigation & Zero-Hash Proof Engine`](file:///workspaces/Zeltra-Protocol/research/decisions/DEC-045A-flat-postorder-mmr-array-and-zero-hash-proof-engine.md)
+  - [`DEC-045B: In-Memory Concurrent Accumulator, Incremental Indexer & Zero-Latency Proof Ingress`](file:///workspaces/Zeltra-Protocol/research/decisions/DEC-045B-in-memory-concurrent-accumulator-and-relayer-proof-ingress.md)
+  - [`DEC-045C: 1-Byte View Tag Memo Protocol & High-Throughput Client Trial Decryption`](file:///workspaces/Zeltra-Protocol/research/decisions/DEC-045C-view-tag-memo-protocol-and-client-scanning-acceleration.md)
 - [`DEC-032: Merkle Mountain Range Commitment Accumulator`](file:///workspaces/Zeltra-Protocol/research/decisions/DEC-032-merkle-mountain-range-commitment-accumulator.md)
 - [`DEC-035C: Relayer MMR Indexer Worker and Client Sync Architecture`](file:///workspaces/Zeltra-Protocol/research/decisions/DEC-035C-relayer-mmr-indexer-worker-and-client-sync-architecture.md)
 - [`DEC-037: Note Encryption Memo & Viewing Key Recovery`](file:///workspaces/Zeltra-Protocol/research/decisions/DEC-037-note-encryption-memo-and-viewing-key-recovery.md)
