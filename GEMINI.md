@@ -27,12 +27,12 @@ Dokumen ini adalah memori konteks persisten untuk agen AI saat bekerja di reposi
 2. **Direct MMR Deposit (DEC-038B / DEC-034B):** Deposit langsung via `deposit_direct_note` (USDC) atau `deposit_direct_native_eth` (ETH payable auto-wrap) menyisipkan komitmen note ke Merkle Mountain Range (`_mmr_insert`), memancarkan event `NoteCommitmentAppended` berisi 96-byte AEAD memo, dan seketika berstatus unspent tanpa perantara kunci $k$.
 3. **Stateless Sequencer Relayer (DEC-038C):** Single stateless sequencer node (`scripts/start_relayer.sh`), murni melayani ingress ZK spend, preflight verification, Zero-Oracle gas reimbursement (Gwei untuk WETH, Micro-USDC untuk USDC), dan dynamic MMR sync.
 
-### B. Pondasi Kriptografi, Sirkuit ZK & Ekosistem Lengkap (DEC-034 s/d DEC-043)
+### B. Pondasi Kriptografi, Sirkuit ZK & Ekosistem Lengkap (DEC-034 s/d DEC-045)
 * **Sirkuit Groth16 (zeltra-core):**
   - **1-in-1-out (`PrivateNoteCircuit`):** 16 Public Inputs (DEC-035A), 128-bit Two-Limb quote hash, Formal Scope Binding Gadget (DEC-035B), Poseidon Grain-128 LFSR (DEC-021), 64-bit integer range constraints, dan evolusi nullifier 2-Epoch (DEC-033).
   - **Universal 2-in-2-out (`JoinSplitCircuit`):** 19 Public Inputs (DEC-036A), constant-arity topology, canonical dummy input/output slots, multi-asset bit-packing (`flags_packed`), dan 448 quadratic range gates.
   - **CEX Selective Disclosure (`SelectiveDisclosureCircuit` - DEC-040A):** Sirkuit kepatuhan Groth16 dengan Verifier Binding (mengikat alamat bursa CEX & challenge nonce) untuk membuktikan asal dana note secara selektif ke Binance/Coinbase tanpa mengekspos kunci belanja ($sk$).
-* **Akumulator MMR (DEC-032):** In-memory dan on-chain Merkle Mountain Range dengan canonical peak bagging backward fold (`DOMAIN_MMR_BAG`) dan ring buffer 100 accepted roots.
+* **Akumulator MMR & Akselerasi Proof (DEC-032 & DEC-045):** In-memory dan on-chain Merkle Mountain Range. Flat Post-Order Array (`FlatMerkleMountainRange`) dengan formula Peter Todd, $O(\log N)$ zero-hash proof (<20 µs), concurrent thread-safe accumulator di `zeltra-node`, dan 1-byte HKDF View Tag memo di `zeltra-sdk` (23.6x scanning acceleration).
 * **Smart Contract Stylus (zeltra-contracts):**
   - Verifikasi Groth16 BLS12-381 via EIP-2537 (`0x0c` MSM + `0x0f` Pairing Check) di WASM Stylus.
   - **Strict 3-Mode State Machine (DEC-043B):**
@@ -41,7 +41,7 @@ Dokumen ini adalah memori konteks persisten untuk agen AI saat bekerja di reposi
     * Mode 3: Public Spend (`recipient != 0x0`, protocol fee flat 45 bps).
   - Invariant solvensi terisolasi multi-aset (`_check_asset_solvency_invariant`).
 * **Client SDK & Wallet State (zeltra-sdk):**
-  - `PrivateNoteWallet`: Tiered Stochastic Knapsack Coin Selection multi-aset, in-pool shielded transfer (`prepare_shielded_transfer_proof`), trial decryption scanner multi-aset (`recover_notes_batch`), alamat ZSA Bech32m (`zs1...` - DEC-043A), dan 2PC crash-safe storage.
+  - `PrivateNoteWallet`: Tiered Stochastic Knapsack Coin Selection multi-aset, in-pool shielded transfer (`prepare_shielded_transfer_proof`), View Tag fast-scanner (`recover_notes_batch`), alamat ZSA Bech32m (`zs1...` - DEC-043A), dan 2PC crash-safe storage.
   - **B2B Double-Entry Compliance & CEX Verifier Engine (DEC-040B/C):** Modul `compliance/` untuk ekspor laporan audit pajak dan verifikasi independen oleh bursa.
   - **In-Browser Web Worker Prover (DEC-041):** Runner prover Groth16 langsung di browser via Web Worker dengan isolasi memori sekali pakai (`worker.terminate()`) anti-OOM linear.
   - **Pure ZK-UTXO HTTP 402 Facilitator (DEC-042):** Mikropembayaran AI Agent sub-sen murni ZK-UTXO.
@@ -152,7 +152,7 @@ Mengacu pada master checklist [`todo.md`](file:///workspaces/Zeltra-Protocol/tod
 │   ├── scripts/test_real_case_dec043c_inpool_wallet.py — Test suite Python independen 44/44 lolos
 │   └── scripts/check_balance.py, ht01_init_verification.py, ht04_spend_negative_tests.py, ht05_refund_tests.py, ht10_signed_quote_tests.py
 │
-├── research/decisions/       — 64 Dokumen Arsitektur & Keputusan Desain Resmi (DEC-001 s/d DEC-043C)
+├── research/decisions/       — 69 Dokumen Arsitektur & Keputusan Desain Resmi (DEC-001 s/d DEC-045C)
 ├── todo.md                   — Master Active Backlog (murni task pending [ ])
 └── docs/                     — Dokumentasi Analisis & Panduan Modular (bisnis.md, analisis/, contract/, core/, relayer/, sdk/, cli/)
 ```
