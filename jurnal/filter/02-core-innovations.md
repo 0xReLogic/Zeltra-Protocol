@@ -161,7 +161,7 @@ Dokumen ini memetakan paper terpilih untuk lapisan kriptografi fundamental Zeltr
   Banyak sirkuit ZK modern yang memuat percabangan kondisional (seperti apakah suatu slot input bersifat aktif atau *dummy*, apakah ada *change note*, atau apakah rollover aktif). Paper ini mengungkap celah fatal bernama **Null-Branch Witness Attack**: ketika sebuah perkalian constraint dikalikan dengan faktor nol (misal $(1 - \text{is\_active}) \cdot \dots$ atau $\text{has\_change} \cdot \dots$), intermediate wire di cabang yang tidak aktif sering kali dibiarkan bebas tanpa ikatan (*unconstrained zero factor*). Akibatnya, prover jahat dapat mengisi nilai acak yang valid secara matematis pada wire tersebut untuk memalsukan bukti (*public-key-only forgery*) tanpa melanggar *soundness* sirkuit tingkat tinggi.
 * **Inovasi Paper:**
   Menganalisis kesenjangan mendasar antara *One-Way Function (OWF) Hardness* dan *Proof-System Soundness*, membuktikan bahwa verifier menerima bukti palsu karena relasi arithmetisasi sirkuit membiarkan cabang null memiliki ruang solusi bebas. Paper ini merumuskan teknik *Quadratic Encoding Soundness* yang secara ketat mengunci seluruh wire pada cabang non-aktif ke konstanta deterministik kanonikal.
-* **Implementasi di Zeltra Core (Fase 2 Circuit Freeze — Spesifikasi Resmi: [`DEC-046`](file:///workspaces/Zeltra-Protocol/research/decisions/DEC-046-null-branch-witness-attack-defense-and-quadratic-encoding-soundness.md)):**
+* **Implementasi di Zeltra Core (Hardening Aljabar — DEC-046):**
   * Komponen: Sirkuit JoinSplit di [`zeltra-core/src/joinsplit_circuit.rs`](file:///workspaces/Zeltra-Protocol/zeltra-core/src/joinsplit_circuit.rs) (`DEC-036A`), gadget bit-packing di [`zeltra-core/src/circuit_gadgets.rs`](file:///workspaces/Zeltra-Protocol/zeltra-core/src/circuit_gadgets.rs), dan PrivateNoteCircuit di [`zeltra-core/src/note_circuit.rs`](file:///workspaces/Zeltra-Protocol/zeltra-core/src/note_circuit.rs).
   * Memberikan justifikasi kriptografis krusial untuk arsitektur Zeltra:
     - Ketika slot kedua adalah dummy (`is_dummy == true`), komitmen dan nullifier dummy **wajib di-pin ke konstanta nol kanonikal** ($C = 0, \text{nullifier} = 0, \text{asset\_id} = 0$) melalui constraint kuadratik ketat, bukan sekadar membatalkan penjumlahan nilai uang.
@@ -180,9 +180,9 @@ Dokumen ini memetakan paper terpilih untuk lapisan kriptografi fundamental Zeltr
   1. Membuktikan batas atas ukuran matriks Dixon melalui perhitungan lintasan kisi (*lattice-path counting*).
   2. Mengimplementasikan solver berkecepatan tinggi *DRSolve* dan merumuskan 3 strategi eliminasi (direct, iterative, dan hybrid reduction).
   3. Menguji dan memvalidasi ketahanan parameter putaran Poseidon terhadap reduksi kompleksitas eliminasi aljabar.
-* **Implementasi di Zeltra Core & Kontrak (Fase 2 Circuit Freeze):**
+* **Implementasi di Zeltra Core & Kontrak:**
   * Komponen: [`zeltra-core/src/poseidon.rs`](file:///workspaces/Zeltra-Protocol/zeltra-core/src/poseidon.rs), [`zeltra-contracts/src/poseidon_w5_constants.rs`](file:///workspaces/Zeltra-Protocol/zeltra-contracts/src/poseidon_w5_constants.rs), dan generator konstanta Grain-128 LFSR (`DEC-021`).
-  * Memberikan landasan verifikasi matematis krusial untuk penguncian parameter (*freeze*):
+  * Memberikan landasan verifikasi matematis krusial untuk ketahanan parameter aljabar:
     - Membuktikan bahwa jumlah putaran penuh (*Full Rounds* $R_F = 8$) dan putaran parsial (*Partial Rounds* $R_P = 56$ atau 60) pada konfigurasi Poseidon-W5 Zeltra memberikan margin keamanan yang kokoh terhadap serangan eliminasi resultan Dixon deterministik.
     - Menjamin bahwa komitmen note ($C = \text{Poseidon}(v, \text{owner\_key}, \rho, r, \text{asset\_id})$) dan nullifier generator tidak dapat diinversi secara aljabar melalui sistem eliminasi polinomial berderajat rendah.
 
