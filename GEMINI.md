@@ -30,7 +30,7 @@ Dokumen ini adalah memori konteks persisten untuk agen AI saat bekerja di reposi
 ### B. Pondasi Kriptografi, Sirkuit ZK & Ekosistem Lengkap (DEC-034 s/d DEC-046)
 * **Sirkuit Groth16 (zeltra-core):**
   - **1-in-1-out (`PrivateNoteCircuit`):** 16 Public Inputs (DEC-035A), 128-bit Two-Limb quote hash, Formal Scope Binding Gadget (DEC-035B), Poseidon Grain-128 LFSR (DEC-021), 64-bit integer range constraints, dan evolusi nullifier 2-Epoch (DEC-033).
-  - **Universal 2-in-2-out (`JoinSplitCircuit`):** 19 Public Inputs (DEC-036A), constant topology, 448 quadratic range gates, dan penguncian dummy slot ([`DEC-046`](file:///workspaces/Zeltra-Protocol/research/decisions/DEC-046-null-branch-witness-attack-defense-and-quadratic-encoding-soundness.md)).
+  - **Universal 2-in-2-out (`JoinSplitCircuit`):** 19 Public Inputs (DEC-036A), constant-arity topology, canonical dummy input/output slots, multi-asset bit-packing (`flags_packed`), 448 quadratic range gates, dan penguncian gerbang pendamping kuadratik deterministik anti-null branch (DEC-046).
   - **CEX Selective Disclosure (`SelectiveDisclosureCircuit` - DEC-040A):** Sirkuit kepatuhan Groth16 dengan Verifier Binding (mengikat alamat bursa CEX & challenge nonce) untuk membuktikan asal dana note secara selektif ke Binance/Coinbase tanpa mengekspos kunci belanja ($sk$).
 * **Akumulator MMR & Akselerasi Proof (DEC-032 & DEC-045):** In-memory dan on-chain Merkle Mountain Range. Flat Post-Order Array (`FlatMerkleMountainRange`) dengan formula Peter Todd, $O(\log N)$ zero-hash proof (<20 µs), concurrent thread-safe accumulator di `zeltra-node`, dan 1-byte HKDF View Tag memo di `zeltra-sdk` (23.6x scanning acceleration).
 * **Smart Contract Stylus (zeltra-contracts):**
