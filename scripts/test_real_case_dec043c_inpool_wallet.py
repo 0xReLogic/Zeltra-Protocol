@@ -133,10 +133,14 @@ def run_rust_harness(bin_path: str, args: List[str]) -> Dict[str, Any]:
     res = subprocess.run([bin_path] + args, capture_output=True, text=True)
     if res.returncode != 0:
         raise RuntimeError(f"Rust harness failed: {res.stderr.strip()}")
-    try:
-        return json.loads(res.stdout.strip())
-    except json.JSONDecodeError:
-        raise RuntimeError(f"Failed to parse Rust harness JSON: {res.stdout.strip()}")
+    for line in res.stdout.splitlines():
+        line = line.strip()
+        if line.startswith("{") and line.endswith("}"):
+            try:
+                return json.loads(line)
+            except json.JSONDecodeError:
+                pass
+    raise RuntimeError(f"Failed to parse Rust harness JSON: {res.stdout.strip()}")
 
 
 # ==============================================================================
@@ -219,6 +223,29 @@ def python_decrypt_memo(
 
         return value, rho_bytes, asset_id, shared_secret
     except Exception:
+        # Support DEC-045C View Tag V2 format fallback
+        try:
+            hk_key = HKDF(
+                algorithm=hashes.SHA256(),
+                length=43,
+                salt=b"ZELTRA_NOTE_MEMO_KDF_V1",
+                info=b"ZELTRA_MEMO_CIPHER_V1",
+            )
+            okm = hk_key.derive(shared_secret)
+            c_key = okm[:32]
+            n_11 = okm[32:43]
+            if encrypted_memo[33:44] != n_11:
+                return None
+            c = ChaCha20Poly1305(c_key)
+            pt = c.decrypt(n_11 + b"\x00", encrypted_memo[44:96], None)
+            if len(pt) == 36:
+                header = int.from_bytes(pt[:4], byteorder="big")
+                aid = (header >> 31) & 1
+                val = header & 0x7FFFFFFF
+                rho = pt[4:36]
+                return val, rho, aid, shared_secret
+        except Exception:
+            pass
         return None
 
 

@@ -2,9 +2,11 @@ use ark_bls12_381::{Bls12_381, Fr};
 use ark_ff::{PrimeField, UniformRand};
 use rand::rngs::OsRng;
 use zeltra_core::{
-    derive_joinsplit_dummy_nullifier, derive_joinsplit_nullifier, encrypt_note_memo_deterministic,
-    extract_joinsplit_public_inputs, fr_to_be_bytes, generate_joinsplit_proof, note_commitment,
-    split_quote_hash_to_limbs, to_evm_g1, to_evm_g2, JoinSplitCircuit, ZeltraShieldedAddress,
+    derive_joinsplit_dummy_nullifier, derive_joinsplit_nullifier, derive_nullifier_key,
+    encrypt_note_memo_deterministic, extract_joinsplit_public_inputs, fr_to_be_bytes,
+    generate_joinsplit_proof, note_commitment, split_quote_hash_to_limbs, to_evm_g1, to_evm_g2,
+    JoinSplitCircuit, ZeltraShieldedAddress, CANONICAL_DUMMY_LEAF_INDEX, CANONICAL_DUMMY_OWNER,
+    CANONICAL_DUMMY_RANDOMNESS, CANONICAL_DUMMY_RHO, CANONICAL_DUMMY_VALUE,
 };
 
 use super::types::*;
@@ -380,12 +382,13 @@ impl PrivateNoteWallet {
             // Canonical Dummy Witness Synthesis (B4.2)
             let mut rng = OsRng;
             let dummy_nonce = Fr::rand(&mut rng);
-            let dummy_nf = derive_joinsplit_dummy_nullifier(nk, dummy_nonce);
+            let dummy_nk = derive_nullifier_key(CANONICAL_DUMMY_OWNER);
+            let dummy_nf = derive_joinsplit_dummy_nullifier(dummy_nk, dummy_nonce);
             (
-                Fr::from(0u64),
-                Fr::from(0u64),
-                Fr::from(0u64),
-                Fr::from(0u64),
+                Fr::from(CANONICAL_DUMMY_VALUE),
+                CANONICAL_DUMMY_RHO,
+                CANONICAL_DUMMY_RANDOMNESS,
+                Fr::from(CANONICAL_DUMMY_LEAF_INDEX),
                 0u8,
                 [Fr::from(0u64); 32],
                 Fr::from(1u64), // is dummy
@@ -443,19 +446,32 @@ impl PrivateNoteWallet {
             (Fr::from(selected.change_amount), c_cm, c_rho, c_rand)
         } else {
             // Direction B: Canonical dummy output commitment (value = 0)
-            let mut rng = OsRng;
-            let c_rho = Fr::rand(&mut rng);
-            let c_rand = Fr::rand(&mut rng);
-            let c_cm = note_commitment(0, input_note_1.asset_id, sk, c_rho, c_rand);
-            (Fr::from(0u64), c_cm, c_rho, c_rand)
+            let c_cm = note_commitment(
+                CANONICAL_DUMMY_VALUE,
+                input_note_1.asset_id,
+                CANONICAL_DUMMY_OWNER,
+                CANONICAL_DUMMY_RHO,
+                CANONICAL_DUMMY_RANDOMNESS,
+            );
+            (
+                Fr::from(CANONICAL_DUMMY_VALUE),
+                c_cm,
+                CANONICAL_DUMMY_RHO,
+                CANONICAL_DUMMY_RANDOMNESS,
+            )
         };
 
         // Output 2 is canonical dummy output commitment with value = 0 (ZIP 315 Constant-Arity Output Gadget)
-        let mut rng = OsRng;
-        let ch2_val = Fr::from(0u64);
-        let ch2_rho = Fr::rand(&mut rng);
-        let ch2_rand = Fr::rand(&mut rng);
-        let ch2_cm = note_commitment(0, input_note_1.asset_id, sk, ch2_rho, ch2_rand);
+        let ch2_val = Fr::from(CANONICAL_DUMMY_VALUE);
+        let ch2_rho = CANONICAL_DUMMY_RHO;
+        let ch2_rand = CANONICAL_DUMMY_RANDOMNESS;
+        let ch2_cm = note_commitment(
+            CANONICAL_DUMMY_VALUE,
+            input_note_1.asset_id,
+            CANONICAL_DUMMY_OWNER,
+            CANONICAL_DUMMY_RHO,
+            CANONICAL_DUMMY_RANDOMNESS,
+        );
 
         // 6. EVM parameters & domain scope
         let recipient_bytes = parse_bytes32_from_hex(recipient_evm_address, true)?;
@@ -517,10 +533,26 @@ impl PrivateNoteWallet {
             in1_mountain_siblings: Some(in1_mountain_siblings),
 
             in2_value: Some(in2_val),
-            in2_owner_key: Some(sk),
-            in2_rho: Some(in2_rho),
-            in2_randomness: Some(in2_rand),
-            in2_leaf_index: Some(in2_index),
+            in2_owner_key: Some(if in2_is_dummy == Fr::from(1u64) {
+                CANONICAL_DUMMY_OWNER
+            } else {
+                sk
+            }),
+            in2_rho: Some(if in2_is_dummy == Fr::from(1u64) {
+                CANONICAL_DUMMY_RHO
+            } else {
+                in2_rho
+            }),
+            in2_randomness: Some(if in2_is_dummy == Fr::from(1u64) {
+                CANONICAL_DUMMY_RANDOMNESS
+            } else {
+                in2_rand
+            }),
+            in2_leaf_index: Some(if in2_is_dummy == Fr::from(1u64) {
+                Fr::from(CANONICAL_DUMMY_LEAF_INDEX)
+            } else {
+                in2_index
+            }),
             in2_mountain_height: Some(in2_mountain_height),
             in2_mountain_siblings: Some(in2_mountain_siblings),
             in2_is_dummy: Some(in2_is_dummy),
@@ -529,12 +561,24 @@ impl PrivateNoteWallet {
             mmr_peaks: Some(mmr_peaks),
 
             out1_value: Some(ch1_val),
-            out1_owner_key: Some(sk),
-            out1_rho: Some(ch1_rho),
-            out1_randomness: Some(ch1_rand),
+            out1_owner_key: Some(if selected.has_change {
+                sk
+            } else {
+                CANONICAL_DUMMY_OWNER
+            }),
+            out1_rho: Some(if selected.has_change {
+                ch1_rho
+            } else {
+                CANONICAL_DUMMY_RHO
+            }),
+            out1_randomness: Some(if selected.has_change {
+                ch1_rand
+            } else {
+                CANONICAL_DUMMY_RANDOMNESS
+            }),
 
             out2_value: Some(ch2_val),
-            out2_owner_key: Some(sk),
+            out2_owner_key: Some(CANONICAL_DUMMY_OWNER),
             out2_rho: Some(ch2_rho),
             out2_randomness: Some(ch2_rand),
 
@@ -865,13 +909,14 @@ impl PrivateNoteWallet {
             // Canonical Dummy Witness Synthesis
             let mut rng = OsRng;
             let dummy_nonce = Fr::rand(&mut rng);
-            let dummy_nf = derive_joinsplit_dummy_nullifier(nk, dummy_nonce);
+            let dummy_nk = derive_nullifier_key(CANONICAL_DUMMY_OWNER);
+            let dummy_nf = derive_joinsplit_dummy_nullifier(dummy_nk, dummy_nonce);
             (
-                Fr::from(0u64),
-                sk,
-                Fr::from(0u64),
-                Fr::from(0u64),
-                Fr::from(0u64),
+                Fr::from(CANONICAL_DUMMY_VALUE),
+                CANONICAL_DUMMY_OWNER,
+                CANONICAL_DUMMY_RHO,
+                CANONICAL_DUMMY_RANDOMNESS,
+                Fr::from(CANONICAL_DUMMY_LEAF_INDEX),
                 0u8,
                 [Fr::from(0u64); 32],
                 Fr::from(1u64), // is dummy
@@ -953,15 +998,28 @@ impl PrivateNoteWallet {
         } else {
             // Random encryption for dummy memo (AUD-7: anti-topologic leak)
             let rho_2 = Fr::rand(&mut rng);
-            let (dummy_memo, rand_2) =
+            let (dummy_memo, _rand_2) =
                 encrypt_note_memo_deterministic(0, rho_2, asset_id as u64, &sender_pk_ivk)
                     .map_err(|e| {
                         WalletError::CryptoError(format!("Dummy memo encryption failed: {e}"))
                     })?;
 
-            let dummy_cm = note_commitment(0, asset_id, sender_owner_key, rho_2, rand_2);
+            let dummy_cm = note_commitment(
+                CANONICAL_DUMMY_VALUE,
+                asset_id,
+                CANONICAL_DUMMY_OWNER,
+                CANONICAL_DUMMY_RHO,
+                CANONICAL_DUMMY_RANDOMNESS,
+            );
 
-            (Fr::from(0u64), dummy_cm, dummy_memo, false, rho_2, rand_2)
+            (
+                Fr::from(CANONICAL_DUMMY_VALUE),
+                dummy_cm,
+                dummy_memo,
+                false,
+                CANONICAL_DUMMY_RHO,
+                CANONICAL_DUMMY_RANDOMNESS,
+            )
         };
 
         // 9. EVM parameters & domain scope (Mode 2: merchant_amount = 0, protocol_fee = 0, recipient = Address::ZERO)
@@ -1038,9 +1096,21 @@ impl PrivateNoteWallet {
             out1_randomness: Some(rand_1),
 
             out2_value: Some(ch2_val),
-            out2_owner_key: Some(sender_owner_key),
-            out2_rho: Some(ch2_rho),
-            out2_randomness: Some(ch2_rand),
+            out2_owner_key: Some(if has_change_2 {
+                sender_owner_key
+            } else {
+                CANONICAL_DUMMY_OWNER
+            }),
+            out2_rho: Some(if has_change_2 {
+                ch2_rho
+            } else {
+                CANONICAL_DUMMY_RHO
+            }),
+            out2_randomness: Some(if has_change_2 {
+                ch2_rand
+            } else {
+                CANONICAL_DUMMY_RANDOMNESS
+            }),
 
             has_change_1: Some(has_change_1_fr),
             has_change_2: Some(has_change_2_fr),
