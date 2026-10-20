@@ -14,6 +14,7 @@ use std::fs;
 use std::path::PathBuf;
 use zeltra_core::from_evm_proof;
 use zeltra_core::joinsplit_circuit::{get_or_init_joinsplit_circuit_keys, verify_joinsplit_proof};
+use zeltra_core::PrimeField;
 use zeltra_node::database::Database;
 use zeltra_node::dto::{JoinSplitSpendRequest, JoinSplitSpendResponse};
 use zeltra_node::handlers::spend::handle_spend_joinsplit;
@@ -286,6 +287,170 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 .expect("verification execution");
 
             println!(r#"{{"verified":{}}}"#, verified);
+        }
+
+        "derive_view_tag" => {
+            if args.len() < 3 {
+                eprintln!("Usage: inpool_interop derive_view_tag <shared_secret_hex>");
+                std::process::exit(1);
+            }
+            let secret_clean = args[2].strip_prefix("0x").unwrap_or(&args[2]);
+            let secret_bytes = hex::decode(secret_clean).expect("valid shared_secret hex");
+            let secret_arr: [u8; 32] = secret_bytes.try_into().expect("32 bytes shared secret");
+            let tag = zeltra_core::derive_view_tag(&secret_arr);
+            println!(r#"{{"view_tag":{}}}"#, tag);
+        }
+
+        "encrypt_memo_v2" => {
+            // encrypt_memo_v2 <recipient_pk_ivk_hex> <value> <rho_hex> <asset_id>
+            if args.len() < 6 {
+                eprintln!("Usage: inpool_interop encrypt_memo_v2 <recipient_pk_ivk_hex> <value> <rho_hex> <asset_id>");
+                std::process::exit(1);
+            }
+            let pk_clean = args[2].strip_prefix("0x").unwrap_or(&args[2]);
+            let pk_bytes: [u8; 32] = hex::decode(pk_clean)
+                .expect("valid pk hex")
+                .try_into()
+                .expect("32 bytes pk");
+            let value: u64 = args[3].parse().expect("valid value");
+            let rho = parse_fr_from_hex(&args[4]).expect("valid rho hex");
+            let asset_id: u64 = args[5].parse().expect("valid asset_id");
+
+            let (memo, rand) =
+                zeltra_core::encrypt_note_memo_deterministic(value, rho, asset_id, &pk_bytes)
+                    .expect("memo encryption");
+            let view_tag = memo[32];
+            let owner_fr = if args.len() > 6 {
+                parse_fr_from_hex(&args[6])
+                    .unwrap_or_else(|_| zeltra_core::Fr::from_be_bytes_mod_order(&pk_bytes))
+            } else {
+                zeltra_core::Fr::from_be_bytes_mod_order(&pk_bytes)
+            };
+            let cm = zeltra_core::note_commitment(value, asset_id as u8, owner_fr, rho, rand);
+
+            println!(
+                r#"{{"memo_hex":"{}","view_tag":{},"randomness_hex":"{}","commitment_hex":"{}"}}"#,
+                hex::encode(&memo),
+                view_tag,
+                hex::encode(zeltra_core::fr_to_be_bytes(&rand)),
+                hex::encode(zeltra_core::fr_to_be_bytes(&cm))
+            );
+        }
+
+        "encrypt_legacy_memo" => {
+            // encrypt_legacy_memo <recipient_pk_ivk_hex> <value> <rho_hex> <asset_id> [owner_key_hex]
+            if args.len() < 6 {
+                eprintln!("Usage: inpool_interop encrypt_legacy_memo <recipient_pk_ivk_hex> <value> <rho_hex> <asset_id> [owner_key_hex]");
+                std::process::exit(1);
+            }
+            let pk_clean = args[2].strip_prefix("0x").unwrap_or(&args[2]);
+            let pk_bytes: [u8; 32] = hex::decode(pk_clean)
+                .expect("valid pk hex")
+                .try_into()
+                .expect("32 bytes pk");
+            let value: u64 = args[3].parse().expect("valid value");
+            let rho = parse_fr_from_hex(&args[4]).expect("valid rho hex");
+            let asset_id: u64 = args[5].parse().expect("valid asset_id");
+
+            let (memo, rand) =
+                zeltra_core::create_legacy_dec037_memo(value, rho, asset_id, pk_bytes);
+            let owner_fr = if args.len() > 6 {
+                parse_fr_from_hex(&args[6])
+                    .unwrap_or_else(|_| zeltra_core::Fr::from_be_bytes_mod_order(&pk_bytes))
+            } else {
+                zeltra_core::Fr::from_be_bytes_mod_order(&pk_bytes)
+            };
+            let cm = zeltra_core::note_commitment(value, asset_id as u8, owner_fr, rho, rand);
+
+            println!(
+                r#"{{"memo_hex":"{}","randomness_hex":"{}","commitment_hex":"{}"}}"#,
+                hex::encode(&memo),
+                hex::encode(zeltra_core::fr_to_be_bytes(&rand)),
+                hex::encode(zeltra_core::fr_to_be_bytes(&cm))
+            );
+        }
+
+        "decrypt_memo_v2" => {
+            // decrypt_memo_v2 <ivk_secret_hex> <memo_hex>
+            if args.len() < 4 {
+                eprintln!("Usage: inpool_interop decrypt_memo_v2 <ivk_secret_hex> <memo_hex>");
+                std::process::exit(1);
+            }
+            let ivk_clean = args[2].strip_prefix("0x").unwrap_or(&args[2]);
+            let ivk_bytes: [u8; 32] = hex::decode(ivk_clean)
+                .expect("valid ivk hex")
+                .try_into()
+                .expect("32 bytes ivk");
+            let ivk = zeltra_core::IncomingViewingKey::from_bytes(&ivk_bytes);
+            let memo_clean = args[3].strip_prefix("0x").unwrap_or(&args[3]);
+            let memo_bytes = hex::decode(memo_clean).expect("valid memo hex");
+
+            if let Some((pt, rand)) =
+                zeltra_core::decrypt_note_memo_deterministic(&memo_bytes, &ivk)
+            {
+                println!(
+                    r#"{{"success":true,"value":{},"asset_id":{},"rho_hex":"{}","randomness_hex":"{}"}}"#,
+                    pt.value,
+                    pt.asset_id,
+                    hex::encode(zeltra_core::fr_to_be_bytes(&pt.rho)),
+                    hex::encode(zeltra_core::fr_to_be_bytes(&rand))
+                );
+            } else {
+                println!(r#"{{"success":false}}"#);
+            }
+        }
+
+        "fast_scan_memos" => {
+            // fast_scan_memos <recipient_seed> <events_json> [asset_id]
+            if args.len() < 4 {
+                eprintln!("Usage: inpool_interop fast_scan_memos <recipient_seed> <events_json> [asset_id]");
+                std::process::exit(1);
+            }
+            let seed_bytes = hex::decode(&args[2]).unwrap_or_else(|_| args[2].as_bytes().to_vec());
+            let mut seed_arr = [0u8; 32];
+            for (i, b) in seed_bytes.iter().take(32).enumerate() {
+                seed_arr[i] = *b;
+            }
+            let mut wallet = PrivateNoteWallet::new(&seed_arr);
+            let events_str = if args[3].starts_with('@') {
+                fs::read_to_string(&args[3][1..]).expect("readable events file")
+            } else if std::path::Path::new(&args[3]).is_file() {
+                fs::read_to_string(&args[3]).expect("readable events file")
+            } else {
+                args[3].clone()
+            };
+            let events_raw: Vec<serde_json::Value> =
+                serde_json::from_str(&events_str).expect("valid events json");
+            let mut events = Vec::new();
+            for ev in events_raw {
+                let leaf_index = ev["leaf_index"].as_u64().unwrap_or(0);
+                let cm_hex = ev["commitment_hex"].as_str().unwrap_or("").to_string();
+                let memo_hex = ev["encrypted_memo_hex"].as_str().unwrap_or("");
+                let memo_clean = memo_hex.strip_prefix("0x").unwrap_or(memo_hex);
+                let memo_bytes = hex::decode(memo_clean).unwrap_or_default();
+                events.push(NoteEvent {
+                    leaf_index,
+                    commitment_hex: cm_hex,
+                    new_mmr_root_hex: "0xroot".to_string(),
+                    leaf_count: leaf_index + 1,
+                    encrypted_memo: memo_bytes,
+                    block_number: Some(100),
+                });
+            }
+            let asset_id: u8 = if args.len() > 4 {
+                args[4].parse().unwrap_or(1)
+            } else {
+                1
+            };
+
+            let rec = wallet.scan_memos_fast(&events).expect("fast scan");
+            let wallet_bal = wallet.get_balance(asset_id).unwrap_or(0);
+            println!(
+                r#"{{"recovered_count":{},"total_unspent_balance":{},"wallet_balance":{}}}"#,
+                rec.recovered_notes.len(),
+                rec.total_unspent_balance,
+                wallet_bal
+            );
         }
 
         _ => {

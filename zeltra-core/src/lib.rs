@@ -84,5 +84,8 @@ pub use selective_disclosure_circuit::{
     NUM_DISCLOSURE_PUBLIC_INPUTS,
 };
 
+pub use hkdf;
+pub use x25519_dalek;
+
 #[cfg(test)]
 mod formal_tests;
