@@ -20,11 +20,17 @@
 
 ---
 
-## 1. Kriptografi, Circuit Freeze & MPC Trusted Setup (Fase 2)
-Ref: [`docs/roadmap.md`](file:///workspaces/Zeltra-Protocol/docs/roadmap.md) (Fase 2) & [`research/decisions/DEC-035`](file:///workspaces/Zeltra-Protocol/research/decisions/DEC-035-cryptographic-canonicality-public-input-binding-and-mmr.md)
+## 1. Kriptografi, Circuit Hardening & MPC Setup (Fase 2 — Fleksibilitas R&D Terbuka)
+Ref: [`docs/roadmap.md`](file:///workspaces/Zeltra-Protocol/docs/roadmap.md) (Fase 2), [`research/decisions/DEC-035`](file:///workspaces/Zeltra-Protocol/research/decisions/DEC-035-cryptographic-canonicality-public-input-binding-and-mmr.md), & [`research/decisions/DEC-046`](file:///workspaces/Zeltra-Protocol/research/decisions/DEC-046-null-branch-witness-attack-defense-and-quadratic-encoding-soundness.md)
 
-- [ ] **Circuit ABI & Constraints Freeze:**
-  - Kunci mati parameter R1CS dan public-input ABI pada 16 PI (`PrivateNoteCircuit`) dan 19 PI (`JoinSplitCircuit`).
+> [!NOTE]
+> **Status Fleksibilitas:** Mengingat deploy Arbitrum sedang jeda/freeze (Oktober 2026), **sirkuit ZK BELUM DIKUNCI**. Tim bebas mengembangkan fitur inovatif (SBM Prover, MinMandate, iSimplePIR) dan memperkuat aljabar sirkuit tanpa terburu-buru melakukan *circuit freeze*.
+
+- [ ] **DEC-046 Quadratic Encoding Soundness & Null-Branch Defense:**
+  - Terapkan gerbang pendamping kuadratik kanonikal deterministik pada [`zeltra-core/src/joinsplit_circuit.rs`](file:///workspaces/Zeltra-Protocol/zeltra-core/src/joinsplit_circuit.rs) (pinning dummy input slot 2, inactive change outputs 1 & 2, dan zero-safe anti-aliasing inverse `diff_inv`).
+  - Uji soundness sirkuit dengan memasukkan saksi non-kanonikal pada cabang null untuk memastikan prover gagal (`cs.is_satisfied() == false`).
+- [ ] **Circuit ABI & Constraints Freeze (Ditangguhkan hingga R&D Lengkap):**
+  - Kunci mati parameter R1CS dan public-input ABI pada 16 PI (`PrivateNoteCircuit`) dan 19 PI (`JoinSplitCircuit`) ketika seluruh fitur siap ke mainnet.
   - Finalisasi parameter Two-Limb quote hash, Formal Scope Binding Gadget, dan 448 quadratic range gates.
 - [ ] **Proving/Verifying Keys Management:**
   - Simpan proving/verifying key resmi sebagai artifact versioned; pastikan test runner menggunakan cached dev keys secara terisolasi.

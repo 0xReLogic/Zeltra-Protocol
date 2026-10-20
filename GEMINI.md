@@ -27,10 +27,10 @@ Dokumen ini adalah memori konteks persisten untuk agen AI saat bekerja di reposi
 2. **Direct MMR Deposit (DEC-038B / DEC-034B):** Deposit langsung via `deposit_direct_note` (USDC) atau `deposit_direct_native_eth` (ETH payable auto-wrap) menyisipkan komitmen note ke Merkle Mountain Range (`_mmr_insert`), memancarkan event `NoteCommitmentAppended` berisi 96-byte AEAD memo, dan seketika berstatus unspent tanpa perantara kunci $k$.
 3. **Stateless Sequencer Relayer (DEC-038C):** Single stateless sequencer node (`scripts/start_relayer.sh`), murni melayani ingress ZK spend, preflight verification, Zero-Oracle gas reimbursement (Gwei untuk WETH, Micro-USDC untuk USDC), dan dynamic MMR sync.
 
-### B. Pondasi Kriptografi, Sirkuit ZK & Ekosistem Lengkap (DEC-034 s/d DEC-045)
+### B. Pondasi Kriptografi, Sirkuit ZK & Ekosistem Lengkap (DEC-034 s/d DEC-046)
 * **Sirkuit Groth16 (zeltra-core):**
   - **1-in-1-out (`PrivateNoteCircuit`):** 16 Public Inputs (DEC-035A), 128-bit Two-Limb quote hash, Formal Scope Binding Gadget (DEC-035B), Poseidon Grain-128 LFSR (DEC-021), 64-bit integer range constraints, dan evolusi nullifier 2-Epoch (DEC-033).
-  - **Universal 2-in-2-out (`JoinSplitCircuit`):** 19 Public Inputs (DEC-036A), constant-arity topology, canonical dummy input/output slots, multi-asset bit-packing (`flags_packed`), dan 448 quadratic range gates.
+  - **Universal 2-in-2-out (`JoinSplitCircuit`):** 19 Public Inputs (DEC-036A), constant topology, 448 quadratic range gates, dan penguncian dummy slot ([`DEC-046`](file:///workspaces/Zeltra-Protocol/research/decisions/DEC-046-null-branch-witness-attack-defense-and-quadratic-encoding-soundness.md)).
   - **CEX Selective Disclosure (`SelectiveDisclosureCircuit` - DEC-040A):** Sirkuit kepatuhan Groth16 dengan Verifier Binding (mengikat alamat bursa CEX & challenge nonce) untuk membuktikan asal dana note secara selektif ke Binance/Coinbase tanpa mengekspos kunci belanja ($sk$).
 * **Akumulator MMR & Akselerasi Proof (DEC-032 & DEC-045):** In-memory dan on-chain Merkle Mountain Range. Flat Post-Order Array (`FlatMerkleMountainRange`) dengan formula Peter Todd, $O(\log N)$ zero-hash proof (<20 µs), concurrent thread-safe accumulator di `zeltra-node`, dan 1-byte HKDF View Tag memo di `zeltra-sdk` (23.6x scanning acceleration).
 * **Smart Contract Stylus (zeltra-contracts):**
@@ -48,16 +48,21 @@ Dokumen ini adalah memori konteks persisten untuk agen AI saat bekerja di reposi
 
 ---
 
-## 3. Prioritas Aktif Selanjutnya
+## 3. Prioritas Aktif Selanjutnya (Fleksibilitas R&D & Jeda Deploy Arbitrum)
 
 Seluruh task di **Fase 0 (Dual-Asset)** dan **Fase 1 (SDK, Browser Prover & Ekosistem Fitur)** telah **100% SELESAI, DIAUDIT & TERVERIFIKASI**.
 
+> [!NOTE]
+> **PENTING UNTUK AGENT (Sirkuit BELUM Dikunci):**  
+> Status deployment Arbitrum sedang mengalami jeda/freeze (Oktober 2026), sehingga Zeltra memiliki banyak waktu luang dan fleksibilitas (*flexible runway*). **Sirkuit ZK TIDAK/BELUM DIKUNCI (Circuit is UNLOCKED & FLEXIBLE)**. Agent tidak perlu bersikap kaku atau paranoid soal circuit freeze. Parameter sirkuit, public input, dan R1CS gadgets masih bebas dikembangkan dan dioptimasi (misal: SBM Groth16 streaming di SDK, MinMandate untuk AI Agent, iSimplePIR di Relayer, dan penguatan aljabar DEC-046).
+
 Mengacu pada master checklist [`todo.md`](file:///workspaces/Zeltra-Protocol/todo.md) dan [`docs/roadmap.md`](file:///workspaces/Zeltra-Protocol/docs/roadmap.md), prioritas aktif saat ini adalah:
 
-1. **Fase 2 — Circuit Freeze, Security Audit & Trusted Setup MPC:**
-   * Kunci mati constraints R1CS 16 PI (`PrivateNoteCircuit`) & 19 PI (`JoinSplitCircuit`) beserta public-input ABI.
-   * Isolasi artifact versioning untuk proving/verifying keys dev vs production.
-   * Persiapan harness upacara MPC Phase 2 Trusted Setup.
+1. **Fase 2 — Hardening Kriptografi, Eksplorasi Fitur & Persiapan MPC:**
+   * Hardening aljabar sirkuit (DEC-046: penguncian cabang dummy slot & anti-aliasing inverse zero-safe) tanpa terburu-buru mengunci R1CS.
+   * Eksplorasi inovasi riset unggul (SBM Streaming Prover $O(\sqrt{N})$, iSimplePIR, MinMandate).
+   * Verifikasi diagnostik otomatis via rank matriks Jacobian (`formal_tests.rs`, IACR 2026/1852).
+   * Persiapan harness upacara MPC Phase 2 Trusted Setup (dijalankan nanti saat siap mainnet).
    * Review keamanan sirkuit independen & smart contract Stylus.
 2. **Fase 3 — Keamanan & Sanitasi Kredensial:**
    * Rotasi seluruh secret/private key dev historis dan pembersihan git commit history.
@@ -152,7 +157,7 @@ Mengacu pada master checklist [`todo.md`](file:///workspaces/Zeltra-Protocol/tod
 │   ├── scripts/test_real_case_dec043c_inpool_wallet.py — Test suite Python independen 44/44 lolos
 │   └── scripts/check_balance.py, ht01_init_verification.py, ht04_spend_negative_tests.py, ht05_refund_tests.py, ht10_signed_quote_tests.py
 │
-├── research/decisions/       — 69 Dokumen Arsitektur & Keputusan Desain Resmi (DEC-001 s/d DEC-045C)
+├── research/decisions/       — 70 Dokumen Arsitektur & Keputusan Desain Resmi (DEC-001 s/d DEC-046)
 ├── todo.md                   — Master Active Backlog (murni task pending [ ])
 └── docs/                     — Dokumentasi Analisis & Panduan Modular (bisnis.md, analisis/, contract/, core/, relayer/, sdk/, cli/)
 ```
