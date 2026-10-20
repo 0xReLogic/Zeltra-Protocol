@@ -23,6 +23,8 @@ pub mod types;
 #[cfg(test)]
 mod tests;
 
+#[allow(unused_imports)]
+pub use mmr::{MMRStore, SqliteMmrStore};
 pub use types::*;
 
 /// Production SQLite database with optimized PRAGMAs
@@ -221,6 +223,13 @@ impl Database {
                     last_indexed_block INTEGER NOT NULL,
                     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 );
+
+                -- MMR post-order nodes storage (DEC-045B / Generic Storage Abstraction)
+                CREATE TABLE IF NOT EXISTS mmr_nodes (
+                    pos INTEGER PRIMARY KEY,
+                    hash TEXT NOT NULL
+                );
+                CREATE INDEX IF NOT EXISTS idx_mmr_nodes_pos ON mmr_nodes(pos);
             ",
             )?;
 

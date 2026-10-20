@@ -11,6 +11,9 @@ pub mod execution_fee_claimer;
 pub mod handlers;
 pub mod mempool_watchdog;
 pub mod mmr_indexer;
+pub mod router;
 pub mod sanctions_sync;
 pub mod state;
 pub mod validation;
+
+pub use router::create_relayer_router;

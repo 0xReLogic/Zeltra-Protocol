@@ -866,7 +866,7 @@ mod tests {
         assert!(!proof.mountain_siblings.is_empty());
 
         // Mutate mountain sibling (1-bit tampering)
-        proof.mountain_siblings[0] = proof.mountain_siblings[0] + Fr::from(1u64);
+        proof.mountain_siblings[0] += Fr::from(1u64);
 
         let valid = FlatMerkleMountainRange::verify_proof(Fr::from(4u64), 3, 8, &proof, root);
         assert!(
@@ -907,7 +907,7 @@ mod tests {
         assert!(!proof.peak_bagging_siblings.is_empty());
 
         // Mutate peak bagging sibling
-        proof.peak_bagging_siblings[0] = proof.peak_bagging_siblings[0] + Fr::from(1u64);
+        proof.peak_bagging_siblings[0] += Fr::from(1u64);
 
         let valid = FlatMerkleMountainRange::verify_proof(Fr::from(7u64), 6, 7, &proof, root);
         assert!(

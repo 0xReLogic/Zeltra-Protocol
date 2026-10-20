@@ -507,4 +507,307 @@ impl Database {
         })
         .await?
     }
+
+    /// Reconstruct local FlatMerkleMountainRange from persistent mmr_leaves and verify against mmr_state (DEC-045B)
+    pub async fn load_flat_mmr_tree(&self) -> Result<zeltra_core::FlatMerkleMountainRange> {
+        let path = self.path.clone();
+        let db_key = database_key()?;
+
+        task::spawn_blocking(move || -> Result<zeltra_core::FlatMerkleMountainRange> {
+            let conn = open_connection(&path, &db_key)?;
+            let mut stmt = conn.prepare(
+                "SELECT leaf_index, commitment
+                 FROM mmr_leaves ORDER BY leaf_index ASC",
+            )?;
+            let rows = stmt.query_map([], |row| {
+                let leaf_index = row.get::<_, i64>(0)? as u64;
+                let commitment = row.get::<_, String>(1)?;
+                Ok((leaf_index, commitment))
+            })?;
+
+            let mut mmr = zeltra_core::FlatMerkleMountainRange::new();
+            for row in rows {
+                let (leaf_index, commitment) = row?;
+                if leaf_index != mmr.leaf_count() {
+                    anyhow::bail!(
+                        "Non-contiguous MMR leaves in storage: expected index {}, found {}",
+                        mmr.leaf_count(),
+                        leaf_index
+                    );
+                }
+                let clean = commitment.trim_start_matches("0x");
+                let bytes = hex::decode(clean).map_err(|e| {
+                    anyhow::anyhow!("Invalid hex commitment at leaf {}: {}", leaf_index, e)
+                })?;
+                let bytes_arr: [u8; 32] = bytes.as_slice().try_into().map_err(|_| {
+                    anyhow::anyhow!("Commitment at leaf {} must be 32 bytes", leaf_index)
+                })?;
+                let fr = zeltra_core::from_evm_scalar(&bytes_arr).ok_or_else(|| {
+                    anyhow::anyhow!("Invalid Fr scalar commitment at leaf {}", leaf_index)
+                })?;
+                mmr.append(fr);
+            }
+
+            // Parity assertion if mmr_state exists
+            let state_opt = conn
+                .query_row(
+                    "SELECT leaf_count, bagged_root FROM mmr_state WHERE id = 1",
+                    [],
+                    |row| Ok((row.get::<_, i64>(0)? as u64, row.get::<_, String>(1)?)),
+                )
+                .optional()?;
+
+            if let Some((stored_count, stored_root)) = state_opt {
+                if mmr.leaf_count() != stored_count {
+                    anyhow::bail!(
+                        "MMR state desync: reconstructed leaf count {} != stored checkpoint {}",
+                        mmr.leaf_count(),
+                        stored_count
+                    );
+                }
+                if mmr.leaf_count() > 0 {
+                    let computed_root = format!(
+                        "0x{}",
+                        hex::encode(zeltra_core::fr_to_be_bytes(&mmr.get_root()))
+                    );
+                    if computed_root.to_lowercase() != stored_root.to_lowercase() {
+                        anyhow::bail!(
+                            "MMR state desync: reconstructed root {} != stored checkpoint {}",
+                            computed_root,
+                            stored_root
+                        );
+                    }
+                }
+            }
+
+            Ok(mmr)
+        })
+        .await?
+    }
+
+    /// Save FlatMerkleMountainRange state snapshot (DEC-045B)
+    pub async fn save_flat_mmr_state(
+        &self,
+        mmr: &zeltra_core::FlatMerkleMountainRange,
+        last_indexed_block: u64,
+    ) -> Result<()> {
+        let path = self.path.clone();
+        let leaf_count = mmr.leaf_count();
+        let root_bytes = zeltra_core::fr_to_be_bytes(&mmr.get_root());
+        let bagged_root = format!("0x{}", hex::encode(root_bytes));
+        let peaks: Vec<String> = mmr
+            .get_peaks()
+            .iter()
+            .map(|p| format!("0x{}", hex::encode(zeltra_core::fr_to_be_bytes(p))))
+            .collect();
+        let peaks_json = serde_json::to_string(&peaks)?;
+        let db_key = database_key()?;
+
+        task::spawn_blocking(move || -> Result<()> {
+            let conn = open_connection(&path, &db_key)?;
+            conn.execute(
+                "INSERT INTO mmr_state (id, leaf_count, bagged_root, peaks_json, last_indexed_block, updated_at)
+                 VALUES (1, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                 ON CONFLICT(id) DO UPDATE SET
+                     leaf_count = excluded.leaf_count,
+                     bagged_root = excluded.bagged_root,
+                     peaks_json = excluded.peaks_json,
+                     last_indexed_block = excluded.last_indexed_block,
+                     updated_at = CURRENT_TIMESTAMP",
+                params![leaf_count as i64, bagged_root, peaks_json, last_indexed_block as i64],
+            )?;
+            Ok(())
+        })
+        .await?
+    }
+
+    /// Atomically insert leaves and update MMR state checkpoint using FlatMerkleMountainRange (DEC-045B)
+    pub async fn atomic_append_mmr_leaves_and_state_flat(
+        &self,
+        leaves: &[MmrLeafRecord],
+        mmr: &zeltra_core::FlatMerkleMountainRange,
+        to_block: u64,
+    ) -> Result<()> {
+        let path = self.path.clone();
+        let leaves_owned = leaves.to_vec();
+        let leaf_count = mmr.leaf_count();
+        let root_bytes = zeltra_core::fr_to_be_bytes(&mmr.get_root());
+        let bagged_root = format!("0x{}", hex::encode(root_bytes));
+        let peaks: Vec<String> = mmr
+            .get_peaks()
+            .iter()
+            .map(|p| format!("0x{}", hex::encode(zeltra_core::fr_to_be_bytes(p))))
+            .collect();
+        let peaks_json = serde_json::to_string(&peaks)?;
+        let db_key = database_key()?;
+
+        task::spawn_blocking(move || -> Result<()> {
+            let mut conn = open_connection(&path, &db_key)?;
+            let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+
+            for leaf in &leaves_owned {
+                tx.execute(
+                    "INSERT INTO mmr_leaves (leaf_index, commitment, tx_hash, block_number, encrypted_memo)
+                     VALUES (?, ?, ?, ?, ?)",
+                    params![
+                        leaf.leaf_index as i64,
+                        leaf.commitment,
+                        leaf.tx_hash,
+                        leaf.block_number as i64,
+                        leaf.encrypted_memo,
+                    ],
+                )?;
+            }
+
+            tx.execute(
+                "INSERT INTO mmr_state (id, leaf_count, bagged_root, peaks_json, last_indexed_block, updated_at)
+                 VALUES (1, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                 ON CONFLICT(id) DO UPDATE SET
+                     leaf_count = excluded.leaf_count,
+                     bagged_root = excluded.bagged_root,
+                     peaks_json = excluded.peaks_json,
+                     last_indexed_block = excluded.last_indexed_block,
+                     updated_at = CURRENT_TIMESTAMP",
+                params![leaf_count as i64, bagged_root, peaks_json, to_block as i64],
+            )?;
+
+            tx.commit()?;
+            Ok(())
+        })
+        .await?
+    }
+
+    /// Insert a batch of MMR nodes (by pos) for MMRStore implementation (DEC-045B)
+    pub async fn batch_insert_mmr_nodes(&self, start_pos: u64, nodes: &[zeltra_core::Fr]) -> Result<()> {
+        let path = self.path.clone();
+        let db_key = database_key()?;
+        let nodes_vec: Vec<(u64, String)> = nodes
+            .iter()
+            .enumerate()
+            .map(|(i, &node)| {
+                let pos = start_pos + i as u64;
+                let hash = format!("0x{}", hex::encode(zeltra_core::fr_to_be_bytes(&node)));
+                (pos, hash)
+            })
+            .collect();
+
+        task::spawn_blocking(move || -> Result<()> {
+            let mut conn = open_connection(&path, &db_key)?;
+            let tx = conn.transaction()?;
+            {
+                let mut stmt = tx.prepare(
+                    "INSERT INTO mmr_nodes (pos, hash) VALUES (?, ?)
+                     ON CONFLICT(pos) DO UPDATE SET hash = excluded.hash",
+                )?;
+                for (pos, hash) in nodes_vec {
+                    stmt.execute(params![pos as i64, hash])?;
+                }
+            }
+            tx.commit()?;
+            Ok(())
+        })
+        .await?
+    }
+
+    /// Retrieve an MMR node by its post-order position `pos` (DEC-045B)
+    pub async fn get_mmr_node(&self, pos: u64) -> Result<Option<zeltra_core::Fr>> {
+        let path = self.path.clone();
+        let db_key = database_key()?;
+
+        task::spawn_blocking(move || -> Result<Option<zeltra_core::Fr>> {
+            let conn = open_connection(&path, &db_key)?;
+            let hash_opt: Option<String> = conn
+                .query_row(
+                    "SELECT hash FROM mmr_nodes WHERE pos = ?",
+                    params![pos as i64],
+                    |row| row.get(0),
+                )
+                .optional()?;
+
+            match hash_opt {
+                Some(hash) => {
+                    let clean = hash.trim_start_matches("0x");
+                    let bytes = hex::decode(clean)?;
+                    let bytes_arr: [u8; 32] = bytes.as_slice().try_into().map_err(|_| {
+                        anyhow::anyhow!("Node hash must be 32 bytes")
+                    })?;
+                    let fr = zeltra_core::from_evm_scalar(&bytes_arr)
+                        .ok_or_else(|| anyhow::anyhow!("Invalid scalar field element"))?;
+                    Ok(Some(fr))
+                }
+                None => Ok(None),
+            }
+        })
+        .await?
+    }
+
+    /// Save MMR checkpoint for MMRStore (DEC-045B)
+    pub async fn save_mmr_checkpoint(&self, leaf_count: u64, bagged_root: &str, block_number: u64) -> Result<()> {
+        let path = self.path.clone();
+        let db_key = database_key()?;
+        let root = bagged_root.to_string();
+
+        task::spawn_blocking(move || -> Result<()> {
+            let conn = open_connection(&path, &db_key)?;
+            conn.execute(
+                "INSERT INTO mmr_state (id, leaf_count, bagged_root, peaks_json, last_indexed_block, updated_at)
+                 VALUES (1, ?, ?, '[]', ?, CURRENT_TIMESTAMP)
+                 ON CONFLICT(id) DO UPDATE SET
+                     leaf_count = excluded.leaf_count,
+                     bagged_root = excluded.bagged_root,
+                     last_indexed_block = excluded.last_indexed_block,
+                     updated_at = CURRENT_TIMESTAMP",
+                params![leaf_count as i64, root, block_number as i64],
+            )?;
+            Ok(())
+        })
+        .await?
+    }
+}
+
+/// Generic asynchronous storage abstraction for Merkle Mountain Range nodes and checkpoints (DEC-045B).
+/// Enables seamless migration between SQLite/SQLCipher, RocksDB, or mmap storage engines.
+#[allow(dead_code)]
+pub trait MMRStore: Send + Sync {
+    /// Retrieve node hash at specific post-order position `pos`
+    fn get_node(&self, pos: u64) -> impl std::future::Future<Output = Result<Option<zeltra_core::Fr>>> + Send;
+
+    /// Persist a slice of newly appended nodes starting at position `start_pos`
+    fn append_nodes(&self, start_pos: u64, nodes: &[zeltra_core::Fr]) -> impl std::future::Future<Output = Result<()>> + Send;
+
+    /// Save state snapshot checkpoint (leaf count, bagged root hex, block number)
+    fn save_checkpoint(&self, leaf_count: u64, bagged_root: &str, block_number: u64) -> impl std::future::Future<Output = Result<()>> + Send;
+}
+
+/// SQLite + SQLCipher implementation of `MMRStore` (DEC-045B).
+#[derive(Clone)]
+#[allow(dead_code)]
+pub struct SqliteMmrStore {
+    db: Database,
+}
+
+#[allow(dead_code)]
+impl SqliteMmrStore {
+    pub fn new(db: Database) -> Self {
+        Self { db }
+    }
+}
+
+impl MMRStore for SqliteMmrStore {
+    fn get_node(&self, pos: u64) -> impl std::future::Future<Output = Result<Option<zeltra_core::Fr>>> + Send {
+        let db = self.db.clone();
+        async move { db.get_mmr_node(pos).await }
+    }
+
+    fn append_nodes(&self, start_pos: u64, nodes: &[zeltra_core::Fr]) -> impl std::future::Future<Output = Result<()>> + Send {
+        let db = self.db.clone();
+        let nodes = nodes.to_vec();
+        async move { db.batch_insert_mmr_nodes(start_pos, &nodes).await }
+    }
+
+    fn save_checkpoint(&self, leaf_count: u64, bagged_root: &str, block_number: u64) -> impl std::future::Future<Output = Result<()>> + Send {
+        let db = self.db.clone();
+        let root = bagged_root.to_string();
+        async move { db.save_mmr_checkpoint(leaf_count, &root, block_number).await }
+    }
 }

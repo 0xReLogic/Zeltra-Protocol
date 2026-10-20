@@ -80,6 +80,7 @@ sol! {
     function accruedExecutionFeeLiability() external view returns (uint256);
     function getAccumulatedFees() external view returns (uint256);
     function stablecoin() external view returns (address);
+    function note_tree_root() external view returns (bytes32);
 
     interface IERC20 {
         function balanceOf(address account) external view returns (uint256);
@@ -1299,6 +1300,28 @@ impl EvmClient {
             Ok(U256::from_be_slice(&result[..32]).to::<u64>())
         } else {
             Ok(0)
+        }
+    }
+
+    /// Query canonical note tree root from Stylus contract (DEC-032 / DEC-045B)
+    pub async fn get_note_tree_root(&self) -> Result<[u8; 32]> {
+        let call_data = note_tree_rootCall {}.abi_encode();
+        let tx = TransactionRequest::default()
+            .with_to(self.contract_address)
+            .with_input(Bytes::from(call_data));
+
+        let result = self
+            .provider
+            .call(tx)
+            .await
+            .context("Failed to call note_tree_root on-chain")?;
+
+        if result.len() >= 32 {
+            let mut root = [0u8; 32];
+            root.copy_from_slice(&result[result.len() - 32..]);
+            Ok(root)
+        } else {
+            anyhow::bail!("Invalid response length from note_tree_root: expected 32 bytes, got {}", result.len())
         }
     }
 
