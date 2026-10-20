@@ -537,7 +537,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 }
             }
         }
-
         _ => {
             eprintln!("Unknown command: {}", command);
             std::process::exit(1);
