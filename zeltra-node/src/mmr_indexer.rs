@@ -125,13 +125,13 @@ pub async fn index_mmr_events_tick(state: &AppState, client: &EvmClient) -> Resu
         return Ok(());
     }
 
-    // Load canonical in-memory MMR mirror from persistent storage
-    let mut mmr = state.db.load_mmr_tree().await?;
+    // Acquire exclusive write-lock on in-memory FlatMerkleMountainRange (INV-45B-2)
+    let mut tree = state.in_memory_mmr.write().await;
     let mut new_leaves = Vec::new();
 
     for ev in events {
         // INV-4 & C2.3 Sequential Leaf Invariant
-        if ev.leaf_index < mmr.leaf_count() {
+        if ev.leaf_index < tree.leaf_count() {
             println!(
                 "MMR_INDEXER: Skipping already-indexed leaf index {}",
                 ev.leaf_index
@@ -139,10 +139,10 @@ pub async fn index_mmr_events_tick(state: &AppState, client: &EvmClient) -> Resu
             continue;
         }
 
-        if ev.leaf_index != mmr.leaf_count() {
+        if ev.leaf_index != tree.leaf_count() {
             anyhow::bail!(
                 "NonSequentialLeafIndex: expected leaf_index {}, but on-chain event emitted {}",
-                mmr.leaf_count(),
+                tree.leaf_count(),
                 ev.leaf_index
             );
         }
@@ -151,14 +151,14 @@ pub async fn index_mmr_events_tick(state: &AppState, client: &EvmClient) -> Resu
         let scalar_commitment = zeltra_core::from_evm_scalar(&ev.commitment)
             .context("Invalid Fr scalar note commitment in on-chain log")?;
 
-        // Append to local MMR mirror
-        mmr.append_leaf(scalar_commitment);
+        // Append to in-memory Flat MMR
+        let (_leaf_idx, new_root) = tree.append(scalar_commitment);
 
         // INV-2 (Fail-Closed Root Parity Guard): Bit-exact parity with on-chain event root
-        let local_root_bytes = zeltra_core::fr_to_be_bytes(&mmr.bagged_root());
+        let local_root_bytes = zeltra_core::fr_to_be_bytes(&new_root);
         if local_root_bytes != ev.new_mmr_root {
             panic!(
-                "CRITICAL SECURITY ALERT (DEC-035C): MMR state desync detected at leaf_index {}! \
+                "CRITICAL SECURITY ALERT (DEC-035C / DEC-045B): MMR state desync detected at leaf_index {}! \
                  Local reconstructed root: 0x{}, On-chain event root: 0x{}. Halting immediately.",
                 ev.leaf_index,
                 hex::encode(local_root_bytes),
@@ -177,18 +177,31 @@ pub async fn index_mmr_events_tick(state: &AppState, client: &EvmClient) -> Resu
         });
     }
 
-    // INV-5 (Atomic Checkpoints): Commit leaves and state in a single SQLite transaction
-    state
-        .db
-        .atomic_append_mmr_leaves_and_state(&new_leaves, &mmr, to_block)
-        .await?;
+    if !new_leaves.is_empty() {
+        // INV-5 (Atomic Checkpoints): Commit leaves and state in a single SQLite transaction
+        state
+            .db
+            .atomic_append_mmr_leaves_and_state_flat(&new_leaves, &tree, to_block)
+            .await?;
 
-    println!(
-        "MMR_INDEXER: Indexed {} new MMR commitments up to block {}, new leaf_count: {}",
-        new_leaves.len(),
-        to_block,
-        mmr.leaf_count()
-    );
+        {
+            let mut blocks = state.in_memory_leaf_blocks.write().await;
+            for leaf in &new_leaves {
+                blocks.push(leaf.block_number);
+            }
+        }
+        state.last_indexed_block.store(to_block, std::sync::atomic::Ordering::SeqCst);
+
+        println!(
+            "MMR_INDEXER: Indexed {} new MMR commitments up to block {}, new leaf_count: {}",
+            new_leaves.len(),
+            to_block,
+            tree.leaf_count()
+        );
+    } else {
+        state.db.update_mmr_indexed_block(to_block).await?;
+        state.last_indexed_block.store(to_block, std::sync::atomic::Ordering::SeqCst);
+    }
 
     Ok(())
 }

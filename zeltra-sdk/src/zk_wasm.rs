@@ -12,15 +12,12 @@
 //! - Cryptographically secure randomness via OS/WASM CSPRNG (Invariant 6)
 
 use ark_bls12_381::{Bls12_381, Fr};
-use ark_ec::{CurveGroup, PrimeGroup};
-use ark_ff::{PrimeField, UniformRand};
 use ark_relations::gr1cs::{ConstraintSynthesizer, ConstraintSystem};
 use ark_serialize::CanonicalDeserialize;
-use rand::rngs::OsRng;
 use wasm_bindgen::prelude::*;
 
 use zeltra_core::{
-    compute_binding_commitment, compute_nullifier, compute_scope_hash,
+    compute_binding_commitment, compute_scope_hash,
     decompose_challenge_to_limbs, derive_joinsplit_dummy_nullifier, derive_joinsplit_nullifier,
     derive_note_randomness, derive_nullifier, derive_nullifier_key,
     extract_joinsplit_public_inputs, extract_public_inputs, from_evm_scalar,

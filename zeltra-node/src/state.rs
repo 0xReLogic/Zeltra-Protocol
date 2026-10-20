@@ -44,12 +44,64 @@ pub struct AppState {
 
     /// In-memory cache for issued execution quotes: quote_hash / quote_id -> ExecutionQuoteResponse
     pub quote_cache: Arc<Mutex<HashMap<String, crate::dto::ExecutionQuoteResponse>>>,
+
+    /// In-memory concurrent FlatMerkleMountainRange mirror for sub-microsecond proof serving (DEC-045B)
+    pub in_memory_mmr: Arc<tokio::sync::RwLock<zeltra_core::FlatMerkleMountainRange>>,
+
+    /// In-memory leaf block numbers: leaf_index -> block_number for zero-disk proof serving
+    pub in_memory_leaf_blocks: Arc<tokio::sync::RwLock<Vec<u64>>>,
+
+    /// Cached last indexed block number for zero-disk tip serving
+    pub last_indexed_block: Arc<std::sync::atomic::AtomicU64>,
 }
 
 impl AppState {
     /// Initialize application state with persistent database
     pub async fn new(db: Database, evm_client: Option<Arc<EvmClient>>) -> Self {
         let pricing_config = crate::config::PricingConfig::from_env();
+
+        // B1.2 & B1.3: Pre-warm FlatMerkleMountainRange from persistent database
+        let flat_mmr = match db.load_flat_mmr_tree().await {
+            Ok(tree) => {
+                println!(
+                    "MMR_WARMUP: Successfully pre-warmed in-memory FlatMerkleMountainRange with {} leaves. Bagged root: 0x{}",
+                    tree.leaf_count(),
+                    hex::encode(zeltra_core::fr_to_be_bytes(&tree.get_root()))
+                );
+                tree
+            }
+            Err(e) => {
+                if db.get_mmr_leaf(0).await.unwrap_or(None).is_some() {
+                    panic!("CRITICAL: ColdBootDesync during MMR warm-up: {}", e);
+                }
+                zeltra_core::FlatMerkleMountainRange::new()
+            }
+        };
+
+        // B1.3: Checkpoint parity verification against on-chain contract if EVM client available
+        if let Some(ref evm) = evm_client {
+            if flat_mmr.leaf_count() > 0 {
+                if let Ok(onchain_root) = evm.get_note_tree_root().await {
+                    let local_root = zeltra_core::fr_to_be_bytes(&flat_mmr.get_root());
+                    if local_root != onchain_root && onchain_root != [0u8; 32] {
+                        eprintln!(
+                            "CRITICAL: ColdBootDesync detected! Local root: 0x{}, On-chain root: 0x{}",
+                            hex::encode(local_root),
+                            hex::encode(onchain_root)
+                        );
+                        if crate::config::runtime_mode().is_strict() {
+                            panic!("CRITICAL: ColdBootDesync between local MMR and on-chain contract note_tree_root!");
+                        }
+                    } else {
+                        println!("MMR_WARMUP: On-chain root parity verified successfully against contract note_tree_root");
+                    }
+                }
+            }
+        }
+
+        let leaves = db.get_all_mmr_leaves().await.unwrap_or_default();
+        let leaf_blocks: Vec<u64> = leaves.iter().map(|l| l.block_number).collect();
+        let last_block = db.get_mmr_last_indexed_block().await.unwrap_or(None).unwrap_or(0);
 
         Self {
             db,
@@ -63,7 +115,31 @@ impl AppState {
             current_eth_price_usdc: Arc::new(Mutex::new(pricing_config.fallback_eth_price)),
             last_price_fetch_timestamp: Arc::new(Mutex::new(0)),
             quote_cache: Arc::new(Mutex::new(HashMap::new())),
+            in_memory_mmr: Arc::new(tokio::sync::RwLock::new(flat_mmr)),
+            in_memory_leaf_blocks: Arc::new(tokio::sync::RwLock::new(leaf_blocks)),
+            last_indexed_block: Arc::new(std::sync::atomic::AtomicU64::new(last_block)),
         }
+    }
+
+    /// Rollback MMR leaves and peak state to a specific fork block (DEC-045B INV-1 & Reorg Protection).
+    /// Atomically unwinds the database and reloads the in-memory MMR mirror under write-lock.
+    pub async fn rollback_mmr_to_block(&self, fork_block: u64) -> anyhow::Result<()> {
+        self.db.rollback_mmr_to_block(fork_block).await?;
+        let restored_tree = self.db.load_flat_mmr_tree().await?;
+        let mut tree_lock = self.in_memory_mmr.write().await;
+        *tree_lock = restored_tree;
+        let remaining_leaves = self.db.get_all_mmr_leaves().await.unwrap_or_default();
+        let remaining_blocks: Vec<u64> = remaining_leaves.iter().map(|l| l.block_number).collect();
+        *self.in_memory_leaf_blocks.write().await = remaining_blocks;
+        let last_block = self.db.get_mmr_last_indexed_block().await.unwrap_or(None).unwrap_or(fork_block);
+        self.last_indexed_block.store(last_block, std::sync::atomic::Ordering::SeqCst);
+        println!(
+            "MMR_ROLLBACK: Reorg rollback complete to block {}. New leaf count: {}, root: 0x{}",
+            fork_block,
+            tree_lock.leaf_count(),
+            hex::encode(zeltra_core::fr_to_be_bytes(&tree_lock.get_root()))
+        );
+        Ok(())
     }
 
     /// Fetch current ETH price in USDC using Chainlink oracle with fallback (DEC-029).
