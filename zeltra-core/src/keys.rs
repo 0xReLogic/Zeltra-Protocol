@@ -70,6 +70,13 @@ impl IncomingViewingKey {
     pub fn owner_key(&self) -> Fr {
         Fr::from_be_bytes_mod_order(&self.public)
     }
+
+    /// Computes X25519 Diffie-Hellman shared secret with an ephemeral public key.
+    pub fn diffie_hellman(&self, eph_pk_bytes: &[u8; 32]) -> [u8; 32] {
+        let static_secret = x25519_dalek::StaticSecret::from(self.secret);
+        let epk = x25519_dalek::PublicKey::from(*eph_pk_bytes);
+        *static_secret.diffie_hellman(&epk).as_bytes()
+    }
 }
 
 /// Outcoming Viewing Key (OVK) for viewing change and payment history.

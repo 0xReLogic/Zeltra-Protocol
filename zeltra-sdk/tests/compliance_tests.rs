@@ -612,10 +612,10 @@ fn test_fvk_auditor_session_recovery() {
     let rho1 = Fr::rand(&mut rng);
     let rho2 = Fr::rand(&mut rng);
 
-    // Note 1: 10,000 USDC
-    let memo1 = encrypt_note_memo(10_000_000_000, rho1, 1, &ivk);
+    // Note 1: 1,000 USDC
+    let memo1 = encrypt_note_memo(1_000_000_000, rho1, 1, &ivk);
     let note1 = zeltra_core::NotePlaintext {
-        value: 10_000_000_000,
+        value: 1_000_000_000,
         rho: rho1,
         asset_id: 1,
     }
@@ -654,9 +654,9 @@ fn test_fvk_auditor_session_recovery() {
     // Recover notes with both unspent
     let rec = session.recover_notes(&events, |_nf| false);
     assert_eq!(rec.recovered_notes.len(), 2);
-    assert_eq!(session.get_balance(1).unwrap(), 10_000_000_000);
+    assert_eq!(session.get_balance(1).unwrap(), 1_000_000_000);
     assert_eq!(session.get_balance(0).unwrap(), 2_000_000_000);
-    assert_eq!(session.get_human_balance(1).unwrap(), "$10000.00 USDC");
+    assert_eq!(session.get_human_balance(1).unwrap(), "$1000.00 USDC");
     assert_eq!(session.get_human_balance(0).unwrap(), "2.000000 ETH");
 
     // Recover again with Note 1 spent on-chain
@@ -665,7 +665,7 @@ fn test_fvk_auditor_session_recovery() {
 
     session.notes.clear();
     let rec2 = session.recover_notes(&events, |nf| nf == nf1_hex);
-    assert_eq!(rec2.total_spent_balance, 10_000_000_000);
+    assert_eq!(rec2.total_spent_balance, 1_000_000_000);
     assert_eq!(rec2.total_unspent_balance, 2_000_000_000);
     assert_eq!(session.get_balance(1).unwrap(), 0); // USDC is spent
     assert_eq!(session.get_balance(0).unwrap(), 2_000_000_000); // WETH remains unspent

@@ -327,3 +327,54 @@ impl WasmProverError {
         )
     }
 }
+
+// ═══════════════════════════════════════════════════════════════════════════
+// DEC-045C: Fast-Scanning Note Scanner DTOs
+// ═══════════════════════════════════════════════════════════════════════════
+
+/// Input event for WASM fast-scanning (DEC-045C).
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WasmNoteEventInput {
+    #[serde(alias = "leaf_index")]
+    pub leaf_index: u64,
+    #[serde(alias = "commitment_hex")]
+    pub commitment_hex: String,
+    #[serde(alias = "encrypted_memo_hex")]
+    pub encrypted_memo_hex: String,
+}
+
+/// Request payload for fast memo scanning in Web Workers (DEC-045C).
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WasmFastScanRequest {
+    #[serde(alias = "ivk_secret_hex")]
+    pub ivk_secret_hex: String,
+    #[serde(default, alias = "spending_key_hex")]
+    pub spending_key_hex: Option<String>,
+    #[serde(alias = "events")]
+    pub events: Vec<WasmNoteEventInput>,
+}
+
+/// Candidate note recovered during WASM fast-scanning (DEC-045C).
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct WasmRecoveredNote {
+    pub leaf_index: u64,
+    pub commitment_hex: String,
+    pub value: u64,
+    pub asset_id: u64,
+    pub rho_hex: String,
+    pub randomness_hex: String,
+}
+
+/// Summary metrics and recovered notes returned to JS/TS Web Worker callers (DEC-045C).
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct WasmFastScanResult {
+    pub scanned_count: usize,
+    pub prefilter_passed_count: usize,
+    pub recovered_notes: Vec<WasmRecoveredNote>,
+    pub elapsed_ms: u64,
+}
+
