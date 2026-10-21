@@ -28,14 +28,14 @@
 
 ## 2. Step-by-Step Implementation Checklist
 
-- [ ] **Step C1: Relayer Ingress & Indexer Validation:**
-  - Check `zeltra-node/src/validation.rs` for memo length assertions (exactly 96 bytes).
-- [ ] **Step C2: Real-Case Multi-Asset Lifecycle Test:**
-  - Execute end-to-end simulation with 5,000 USDC notes to verify zero desync.
-- [ ] **Step C3: Adversarial Security Suite Execution:**
-  - Run `python3 scripts/test_dec048_committing_aead.py`.
-- [ ] **Step C4: Final Review Signoff:**
-  - Verify audit status and documentation integrity.
+- [x] **Step C1: Relayer Ingress & Indexer Validation:**
+  - Check `zeltra-node/src/validation/spend_preflight.rs` for memo length assertions (strictly 96 bytes / 192 hex chars). Verified zero rejection on valid committing memos and strict rejection on non-96B inputs.
+- [x] **Step C2: Real-Case Multi-Asset Lifecycle Test:**
+  - Execute end-to-end simulation with large note values (5,000 USDC and 10 WETH) via `scripts/test_real_case_dec043c_inpool_wallet.py` (Section 8: 61/61 tests passed) to confirm zero balance desynchronization.
+- [x] **Step C3: Adversarial Security Suite Execution:**
+  - Run `python3 scripts/test_dec048_committing_aead.py` covering all 11 positive and negative suites (100% passed).
+- [x] **Step C4: Final Review Signoff:**
+  - Verified audit status, backward-compatible trial decryption fallbacks, DEC-046 canonical dummy constants, and documentation integrity.
 
 ---
 

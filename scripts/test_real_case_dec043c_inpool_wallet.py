@@ -50,10 +50,13 @@ from typing import Dict, Any, List, Optional, Tuple
 
 try:
     import bech32
+    import hmac
+    import hashlib
     from eth_abi import encode
     from web3 import Web3
     from cryptography.hazmat.primitives.asymmetric import x25519
     from cryptography.hazmat.primitives.ciphers.aead import ChaCha20Poly1305
+    from cryptography.hazmat.primitives.ciphers import Cipher, algorithms
     from cryptography.hazmat.primitives.kdf.hkdf import HKDF
     from cryptography.hazmat.primitives import hashes
 except ImportError as e:
@@ -73,6 +76,12 @@ FR_MODULUS = 5243587517512619047944774050818596583769055250052763782260365869993
 ZSA_HRP = "zs"
 ENCRYPTED_MEMO_SIZE = 96
 NOTE_PLAINTEXT_SIZE = 48
+
+# DEC-048 Committing AEAD Constants (EtH-KS)
+INFO_VIEW_TAG = b"zeltra_view_tag"
+SALT_COMMITTING_MEMO_V2 = b"ZELTRA_COMMITTING_MEMO_SALT_V2"
+INFO_COMMITTING_MEMO_KEYS_V2 = b"ZELTRA_COMMITTING_MEMO_KEYS_V2"
+INFO_MEMO_AD_BINDING_V1 = b"ZELTRA_MEMO_AD_BINDING_V1"
 
 TOTAL_TESTS = 0
 PASSED_TESTS = 0
@@ -99,10 +108,29 @@ def find_or_build_harness() -> str:
     release_bin = os.path.join(repo_root, "target", "release", "inpool_interop")
     debug_bin = os.path.join(repo_root, "target", "debug", "inpool_interop")
 
+    # Check if existing binary is stale compared to Rust source files
     if os.path.exists(release_bin):
-        return release_bin
-    if os.path.exists(debug_bin):
-        return debug_bin
+        bin_mtime = os.path.getmtime(release_bin)
+        src_dirs = [
+            os.path.join(repo_root, "zeltra-core", "src"),
+            os.path.join(repo_root, "zeltra-sdk", "src"),
+            os.path.join(repo_root, "zeltra-node", "src"),
+        ]
+        is_stale = False
+        for sdir in src_dirs:
+            if not os.path.exists(sdir):
+                continue
+            for root, _, files in os.walk(sdir):
+                for f in files:
+                    if f.endswith(".rs") and os.path.getmtime(os.path.join(root, f)) > bin_mtime:
+                        is_stale = True
+                        break
+                if is_stale:
+                    break
+            if is_stale:
+                break
+        if not is_stale:
+            return release_bin
 
     print(f"{YELLOW}[BUILD]{RESET} Building inpool_interop test harness...")
     res = subprocess.run(
@@ -181,26 +209,148 @@ def python_bech32m_decode(s: str) -> Tuple[Optional[str], Optional[bytes]]:
     return hrp, bytes(raw)
 
 
+def derive_view_tag(shared_secret: bytes) -> int:
+    """Derives 1-byte pseudo-random view tag (DEC-045C / DEC-048)."""
+    hkdf = HKDF(
+        algorithm=hashes.SHA256(),
+        length=1,
+        salt=None,
+        info=INFO_VIEW_TAG,
+    )
+    return hkdf.derive(shared_secret)[0]
+
+
+def derive_key_separation(shared_secret: bytes) -> Tuple[bytes, bytes, bytes]:
+    """
+    RCR-PRG Key Separation G(S) -> (K_enc, K_cmt, N_7) (DEC-048).
+    Returns (cipher_key: 32B, commitment_key: 32B, nonce_7: 7B).
+    """
+    hkdf = HKDF(
+        algorithm=hashes.SHA256(),
+        length=71,
+        salt=SALT_COMMITTING_MEMO_V2,
+        info=INFO_COMMITTING_MEMO_KEYS_V2,
+    )
+    okm = hkdf.derive(shared_secret)
+    cipher_key = okm[0:32]
+    commitment_key = okm[32:64]
+    nonce_7 = okm[64:71]
+    return cipher_key, commitment_key, nonce_7
+
+
+def compute_committing_tag(
+    commitment_key: bytes,
+    nonce_7: bytes,
+    epk_bytes: bytes,
+    view_tag: int,
+    ciphertext: bytes,
+) -> bytes:
+    """Computes 16-byte committing authentication tag T_cmt using HMAC-SHA256 (DEC-048)."""
+    h = hmac.new(commitment_key, digestmod=hashlib.sha256)
+    h.update(nonce_7)
+    h.update(epk_bytes)
+    h.update(bytes([view_tag]))
+    h.update(INFO_MEMO_AD_BINDING_V1)
+    h.update(ciphertext)
+    return h.digest()[:16]
+
+
+def chacha20_keystream(key: bytes, nonce_7: bytes, data: bytes) -> bytes:
+    """ChaCha20 stream encryption/decryption using 16-byte IV (4B 0 + 7B nonce + 5B 0)."""
+    nonce_16 = b"\x00" * 4 + nonce_7 + b"\x00" * 5
+    cipher = Cipher(algorithms.ChaCha20(key, nonce_16), mode=None)
+    encryptor = cipher.encryptor()
+    return encryptor.update(data)
+
+
+def deserialize_note_plaintext_v3(payload: bytes) -> Optional[Tuple[int, int, int]]:
+    """Deserializes 40-byte note plaintext with Field-Bit Embedding (AUD-25 / DEC-048)."""
+    if len(payload) != 40:
+        return None
+    value = int.from_bytes(payload[0:8], byteorder="little")
+    rho_bytes = bytearray(payload[8:40])
+    asset_id = (rho_bytes[31] >> 7) & 1
+    rho_bytes[31] &= 0x7F
+    rho_int = int.from_bytes(rho_bytes, byteorder="little")
+
+    if rho_int >= FR_MODULUS:
+        return None  # Non-canonical scalar rejected
+    return value, rho_int, asset_id
+
+
 def python_decrypt_memo(
     encrypted_memo: bytes,
     ivk_secret_bytes: bytes
 ) -> Optional[Tuple[int, bytes, int, bytes]]:
     """
-    Decrypts a 96-byte AEAD memo in pure Python using X25519 + HKDF-SHA256 + ChaCha20Poly1305.
+    Trial-decrypts a 96-byte AEAD memo in pure Python.
+    Primary Path (DEC-048): EtH-KS committing AEAD with Field-Bit Embedding (40B plaintext).
+    Fallback 1 (DEC-045C): View tag + ChaCha20Poly1305 (36B plaintext).
+    Fallback 2 (DEC-037): Legacy ChaCha20Poly1305 (48B plaintext).
     Returns (value, rho_bytes, asset_id, shared_secret_bytes) or None if decryption fails.
     """
     if len(encrypted_memo) != ENCRYPTED_MEMO_SIZE:
         return None
 
     epk_bytes = encrypted_memo[:32]
-    ciphertext_and_tag = encrypted_memo[32:96]
 
     try:
         epk = x25519.X25519PublicKey.from_public_bytes(epk_bytes)
         static_priv = x25519.X25519PrivateKey.from_private_bytes(ivk_secret_bytes)
         shared_secret = static_priv.exchange(epk)
+    except Exception:
+        return None
 
-        # HKDF-Expand with exact domain constants
+    if shared_secret == b"\x00" * 32:
+        return None
+
+    # Path 1: DEC-048 Committing AEAD (EtH-KS with Field-Bit Embedding)
+    try:
+        view_tag_memo = encrypted_memo[32]
+        expected_vt = derive_view_tag(shared_secret)
+        if view_tag_memo == expected_vt:
+            k_enc, k_cmt, expected_nonce = derive_key_separation(shared_secret)
+            nonce_7 = encrypted_memo[33:40]
+            if hmac.compare_digest(nonce_7, expected_nonce):
+                ciphertext = encrypted_memo[40:80]
+                tag_memo = encrypted_memo[80:96]
+                expected_tag = compute_committing_tag(
+                    k_cmt, nonce_7, epk_bytes, view_tag_memo, ciphertext
+                )
+                if hmac.compare_digest(expected_tag, tag_memo):
+                    pt_bytes = chacha20_keystream(k_enc, nonce_7, ciphertext)
+                    res = deserialize_note_plaintext_v3(pt_bytes)
+                    if res is not None:
+                        val, rho_int, aid = res
+                        return val, rho_int.to_bytes(32, byteorder="big"), aid, shared_secret
+    except Exception:
+        pass
+
+    # Path 2: Support DEC-045C View Tag V2 format fallback
+    try:
+        hk_key = HKDF(
+            algorithm=hashes.SHA256(),
+            length=43,
+            salt=b"ZELTRA_NOTE_MEMO_KDF_V1",
+            info=b"ZELTRA_MEMO_CIPHER_V1",
+        )
+        okm = hk_key.derive(shared_secret)
+        c_key = okm[:32]
+        n_11 = okm[32:43]
+        if encrypted_memo[33:44] == n_11:
+            c = ChaCha20Poly1305(c_key)
+            pt = c.decrypt(n_11 + b"\x00", encrypted_memo[44:96], None)
+            if len(pt) == 36:
+                header = int.from_bytes(pt[:4], byteorder="big")
+                aid = (header >> 31) & 1
+                val = header & 0x7FFFFFFF
+                rho = pt[4:36]
+                return val, rho, aid, shared_secret
+    except Exception:
+        pass
+
+    # Path 3: DEC-037 Legacy 48B format fallback
+    try:
         hk = HKDF(
             algorithm=hashes.SHA256(),
             length=44,
@@ -212,41 +362,17 @@ def python_decrypt_memo(
         nonce = okm[32:44]
 
         cipher = ChaCha20Poly1305(cipher_key)
-        decrypted = cipher.decrypt(nonce, ciphertext_and_tag, associated_data=None)
+        decrypted = cipher.decrypt(nonce, encrypted_memo[32:96], associated_data=None)
 
-        if len(decrypted) != NOTE_PLAINTEXT_SIZE:
-            return None
-
-        value = int.from_bytes(decrypted[:8], byteorder="big")
-        rho_bytes = decrypted[8:40]
-        asset_id = int.from_bytes(decrypted[40:48], byteorder="big")
-
-        return value, rho_bytes, asset_id, shared_secret
+        if len(decrypted) == NOTE_PLAINTEXT_SIZE:
+            value = int.from_bytes(decrypted[:8], byteorder="big")
+            rho_bytes = decrypted[8:40]
+            asset_id = int.from_bytes(decrypted[40:48], byteorder="big")
+            return value, rho_bytes, asset_id, shared_secret
     except Exception:
-        # Support DEC-045C View Tag V2 format fallback
-        try:
-            hk_key = HKDF(
-                algorithm=hashes.SHA256(),
-                length=43,
-                salt=b"ZELTRA_NOTE_MEMO_KDF_V1",
-                info=b"ZELTRA_MEMO_CIPHER_V1",
-            )
-            okm = hk_key.derive(shared_secret)
-            c_key = okm[:32]
-            n_11 = okm[32:43]
-            if encrypted_memo[33:44] != n_11:
-                return None
-            c = ChaCha20Poly1305(c_key)
-            pt = c.decrypt(n_11 + b"\x00", encrypted_memo[44:96], None)
-            if len(pt) == 36:
-                header = int.from_bytes(pt[:4], byteorder="big")
-                aid = (header >> 31) & 1
-                val = header & 0x7FFFFFFF
-                rho = pt[4:36]
-                return val, rho, aid, shared_secret
-        except Exception:
-            pass
-        return None
+        pass
+
+    return None
 
 
 # ==============================================================================
@@ -702,6 +828,182 @@ def test_section_7_dual_asset_weth_transfer(harness_bin: str):
     assert_test(commit["new_balance"] == expected_alice_weth, f"Alice WETH Balance is {expected_alice_weth} Gwei (1.49995 WETH)")
 
 
+def test_section_8_large_value_multi_asset_lifecycle(harness_bin: str):
+    print_header("SECTION 8: DEC-048 Large-Value Multi-Asset Solvency Regression (5,000 USDC & 10 WETH)")
+
+    # --------------------------------------------------------------------------
+    # 1. Large-Value USDC Rail (5,000 USDC = 5,000,000,000 micro-USDC > 2^31)
+    # --------------------------------------------------------------------------
+    alice_seed_usdc = "31" * 32
+    bob_seed_usdc = "32" * 32
+
+    bob_info_usdc = run_rust_harness(harness_bin, ["create_wallet", bob_seed_usdc])
+    bob_zsa_usdc = bob_info_usdc["zsa_bech32m"]
+    bob_ivk_usdc = bytes.fromhex(bob_info_usdc["ivk_secret"])
+
+    deposit_usdc = 5_000_000_000   # 5,000 USDC (exceeds old 31-bit limit: 2,147 USDC)
+    transfer_usdc = 2_500_000_000  # 2,500 USDC
+    asset_usdc = 1                 # USDC
+    fee_usdc = 20_000              # 0.02 USDC max fee
+
+    prep_usdc = run_rust_harness(
+        harness_bin,
+        [
+            "prepare_transfer",
+            alice_seed_usdc,
+            bob_zsa_usdc,
+            str(deposit_usdc),
+            str(transfer_usdc),
+            str(asset_usdc),
+            str(fee_usdc),
+        ],
+    )
+    assert_test(prep_usdc["success"] is True, "5,000 USDC Mode 2 Proof Generation Succeeded")
+    payload_usdc = prep_usdc["payload"]
+
+    assert_test(len(payload_usdc["encrypted_memo_1"]) == 192, "5,000 USDC Memo 1 is 192 hex chars (96 bytes)")
+    assert_test(len(payload_usdc["encrypted_memo_2"]) == 192, "5,000 USDC Memo 2 is 192 hex chars (96 bytes)")
+
+    # Independent Python trial decryption
+    memo_1_usdc = bytes.fromhex(payload_usdc["encrypted_memo_1"])
+    dec_usdc = python_decrypt_memo(memo_1_usdc, bob_ivk_usdc)
+    assert_test(dec_usdc is not None, "Python trial-decrypted 2,500 USDC Memo 1 with Bob's IVK")
+    val_u, _, aid_u, _ = dec_usdc
+    assert_test(val_u == transfer_usdc, f"Decrypted value exactly matches 2,500 USDC ({val_u} == {transfer_usdc})")
+    assert_test(aid_u == asset_usdc, f"Decrypted asset_id matches USDC ({aid_u} == {asset_usdc})")
+
+    # Relayer preflight verification
+    req_json_usdc = json.dumps({
+        "note_root": payload_usdc["note_root_hex"],
+        "leaf_count": 1,
+        "input_nullifier_1": payload_usdc["input_nullifier_1_hex"],
+        "input_nullifier_2": payload_usdc["input_nullifier_2_hex"],
+        "epoch_id_1": 0,
+        "epoch_id_2": 0,
+        "asset_id": asset_usdc,
+        "output_commitment_1": payload_usdc["output_commitment_1_hex"],
+        "output_commitment_2": payload_usdc["output_commitment_2_hex"],
+        "recipient": payload_usdc["recipient_hex"],
+        "merchant_amount": payload_usdc["merchant_amount"],
+        "protocol_fee": payload_usdc["protocol_fee"],
+        "execution_fee": payload_usdc["execution_fee"],
+        "max_execution_fee": payload_usdc["max_execution_fee"],
+        "quote_hash": payload_usdc["quote_hash_hex"],
+        "chain_id": payload_usdc["chain_id"],
+        "contract_address": payload_usdc["contract_address_hex"],
+        "expiry": payload_usdc["expiry"],
+        "has_change_1": payload_usdc["has_change_1"],
+        "has_change_2": payload_usdc["has_change_2"],
+        "proof_a_neg": payload_usdc["proof_a_neg_hex"],
+        "proof_b": payload_usdc["proof_b_hex"],
+        "proof_c": payload_usdc["proof_c_hex"],
+        "public_inputs": payload_usdc["public_inputs_hex"],
+        "encrypted_memo_1": payload_usdc["encrypted_memo_1"],
+        "encrypted_memo_2": payload_usdc["encrypted_memo_2"],
+    })
+    preflight_usdc = run_rust_harness(harness_bin, ["relayer_preflight", req_json_usdc])
+    assert_test(preflight_usdc["accepted"] is True, "Relayer Preflight Accepted 5,000 USDC Mode 2 Spend")
+
+    # Bob discovers note
+    rec_b_usdc = run_rust_harness(
+        harness_bin,
+        [
+            "recover_notes",
+            bob_seed_usdc,
+            "1",
+            payload_usdc["output_commitment_1_hex"],
+            payload_usdc["encrypted_memo_1"],
+            str(asset_usdc),
+        ],
+    )
+    assert_test(rec_b_usdc["recovered_count"] == 1, "Bob discovered large USDC note")
+    assert_test(rec_b_usdc["wallet_balance"] == transfer_usdc, f"Bob wallet balance is {transfer_usdc} micro-USDC ($2,500.00)")
+
+    # Alice commits spend and verifies solvency
+    commit_usdc = run_rust_harness(
+        harness_bin,
+        [
+            "commit_spend",
+            alice_seed_usdc,
+            payload_usdc["session_id"],
+            payload_usdc["input_nullifier_1_hex"],
+            "true",
+            str(asset_usdc),
+            str(deposit_usdc),
+        ],
+    )
+    expected_alice_usdc = deposit_usdc - transfer_usdc - fee_usdc  # 2,499,980,000
+    assert_test(commit_usdc["new_balance"] == expected_alice_usdc, f"Alice change balance is {expected_alice_usdc} micro-USDC ($2,499.98)")
+
+    # --------------------------------------------------------------------------
+    # 2. Large-Value WETH Rail (10 WETH = 10,000,000,000 Gwei > 2^31)
+    # --------------------------------------------------------------------------
+    alice_seed_weth = "41" * 32
+    bob_seed_weth = "42" * 32
+
+    bob_info_weth = run_rust_harness(harness_bin, ["create_wallet", bob_seed_weth])
+    bob_zsa_weth = bob_info_weth["zsa_bech32m"]
+    bob_ivk_weth = bytes.fromhex(bob_info_weth["ivk_secret"])
+
+    deposit_weth = 10_000_000_000   # 10 WETH (exceeds old 31-bit limit)
+    transfer_weth = 4_000_000_000   # 4 WETH
+    asset_weth = 0                  # WETH
+    fee_weth = 50_000               # 50,000 Gwei max fee
+
+    prep_weth = run_rust_harness(
+        harness_bin,
+        [
+            "prepare_transfer",
+            alice_seed_weth,
+            bob_zsa_weth,
+            str(deposit_weth),
+            str(transfer_weth),
+            str(asset_weth),
+            str(fee_weth),
+        ],
+    )
+    assert_test(prep_weth["success"] is True, "10 WETH Mode 2 Proof Generation Succeeded")
+    payload_weth = prep_weth["payload"]
+
+    memo_1_weth = bytes.fromhex(payload_weth["encrypted_memo_1"])
+    dec_weth = python_decrypt_memo(memo_1_weth, bob_ivk_weth)
+    assert_test(dec_weth is not None, "Python trial-decrypted 4 WETH Memo 1 with Bob's IVK")
+    val_w, _, aid_w, _ = dec_weth
+    assert_test(val_w == transfer_weth, f"Decrypted value matches 4 WETH ({val_w} == {transfer_weth})")
+    assert_test(aid_w == asset_weth, f"Decrypted asset_id matches WETH ({aid_w} == {asset_weth})")
+
+    # Bob recovers 4 WETH
+    rec_b_weth = run_rust_harness(
+        harness_bin,
+        [
+            "recover_notes",
+            bob_seed_weth,
+            "1",
+            payload_weth["output_commitment_1_hex"],
+            payload_weth["encrypted_memo_1"],
+            str(asset_weth),
+        ],
+    )
+    assert_test(rec_b_weth["recovered_count"] == 1, "Bob discovered large WETH note")
+    assert_test(rec_b_weth["wallet_balance"] == transfer_weth, f"Bob balance is {transfer_weth} Gwei (4.0 WETH)")
+
+    # Alice commits spend and verifies solvency
+    commit_weth = run_rust_harness(
+        harness_bin,
+        [
+            "commit_spend",
+            alice_seed_weth,
+            payload_weth["session_id"],
+            payload_weth["input_nullifier_1_hex"],
+            "true",
+            str(asset_weth),
+            str(deposit_weth),
+        ],
+    )
+    expected_alice_weth = deposit_weth - transfer_weth - fee_weth  # 5,999,950,000
+    assert_test(commit_weth["new_balance"] == expected_alice_weth, f"Alice change balance is {expected_alice_weth} Gwei (5.99995 WETH)")
+
+
 # ==============================================================================
 # MAIN RUNNER
 # ==============================================================================
@@ -721,9 +1023,10 @@ def main():
     test_section_5_sdk_boundary_negatives(harness_bin)
     test_section_6_eavesdropper_resistance(harness_bin)
     test_section_7_dual_asset_weth_transfer(harness_bin)
+    test_section_8_large_value_multi_asset_lifecycle(harness_bin)
 
     print(f"\n{BOLD}{GREEN}========================================================================{RESET}")
-    print(f"{BOLD}{GREEN}  ALL DEC-043C REAL-CASE TESTS PASSED: {PASSED_TESTS}/{TOTAL_TESTS} OK (100% SUCCESS)    {RESET}")
+    print(f"{BOLD}{GREEN}  ALL DEC-043C & DEC-048 REAL-CASE TESTS PASSED: {PASSED_TESTS}/{TOTAL_TESTS} OK (100% SUCCESS)    {RESET}")
     print(f"{BOLD}{GREEN}========================================================================{RESET}\n")
 
 
