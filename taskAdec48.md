@@ -39,15 +39,15 @@
 
 ## 2. Step-by-Step Implementation Checklist
 
-- [ ] **Step A1: Update `NotePlaintext` serialization in `zeltra-core/src/memo.rs`:**
+- [x] **Step A1: Update `NotePlaintext` serialization in `zeltra-core/src/memo.rs`:**
   - Implement `to_bytes_v3(&self) -> [u8; 40]` and `from_bytes_v3(bytes: &[u8; 40]) -> Option<Self>`.
   - Ensure canonical BLS12-381 scalar validation ($< r$) after extracting `asset_id`.
-- [ ] **Step A2: Update Key Separation PRG in `zeltra-core/src/memo.rs`:**
+- [x] **Step A2: Update Key Separation PRG in `zeltra-core/src/memo.rs`:**
   - Derive $K_{\text{enc}}$ (32B), $K_{\text{cmt}}$ (32B), and $N_7$ (7B) via `HKDF-Expand` (71 bytes total OKM).
-- [ ] **Step A3: Implement `encrypt_committing_note_memo` & `decrypt_committing_note_memo`:**
+- [x] **Step A3: Implement `encrypt_committing_note_memo` & `decrypt_committing_note_memo`:**
   - Wire format: $32 + 1 + 7 + 40 + 16 = 96$ bytes.
   - Add `shared_secret.was_non_contributory()` rejection.
-- [ ] **Step A4: Unit Tests in `zeltra-core`:**
+- [x] **Step A4: Unit Tests in `zeltra-core`:**
   - Test boundary values: 0, $2^{31}-1$, $2^{31}$, 5,000 USDC ($5 \times 10^9$), 10 Billion USDC, and `u64::MAX`.
   - Test all-zero X25519 public key rejection.
   - Test 128 bit flips on committing tag (100% rejection).
