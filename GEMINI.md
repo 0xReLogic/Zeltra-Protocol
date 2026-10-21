@@ -183,6 +183,9 @@ Mengacu pada master checklist [`todo.md`](file:///workspaces/Zeltra-Protocol/tod
    * Jangan pernah membypass verifikasi kriptografi di production path.
    * `fail-closed` jika rahasia/kunci tidak tersedia (dilarang fallback ke mock key di mode non-test).
    * Uji selalu kondisi negatif (tes gagal harus membuktikan state on-chain/DB tidak berubah).
+7. **Circuit Security Dual Gate (Wajib Setiap Ada Modifikasi Sirkuit):**
+   * *Design Gate (DEC-046):* Kunci cabang kondisional/dummy ke konstanta kanonikal dengan gerbang pendamping kuadratik (*Zero Degrees of Freedom*).
+   * *Verification Gate (DEC-047):* Uji rank Jacobian teraugmentasi $M(a)$ di `formal_tests.rs` dengan $r_{T_{\text{financial}}} = 0$ melintasi matriks 6 keluarga saksi (*Witness-Locality Sweep*).
 
 ---
 

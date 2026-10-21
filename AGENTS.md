@@ -218,6 +218,9 @@ WITHOUT exposing spending authority (sk), unspent notes, or total account balanc
 ### While Coding
 
 - **Circuit Status (FLEXIBLE & UNLOCKED):** Deploy Arbitrum sedang dalam masa pause/freeze (Oktober 2026), sehingga sirkuit Zeltra **BELUM DIKUNCI (CIRCUIT IS NOT FROZEN)**. Tim memiliki fleksibilitas penuh untuk menyempurnakan sirkuit, menambah gadget, dan mengubah public inputs tanpa batasan freeze prematur.
+- **Circuit Security Dual Gate (DEC-046 & DEC-047):** Setiap kali menambah atau memodifikasi logika sirkuit R1CS:
+  * **Design Gate (DEC-046):** Wajib pasang gerbang pendamping kuadratik deterministik (*companion constraint*) pada seluruh cabang kondisional/dummy agar derajat kebebasan kawat non-aktif terkunci ke konstanta kanonikal (Zero Degrees of Freedom).
+  * **Verification Gate (DEC-047):** Wajib lulus evaluasi Augmented Jacobian $M(a)$ di test suite formal (`formal_tests.rs`) dengan $r_{T_{\text{financial}}} = 0$ melintasi matriks 6 keluarga saksi adversarial (*Witness-Locality Sweep*), anti-komplasensi saksi tunggal.
 - `cargo fmt` + `clippy` clean
 - Never bypass crypto verification with `#[cfg(test)]` in production paths
 - Never fall back to mock/test keys when secrets are unavailable — fail closed
