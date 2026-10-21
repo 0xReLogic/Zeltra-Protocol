@@ -880,16 +880,17 @@ mod tests {
         let epoch1 = 10u64;
         let nf1 = derive_joinsplit_nullifier(nk, rho1, epoch1);
 
+        // DEC-046: Dummy second input uses canonical dummy constants
         let nonce = Fr::from(999u64);
-        let nf2 = derive_joinsplit_dummy_nullifier(nk, nonce);
+        let owner_dummy = zeltra_core::circuit_gadgets::CANONICAL_DUMMY_OWNER;
+        let rho_dummy = zeltra_core::circuit_gadgets::CANONICAL_DUMMY_RHO;
+        let rand_dummy = zeltra_core::circuit_gadgets::CANONICAL_DUMMY_RANDOMNESS;
+        let dummy_nk = derive_nullifier_key(owner_dummy);
+        let nf2 = derive_joinsplit_dummy_nullifier(dummy_nk, nonce);
 
-        let rho_out1 = Fr::from(401u64);
-        let rand_out1 = Fr::from(402u64);
-        let cm_out1 = note_commitment(0, 1, sk, rho_out1, rand_out1);
-
-        let rho_out2 = Fr::from(501u64);
-        let rand_out2 = Fr::from(502u64);
-        let cm_out2 = note_commitment(0, 1, sk, rho_out2, rand_out2);
+        // DEC-046: Canonical dummy output commitments (v=0, owner=0, rho=0, rand=0)
+        let cm_out1 = note_commitment(0, 1, owner_dummy, rho_dummy, rand_dummy);
+        let cm_out2 = note_commitment(0, 1, owner_dummy, rho_dummy, rand_dummy);
 
         let merch_amt = 9_900_000u64;
         let proto_fee = (merch_amt * 45).div_ceil(10_000); // 44_550
@@ -937,10 +938,10 @@ mod tests {
 
             in2_value: Some(Fr::from(0u64)),
             in2_asset_id: Some(Fr::from(1u64)),
-            in2_owner_key: Some(sk),
-            in2_rho: Some(Fr::from(0u64)),
-            in2_randomness: Some(Fr::from(0u64)),
-            in2_leaf_index: Some(Fr::from(0u64)),
+            in2_owner_key: Some(owner_dummy),
+            in2_rho: Some(rho_dummy),
+            in2_randomness: Some(rand_dummy),
+            in2_leaf_index: Some(Fr::from(zeltra_core::circuit_gadgets::CANONICAL_DUMMY_LEAF_INDEX)),
             in2_mountain_height: Some(0),
             in2_mountain_siblings: Some([Fr::from(0u64); 32]),
             in2_is_dummy: Some(Fr::from(1u64)),
@@ -950,15 +951,15 @@ mod tests {
 
             out1_value: Some(Fr::from(0u64)),
             out1_asset_id: Some(Fr::from(1u64)),
-            out1_owner_key: Some(sk),
-            out1_rho: Some(rho_out1),
-            out1_randomness: Some(rand_out1),
+            out1_owner_key: Some(owner_dummy),
+            out1_rho: Some(rho_dummy),
+            out1_randomness: Some(rand_dummy),
 
             out2_value: Some(Fr::from(0u64)),
             out2_asset_id: Some(Fr::from(1u64)),
-            out2_owner_key: Some(sk),
-            out2_rho: Some(rho_out2),
-            out2_randomness: Some(rand_out2),
+            out2_owner_key: Some(owner_dummy),
+            out2_rho: Some(rho_dummy),
+            out2_randomness: Some(rand_dummy),
 
             has_change_1: Some(Fr::from(0u64)),
             has_change_2: Some(Fr::from(0u64)),
