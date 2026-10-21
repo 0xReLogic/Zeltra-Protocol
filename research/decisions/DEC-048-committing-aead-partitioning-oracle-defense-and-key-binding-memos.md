@@ -183,26 +183,8 @@ where $G$ is an **RCR-PRG** and $H$ is a **CR-PRF** (Collision-Resistant PRF).
          │   C = Γ.E(K_1, N, M)│                     │  T = H(K_2, N, A, C)│
          └─────────────────────┘                     └─────────────────────┘
                     │                                           │
-                    └─────────────────────┬─────────────────────┘
-                                          ▼
-                               Ciphertext Package (C, T)
-```
-
-#### Comparison of Generic Transform Architectures
-
-| Scheme | Generic? | Nonce-Based Rekey? | Security Model | CMT Class | Zeltra Calldata Overhead | Status in Zeltra |
-|---|---|---|---|---|---|---|
-| **Standard ChaCha20Poly1305** | N/A | No | Standard | **Non-Committing** | 0 bytes | **DEPRECATED (Vulnerable to AUD-21)** |
-| **CTX (Chan-Rogaway 2022)** | No (Tag-based) | No | Mixed (RO) | CMT-4 | +16 bytes (112B total) | Rejected (Violates 96B invariant) |
-| **AEaH (Chen-Karadžić 2025)** | Yes | No | Mixed (Broken) | None (Broken) | 0 bytes | **UNINSTANTIABLE (Plaintext Leakage)** |
-| **EtH (Chen-Karadžić 2025)** | Yes | No | Mixed (Broken) | None (Broken) | 0 bytes | **UNINSTANTIABLE (Auth Forgery)** |
-| **HtAE-ST (Minematsu-Inoue)** | Yes | Yes (Costly) | Standard | CMT-4 | 0 bytes | Suboptimal (Expensive on WASM) |
-| **AEtH-KS (Minematsu-Inoue)** | Yes | No | Standard | CMT-4 | +16 bytes | Suboptimal (Requires dual tags) |
-| **EtH-KS (Minematsu-Inoue)** | **Yes** | **No (Zero overhead)**| **Standard** | **CMT-4** | **0 bytes (Strict 96B)** | **SELECTED FOR DEC-048** |
-
-### D. Architectural Selection for Zeltra: EtH-KS
-Zeltra Protocol selects **EtH-KS (Encrypt-then-Hash with Key Separation)** for the 96-byte memo layer:
-1. **Zero Calldata Overhead:** Exactly matches the canonical 96-byte layout ($32\text{B } epk + 1\text{B } vt + 11\text{B } N + 36\text{B } C + 16\text{B } T = 96\text{B}$).
+                    └─────────────────────┬───────
+1. **Zero Calldata Overhead:** Exactly matches the canonical 96-byte layout ($32\text{B } epk + 1\text{B } vt + 7\text{B } N + 40\text{B } C + 16\text{B } T = 96\text{B}$).
 2. **Verify-then-Decrypt Invariant:** The client verifies the committing tag $T$ in constant time *before* passing ciphertext bytes to the decryption routine. Corrupted or malicious candidate memos are rejected with zero allocation and zero exposure to stream cipher operations.
 3. **No Nonce-Based Rekeying:** Unlike SIV or tree-rekeying architectures, key separation is evaluated once during ECDH key agreement. Online per-note proof generation and scanning speeds are preserved.
 4. **Standard Model Provability:** Proven secure under standard cryptographic assumptions (PRF security of HMAC-SHA256 and collision resistance of HKDF-SHA256), completely eliminating random oracle heuristics.
@@ -226,18 +208,14 @@ The wire format preserves the 96-byte invariant established in DEC-043B and DEC-
 +                                                               +
 |                                                               |
 +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-| View Tag (1B) |                 Nonce (11 Bytes)              |
-+-+-+-+-+-+-+-+-+                                               +
-|                                                               |
-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-|       Ciphertext Payload Header (4B) [asset_id || value]      |
-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-|                                                               |
-+                                                               +
-|                                                               |
-+                   Encrypted Rho Scalar (rho)                  +
-|                            (32 Bytes)                         |
-+                                                               +
+| View Tag (1B) |                 Nonce (7 Bytes)               |
++-+-+-+-+-+-+-+-+                               +-+-+-+-+-+-+-+-+
+|                                               |               |
++-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+               +
+|             Plaintext Payload (40 Bytes Ciphertext)           |
++                   8 Bytes: u64 Note Value                     +
+|                   32 Bytes: Fr Rho Scalar                     |
++             (Bit 255 of Rho embeds 1-bit asset_id)            +
 |                                                               |
 +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
 |                                                               |
@@ -254,12 +232,12 @@ The wire format preserves the 96-byte invariant established in DEC-043B and DEC-
 |---|---|---|---|---|
 | `[0..32]` | `ephemeral_public_key` | Curve Point | 32 B | Sender ephemeral X25519 public key ($epk = esk \cdot G$) |
 | `[32]` | `view_tag` | `u8` | 1 B | DEC-045C fast pre-filter discarding 99.6% non-owned memos |
-| `[33..44]` | `nonce` | `[u8; 11]` | 11 B | Deterministic nonce stream derived from $S$ |
-| `[44..48]` | `ciphertext_hdr` | Encrypted Header | 4 B | ChaCha20 encrypted $[1\text{b } \text{asset\_id} \parallel 31\text{b } \text{value}]$ |
-| `[48..80]` | `ciphertext_rho` | Encrypted Scalar | 32 B | ChaCha20 encrypted canonical Fr scalar $\rho$ |
+| `[33..40]` | `nonce` | `[u8; 7]` | 7 B | Deterministic nonce stream derived from $S$ |
+| `[40..48]` | `ciphertext_value` | Encrypted `u64` | 8 B | ChaCha20 encrypted 64-bit note value (supports micro-units to billions) |
+| `[48..80]` | `ciphertext_rho` | Encrypted Scalar | 32 B | ChaCha20 encrypted canonical Fr scalar $\rho$ (bit 255 embeds `asset_id`) |
 | `[80..96]` | `committing_tag` | PRF Tag | 16 B | Truncated HMAC-SHA256 committing authenticator ($T_{\text{cmt}}$) |
 
-Total Length: Exactly **96 bytes** ($32 + 1 + 11 + 4 + 32 + 16 = 96$).
+Total Length: Exactly **96 bytes** ($32 + 1 + 7 + 8 + 32 + 16 = 96$).
 
 ### B. Mathematical Key Separation & Tag Generation Pipeline
 
@@ -268,28 +246,31 @@ The sender generates an ephemeral secret scalar $esk \xleftarrow{\$} \mathbb{F}_
 $$epk = \text{X25519}(esk, G)$$
 $$S = \text{X25519}(esk, pk_{\text{ivk}}) \in [0..255]^{32}$$
 
+Recipient validation strictly checks `shared_secret.was_non_contributory()` to reject small-order/all-zero public keys (`AUD-26`).
+
 #### Step 2: View Tag Derivation (DEC-045C Fast-Path Filter)
-$$vt = \text{HKDF-Expand}(S, \text{"zeltra\_view\_tag"}, 1)[0]$$
+$$vt = \text{HKDF-Expand}(S, \text{"zeltra_view_tag"}, 1)[0]$$
 
 #### Step 3: Key Separation via RCR-PRG ($G$)
 We instantiate $G(S)$ using RFC 5869 HKDF over SHA-256 with domain-isolated salt and info parameters:
 $$\text{PRK} = \text{HKDF-Extract}(\text{salt}=\text{"ZELTRA_COMMITTING_MEMO_SALT_V2"}, S)$$
-$$\text{OKM} = \text{HKDF-Expand}(\text{PRK}, \text{"ZELTRA_COMMITTING_MEMO_KEYS_V2"}, 75)$$
+$$\text{OKM} = \text{HKDF-Expand}(\text{PRK}, \text{"ZELTRA_COMMITTING_MEMO_KEYS_V2"}, 71)$$
 
-We partition the 75-byte output material into three cryptographically independent streams:
+We partition the 71-byte output material into three cryptographically independent streams:
 $$K_{\text{enc}} = \text{OKM}[0..32] \quad (\text{32-byte ChaCha20 Stream Encryption Key})$$
 $$K_{\text{cmt}} = \text{OKM}[32..64] \quad (\text{32-byte Key-Commitment PRF Key})$$
-$$N_{11} = \text{OKM}[64..75] \quad (\text{11-byte Transport Nonce})$$
+$$N_7 = \text{OKM}[64..71] \quad (\text{7-byte Transport Nonce})$$
 
 The 12-byte ChaCha20 cipher nonce is formatted by zero-padding:
-$$N_{12} = N_{11} \parallel 0\text{x}00 \in [0..255]^{12}$$
+$$N_{12} = N_7 \parallel [0\text{x}00; 5] \in [0..255]^{12}$$
 
 #### Step 4: Stream Cipher Encryption ($\Gamma.E$)
-The note plaintext payload $M \in [0..255]^{36}$ is encrypted via ChaCha20:
+The note plaintext payload $M \in [0..255]^{40}$ is encrypted via ChaCha20:
 $$C = \text{ChaCha20-Encrypt}(K_{\text{enc}}, N_{12}, M)$$
 where:
-$$M = \text{Header}_{4\text{B}} \parallel \text{EVM-Scalar}_{32\text{B}}(\rho)$$
-$$\text{Header}_{4\text{B}} = ((\text{asset\_id} \ \& \ 1) \ll 31) \mid (\text{value} \ \& \ 0\text{x}7FFF\_FFFF)$$
+$$M = \text{Value}_{8\text{B}} \ (\text{little-endian } u64) \parallel \text{Rho}_{32\text{B}} \ (\text{canonical Fr scalar with bit 255 = asset\_id})$$
+
+Because BLS12-381 scalar field modulus $r < 2^{255}$, bit 255 of canonical $\rho$ is always 0. Setting bit 255 to `asset_id` (0 or 1) allows full 64-bit value storage with zero payload expansion (`AUD-25`).
 
 #### Step 5: Associated Data Context Binding ($A$)
 To achieve **CMT-4 (Context-Committing Security)**, the associated data $A$ deterministically binds the external protocol context:
@@ -302,12 +283,12 @@ Total Associated Data length: $|A_{\text{cm}}| = 91$ bytes.
 
 #### Step 6: Committing Tag Generation ($H$)
 The committing authentication tag is computed using HMAC-SHA256 parameterized by $K_{\text{cmt}}$:
-$$M_H = N_{11} \ (11\text{B}) \parallel A \ (59\text{B}) \parallel C \ (36\text{B})$$
+$$M_H = N_7 \ (7\text{B}) \parallel A \ (59\text{B}) \parallel C \ (40\text{B})$$
 $$T_{\text{full}} = \text{HMAC-SHA256}(K_{\text{cmt}}, M_H) \in [0..255]^{32}$$
 $$T_{\text{cmt}} = T_{\text{full}}[0..16] \quad (\text{16-byte Truncated Authenticator})$$
 
 The complete 96-byte memo is assembled as:
-$$\text{Memo}_{96\text{B}} = epk \parallel vt \parallel N_{11} \parallel C \parallel T_{\text{cmt}}$$
+$$\text{Memo}_{96\text{B}} = epk \parallel vt \parallel N_7 \parallel C \parallel T_{\text{cmt}}$$
 
 ---
 
@@ -322,15 +303,41 @@ flowchart TD
     CompEPK --> ECDH[Compute Shared Secret S = X25519 esk, pk_ivk]
     ECDH --> DetRand[Derive Deterministic Hiding Randomness r]
     ECDH --> ViewTag[Derive 1-Byte View Tag vt]
-    ECDH --> KeySep[HKDF Key Separation: S -> K_enc, K_cmt, N_11]
+    ECDH --> KeySep[HKDF Key Separation: S -> K_enc, K_cmt, N_7]dles where the on-chain commitment $cm$ is available, the associated data binds $cm$ directly:
+$$A_{\text{cm}} = epk \ (32\text{B}) \parallel vt \ (1\text{B}) \parallel cm \ (32\text{B}) \parallel \text{"ZELTRA_MEMO_AD_BINDING_V1"}$$
+Total Associated Data length: $|A_{\text{cm}}| = 91$ bytes.
+
+#### Step 6: Committing Tag Generation ($H$)
+The committing authentication tag is computed using HMAC-SHA256 parameterized by $K_{\text{cmt}}$:
+$$M_H = N_7 \ (7\text{B}) \parallel A \ (59\text{B}) \parallel C \ (40\text{B})$$
+$$T_{\text{full}} = \text{HMAC-SHA256}(K_{\text{cmt}}, M_H) \in [0..255]^{32}$$
+$$T_{\text{cmt}} = T_{\text{full}}[0..16] \quad (\text{16-byte Truncated Authenticator})$$
+
+The complete 96-byte memo is assembled as:
+$$\text{Memo}_{96\text{B}} = epk \parallel vt \parallel N_7 \parallel C \parallel T_{\text{cmt}}$$
+
+---
+
+## 4. Algorithmic Workflows & Fail-Closed State Transitions
+
+### A. Sender Encryption Workflow (`encrypt_committing_note_memo`)
+
+```mermaid
+flowchart TD
+    Start([Input: value, rho, asset_id, recipient_zsa]) --> GenEph[Generate Ephemeral Secret Key esk]
+    GenEph --> CompEPK[Compute epk = esk * BasePoint]
+    CompEPK --> ECDH[Compute Shared Secret S = X25519 esk, pk_ivk]
+    ECDH --> DetRand[Derive Deterministic Hiding Randomness r]
+    ECDH --> ViewTag[Derive 1-Byte View Tag vt]
+    ECDH --> KeySep[HKDF Key Separation: S -> K_enc, K_cmt, N_7]
     
     KeySep --> PackPT[Pack Plaintext M: Header 4B || rho 32B]
-    PackPT --> ChaCha[Encrypt C = ChaCha20 K_enc, N_11 || 0x00, M]
+    PackPT --> ChaCha[Encrypt C = ChaCha20 K_enc, N_7 || [0x00; 5], M]
     
     ChaCha --> AssembleAD[Assemble AD = epk || vt || DOMAIN_TAG]
-    AssembleAD --> HMAC[Compute T_cmt = Truncate_16 HMAC-SHA256 K_cmt, N_11 || AD || C]
+    AssembleAD --> HMAC[Compute T_cmt = Truncate_16 HMAC-SHA256 K_cmt, N_7 || AD || C]
     
-    HMAC --> PackWire[Pack 96B Wire: epk || vt || N_11 || C || T_cmt]
+    HMAC --> PackWire[Pack 96B Wire: epk || vt || N_7 || C || T_cmt]
     PackWire --> Zeroize[Zeroize esk, S, K_enc, K_cmt]
     Zeroize --> Ret([Return: 96-Byte Memo, Hiding Randomness r])
 ```
@@ -341,20 +348,20 @@ flowchart TD
 flowchart TD
     StartScan([Incoming 96B Memo, Recipient IVK]) --> CheckLen{Length == 96?}
     CheckLen -- No --> RejectLen[Fail-Closed: Return None]
-    CheckLen -- Yes --> ParseWire[Extract epk 0..32, vt_memo 32, N_11 33..44, C 44..80, T_memo 80..96]
+    CheckLen -- Yes --> ParseWire[Extract epk 0..32, vt_memo 32, N_7 33..40, C 40..80, T_memo 80..96]
     
     ParseWire --> RecECDH[Compute S = X25519 ivk, epk]
     RecECDH --> CheckVT{derive_view_tag S == vt_memo?}
     CheckVT -- No (99.6%) --> DiscardVT[Instant Discard: 0 Symmetric Crypto]
     CheckVT -- Yes (0.39%) --> ExpandKeys[HKDF Key Separation: S -> K_enc, K_cmt, N_derived]
     
-    ExpandKeys --> CheckNonce{ConstantTimeEq N_11, N_derived?}
+    ExpandKeys --> CheckNonce{ConstantTimeEq N_7, N_derived?}
     CheckNonce -- No --> RejectNonce[Fail-Closed: Tampered Nonce]
-    CheckNonce -- Yes --> CompTag[Compute Expected Tag T_expected = HMAC-SHA256 K_cmt, N_11 || AD || C]
+    CheckNonce -- Yes --> CompTag[Compute Expected Tag T_expected = HMAC-SHA256 K_cmt, N_7 || AD || C]
     
     CompTag --> VerifyTag{ConstantTimeEq T_expected, T_memo?}
     VerifyTag -- No --> RejectTag[Fail-Closed: Partitioning / Corrupted Tag Rejected]
-    VerifyTag -- Yes --> Decrypt[Decrypt Plaintext M = ChaCha20 K_enc, N_11 || 0x00, C]
+    VerifyTag -- Yes --> Decrypt[Decrypt Plaintext M = ChaCha20 K_enc, N_7 || [0x00; 5], C]
     
     Decrypt --> CheckHeader{Header Valid & asset_id <= 1?}
     CheckHeader -- No --> RejectHdr[Fail-Closed: Corrupted Header]
@@ -408,18 +415,18 @@ pub enum CommittingMemoError {
 ### B. Key Separation Derivation Routine (`zeltra-core/src/memo.rs`)
 
 ```rust
-/// Material produced by Key Separation PRG G(S) -> (K_enc, K_cmt, N_11).
+/// Material produced by Key Separation PRG G(S) -> (K_enc, K_cmt, N_7).
 pub struct KeySeparationResult {
     pub cipher_key: [u8; 32],
     pub commitment_key: [u8; 32],
-    pub nonce_11: [u8; 11],
+    pub nonce_7: [u8; 7],
 }
 
 impl Zeroize for KeySeparationResult {
     fn zeroize(&mut self) {
         self.cipher_key.zeroize();
         self.commitment_key.zeroize();
-        self.nonce_11.zeroize();
+        self.nonce_7.zeroize();
     }
 }
 
@@ -429,7 +436,7 @@ impl Drop for KeySeparationResult {
     }
 }
 
-/// Evaluates the RCR-PRG G(S) -> (K_enc, K_cmt, N_11) using HKDF-SHA256.
+/// Evaluates the RCR-PRG G(S) -> (K_enc, K_cmt, N_7) using HKDF-SHA256.
 pub fn derive_key_separation(shared_secret: &[u8; 32]) -> Result<KeySeparationResult, CommittingMemoError> {
     let hk = hkdf::Hkdf::<sha2::Sha256>::new(Some(SALT_COMMITTING_MEMO_V2), shared_secret);
     let mut okm = [0u8; 75];
@@ -438,18 +445,18 @@ pub fn derive_key_separation(shared_secret: &[u8; 32]) -> Result<KeySeparationRe
 
     let mut cipher_key = [0u8; 32];
     let mut commitment_key = [0u8; 32];
-    let mut nonce_11 = [0u8; 11];
+    let mut nonce_7 = [0u8; 7];
 
     cipher_key.copy_from_slice(&okm[0..32]);
     commitment_key.copy_from_slice(&okm[32..64]);
-    nonce_11.copy_from_slice(&okm[64..75]);
+    nonce_7.copy_from_slice(&okm[64..71]);
 
     okm.zeroize();
 
     Ok(KeySeparationResult {
         cipher_key,
         commitment_key,
-        nonce_11,
+        nonce_7,
     })
 }
 ```
@@ -465,16 +472,16 @@ type HmacSha256 = Hmac<Sha256>;
 /// Computes the 16-byte committing authentication tag T_cmt using HMAC-SHA256.
 pub fn compute_committing_tag(
     commitment_key: &[u8; 32],
-    nonce_11: &[u8; 11],
+    nonce_7: &[u8; 7],
     epk: &[u8; 32],
     view_tag: u8,
-    ciphertext: &[u8; 36],
+    ciphertext: &[u8; 40],
 ) -> [u8; 16] {
     let mut mac = HmacSha256::new_from_slice(commitment_key)
         .expect("HMAC can take key of any size");
 
     // 1. Nonce stream
-    mac.update(nonce_11);
+    mac.update(nonce_7);
     // 2. Associated Data Context (epk || view_tag || DOMAIN_TAG)
     mac.update(epk);
     mac.update(&[view_tag]);
@@ -518,7 +525,7 @@ pub fn encrypt_committing_note_memo<R: RecipientViewingKey>(
 
     let recipient_pk_bytes = recipient.recipient_pubkey();
     let plaintext = NotePlaintext { value, rho, asset_id };
-    let pt_bytes = plaintext.to_bytes_v2();
+    let pt_bytes = plaintext.to_bytes_v3();
 
     // 1. Ephemeral Diffie-Hellman Key Agreement
     let mut eph_bytes = [0u8; 32];
@@ -533,23 +540,23 @@ pub fn encrypt_committing_note_memo<R: RecipientViewingKey>(
     let randomness = derive_ecdh_note_randomness(&shared_secret_bytes, &rho);
     let view_tag = derive_view_tag(&shared_secret_bytes);
 
-    // 2. Key Separation: G(S) -> (K_enc, K_cmt, N_11)
+    // 2. Key Separation: G(S) -> (K_enc, K_cmt, N_7)
     let keys = derive_key_separation(&shared_secret_bytes)?;
 
     // 3. ChaCha20 Stream Encryption
     let mut nonce_12 = [0u8; 12];
-    nonce_12[0..11].copy_from_slice(&keys.nonce_11);
-    nonce_12[11] = 0u8;
+    nonce_12[0..7].copy_from_slice(&keys.nonce_7);
+    // nonce_12[7..12] is zero-padded
 
     let mut cipher = ChaCha20::new(&keys.cipher_key.into(), &nonce_12.into());
-    let mut ciphertext = [0u8; 36];
+    let mut ciphertext = [0u8; 40];
     ciphertext.copy_from_slice(&pt_bytes);
     cipher.apply_keystream(&mut ciphertext);
 
     // 4. Committing Tag Evaluation via HMAC-SHA256 (EtH-KS)
     let tag = compute_committing_tag(
         &keys.commitment_key,
-        &keys.nonce_11,
+        &keys.nonce_7,
         ephemeral_public.as_bytes(),
         view_tag,
         &ciphertext,
@@ -559,8 +566,8 @@ pub fn encrypt_committing_note_memo<R: RecipientViewingKey>(
     let mut memo = Vec::with_capacity(ENCRYPTED_MEMO_SIZE);
     memo.extend_from_slice(ephemeral_public.as_bytes()); // Bytes 0..32
     memo.push(view_tag);                                 // Byte 32
-    memo.extend_from_slice(&keys.nonce_11);              // Bytes 33..44
-    memo.extend_from_slice(&ciphertext);                 // Bytes 44..80
+    memo.extend_from_slice(&keys.nonce_7);               // Bytes 33..40
+    memo.extend_from_slice(&ciphertext);                 // Bytes 40..80
     memo.extend_from_slice(&tag);                        // Bytes 80..96
 
     assert_eq!(memo.len(), ENCRYPTED_MEMO_SIZE);
@@ -585,8 +592,8 @@ pub fn decrypt_committing_note_memo(
 
     let epk_bytes: [u8; 32] = encrypted_memo[0..32].try_into().ok()?;
     let memo_view_tag = encrypted_memo[32];
-    let memo_nonce: [u8; 11] = encrypted_memo[33..44].try_into().ok()?;
-    let memo_ciphertext: [u8; 36] = encrypted_memo[44..80].try_into().ok()?;
+    let memo_nonce: [u8; 7] = encrypted_memo[33..40].try_into().ok()?;
+    let memo_ciphertext: [u8; 40] = encrypted_memo[40..80].try_into().ok()?;
     let memo_tag: [u8; 16] = encrypted_memo[80..96].try_into().ok()?;
 
     let epk = x25519_dalek::PublicKey::from(epk_bytes);
@@ -600,11 +607,11 @@ pub fn decrypt_committing_note_memo(
         return None; // 99.6% non-owned memos discarded in ~50 ns
     }
 
-    // 2. Key Separation Derivation: G(S) -> (K_enc, K_cmt, N_11)
+    // 2. Key Separation Derivation: G(S) -> (K_enc, K_cmt, N_7)
     let keys = derive_key_separation(&shared_secret_bytes).ok()?;
 
     // 3. Strict Nonce Verification
-    if !bool::from(keys.nonce_11.ct_eq(&memo_nonce)) {
+    if !bool::from(keys.nonce_7.ct_eq(&memo_nonce)) {
         return None;
     }
 
@@ -625,15 +632,15 @@ pub fn decrypt_committing_note_memo(
 
     // 5. Verified Stream Cipher Decryption
     let mut nonce_12 = [0u8; 12];
-    nonce_12[0..11].copy_from_slice(&memo_nonce);
-    nonce_12[11] = 0u8;
+    nonce_12[0..7].copy_from_slice(&memo_nonce);
+    // nonce_12[7..12] zero-padded
 
     let mut cipher = ChaCha20::new(&keys.cipher_key.into(), &nonce_12.into());
     let mut pt_buf = memo_ciphertext;
     cipher.apply_keystream(&mut pt_buf);
 
     // 6. Canonical Field & Asset Bounds Deserialization
-    let pt = NotePlaintext::from_bytes_v2(&pt_buf)?;
+    let pt = NotePlaintext::from_bytes_v3(&pt_buf)?;
     let randomness = derive_ecdh_note_randomness(&shared_secret_bytes, &pt.rho);
 
     Some((pt, randomness))
@@ -710,7 +717,7 @@ To eliminate confirmation bias, testing must satisfy the following criteria:
 | `NEG-01` | **Multi-Key Partitioning Attempt** | Synthesize memo targeting Alice ($ivk_A$); attempt decryption under 100 random non-target IVKs | 100/100 Rejections (0 decryptions) | `AUD-21` (Immunity to Partitioning Oracles) |
 | `NEG-02` | **Single-Bit Tag Tampering** | Flip 1 bit in committing tag ($T_{\text{cmt}}[i] \oplus (1 \ll b)$ for $i \in [0..16], b \in [0..7]$) | Immediate `None` rejection before decryption | `AUD-22` (Verify-then-Decrypt) |
 | `NEG-03` | **Ciphertext Payload Tampering** | Flip 1 bit in encrypted payload ($C[i] \oplus 0\text{x}01$ for $i \in [0..36]$) | Tag verification fails; zero plaintext leak | `AUD-22` (Ciphertext Integrity) |
-| `NEG-04` | **Nonce Modification / Malleation** | Mutate wire nonce byte ($N_{11}[5] \oplus 0\text{xFF}$) | Nonce check fails; immediate `None` | `INV-DEC048-1` (Nonce Binding) |
+| `NEG-04` | **Nonce Modification / Malleation** | Mutate wire nonce byte ($N_7[3] \oplus 0\text{xFF}$) | Nonce check fails; immediate `None` | `INV-DEC048-1` (Nonce Binding) |
 | `NEG-05` | **Ephemeral Public Key Substitution** | Replace $epk$ with random 32-byte curve point | View Tag / Tag verification fails | `AUD-21` (Context Commitment) |
 | `NEG-06` | **Non-Canonical Scalar Overflow** | Inject $\rho \ge r_{\text{BLS12-381}}$ into encrypted payload | `from_bytes_v2` returns `None` | `DEC-035` (Canonical Scalar Rigidity) |
 | `NEG-07` | **Truncated / Oversized Wire Memo** | Supply calldata of length 0, 32, 95, 97, and 128 bytes | Pre-flight length check rejects instantly | `INV-DEC048-1` (96-Byte Calldata Invariant) |
@@ -777,7 +784,7 @@ An exhaustive, evidence-based independent security review was conducted against 
   2. We embed the 1-bit `asset_id` into bit 255 of $\rho$, leaving the full 32 bytes of $\rho$ self-contained without altering its canonicality in Fr.
   3. We allocate a full **8 bytes (`u64`)** for `value` (supporting up to $1.8 \times 10^{19}$ units).
   4. Plaintext payload size becomes $8\text{B (value)} + 32\text{B (rho + asset\_id bit)} = \mathbf{40\text{ bytes}}$.
-  5. The transport nonce is set to **7 bytes (56 bits)**. Because the encryption key $K_{\text{enc}}$ is a single-use ephemeral key derived via HKDF per note memo, a 56-bit unique nonce provides absolute cryptographic security against keystream reuse.
+  5. The transport nonce is set to **7 bytes (56 bits)**. Because the encryption key $K_{\text{enc}}$ is a single-use ephemeral key derived via HKDF per note memo, a 56-bit unique nonce provides robust keystream-reuse protection under the single-use ephemeral key model (where a fresh $esk$ is sampled per note).
   6. Final wire budget:
      $$32\text{B (epk)} + 1\text{B (view\_tag)} + 7\text{B (nonce)} + 40\text{B (ciphertext)} + 16\text{B (committing\_tag)} = \mathbf{96\text{ BYTES TEPAT}}.$$
 
