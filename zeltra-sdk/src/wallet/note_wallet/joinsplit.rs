@@ -3,7 +3,7 @@ use ark_ff::{PrimeField, UniformRand};
 use rand::rngs::OsRng;
 use zeltra_core::{
     derive_joinsplit_dummy_nullifier, derive_joinsplit_nullifier, derive_nullifier_key,
-    encrypt_note_memo_deterministic, extract_joinsplit_public_inputs, fr_to_be_bytes,
+    encrypt_committing_note_memo, extract_joinsplit_public_inputs, fr_to_be_bytes,
     generate_joinsplit_proof, note_commitment, split_quote_hash_to_limbs, to_evm_g1, to_evm_g2,
     JoinSplitCircuit, ZeltraShieldedAddress, CANONICAL_DUMMY_LEAF_INDEX, CANONICAL_DUMMY_OWNER,
     CANONICAL_DUMMY_RANDOMNESS, CANONICAL_DUMMY_RHO, CANONICAL_DUMMY_VALUE,
@@ -612,7 +612,7 @@ impl PrivateNoteWallet {
 
         let sender_pk_ivk = self.incoming_viewing_public_key()?;
         let memo_1 = if selected.has_change {
-            zeltra_core::encrypt_note_memo_deterministic(
+            zeltra_core::encrypt_committing_note_memo(
                 selected.change_amount,
                 ch1_rho,
                 input_note_1.asset_id as u64,
@@ -621,7 +621,7 @@ impl PrivateNoteWallet {
             .map(|(m, _)| m)
             .unwrap_or_else(|_| vec![0u8; 96])
         } else {
-            zeltra_core::encrypt_note_memo_deterministic(
+            zeltra_core::encrypt_committing_note_memo(
                 0,
                 ch1_rho,
                 input_note_1.asset_id as u64,
@@ -630,7 +630,7 @@ impl PrivateNoteWallet {
             .map(|(m, _)| m)
             .unwrap_or_else(|_| vec![0u8; 96])
         };
-        let memo_2 = zeltra_core::encrypt_note_memo_deterministic(
+        let memo_2 = zeltra_core::encrypt_committing_note_memo(
             0,
             ch2_rho,
             input_note_1.asset_id as u64,
@@ -937,7 +937,7 @@ impl PrivateNoteWallet {
         // 7. Output 1: Recipient Note with Deterministic Randomness (AUD-2)
         let mut rng = OsRng;
         let rho_1 = Fr::rand(&mut rng);
-        let (memo_1, rand_1) = encrypt_note_memo_deterministic(
+        let (memo_1, rand_1) = encrypt_committing_note_memo(
             transfer_amount,
             rho_1,
             asset_id as u64,
@@ -960,7 +960,7 @@ impl PrivateNoteWallet {
 
         let (ch2_val, cm_2, memo_2, has_change_2, ch2_rho, ch2_rand) = if change_amount > 0 {
             let rho_2 = Fr::rand(&mut rng);
-            let (memo_2, rand_2) = encrypt_note_memo_deterministic(
+            let (memo_2, rand_2) = encrypt_committing_note_memo(
                 change_amount,
                 rho_2,
                 asset_id as u64,
@@ -999,7 +999,7 @@ impl PrivateNoteWallet {
             // Random encryption for dummy memo (AUD-7: anti-topologic leak)
             let rho_2 = Fr::rand(&mut rng);
             let (dummy_memo, _rand_2) =
-                encrypt_note_memo_deterministic(0, rho_2, asset_id as u64, &sender_pk_ivk)
+                encrypt_committing_note_memo(0, rho_2, asset_id as u64, &sender_pk_ivk)
                     .map_err(|e| {
                         WalletError::CryptoError(format!("Dummy memo encryption failed: {e}"))
                     })?;

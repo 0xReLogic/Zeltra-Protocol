@@ -21,7 +21,7 @@ use zeltra_core::{
     from_evm_scalar, get_or_init_joinsplit_circuit_keys, get_or_init_note_circuit_keys,
     note_commitment, selective_disclosure_circuit::setup_disclosure_circuit_params,
     verify_disclosure_proof_unprepared, verify_joinsplit_proof, verify_note_proof,
-    MerkleMountainRange,
+    MerkleMountainRange, CANONICAL_DUMMY_OWNER, CANONICAL_DUMMY_RANDOMNESS, CANONICAL_DUMMY_RHO,
 };
 
 use zeltra_sdk::{
@@ -178,14 +178,14 @@ fn create_valid_joinsplit_witness() -> (JoinSplitWitnessInput, Vec<u8>) {
         mmr_peaks_hex: peaks,
 
         out1_value: 0,
-        out1_owner_key_hex: scalar_to_hex(&sk),
-        out1_rho_hex: scalar_to_hex(&Fr::from(401u64)),
-        out1_randomness_hex: scalar_to_hex(&Fr::from(402u64)),
+        out1_owner_key_hex: scalar_to_hex(&CANONICAL_DUMMY_OWNER),
+        out1_rho_hex: scalar_to_hex(&CANONICAL_DUMMY_RHO),
+        out1_randomness_hex: scalar_to_hex(&CANONICAL_DUMMY_RANDOMNESS),
 
         out2_value: 0,
-        out2_owner_key_hex: scalar_to_hex(&sk),
-        out2_rho_hex: scalar_to_hex(&Fr::from(501u64)),
-        out2_randomness_hex: scalar_to_hex(&Fr::from(502u64)),
+        out2_owner_key_hex: scalar_to_hex(&CANONICAL_DUMMY_OWNER),
+        out2_rho_hex: scalar_to_hex(&CANONICAL_DUMMY_RHO),
+        out2_randomness_hex: scalar_to_hex(&CANONICAL_DUMMY_RANDOMNESS),
 
         has_change_1: false,
         has_change_2: false,

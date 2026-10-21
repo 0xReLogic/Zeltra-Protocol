@@ -2,8 +2,8 @@ use ark_bls12_381::{Bls12_381, Fr};
 use ark_ff::{PrimeField, UniformRand};
 use rand::rngs::OsRng;
 use zeltra_core::{
-    derive_nullifier, encrypt_note_memo, fr_to_be_bytes, generate_note_proof, note_commitment,
-    to_evm_g1, to_evm_g2,
+    derive_nullifier, encrypt_committing_note_memo, fr_to_be_bytes, generate_note_proof,
+    note_commitment, to_evm_g1, to_evm_g2,
 };
 
 use super::types::*;
@@ -282,7 +282,19 @@ impl PrivateNoteWallet {
         let (ch_val, ch_cm, ch_rho, ch_rand, change_encrypted_memo_hex) = if selected.has_change {
             let mut rng = OsRng;
             let c_rho = Fr::rand(&mut rng);
-            let c_rand = zeltra_core::derive_note_randomness(sk, c_rho);
+            let (change_memo, c_rand) = match self.incoming_viewing_key() {
+                Ok(ivk) => match encrypt_committing_note_memo(
+                    selected.change_amount,
+                    c_rho,
+                    input_note.asset_id as u64,
+                    &ivk,
+                ) {
+                    Ok((memo_bytes, rand)) => (Some(hex::encode(memo_bytes)), rand),
+                    Err(_) => (None, zeltra_core::derive_note_randomness(sk, c_rho)),
+                },
+                Err(_) => (None, zeltra_core::derive_note_randomness(sk, c_rho)),
+            };
+
             let c_cm = note_commitment(
                 selected.change_amount,
                 input_note.asset_id,
@@ -297,16 +309,6 @@ impl PrivateNoteWallet {
             let sk_hex = hex::encode(fr_to_be_bytes(&sk));
 
             let change_epoch = target_change_epoch.or(input_note.epoch_id).or(Some(0));
-
-            // Encrypt change memo with IVK (DEC-037)
-            let change_memo = self.incoming_viewing_key().ok().map(|ivk| {
-                hex::encode(encrypt_note_memo(
-                    selected.change_amount,
-                    c_rho,
-                    input_note.asset_id as u64,
-                    &ivk,
-                ))
-            });
 
             // Persist unconfirmed change note (2PC Phase 1)
             let change_note = WalletNote {

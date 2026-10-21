@@ -23,8 +23,9 @@ use zeltra_core::{
     extract_joinsplit_public_inputs, extract_public_inputs, from_evm_scalar,
     generate_disclosure_proof, generate_joinsplit_proof, generate_note_proof, note_commitment,
     to_evm_g1, to_evm_g2, to_evm_scalar, JoinSplitCircuit, PrivateNoteCircuit,
-    SelectiveDisclosureCircuit, NUM_DISCLOSURE_PUBLIC_INPUTS, NUM_JOINSPLIT_PUBLIC_INPUTS,
-    NUM_PUBLIC_INPUTS,
+    SelectiveDisclosureCircuit, CANONICAL_DUMMY_LEAF_INDEX, CANONICAL_DUMMY_OWNER,
+    CANONICAL_DUMMY_RANDOMNESS, CANONICAL_DUMMY_RHO, CANONICAL_DUMMY_VALUE,
+    NUM_DISCLOSURE_PUBLIC_INPUTS, NUM_JOINSPLIT_PUBLIC_INPUTS, NUM_PUBLIC_INPUTS,
 };
 
 use crate::wasm_types::{
@@ -438,13 +439,14 @@ pub fn prove_joinsplit_with_pk(
             } else {
                 Fr::from(999u64)
             };
-            let dummy_nf = derive_joinsplit_dummy_nullifier(nk1, nonce);
+            let dummy_nk = derive_nullifier_key(CANONICAL_DUMMY_OWNER);
+            let dummy_nf = derive_joinsplit_dummy_nullifier(dummy_nk, nonce);
             (
-                Fr::from(0u64),
-                in1_sk,
-                Fr::from(0u64),
-                Fr::from(0u64),
-                Fr::from(0u64),
+                Fr::from(CANONICAL_DUMMY_VALUE),
+                CANONICAL_DUMMY_OWNER,
+                CANONICAL_DUMMY_RHO,
+                CANONICAL_DUMMY_RANDOMNESS,
+                Fr::from(CANONICAL_DUMMY_LEAF_INDEX),
                 0u8,
                 [Fr::from(0u64); 32],
                 nonce,
@@ -503,12 +505,32 @@ pub fn prove_joinsplit_with_pk(
     let out1_owner = parse_canonical_scalar(&witness.out1_owner_key_hex, "out1_owner_key")?;
     let out1_rho = parse_canonical_scalar(&witness.out1_rho_hex, "out1_rho")?;
     let out1_rand = parse_canonical_scalar(&witness.out1_randomness_hex, "out1_randomness")?;
-    let cm_out1 = note_commitment(witness.out1_value, aid_u8, out1_owner, out1_rho, out1_rand);
+    let cm_out1 = if witness.has_change_1 {
+        note_commitment(witness.out1_value, aid_u8, out1_owner, out1_rho, out1_rand)
+    } else {
+        note_commitment(
+            CANONICAL_DUMMY_VALUE,
+            aid_u8,
+            CANONICAL_DUMMY_OWNER,
+            CANONICAL_DUMMY_RHO,
+            CANONICAL_DUMMY_RANDOMNESS,
+        )
+    };
 
     let out2_owner = parse_canonical_scalar(&witness.out2_owner_key_hex, "out2_owner_key")?;
     let out2_rho = parse_canonical_scalar(&witness.out2_rho_hex, "out2_rho")?;
     let out2_rand = parse_canonical_scalar(&witness.out2_randomness_hex, "out2_randomness")?;
-    let cm_out2 = note_commitment(witness.out2_value, aid_u8, out2_owner, out2_rho, out2_rand);
+    let cm_out2 = if witness.has_change_2 {
+        note_commitment(witness.out2_value, aid_u8, out2_owner, out2_rho, out2_rand)
+    } else {
+        note_commitment(
+            CANONICAL_DUMMY_VALUE,
+            aid_u8,
+            CANONICAL_DUMMY_OWNER,
+            CANONICAL_DUMMY_RHO,
+            CANONICAL_DUMMY_RANDOMNESS,
+        )
+    };
 
     // Expected scope binding
     let expected_binding = if let Some(ref bind_hex) = witness.expected_binding_hex {
@@ -559,15 +581,47 @@ pub fn prove_joinsplit_with_pk(
 
         mmr_peaks: Some(peaks),
 
-        out1_value: Some(Fr::from(witness.out1_value)),
-        out1_owner_key: Some(out1_owner),
-        out1_rho: Some(out1_rho),
-        out1_randomness: Some(out1_rand),
+        out1_value: Some(Fr::from(if witness.has_change_1 {
+            witness.out1_value
+        } else {
+            CANONICAL_DUMMY_VALUE
+        })),
+        out1_owner_key: Some(if witness.has_change_1 {
+            out1_owner
+        } else {
+            CANONICAL_DUMMY_OWNER
+        }),
+        out1_rho: Some(if witness.has_change_1 {
+            out1_rho
+        } else {
+            CANONICAL_DUMMY_RHO
+        }),
+        out1_randomness: Some(if witness.has_change_1 {
+            out1_rand
+        } else {
+            CANONICAL_DUMMY_RANDOMNESS
+        }),
 
-        out2_value: Some(Fr::from(witness.out2_value)),
-        out2_owner_key: Some(out2_owner),
-        out2_rho: Some(out2_rho),
-        out2_randomness: Some(out2_rand),
+        out2_value: Some(Fr::from(if witness.has_change_2 {
+            witness.out2_value
+        } else {
+            CANONICAL_DUMMY_VALUE
+        })),
+        out2_owner_key: Some(if witness.has_change_2 {
+            out2_owner
+        } else {
+            CANONICAL_DUMMY_OWNER
+        }),
+        out2_rho: Some(if witness.has_change_2 {
+            out2_rho
+        } else {
+            CANONICAL_DUMMY_RHO
+        }),
+        out2_randomness: Some(if witness.has_change_2 {
+            out2_rand
+        } else {
+            CANONICAL_DUMMY_RANDOMNESS
+        }),
 
         has_change_1: Some(has_change_1_fr),
         has_change_2: Some(has_change_2_fr),
