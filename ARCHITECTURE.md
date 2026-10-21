@@ -38,7 +38,7 @@ Dokumen ini memetakan struktur kode riil, crate, dan hirarki direktori di seluru
 │   ├── src/circuit_gadgets.rs        — Reusable R1CS gadgets (flags_packed multi-asset, range checks, Poseidon gadgets)
 │   ├── src/note.rs                   — Note primitives (PrivateNoteV1 dengan asset_id, NotePlaintext)
 │   ├── src/keys.rs                   — Derivasi kunci ZSA (SpendingKey, NullifierKey, ViewingKey, IncomingViewingKey)
-│   ├── src/memo.rs                   — Enkripsi & dekripsi 96-byte AEAD memo (ChaCha20Poly1305 + 1B View Tag)
+│   ├── src/memo.rs                   — Committing AEAD 96B memo (EtH-KS transform, ChaCha20 + HMAC-SHA256, 1B View Tag, DEC-048)
 │   ├── src/merkle.rs                 — Flat Merkle Mountain Range (FlatMerkleMountainRange, Peter Todd indexing)
 │   ├── src/poseidon.rs               — Poseidon width-3 & width-5, Grain-128 LFSR parameter generator (DEC-021)
 │   ├── src/jacobian.rs               — Mesin kalkulasi Augmented Jacobian M(a) untuk uji kekakuan tangen (DEC-047)
@@ -120,11 +120,12 @@ Dokumen ini memetakan struktur kode riil, crate, dan hirarki direktori di seluru
 ├── scripts/                          — Automation, Testing & Deployment
 │   ├── start_relayer.sh              — Daemon runner relayer sequencer tunggal (start|status|stop|restart)
 │   ├── deploy_testnet.sh             — Deployment contract Stylus ke Arbitrum Sepolia
-│   ├── test_real_case_dec043c_inpool_wallet.py — Test suite Python independen (44/44 in-pool tests)
+│   ├── test_dec048_committing_aead.py — Suite verifikasi adversarial EtH-KS committing AEAD DEC-048 (11/11 passed)
+│   ├── test_real_case_dec043c_inpool_wallet.py — Test suite Python independen (61/61 in-pool lifecycle tests)
 │   ├── test_dec046_dec047_jacobian_soundness.py — Suite verifikasi formal Jacobian rank DEC-046 & DEC-047
 │   └── check_balance.py, ht01_init_verification.py, ht04_spend_negative_tests.py, ht05_refund_tests.py, ht10_signed_quote_tests.py
 │
-├── research/decisions/               — 71 Architecture Decision Records (DEC-001 s/d DEC-047)
+├── research/decisions/               — 72 Architecture Decision Records (DEC-001 s/d DEC-048)
 ├── docs/                             — Documentation (bisnis.md, roadmap.md, X402_INTEGRATION_STRATEGY.md, analisis/)
 └── todo.md                           — Master active checklist (pending tasks only)
 ```

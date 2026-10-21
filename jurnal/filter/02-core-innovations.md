@@ -79,16 +79,18 @@ Dokumen ini memetakan paper terpilih untuk lapisan kriptografi fundamental Zeltr
 
 ---
 
-## 7. Committing AEAD: Partitioning Oracle Attack Defense for Encrypted Memos (IACR ePrint 2026/240)
+## 7. Committing AEAD: Partitioning Oracle Attack Defense for Encrypted Memos (IACR ePrint 2026/240) [x]
 * **File Jurnal / ePrint:** IACR ePrint 2026/240 (Oktober 2026)
 * **Penulis:** Kazuhiko Minematsu and Akiko Inoue
 * **Problem Kritis:**
   Pada skema AEAD konvensional (seperti ChaCha20Poly1305 naif), sebuah ciphertext dapat valid didekripsi oleh dua kunci berbeda menjadi dua plaintext berbeda. Kerentanan ini (*non-committing AEAD flaw*) memungkinkan penyerang mengeksekusi *partitioning oracle attacks* pada protokol berbasis UTXO/memo: adversary menyuntikkan memo crafted on-chain yang membingungkan scanner wallet penerima dan dapat memicu desinkronisasi saldo atau deanonymization.
 * **Inovasi Paper:**
   Mengevaluasi dan memperbaiki transformasi generik Committing AEAD (seperti CTX Chan-Rogaway dan Chen-Karadžić) yang rentan terhadap instansiasi hash praktis. Paper ini merumuskan transformasi committing AEAD yang terbukti kokoh di bawah *standard model* dengan modifikasi algoritmik minimal tanpa mengorbankan performa enkripsi/dekripsi simetris.
-* **Implementasi di Zeltra Core & SDK:**
-  * Komponen: [`zeltra-core/src/note.rs`](file:///workspaces/Zeltra-Protocol/zeltra-core/src/note.rs) (`NotePlaintext::encrypt_memo` & `decrypt_memo`) dan trial decryption scanner di [`zeltra-sdk/src/wallet/note_wallet.rs`](file:///workspaces/Zeltra-Protocol/zeltra-sdk/src/wallet/note_wallet.rs).
-  * Menjamin 96-byte encrypted memo yang dipancarkan lewat event `NoteCommitmentAppended` on-chain mengikat komitmen ciphertext secara matematis (*binding ciphertext to key & plaintext*), membendung partitioning attacks dan menjamin keaslian data scanning note wallet 100%.
+* **Implementasi di Zeltra Core & SDK (SELESAI & TERVERIFIKASI [x] — DEC-048):**
+  * Komponen: [`zeltra-core/src/memo.rs`](file:///workspaces/Zeltra-Protocol/zeltra-core/src/memo.rs) (`encrypt_memo_committing_aead` & `decrypt_memo_committing_aead`), [`zeltra-core/src/note.rs`](file:///workspaces/Zeltra-Protocol/zeltra-core/src/note.rs), scanner note di [`zeltra-sdk/src/wallet/note_wallet/sync.rs`](file:///workspaces/Zeltra-Protocol/zeltra-sdk/src/wallet/note_wallet/sync.rs), dan test harness [`scripts/test_dec048_committing_aead.py`](file:///workspaces/Zeltra-Protocol/scripts/test_dec048_committing_aead.py).
+  * Mengadopsi generic transform `EtH-KS` (Minematsu & Inoue, 2026) dengan Key Separation berbasis RCR-PRG $G(S) \to (K_{\text{enc}}, K_{\text{cmt}}, N_{11})$ dan CR-PRF $H(K_{\text{cmt}}, N_{11} \parallel A \parallel C)$.
+  * Menjamin 96-byte encrypted memo yang dipancarkan lewat event `NoteCommitmentAppended` on-chain mengikat komitmen ciphertext secara matematis (*binding ciphertext to key & plaintext*), membendung partitioning attacks (`AUD-21`, `AUD-23`, `AUD-24`) dan menjamin keaslian data scanning note wallet 100% fail-closed.
+  * Teruji 100% lolos melintasi 11 suite pengujian adversarial Python dan 61/61 test lifecycle multi-asset di `scripts/test_real_case_dec043c_inpool_wallet.py`.
 
 ---
 
