@@ -450,7 +450,12 @@ impl ConstraintSynthesizer<Fr> for PrivateNoteCircuit {
         )?;
 
         let change_cm = poseidon_w5_hash(
-            &[ch_value_packed, ch_owner, ch_rho, ch_rand],
+            &[
+                ch_value_packed,
+                ch_owner.clone(),
+                ch_rho.clone(),
+                ch_rand.clone(),
+            ],
             domain_note,
             w5_rc,
             w5_mds,
@@ -469,6 +474,25 @@ impl ConstraintSynthesizer<Fr> for PrivateNoteCircuit {
         // c. Output commitment: output_cm == has_change * change_cm
         let expected_output = &has_change_var * &change_cm;
         expected_output.enforce_equal(&output_cm_var)?;
+
+        // DEC-046 §3.D: Companion quadratic constraints for inactive change output:
+        // When has_change == 0 (one_minus_has_change == 1), strictly pin change note
+        // witness coordinates to canonical constants (zero degrees of freedom)
+        crate::circuit_gadgets::enforce_canonical_pinning(
+            &one_minus_has_change,
+            &ch_owner,
+            crate::circuit_gadgets::CANONICAL_DUMMY_OWNER,
+        )?;
+        crate::circuit_gadgets::enforce_canonical_pinning(
+            &one_minus_has_change,
+            &ch_rho,
+            crate::circuit_gadgets::CANONICAL_DUMMY_RHO,
+        )?;
+        crate::circuit_gadgets::enforce_canonical_pinning(
+            &one_minus_has_change,
+            &ch_rand,
+            crate::circuit_gadgets::CANONICAL_DUMMY_RANDOMNESS,
+        )?;
 
         // ═══════════════════════════════════════════════════════════════
         // 8. 64-bit integer range safety and exact value conservation
@@ -1743,7 +1767,7 @@ mod tests {
             peak_bagging_siblings: Some(p_sibs),
             peak_bagging_count: Some(proof.peak_bagging_siblings.len() as u8),
             change_value: Some(Fr::from(0u64)),
-            change_owner_key: Some(sk),
+            change_owner_key: Some(Fr::from(0u64)),
             change_rho: Some(Fr::from(0u64)),
             change_randomness: Some(Fr::from(0u64)),
             expected_binding: Some(binding),
@@ -1754,6 +1778,70 @@ mod tests {
             cs.is_satisfied().unwrap(),
             "WETH PrivateNoteCircuit must be satisfied: {:?}",
             cs.which_is_unsatisfied()
+        );
+    }
+
+    #[test]
+    fn test_note_circuit_tampered_inactive_change_owner_rejected() {
+        let cs = ConstraintSystem::<Fr>::new_ref();
+        let mut circuit = setup_valid_circuit();
+        // Set has_change to 0
+        circuit.has_change = Some(Fr::from(0u64));
+        circuit.change_value = Some(Fr::from(0u64));
+        circuit.flags_packed = Some(Fr::from(2u64)); // is_rollover=0, asset_id=1
+        circuit.output_commitment = Some(Fr::from(0u64));
+
+        // Inject non-canonical owner key when has_change == 0
+        circuit.change_owner_key = Some(Fr::from(0xdead_beef_cafe_u64));
+        circuit.change_rho = Some(Fr::from(0u64));
+        circuit.change_randomness = Some(Fr::from(0u64));
+
+        circuit.generate_constraints(cs.clone()).unwrap();
+        assert!(
+            !cs.is_satisfied().unwrap(),
+            "Non-canonical change_owner_key when has_change == 0 MUST be rejected by companion constraint!"
+        );
+    }
+
+    #[test]
+    fn test_note_circuit_tampered_inactive_change_rho_rejected() {
+        let cs = ConstraintSystem::<Fr>::new_ref();
+        let mut circuit = setup_valid_circuit();
+        circuit.has_change = Some(Fr::from(0u64));
+        circuit.change_value = Some(Fr::from(0u64));
+        circuit.flags_packed = Some(Fr::from(2u64));
+        circuit.output_commitment = Some(Fr::from(0u64));
+
+        circuit.change_owner_key = Some(Fr::from(0u64));
+        // Inject non-canonical rho when has_change == 0
+        circuit.change_rho = Some(Fr::from(0x1234_5678_u64));
+        circuit.change_randomness = Some(Fr::from(0u64));
+
+        circuit.generate_constraints(cs.clone()).unwrap();
+        assert!(
+            !cs.is_satisfied().unwrap(),
+            "Non-canonical change_rho when has_change == 0 MUST be rejected by companion constraint!"
+        );
+    }
+
+    #[test]
+    fn test_note_circuit_tampered_inactive_change_randomness_rejected() {
+        let cs = ConstraintSystem::<Fr>::new_ref();
+        let mut circuit = setup_valid_circuit();
+        circuit.has_change = Some(Fr::from(0u64));
+        circuit.change_value = Some(Fr::from(0u64));
+        circuit.flags_packed = Some(Fr::from(2u64));
+        circuit.output_commitment = Some(Fr::from(0u64));
+
+        circuit.change_owner_key = Some(Fr::from(0u64));
+        circuit.change_rho = Some(Fr::from(0u64));
+        // Inject non-canonical randomness when has_change == 0
+        circuit.change_randomness = Some(Fr::from(0x9999_8888_u64));
+
+        circuit.generate_constraints(cs.clone()).unwrap();
+        assert!(
+            !cs.is_satisfied().unwrap(),
+            "Non-canonical change_randomness when has_change == 0 MUST be rejected by companion constraint!"
         );
     }
 }

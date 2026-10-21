@@ -248,9 +248,9 @@ pub fn encrypt_note_memo_deterministic<R: RecipientViewingKey>(
 
     let mut result = Vec::with_capacity(ENCRYPTED_MEMO_SIZE);
     result.extend_from_slice(ephemeral_public.as_bytes()); // 32 bytes (0..32)
-    result.push(view_tag);                                 // 1 byte (offset 32)
-    result.extend_from_slice(&nonce_11);                   // 11 bytes (33..44)
-    result.extend_from_slice(&ciphertext_and_tag[0..36]);  // 36 bytes (44..80)
+    result.push(view_tag); // 1 byte (offset 32)
+    result.extend_from_slice(&nonce_11); // 11 bytes (33..44)
+    result.extend_from_slice(&ciphertext_and_tag[0..36]); // 36 bytes (44..80)
     result.extend_from_slice(&ciphertext_and_tag[36..52]); // 16 bytes (80..96)
 
     assert_eq!(result.len(), ENCRYPTED_MEMO_SIZE);
@@ -277,8 +277,7 @@ pub fn decrypt_note_memo_payload(
     let ciphertext = &encrypted_memo[44..80];
     let tag = &encrypted_memo[80..96];
 
-    let hk =
-        hkdf::Hkdf::<sha2::Sha256>::new(Some(b"ZELTRA_NOTE_MEMO_KDF_V1"), shared_secret);
+    let hk = hkdf::Hkdf::<sha2::Sha256>::new(Some(b"ZELTRA_NOTE_MEMO_KDF_V1"), shared_secret);
     let mut okm = [0u8; 43];
     hk.expand(INFO_MEMO_CIPHER_V1, &mut okm).ok()?;
 
@@ -391,10 +390,8 @@ pub fn create_legacy_dec037_memo(
     let shared_secret = ephemeral_secret.diffie_hellman(&recipient_public);
     let randomness = derive_ecdh_note_randomness(shared_secret.as_bytes(), &rho);
 
-    let hk = hkdf::Hkdf::<sha2::Sha256>::new(
-        Some(b"ZELTRA_NOTE_MEMO_KDF_V1"),
-        shared_secret.as_bytes(),
-    );
+    let hk =
+        hkdf::Hkdf::<sha2::Sha256>::new(Some(b"ZELTRA_NOTE_MEMO_KDF_V1"), shared_secret.as_bytes());
     let mut okm = [0u8; 44];
     hk.expand(INFO_MEMO_CIPHER_V1, &mut okm).unwrap();
 

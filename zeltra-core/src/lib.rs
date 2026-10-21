@@ -2,6 +2,7 @@ pub mod accounting;
 pub mod circuit_gadgets;
 pub mod evm;
 pub mod fees;
+pub mod jacobian;
 pub mod joinsplit_circuit;
 pub mod keys;
 pub mod memo;
@@ -89,6 +90,12 @@ pub use selective_disclosure_circuit::{
     decompose_challenge_to_limbs, generate_disclosure_proof, setup_disclosure_circuit_params,
     verify_disclosure_proof, verify_disclosure_proof_unprepared, SelectiveDisclosureCircuit,
     NUM_DISCLOSURE_PUBLIC_INPUTS,
+};
+
+// Re-export Automated Jacobian Diagnostics & Rigidity (DEC-047)
+pub use jacobian::{
+    extract_witness_and_matrices, run_jacobian_diagnostic, AffineLineCertificate,
+    AugmentedJacobian, DiagnosticClassification, EchelonBasis, SparseEntry, SparseMatrixFr,
 };
 
 pub use hkdf;
