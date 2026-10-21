@@ -15,8 +15,8 @@ use rand::RngCore;
 
 use zeltra_core::{
     create_legacy_dec037_memo, derive_owner_key, derive_view_tag,
-    encrypt_note_memo_deterministic, fr_to_be_bytes, note_commitment, x25519_dalek,
-    ENCRYPTED_MEMO_SIZE, INFO_MEMO_CIPHER_V1,
+    encrypt_committing_note_memo, encrypt_note_memo_deterministic, fr_to_be_bytes, note_commitment,
+    x25519_dalek, ENCRYPTED_MEMO_SIZE, INFO_MEMO_CIPHER_V1,
 };
 use zeltra_sdk::wallet::note_wallet::{NoteEvent, PrivateNoteWallet};
 
@@ -147,14 +147,23 @@ fn test_view_tag_backward_compatible_fallback_scan() {
     let cm_legacy = note_commitment(val_legacy, 1, owner_key, rho_legacy, rand_legacy);
     let cm_legacy_hex = format!("0x{}", hex::encode(fr_to_be_bytes(&cm_legacy)));
 
-    // 2. New DEC-045C note (36-byte plaintext with view tag)
-    let val_new = 35_000_000u64; // 35 USDC
-    let rho_new = Fr::rand(&mut rng);
-    let (new_memo, rand_new) =
-        encrypt_note_memo_deterministic(val_new, rho_new, 1, &zsa.incoming_viewing_public_key)
+    // 2. Legacy DEC-045C note (36-byte plaintext with view tag)
+    let val_045c = 35_000_000u64; // 35 USDC
+    let rho_045c = Fr::rand(&mut rng);
+    let (memo_045c, rand_045c) =
+        encrypt_note_memo_deterministic(val_045c, rho_045c, 1, &zsa.incoming_viewing_public_key)
             .unwrap();
-    let cm_new = note_commitment(val_new, 1, owner_key, rho_new, rand_new);
-    let cm_new_hex = format!("0x{}", hex::encode(fr_to_be_bytes(&cm_new)));
+    let cm_045c = note_commitment(val_045c, 1, owner_key, rho_045c, rand_045c);
+    let cm_045c_hex = format!("0x{}", hex::encode(fr_to_be_bytes(&cm_045c)));
+
+    // 3. New DEC-048 note (40-byte committing AEAD EtH-KS memo with view tag)
+    let val_048 = 50_000_000u64; // 50 USDC
+    let rho_048 = Fr::rand(&mut rng);
+    let (memo_048, rand_048) =
+        encrypt_committing_note_memo(val_048, rho_048, 1, &zsa.incoming_viewing_public_key)
+            .unwrap();
+    let cm_048 = note_commitment(val_048, 1, owner_key, rho_048, rand_048);
+    let cm_048_hex = format!("0x{}", hex::encode(fr_to_be_bytes(&cm_048)));
 
     let events = vec![
         NoteEvent {
@@ -167,20 +176,34 @@ fn test_view_tag_backward_compatible_fallback_scan() {
         },
         NoteEvent {
             leaf_index: 1,
-            commitment_hex: cm_new_hex.clone(),
+            commitment_hex: cm_045c_hex.clone(),
             new_mmr_root_hex: "0xroot".to_string(),
             leaf_count: 2,
-            encrypted_memo: new_memo,
+            encrypted_memo: memo_045c,
             block_number: Some(11),
         },
+        NoteEvent {
+            leaf_index: 2,
+            commitment_hex: cm_048_hex.clone(),
+            new_mmr_root_hex: "0xroot".to_string(),
+            leaf_count: 3,
+            encrypted_memo: memo_048,
+            block_number: Some(12),
+        },
     ];
+
+    let total_expected = val_legacy + val_045c + val_048;
 
     let res = wallet
         .scan_memos_fast(&events)
         .expect("mixed batch scan must succeed");
-    assert_eq!(res.recovered_notes.len(), 2, "Both legacy and new note must be recovered");
-    assert_eq!(res.total_unspent_balance, val_legacy + val_new);
-    assert_eq!(wallet.get_balance(1).unwrap(), val_legacy + val_new);
+    assert_eq!(
+        res.recovered_notes.len(),
+        3,
+        "All three memo generations (DEC-037, DEC-045C, DEC-048) must be recovered"
+    );
+    assert_eq!(res.total_unspent_balance, total_expected);
+    assert_eq!(wallet.get_balance(1).unwrap(), total_expected);
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -446,4 +469,202 @@ fn test_view_tag_rejects_non_canonical_scalar_during_commitment_reconstruction()
         "Non-canonical scalar must be rejected before commitment reconstruction"
     );
     assert_eq!(wallet.get_balance(1).unwrap_or(0), initial_balance);
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// DEC-048 COMMITTING AEAD & LARGE VALUE TESTS
+// ═══════════════════════════════════════════════════════════════════════════
+
+#[test]
+fn test_dec048_large_value_5000_usdc_recovered_cleanly() {
+    let mut rng = OsRng;
+    let seed = [88u8; 32];
+    let mut wallet = PrivateNoteWallet::new(&seed);
+    let zsa = wallet.shielded_address().unwrap();
+    let sk = wallet.spending_key().unwrap();
+    let owner_key = derive_owner_key(sk);
+
+    // 5,000 USDC = 5,000,000,000 micro-units (> 2^31 = 2,147,483,648)
+    // Previously in DEC-045C 31-bit packing, values > 2^31 were truncated causing commitment desync.
+    // In DEC-048 40-byte Field-Bit Embedding, the full u64 is preserved without truncation.
+    let value = 5_000_000_000u64;
+    let rho = Fr::rand(&mut rng);
+    let asset_id = 1u64;
+
+    let (memo, rand) =
+        encrypt_committing_note_memo(value, rho, asset_id, &zsa.incoming_viewing_public_key)
+            .expect("encryption success");
+    assert_eq!(memo.len(), ENCRYPTED_MEMO_SIZE);
+
+    let target_cm = note_commitment(value, asset_id as u8, owner_key, rho, rand);
+    let target_cm_hex = format!("0x{}", hex::encode(fr_to_be_bytes(&target_cm)));
+
+    let event = NoteEvent {
+        leaf_index: 42,
+        commitment_hex: target_cm_hex.clone(),
+        new_mmr_root_hex: "0xroot".to_string(),
+        leaf_count: 43,
+        encrypted_memo: memo.clone(),
+        block_number: Some(12345),
+    };
+
+    // 1. Test fast scanner
+    let res = wallet
+        .scan_memos_fast(std::slice::from_ref(&event))
+        .expect("fast scan succeeds");
+    assert_eq!(
+        res.recovered_notes.len(),
+        1,
+        "5,000 USDC note must be recovered"
+    );
+    assert_eq!(
+        res.recovered_notes[0].value, value,
+        "Recovered note value must be exactly 5,000,000,000 micro-units"
+    );
+    assert_eq!(
+        res.recovered_notes[0].commitment_hex, target_cm_hex,
+        "Decrypted commitment must match on-chain commitment exactly"
+    );
+    assert_eq!(res.total_unspent_balance, value);
+    assert_eq!(wallet.get_balance(1).unwrap(), value);
+
+    // 2. Test batch nullifier scanner on fresh wallet instance
+    let mut wallet2 = PrivateNoteWallet::new(&seed);
+    let res_batch = wallet2
+        .recover_notes_batch(&[event], |_| Ok(vec![false]))
+        .expect("recover_notes_batch succeeds");
+    assert_eq!(
+        res_batch.recovered_notes.len(),
+        1,
+        "recover_notes_batch must also recover the note"
+    );
+    assert_eq!(res_batch.recovered_notes[0].value, value);
+    assert_eq!(
+        res_batch.recovered_notes[0].commitment_hex, target_cm_hex,
+        "recover_notes_batch commitment must match exactly"
+    );
+    assert_eq!(wallet2.get_balance(1).unwrap(), value);
+}
+
+#[test]
+fn test_dec048_committing_memo_tampered_tag_rejected() {
+    let mut rng = OsRng;
+    let seed = [33u8; 32];
+    let mut wallet = PrivateNoteWallet::new(&seed);
+    let zsa = wallet.shielded_address().unwrap();
+    let initial_balance = wallet.get_balance(1).unwrap_or(0);
+
+    let (mut memo, _) = encrypt_committing_note_memo(
+        50_000_000,
+        Fr::rand(&mut rng),
+        1,
+        &zsa.incoming_viewing_public_key,
+    )
+    .unwrap();
+
+    // Tamper committing tag (offset 80..96)
+    memo[85] ^= 0xaa;
+
+    let event = NoteEvent {
+        leaf_index: 0,
+        commitment_hex: "0xdeadbeef".to_string(),
+        new_mmr_root_hex: "0xroot".to_string(),
+        leaf_count: 1,
+        encrypted_memo: memo,
+        block_number: Some(1),
+    };
+
+    let res = wallet.scan_memos_fast(&[event]).expect("no panic");
+    assert_eq!(
+        res.recovered_notes.len(),
+        0,
+        "Committing tag mismatch must drop candidate in verify-then-decrypt"
+    );
+    assert_eq!(
+        wallet.get_balance(1).unwrap_or(0),
+        initial_balance,
+        "Wallet balance must remain unchanged"
+    );
+}
+
+#[test]
+fn test_dec048_committing_memo_tampered_nonce_rejected() {
+    let mut rng = OsRng;
+    let seed = [44u8; 32];
+    let mut wallet = PrivateNoteWallet::new(&seed);
+    let zsa = wallet.shielded_address().unwrap();
+    let initial_balance = wallet.get_balance(1).unwrap_or(0);
+
+    let (mut memo, _) = encrypt_committing_note_memo(
+        50_000_000,
+        Fr::rand(&mut rng),
+        1,
+        &zsa.incoming_viewing_public_key,
+    )
+    .unwrap();
+
+    // Tamper 7-byte nonce (offset 33..40)
+    memo[35] ^= 0xff;
+
+    let event = NoteEvent {
+        leaf_index: 0,
+        commitment_hex: "0xdeadbeef".to_string(),
+        new_mmr_root_hex: "0xroot".to_string(),
+        leaf_count: 1,
+        encrypted_memo: memo,
+        block_number: Some(1),
+    };
+
+    let res = wallet.scan_memos_fast(&[event]).expect("no panic");
+    assert_eq!(
+        res.recovered_notes.len(),
+        0,
+        "Nonce mismatch must drop candidate"
+    );
+    assert_eq!(
+        wallet.get_balance(1).unwrap_or(0),
+        initial_balance,
+        "Wallet balance must remain unchanged"
+    );
+}
+
+#[test]
+fn test_dec048_committing_memo_tampered_ciphertext_rejected() {
+    let mut rng = OsRng;
+    let seed = [55u8; 32];
+    let mut wallet = PrivateNoteWallet::new(&seed);
+    let zsa = wallet.shielded_address().unwrap();
+    let initial_balance = wallet.get_balance(1).unwrap_or(0);
+
+    let (mut memo, _) = encrypt_committing_note_memo(
+        50_000_000,
+        Fr::rand(&mut rng),
+        1,
+        &zsa.incoming_viewing_public_key,
+    )
+    .unwrap();
+
+    // Tamper ciphertext payload (offset 40..80)
+    memo[50] ^= 0x42;
+
+    let event = NoteEvent {
+        leaf_index: 0,
+        commitment_hex: "0xdeadbeef".to_string(),
+        new_mmr_root_hex: "0xroot".to_string(),
+        leaf_count: 1,
+        encrypted_memo: memo,
+        block_number: Some(1),
+    };
+
+    let res = wallet.scan_memos_fast(&[event]).expect("no panic");
+    assert_eq!(
+        res.recovered_notes.len(),
+        0,
+        "Ciphertext tampering must fail committing HMAC-SHA256 tag verification"
+    );
+    assert_eq!(
+        wallet.get_balance(1).unwrap_or(0),
+        initial_balance,
+        "Wallet balance must remain unchanged"
+    );
 }

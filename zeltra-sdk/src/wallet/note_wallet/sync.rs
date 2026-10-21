@@ -1,6 +1,7 @@
 use ark_bls12_381::Fr;
 use zeltra_core::{
-    decrypt_note_memo, decrypt_note_memo_deterministic, derive_nullifier, derive_owner_key,
+    decrypt_committing_note_memo, decrypt_committing_note_memo_payload,
+    decrypt_note_memo_deterministic, decrypt_note_memo_payload, derive_nullifier, derive_owner_key,
     fr_to_be_bytes, note_commitment, IncomingViewingKey,
 };
 
@@ -83,12 +84,18 @@ impl PrivateNoteWallet {
         let mut candidates = Vec::new();
 
         for ev in events {
-            if ev.encrypted_memo.is_empty() {
+            if ev.encrypted_memo.len() != 96 {
                 continue;
             }
-            if let Some((pt, deterministic_r)) =
-                decrypt_note_memo_deterministic(&ev.encrypted_memo, &ivk)
-            {
+
+            // Dual-path decryption:
+            // Step 1: Fast pre-filter with 1-byte View Tag (integrated into decrypt_committing_note_memo)
+            // Step 2: Attempt DEC-048 committing memo decryption via decrypt_committing_note_memo (EtH-KS)
+            // Step 3: If committing decryption returns None, fall back gracefully to legacy memo decryption (DEC-045C / DEC-037)
+            let candidate_pair = decrypt_committing_note_memo(&ev.encrypted_memo, &ivk)
+                .or_else(|| decrypt_note_memo_deterministic(&ev.encrypted_memo, &ivk));
+
+            if let Some((pt, deterministic_r)) = candidate_pair {
                 // Skip dummy zero-notes to keep active UTXO state clean (AUD-7)
                 if pt.value == 0 {
                     continue;
@@ -288,17 +295,26 @@ impl PrivateNoteWallet {
 
             let mut candidate_pair = None;
 
-            // 3. Fast pre-filter (99.6% non-owned memos dropped with 0 AEAD invocations)
+            // Step 1: Fast pre-filter with 1-byte View Tag (99.6% non-owned memos dropped with 0 AEAD invocations)
             if memo_view_tag == expected_view_tag {
-                // Attempt DEC-045C fast payload decryption
-                if let Some((pt, deterministic_r)) = zeltra_core::decrypt_note_memo_payload(memo, &shared_secret) {
+                // Step 2: Attempt DEC-048 committing memo decryption via EtH-KS payload
+                if let Some((pt, deterministic_r)) =
+                    decrypt_committing_note_memo_payload(memo, &shared_secret)
+                {
+                    candidate_pair = Some((pt, deterministic_r));
+                } else if let Some((pt, deterministic_r)) =
+                    decrypt_note_memo_payload(memo, &shared_secret)
+                {
+                    // Step 3a: Fall back to DEC-045C fast payload decryption
                     candidate_pair = Some((pt, deterministic_r));
                 }
             }
 
-            // Fallback for legacy notes or tag collisions where fast payload did not match
+            // Step 3b: Fallback for historical DEC-037 notes or view tag collisions where fast payload did not match
             if candidate_pair.is_none() {
-                if let Some((pt, deterministic_r)) = zeltra_core::decrypt_note_memo_deterministic(memo, &ivk) {
+                if let Some((pt, deterministic_r)) =
+                    decrypt_note_memo_deterministic(memo, &ivk)
+                {
                     candidate_pair = Some((pt, deterministic_r));
                 }
             }
@@ -497,25 +513,56 @@ impl PrivateNoteWallet {
 
             let mut chunk_candidates = Vec::new();
             for ev in &events {
-                if ev.encrypted_memo.is_empty() {
+                if ev.encrypted_memo.len() != 96 {
                     continue;
                 }
-                if let Some(pt) = decrypt_note_memo(&ev.encrypted_memo, ivk) {
-                    let deterministic_r = zeltra_core::derive_note_randomness(sk, pt.rho);
-                    let note = pt.to_note(sk);
-                    let cm = note.commitment();
-                    let cm_hex = format!("0x{}", hex::encode(fr_to_be_bytes(&cm)));
+                let candidate_pair = decrypt_committing_note_memo(&ev.encrypted_memo, ivk)
+                    .or_else(|| decrypt_note_memo_deterministic(&ev.encrypted_memo, ivk));
+
+                if let Some((pt, deterministic_r)) = candidate_pair {
+                    if pt.value == 0 {
+                        continue;
+                    }
                     let ev_cm_clean = ev
                         .commitment_hex
                         .strip_prefix("0x")
                         .unwrap_or(&ev.commitment_hex);
 
-                    if hex::encode(fr_to_be_bytes(&cm)).to_lowercase() != ev_cm_clean.to_lowercase()
-                    {
-                        continue;
-                    }
+                    let owner_zsa = derive_owner_key(sk);
+                    let cm_zsa = note_commitment(
+                        pt.value,
+                        pt.asset_id as u8,
+                        owner_zsa,
+                        pt.rho,
+                        deterministic_r,
+                    );
+                    let cm_direct =
+                        note_commitment(pt.value, pt.asset_id as u8, sk, pt.rho, deterministic_r);
+                    let r_legacy = zeltra_core::derive_note_randomness(sk, pt.rho);
+                    let cm_legacy = note_commitment(pt.value, pt.asset_id as u8, sk, pt.rho, r_legacy);
+                    let cm_legacy_zsa =
+                        note_commitment(pt.value, pt.asset_id as u8, owner_zsa, pt.rho, r_legacy);
 
-                    let nullifier = derive_nullifier(nk, cm, ev.leaf_index, 0);
+                    let (matched_cm, matched_r) = if hex::encode(fr_to_be_bytes(&cm_zsa))
+                        .eq_ignore_ascii_case(ev_cm_clean)
+                    {
+                        (cm_zsa, deterministic_r)
+                    } else if hex::encode(fr_to_be_bytes(&cm_direct)).eq_ignore_ascii_case(ev_cm_clean)
+                    {
+                        (cm_direct, deterministic_r)
+                    } else if hex::encode(fr_to_be_bytes(&cm_legacy)).eq_ignore_ascii_case(ev_cm_clean)
+                    {
+                        (cm_legacy, r_legacy)
+                    } else if hex::encode(fr_to_be_bytes(&cm_legacy_zsa))
+                        .eq_ignore_ascii_case(ev_cm_clean)
+                    {
+                        (cm_legacy_zsa, r_legacy)
+                    } else {
+                        continue;
+                    };
+
+                    let cm_hex = format!("0x{}", hex::encode(fr_to_be_bytes(&matched_cm)));
+                    let nullifier = derive_nullifier(nk, matched_cm, ev.leaf_index, 0);
                     let nf_hex = format!("0x{}", hex::encode(fr_to_be_bytes(&nullifier)));
 
                     chunk_candidates.push(ChunkCandidate {
@@ -526,7 +573,7 @@ impl PrivateNoteWallet {
                         value: pt.value,
                         asset_id: pt.asset_id,
                         rho: pt.rho,
-                        deterministic_r,
+                        deterministic_r: matched_r,
                     });
                 }
             }

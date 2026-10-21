@@ -27,14 +27,14 @@
 
 ## 2. Step-by-Step Implementation Checklist
 
-- [ ] **Step B1: Update `sync.rs` trial decryption pipeline:**
+- [x] **Step B1: Update `sync.rs` trial decryption pipeline:**
   - Fast-path 1-byte View Tag comparison.
   - Committing tag verification before decryption.
   - Transparent fallback to legacy memo format if committing decryption returns `None`.
-- [ ] **Step B2: Update memo generation in `joinsplit.rs` and `spend.rs`:**
+- [x] **Step B2: Update memo generation in `joinsplit.rs` and `spend.rs`:**
   - Call `encrypt_committing_note_memo` for Output 1 and Output 2.
   - Ensure zero regressions in Mode 1 (Rollover), Mode 2 (In-Pool), and Mode 3 (Spend).
-- [ ] **Step B3: SDK Regression Tests:**
+- [x] **Step B3: SDK Regression Tests:**
   - Run `cargo test -p zeltra-sdk view_tag_tests`.
   - Add test case verifying a deposit of 5,000 USDC is recovered with exact matching commitment.
 
