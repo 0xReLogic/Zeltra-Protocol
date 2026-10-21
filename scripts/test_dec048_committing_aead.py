@@ -49,70 +49,72 @@ def derive_view_tag(shared_secret: bytes) -> int:
 
 def derive_key_separation(shared_secret: bytes) -> tuple[bytes, bytes, bytes]:
     """
-    RCR-PRG Key Separation G(S) -> (K_enc, K_cmt, N_11).
-    Returns (cipher_key: 32B, commitment_key: 32B, nonce_11: 11B).
+    RCR-PRG Key Separation G(S) -> (K_enc, K_cmt, N_7).
+    Returns (cipher_key: 32B, commitment_key: 32B, nonce_7: 7B).
     """
     hkdf = HKDF(
         algorithm=hashes.SHA256(),
-        length=75,
+        length=71,
         salt=SALT_COMMITTING_MEMO_V2,
         info=INFO_COMMITTING_MEMO_KEYS_V2,
     )
     okm = hkdf.derive(shared_secret)
     cipher_key = okm[0:32]
     commitment_key = okm[32:64]
-    nonce_11 = okm[64:75]
-    return cipher_key, commitment_key, nonce_11
+    nonce_7 = okm[64:71]
+    return cipher_key, commitment_key, nonce_7
 
 
 def compute_committing_tag(
     commitment_key: bytes,
-    nonce_11: bytes,
+    nonce_7: bytes,
     epk_bytes: bytes,
     view_tag: int,
     ciphertext: bytes,
 ) -> bytes:
     """Computes 16-byte committing authentication tag T_cmt using HMAC-SHA256."""
     h = hmac.new(commitment_key, digestmod=hashlib.sha256)
-    # Nonce
-    h.update(nonce_11)
-    # Associated Data Context (epk || view_tag || DOMAIN_TAG)
+    # Nonce (7 bytes)
+    h.update(nonce_7)
+    # Associated Data Context (epk || view_tag || DOMAIN_TAG) (32 + 1 + 26 bytes)
     h.update(epk_bytes)
     h.update(bytes([view_tag]))
     h.update(INFO_MEMO_AD_BINDING_V1)
-    # Ciphertext payload
+    # Ciphertext payload (40 bytes)
     h.update(ciphertext)
     return h.digest()[:16]
 
 
-def chacha20_keystream(key: bytes, nonce_11: bytes, data: bytes) -> bytes:
-    """ChaCha20 stream encryption/decryption using 16-byte OpenSSL IV (4B counter 0 + 1B pad + 11B nonce)."""
-    nonce_16 = b"\x00" * 5 + nonce_11
+def chacha20_keystream(key: bytes, nonce_7: bytes, data: bytes) -> bytes:
+    """ChaCha20 stream encryption/decryption using 16-byte OpenSSL IV (4B counter 0 + 7B nonce + 5B zero pad)."""
+    nonce_16 = b"\x00" * 4 + nonce_7 + b"\x00" * 5
     cipher = Cipher(algorithms.ChaCha20(key, nonce_16), mode=None)
     encryptor = cipher.encryptor()
     return encryptor.update(data)
 
 
-def serialize_note_plaintext_v2(value: int, rho_int: int, asset_id: int) -> bytes:
-    """Serializes 36-byte note plaintext payload (DEC-045C/DEC-048)."""
+def serialize_note_plaintext_v3(value: int, rho_int: int, asset_id: int) -> bytes:
+    """Serializes 40-byte note plaintext payload with Field-Bit Embedding (AUD-25 / DEC-048)."""
     assert 0 <= asset_id <= 1, "Invalid asset_id"
-    assert 0 <= value <= 0x7FFF_FFFF, "Value out of 31-bit bounds"
+    assert 0 <= value <= 0xFFFF_FFFF_FFFF_FFFF, "Value out of 64-bit bounds"
     assert 0 <= rho_int < BLS12_381_R, "Non-canonical rho scalar"
 
-    header = ((asset_id & 1) << 31) | (value & 0x7FFF_FFFF)
-    header_bytes = header.to_bytes(4, byteorder="big")
-    rho_bytes = rho_int.to_bytes(32, byteorder="big")
-    return header_bytes + rho_bytes
+    val_bytes = value.to_bytes(8, byteorder="little")
+    rho_bytes = bytearray(rho_int.to_bytes(32, byteorder="little"))
+    assert (rho_bytes[31] & 0x80) == 0, "BLS12-381 scalar bit 255 must be 0"
+    rho_bytes[31] |= (asset_id & 1) << 7
+    return val_bytes + bytes(rho_bytes)
 
 
-def deserialize_note_plaintext_v2(payload: bytes) -> tuple[int, int, int] | None:
-    """Deserializes 36-byte note plaintext. Returns (value, rho_int, asset_id) or None."""
-    if len(payload) != 36:
+def deserialize_note_plaintext_v3(payload: bytes) -> tuple[int, int, int] | None:
+    """Deserializes 40-byte note plaintext (AUD-25). Returns (value, rho_int, asset_id) or None."""
+    if len(payload) != 40:
         return None
-    header = int.from_bytes(payload[0:4], byteorder="big")
-    asset_id = (header >> 31) & 1
-    value = header & 0x7FFF_FFFF
-    rho_int = int.from_bytes(payload[4:36], byteorder="big")
+    value = int.from_bytes(payload[0:8], byteorder="little")
+    rho_bytes = bytearray(payload[8:40])
+    asset_id = (rho_bytes[31] >> 7) & 1
+    rho_bytes[31] &= 0x7F
+    rho_int = int.from_bytes(rho_bytes, byteorder="little")
 
     if rho_int >= BLS12_381_R:
         return None  # Non-canonical scalar rejected
@@ -126,8 +128,8 @@ def encrypt_committing_memo(
     recipient_pubkey_bytes: bytes,
     ephemeral_privkey: x25519.X25519PrivateKey | None = None,
 ) -> bytes:
-    """Encrypts note into canonical 96-byte committing memo (EtH-KS)."""
-    pt_bytes = serialize_note_plaintext_v2(value, rho_int, asset_id)
+    """Encrypts note into canonical 96-byte committing memo (EtH-KS / DEC-048)."""
+    pt_bytes = serialize_note_plaintext_v3(value, rho_int, asset_id)
 
     if ephemeral_privkey is None:
         ephemeral_privkey = x25519.X25519PrivateKey.generate()
@@ -137,15 +139,17 @@ def encrypt_committing_memo(
 
     recipient_pub = x25519.X25519PublicKey.from_public_bytes(recipient_pubkey_bytes)
     shared_secret = ephemeral_privkey.exchange(recipient_pub)
+    if shared_secret == b"\x00" * 32:
+        raise ValueError("Non-contributory public key")
 
     view_tag = derive_view_tag(shared_secret)
-    k_enc, k_cmt, nonce_11 = derive_key_separation(shared_secret)
+    k_enc, k_cmt, nonce_7 = derive_key_separation(shared_secret)
 
-    ciphertext = chacha20_keystream(k_enc, nonce_11, pt_bytes)
+    ciphertext = chacha20_keystream(k_enc, nonce_7, pt_bytes)
 
-    tag = compute_committing_tag(k_cmt, nonce_11, epk_bytes, view_tag, ciphertext)
+    tag = compute_committing_tag(k_cmt, nonce_7, epk_bytes, view_tag, ciphertext)
 
-    memo = epk_bytes + bytes([view_tag]) + nonce_11 + ciphertext + tag
+    memo = epk_bytes + bytes([view_tag]) + nonce_7 + ciphertext + tag
     assert len(memo) == ENCRYPTED_MEMO_SIZE
     return memo
 
@@ -163,14 +167,18 @@ def decrypt_committing_memo(
 
     epk_bytes = memo[0:32]
     view_tag_memo = memo[32]
-    nonce_11 = memo[33:44]
-    ciphertext = memo[44:80]
+    nonce_7 = memo[33:40]
+    ciphertext = memo[40:80]
     tag_memo = memo[80:96]
 
     try:
         epk = x25519.X25519PublicKey.from_public_bytes(epk_bytes)
         shared_secret = recipient_privkey.exchange(epk)
     except Exception:
+        return None
+
+    # AUD-26 check: non-contributory point defense
+    if shared_secret == b"\x00" * 32:
         return None
 
     # Step 1: Fast-path View Tag pre-filter
@@ -182,19 +190,19 @@ def decrypt_committing_memo(
     k_enc, k_cmt, expected_nonce = derive_key_separation(shared_secret)
 
     # Step 3: Strict Nonce Verification
-    if not hmac.compare_digest(nonce_11, expected_nonce):
+    if not hmac.compare_digest(nonce_7, expected_nonce):
         return None
 
     # Step 4: Verify-then-Decrypt Constant-Time Tag Verification
-    expected_tag = compute_committing_tag(k_cmt, nonce_11, epk_bytes, view_tag_memo, ciphertext)
+    expected_tag = compute_committing_tag(k_cmt, nonce_7, epk_bytes, view_tag_memo, ciphertext)
     if not hmac.compare_digest(expected_tag, tag_memo):
         return None  # Tampered or partitioning memo rejected fail-closed
 
     # Step 5: Decryption of verified ciphertext
-    pt_bytes = chacha20_keystream(k_enc, nonce_11, ciphertext)
+    pt_bytes = chacha20_keystream(k_enc, nonce_7, ciphertext)
 
     # Step 6: Canonical parsing
-    return deserialize_note_plaintext_v2(pt_bytes)
+    return deserialize_note_plaintext_v3(pt_bytes)
 
 
 # ==============================================================================
@@ -266,9 +274,9 @@ def run_all_tests():
     # --------------------------------------------------------------------------
     # 4. NEG-03: Single-Bit Ciphertext Payload Tampering Resistance
     # --------------------------------------------------------------------------
-    print("\n[-] NEG-03: Ciphertext Payload Tampering (36 Bytes Mutation)...")
+    print("\n[-] NEG-03: Ciphertext Payload Tampering (40 Bytes Mutation)...")
     ct_tamper_failures = 0
-    for byte_idx in range(44, 80):
+    for byte_idx in range(40, 80):
         corrupted = bytearray(memo)
         corrupted[byte_idx] ^= 0x01
         res = decrypt_committing_memo(bytes(corrupted), alice_priv)
@@ -276,7 +284,7 @@ def run_all_tests():
             ct_tamper_failures += 1
 
     assert ct_tamper_failures == 0, f"Critical Bug! {ct_tamper_failures} tampered ciphertexts accepted!"
-    print(f"    SUCCESS: All 36/36 ciphertext payload mutations rejected fail-closed.")
+    print(f"    SUCCESS: All 40/40 ciphertext payload mutations rejected fail-closed.")
 
     # --------------------------------------------------------------------------
     # 5. NEG-04: Nonce Manipulation / Replay Tampering Resistance
@@ -305,17 +313,17 @@ def run_all_tests():
     print("\n[-] NEG-06: Non-Canonical Scalar Injection (rho >= r)...")
     overflow_rho = BLS12_381_R + 5
     # Manually construct memo with overflow rho to test deserialization gate
-    bad_pt = serialize_note_plaintext_v2(test_value, test_rho, test_asset_id)
-    # Patch bad rho directly
-    bad_pt_overflow = bad_pt[0:4] + overflow_rho.to_bytes(32, byteorder="big")
+    bad_pt = serialize_note_plaintext_v3(test_value, test_rho, test_asset_id)
+    # Patch bad rho directly (little-endian)
+    bad_pt_overflow = bad_pt[0:8] + overflow_rho.to_bytes(32, byteorder="little")
     eph = x25519.X25519PrivateKey.generate()
     epk_bytes = eph.public_key().public_bytes_raw()
     shared = eph.exchange(alice_pub)
     vt = derive_view_tag(shared)
-    k_enc, k_cmt, n_11 = derive_key_separation(shared)
-    ct_bad = chacha20_keystream(k_enc, n_11, bad_pt_overflow)
-    tag_bad = compute_committing_tag(k_cmt, n_11, epk_bytes, vt, ct_bad)
-    memo_overflow = epk_bytes + bytes([vt]) + n_11 + ct_bad + tag_bad
+    k_enc, k_cmt, n_7 = derive_key_separation(shared)
+    ct_bad = chacha20_keystream(k_enc, n_7, bad_pt_overflow)
+    tag_bad = compute_committing_tag(k_cmt, n_7, epk_bytes, vt, ct_bad)
+    memo_overflow = epk_bytes + bytes([vt]) + n_7 + ct_bad + tag_bad
 
     res_overflow = decrypt_committing_memo(memo_overflow, alice_priv)
     assert res_overflow is None, "Non-canonical scalar (rho >= r) was accepted!"
@@ -336,7 +344,7 @@ def run_all_tests():
     # --------------------------------------------------------------------------
     print("\n[-] NEG-08: Asset ID Boundary Overflow...")
     try:
-        serialize_note_plaintext_v2(test_value, test_rho, asset_id=2)
+        serialize_note_plaintext_v3(test_value, test_rho, asset_id=2)
         assert False, "Asset ID 2 must not be serializable"
     except AssertionError:
         pass
