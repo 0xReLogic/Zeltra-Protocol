@@ -19,6 +19,7 @@
 - **Stateless Sequencer Relayer (DEC-038C):** Single sequencer daemon (`scripts/start_relayer.sh`), dynamic MMR proof sync, fail-closed preflight validation, dan dual-layer nullifier double-spend prevention.
 - **Circuit Hardening & Null-Branch Defense (DEC-046 — IACR 2026/2235):** Gerbang pendamping kuadratik kanonikal deterministik anti-null branch pada dummy input slot 2 (`in2_is_dummy * (owner, rho, r, index) == 0`), inactive change outputs 1 & 2 (`(1 - has_change) * (owner, rho, r) == 0`), dan zero-safe anti-aliasing inverse (`enforce_zero_safe_diff_inv`). 16 negative tests membuktikan saksi tampered tertolak mutlak.
 - **Augmented Jacobian Diagnostics & Rigidity Auditing (DEC-047 — IACR 2026/1852):** Engine evaluasi $M(a) = \begin{pmatrix} J(a) \\ E_F \end{pmatrix}$, eliminasi Gauss sparse Markowitz over $\mathbb{F}_p$, row-space test $e_j^T \in \text{rowspan}(M(a))$, dan sintesis sertifikat garis afin Proposisi 27. Matriks 6 keluarga saksi adversarial (FAM-1 s/d FAM-6) 100% rigid ($r_T = 0$), terverifikasi di Rust (`formal_tests.rs`, 26/26 passed) dan harness independen Python (`test_dec046_dec047_jacobian_soundness.py`, 100% verified).
+- **Committing AEAD & Partitioning Oracle Defense (DEC-048 — IACR 2026/240):** Generic transform `EtH-KS` (Minematsu & Inoue) dengan Key Separation RCR-PRG $G(S) \to (K_{\text{enc}}, K_{\text{cmt}}, N_7)$ dan CR-PRF $H(K_{\text{cmt}}, N_7 \parallel A \parallel C)$. Mengeliminasi kerentanan partitioning oracle (`AUD-21`), desinkronisasi saldo (`AUD-23`), dan multi-recipient equivocation (`AUD-24`) pada batas calldata tepat 96 byte dan View Tag 1-byte. Terverifikasi 11/11 suite pengujian adversarial Python dan 61/61 test lifecycle multi-asset.
 
 ---
 
@@ -28,12 +29,11 @@ Ref: [`docs/roadmap.md`](file:///workspaces/Zeltra-Protocol/docs/roadmap.md) (Fa
 > [!NOTE]
 > **Status Fleksibilitas:** Mengingat deploy Arbitrum sedang jeda/freeze (Oktober 2026), **sirkuit ZK BELUM DIKUNCI**. Tim bebas mengembangkan fitur inovatif (SBM Prover, MinMandate, iSimplePIR) dan memperkuat aljabar sirkuit tanpa terburu-buru melakukan *circuit freeze*.
 
-- [x] **Committing AEAD & Partitioning Oracle Defense (DEC-048 — IACR 2026/240):**
-  - Mengadopsi generic transform `EtH-KS` (Minematsu & Inoue, Oktober 2026) dengan Key Separation berbasis RCR-PRG $G(S) \to (K_{\text{enc}}, K_{\text{cmt}}, N_{11})$ dan CR-PRF $H(K_{\text{cmt}}, N_{11} \parallel A \parallel C)$.
-  - Mengeliminasi kerentanan Partitioning Oracle Attack pada pemindaian memo note on-chain (`AUD-21`), silent wallet desynchronization (`AUD-23`), dan multi-recipient equivocation (`AUD-24`).
-  - Menegakkan invarian Verify-then-Decrypt fail-closed pada `zeltra-core/src/memo.rs` dan scanner klien `zeltra-sdk/src/wallet/note_wallet/sync.rs` dengan tetap mempertahankan batas calldata kanonikal tepat 96 byte dan akselerasi filter 1-byte View Tag (`DEC-045C`).
-  - Menjalankan test harness independen Python `scripts/test_dec048_committing_aead.py` (100% lolos dengan 11 suite pengujian adversarial).
-  - Melakukan verifikasi calldata ingress guard relayer (strictly 96B) dan end-to-end multi-asset lifecycle simulation dengan note bernilai besar (5.000 USDC dan 10 WETH) via `scripts/test_real_case_dec043c_inpool_wallet.py` (61/61 tests lolos 100%, 0 desynchronization). Task C terverifikasi penuh.
+- [ ] **Studi Komparasi Desain Privasi & Tooling Ekosistem (Fairblock, ZeroStyl, Renegade):**
+  - **Fairblock:** Analisis arsitektur *conditional confidentiality* (FHE/t-IBE/decentralized MPC) untuk inspirasi batasan perlindungan transaksi privat Zeltra.
+  - **ZeroStyl:** Evaluasi *tooling ZK di Arbitrum Stylus* untuk optimasi pipeline verifikasi dan interop host WASM.
+  - **Renegade:** Analisis strategi produk & UX *dark pool MPC-ZK* dalam mengubah konsep privasi abstrak menjadi produk dengan use case nyata dan daya tarik pasar tinggi.
+  - *Prinsip:* Studi ini menjadi input komparasi desain; pelaksanaan audit independen Zeltra tetap berjalan paralel sesuai prioritas.
 - [ ] **Circuit ABI & Constraints Freeze (Ditangguhkan hingga R&D Lengkap):**
   - Kunci mati parameter R1CS dan public-input ABI pada 16 PI (`PrivateNoteCircuit`) dan 19 PI (`JoinSplitCircuit`) ketika seluruh fitur siap ke mainnet.
   - Finalisasi parameter Two-Limb quote hash, Formal Scope Binding Gadget, dan 448 quadratic range gates.
