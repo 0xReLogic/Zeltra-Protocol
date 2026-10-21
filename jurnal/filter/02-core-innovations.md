@@ -79,22 +79,7 @@ Dokumen ini memetakan paper terpilih untuk lapisan kriptografi fundamental Zeltr
 
 ---
 
-## 7. Committing AEAD: Partitioning Oracle Attack Defense for Encrypted Memos (IACR ePrint 2026/240) [x]
-* **File Jurnal / ePrint:** IACR ePrint 2026/240 (Oktober 2026)
-* **Penulis:** Kazuhiko Minematsu and Akiko Inoue
-* **Problem Kritis:**
-  Pada skema AEAD konvensional (seperti ChaCha20Poly1305 naif), sebuah ciphertext dapat valid didekripsi oleh dua kunci berbeda menjadi dua plaintext berbeda. Kerentanan ini (*non-committing AEAD flaw*) memungkinkan penyerang mengeksekusi *partitioning oracle attacks* pada protokol berbasis UTXO/memo: adversary menyuntikkan memo crafted on-chain yang membingungkan scanner wallet penerima dan dapat memicu desinkronisasi saldo atau deanonymization.
-* **Inovasi Paper:**
-  Mengevaluasi dan memperbaiki transformasi generik Committing AEAD (seperti CTX Chan-Rogaway dan Chen-Karadžić) yang rentan terhadap instansiasi hash praktis. Paper ini merumuskan transformasi committing AEAD yang terbukti kokoh di bawah *standard model* dengan modifikasi algoritmik minimal tanpa mengorbankan performa enkripsi/dekripsi simetris.
-* **Implementasi di Zeltra Core & SDK (SELESAI & TERVERIFIKASI [x] — DEC-048):**
-  * Komponen: [`zeltra-core/src/memo.rs`](file:///workspaces/Zeltra-Protocol/zeltra-core/src/memo.rs) (`encrypt_memo_committing_aead` & `decrypt_memo_committing_aead`), [`zeltra-core/src/note.rs`](file:///workspaces/Zeltra-Protocol/zeltra-core/src/note.rs), scanner note di [`zeltra-sdk/src/wallet/note_wallet/sync.rs`](file:///workspaces/Zeltra-Protocol/zeltra-sdk/src/wallet/note_wallet/sync.rs), dan test harness [`scripts/test_dec048_committing_aead.py`](file:///workspaces/Zeltra-Protocol/scripts/test_dec048_committing_aead.py).
-  * Mengadopsi generic transform `EtH-KS` (Minematsu & Inoue, 2026) dengan Key Separation berbasis RCR-PRG $G(S) \to (K_{\text{enc}}, K_{\text{cmt}}, N_{11})$ dan CR-PRF $H(K_{\text{cmt}}, N_{11} \parallel A \parallel C)$.
-  * Menjamin 96-byte encrypted memo yang dipancarkan lewat event `NoteCommitmentAppended` on-chain mengikat komitmen ciphertext secara matematis (*binding ciphertext to key & plaintext*), membendung partitioning attacks (`AUD-21`, `AUD-23`, `AUD-24`) dan menjamin keaslian data scanning note wallet 100% fail-closed.
-  * Teruji 100% lolos melintasi 11 suite pengujian adversarial Python dan 61/61 test lifecycle multi-asset di `scripts/test_real_case_dec043c_inpool_wallet.py`.
-
----
-
-## 8. Fast Polynomial Arithmetic in the Exponent without Roots of Unity (IACR ePrint 2026/2413)
+## 7. Fast Polynomial Arithmetic in the Exponent without Roots of Unity (IACR ePrint 2026/2413)
 * **File Jurnal / ePrint:** IACR ePrint 2026/2413 (Oktober 2026)
 * **Penulis:** Diane Ducrocq and Pierrick Gaudry
 * **Problem di Sistem Klasik:**
@@ -107,7 +92,7 @@ Dokumen ini memetakan paper terpilih untuk lapisan kriptografi fundamental Zeltr
 
 ---
 
-## 9. The Geometry of Witness-Update Tradeoffs in Additive Positive Accumulators (IACR ePrint 2026/2362)
+## 8. The Geometry of Witness-Update Tradeoffs in Additive Positive Accumulators (IACR ePrint 2026/2362)
 * **File Jurnal / ePrint:** IACR ePrint 2026/2362 (Oktober 2026)
 * **Penulis:** Wei Qi
 * **Problem Kritis:**
@@ -119,7 +104,7 @@ Dokumen ini memetakan paper terpilih untuk lapisan kriptografi fundamental Zeltr
   * Memberikan model matematika presisi untuk penjadwalan caching bukti MMR di client SDK: bukti daun di-refresh dengan jadwal amortisasi optimal $O(\log N)$ tanpa pemborosan komputasi traversal hashing ulang yang redundan.
 ---
 
-## 10. Cryptanalysis & Security Margins of Poseidon via Subspace Restriction (IACR ePrint 2026/1692)
+## 9. Cryptanalysis & Security Margins of Poseidon via Subspace Restriction (IACR ePrint 2026/1692)
 * **File Jurnal / ePrint:** IACR ePrint 2026/1692 (Oktober 2026)
 * **Penulis:** Amit Singh Bhati, Sundas Tariq, Tomer Ashur
 * **Problem Kritis:**
@@ -132,22 +117,7 @@ Dokumen ini memetakan paper terpilih untuk lapisan kriptografi fundamental Zeltr
 
 ---
 
-## 11. Jacobian Diagnostics for Under-Constrained Zero-Knowledge Circuits (IACR ePrint 2026/1852)
-* **File Jurnal / ePrint:** IACR ePrint 2026/1852 (Oktober 2026)
-* **Penulis:** Vijay Singh
-* **Problem Kritis:**
-  *Under-constrained arithmetic circuits* adalah salah satu celah keamanan paling mematikan dalam protokol zero-knowledge. Jika suatu wire saksi (*witness wire*) atau variabel perantara dalam sirkuit R1CS tidak terikat secara ketat (*under-constrained*), seorang prover jahat dapat menetapkan nilai alternatif tanpa melanggar persamaan verifikasi (misalnya menduplikasi proof, memanipulasi nilai kembalian uang *change*, atau mengubah flag multi-aset). Pengujian fuzzer acak sering kali gagal mendeteksi celah ini pada sirkuit berukuran puluhan ribu gerbang.
-* **Inovasi Paper:**
-  Memperkenalkan metodologi diagnostik aljabar berbasis aljabar linier matriks Jacobian eksak. Dengan menggabungkan matriks Jacobian dari seluruh *constraint* R1CS dan menetapkan koordinat input publik, *kernel* dari Jacobian tersebut merepresentasikan *Zariski tangent space*. Jika terdapat arah pergerakan dalam kernel (*tangent dimension $> 0$*), hal tersebut membuktikan secara matematis keberadaan derajat kebebasan infinitesimal (*infinitesimal freedom / non-uniqueness certificate*). Alat ini memverifikasi sirkuit hingga 66.000 constraints hanya dalam hitungan detik.
-* **Implementasi di Zeltra Core (SELESAI & TERVERIFIKASI [x]):**
-  * Komponen: [`zeltra-core/src/jacobian.rs`](file:///workspaces/Zeltra-Protocol/zeltra-core/src/jacobian.rs), [`zeltra-core/src/formal_tests.rs`](file:///workspaces/Zeltra-Protocol/zeltra-core/src/formal_tests.rs), dan [`scripts/test_dec046_dec047_jacobian_soundness.py`](file:///workspaces/Zeltra-Protocol/scripts/test_dec046_dec047_jacobian_soundness.py) (`DEC-047`).
-  * Mengimplementasikan Sparse Augmented Jacobian $M(a) = \begin{pmatrix} J(a) \\ E_F \end{pmatrix}$, eliminasi Gauss sparse Markowitz over $\mathbb{F}_p$, row-space test $e_j^T \in \text{rowspan}(M(a))$ untuk kekakuan kawat simultan, dan generator sertifikat garis afin Proposisi 27.
-  * Teruji 100% lolos melintasi matriks 6 keluarga saksi adversarial (FAM-1 s/d FAM-6) dengan $r_T = 0$ (26/26 formal tests passed).
-
----
-
-
-## 12. Accelerated Endomorphism & Side-Channel Regular Scalar Multiplication on BLS12-381 (IACR ePrint 2024/1906)
+## 10. Accelerated Endomorphism & Side-Channel Regular Scalar Multiplication on BLS12-381 (IACR ePrint 2024/1906)
 * **File Jurnal / ePrint:** IACR ePrint 2024/1906 (September 2026 update)
 * **Penulis:** Guangwu Xu, Wei Yu, Ke Han, Pengfei Lu
 * **Problem Kritis:**
@@ -161,23 +131,7 @@ Dokumen ini memetakan paper terpilih untuk lapisan kriptografi fundamental Zeltr
 
 ---
 
-## 13. Defeating Null-Branch Witness Attacks in Conditional ZK-UTXO Circuits (IACR ePrint 2026/2235)
-* **File Jurnal / ePrint:** IACR ePrint 2026/2235 (September 2026)
-* **Penulis:** Guoxiao Liu, Zhuoqing Peng, Guowei Liu, Keting Jia, Xiaoyun Wang, Zongyue Wang, Junfeng Fan
-* **Problem Kritis:**
-  Banyak sirkuit ZK modern yang memuat percabangan kondisional (seperti apakah suatu slot input bersifat aktif atau *dummy*, apakah ada *change note*, atau apakah rollover aktif). Paper ini mengungkap celah fatal bernama **Null-Branch Witness Attack**: ketika sebuah perkalian constraint dikalikan dengan faktor nol (misal $(1 - \text{is\_active}) \cdot \dots$ atau $\text{has\_change} \cdot \dots$), intermediate wire di cabang yang tidak aktif sering kali dibiarkan bebas tanpa ikatan (*unconstrained zero factor*). Akibatnya, prover jahat dapat mengisi nilai acak yang valid secara matematis pada wire tersebut untuk memalsukan bukti (*public-key-only forgery*) tanpa melanggar *soundness* sirkuit tingkat tinggi.
-* **Inovasi Paper:**
-  Menganalisis kesenjangan mendasar antara *One-Way Function (OWF) Hardness* dan *Proof-System Soundness*, membuktikan bahwa verifier menerima bukti palsu karena relasi arithmetisasi sirkuit membiarkan cabang null memiliki ruang solusi bebas. Paper ini merumuskan teknik *Quadratic Encoding Soundness* yang secara ketat mengunci seluruh wire pada cabang non-aktif ke konstanta deterministik kanonikal.
-* **Implementasi di Zeltra Core (Hardening Aljabar — DEC-046):**
-  * Komponen: Sirkuit JoinSplit di [`zeltra-core/src/joinsplit_circuit.rs`](file:///workspaces/Zeltra-Protocol/zeltra-core/src/joinsplit_circuit.rs) (`DEC-036A`), gadget bit-packing di [`zeltra-core/src/circuit_gadgets.rs`](file:///workspaces/Zeltra-Protocol/zeltra-core/src/circuit_gadgets.rs), dan PrivateNoteCircuit di [`zeltra-core/src/note_circuit.rs`](file:///workspaces/Zeltra-Protocol/zeltra-core/src/note_circuit.rs).
-  * Memberikan justifikasi kriptografis krusial untuk arsitektur Zeltra:
-    - Ketika slot kedua adalah dummy (`is_dummy == true`), komitmen dan nullifier dummy **wajib di-pin ke konstanta nol kanonikal** ($C = 0, \text{nullifier} = 0, \text{asset\_id} = 0$) melalui constraint kuadratik ketat, bukan sekadar membatalkan penjumlahan nilai uang.
-    - Pada percabangan `has_change_1` dan `has_change_2`, jika note kembalian tidak ada, nilai amount dan blinding factor dikunci ke nilai kanonikal agar penyerang tidak dapat mengeksploitasi *null-branch witness degrees of freedom*.
-    - Menjamin anti-aliasing inverse `diff_inv` di-pin ke nol kanonikal saat `is_dummy == 1` via gerbang pendamping kuadratik (*Proposition 5 Zero-Safe Inverse*).
-
----
-
-## 14. Dixon Resultants Algebraic Cryptanalysis & Parameter Hardening for Poseidon-W5 (IACR ePrint 2026/1969)
+## 11. Dixon Resultants Algebraic Cryptanalysis & Parameter Hardening for Poseidon-W5 (IACR ePrint 2026/1969)
 * **File Jurnal / ePrint:** IACR ePrint 2026/1969 (September 2026)
 * **Penulis:** Haohai Suo, Jiamin Cui
 * **Problem Kritis:**
@@ -195,7 +149,7 @@ Dokumen ini memetakan paper terpilih untuk lapisan kriptografi fundamental Zeltr
 
 ---
 
-## 15. Forkcipher-Based Committing Security & Context-Binding AEAD (IACR ePrint 2026/2110)
+## 12. Forkcipher-Based Committing Security & Context-Binding AEAD (IACR ePrint 2026/2110)
 * **File Jurnal / ePrint:** IACR ePrint 2026/2110 (September 2026)
 * **Penulis:** Elena Andreeva, Maria Eichlseder, Simon Gerhalter, Marcel Nageler, Oliver Christoph Popa, Andreas Weninger
 * **Problem Kritis:**
@@ -208,7 +162,7 @@ Dokumen ini memetakan paper terpilih untuk lapisan kriptografi fundamental Zeltr
 
 ---
 
-## 16. Top Gun: Degree Annihilation Attacks on Poseidon & Security Margins (IACR ePrint 2026/1254)
+## 13. Top Gun: Degree Annihilation Attacks on Poseidon & Security Margins (IACR ePrint 2026/1254)
 * **File Jurnal / ePrint:** IACR ePrint 2026/1254 (September 2026)
 * **Penulis:** Antonio Sanso, Giuseppe Vitto
 * **Problem Kritis:**
@@ -221,7 +175,7 @@ Dokumen ini memetakan paper terpilih untuk lapisan kriptografi fundamental Zeltr
 
 ---
 
-## 17. Slipway: Accessing Finite Subspace Trails & Full-Round Absorption in Poseidon (IACR ePrint 2026/1579)
+## 14. Slipway: Accessing Finite Subspace Trails & Full-Round Absorption in Poseidon (IACR ePrint 2026/1579)
 * **File Jurnal / ePrint:** IACR ePrint 2026/1579 (September 2026)
 * **Penulis:** Giuseppe Vitto
 * **Problem Kritis:**
