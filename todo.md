@@ -28,6 +28,11 @@ Ref: [`docs/roadmap.md`](file:///workspaces/Zeltra-Protocol/docs/roadmap.md) (Fa
 > [!NOTE]
 > **Status Fleksibilitas:** Mengingat deploy Arbitrum sedang jeda/freeze (Oktober 2026), **sirkuit ZK BELUM DIKUNCI**. Tim bebas mengembangkan fitur inovatif (SBM Prover, MinMandate, iSimplePIR) dan memperkuat aljabar sirkuit tanpa terburu-buru melakukan *circuit freeze*.
 
+- [ ] **Committing AEAD & Partitioning Oracle Defense (DEC-048 — IACR 2026/240):**
+  - Mengadopsi generic transform `EtH-KS` (Minematsu & Inoue, Oktober 2026) dengan Key Separation berbasis RCR-PRG $G(S) \to (K_{\text{enc}}, K_{\text{cmt}}, N_{11})$ dan CR-PRF $H(K_{\text{cmt}}, N_{11} \parallel A \parallel C)$.
+  - Mengeliminasi kerentanan Partitioning Oracle Attack pada pemindaian memo note on-chain (`AUD-21`), silent wallet desynchronization (`AUD-23`), dan multi-recipient equivocation (`AUD-24`).
+  - Menegakkan invarian Verify-then-Decrypt fail-closed pada `zeltra-core/src/memo.rs` dan scanner klien `zeltra-sdk/src/wallet/note_wallet/sync.rs` dengan tetap mempertahankan batas calldata kanonikal tepat 96 byte dan akselerasi filter 1-byte View Tag (`DEC-045C`).
+  - Menjalankan test harness independen Python `scripts/test_dec048_committing_aead.py` (100% lolos dengan 8 suite pengujian adversarial).
 - [ ] **Circuit ABI & Constraints Freeze (Ditangguhkan hingga R&D Lengkap):**
   - Kunci mati parameter R1CS dan public-input ABI pada 16 PI (`PrivateNoteCircuit`) dan 19 PI (`JoinSplitCircuit`) ketika seluruh fitur siap ke mainnet.
   - Finalisasi parameter Two-Limb quote hash, Formal Scope Binding Gadget, dan 448 quadratic range gates.
