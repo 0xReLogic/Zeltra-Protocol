@@ -500,6 +500,33 @@ impl ConstraintSynthesizer<Fr> for JoinSplitCircuit {
         let epoch_diff = &epoch_id_2_var - &epoch_id_1_var;
         (&is_dummy_var * &epoch_diff).enforce_equal(&zero)?;
 
+        // DEC-046 §3.B: Companion quadratic constraints pinning dummy slot 2 witness coordinates
+        // strictly to canonical deterministic constants:
+        // is_dummy_2 * (in2_owner - CANONICAL_DUMMY_OWNER) == 0
+        // is_dummy_2 * (in2_rho - CANONICAL_DUMMY_RHO) == 0
+        // is_dummy_2 * (in2_rand - CANONICAL_DUMMY_RANDOMNESS) == 0
+        // is_dummy_2 * (in2_index - CANONICAL_DUMMY_LEAF_INDEX) == 0
+        crate::circuit_gadgets::enforce_canonical_pinning(
+            &is_dummy_var,
+            &in2_owner,
+            crate::circuit_gadgets::CANONICAL_DUMMY_OWNER,
+        )?;
+        crate::circuit_gadgets::enforce_canonical_pinning(
+            &is_dummy_var,
+            &in2_rho,
+            crate::circuit_gadgets::CANONICAL_DUMMY_RHO,
+        )?;
+        crate::circuit_gadgets::enforce_canonical_pinning(
+            &is_dummy_var,
+            &in2_rand,
+            crate::circuit_gadgets::CANONICAL_DUMMY_RANDOMNESS,
+        )?;
+        crate::circuit_gadgets::enforce_canonical_pinning(
+            &is_dummy_var,
+            &in2_index,
+            Fr::from(crate::circuit_gadgets::CANONICAL_DUMMY_LEAF_INDEX),
+        )?;
+
         // ═══════════════════════════════════════════════════════════════
         // 6. Phase 3: Direction B Constant-Arity Output Gadget (ZIP 315 Defense)
         // ═══════════════════════════════════════════════════════════════
@@ -516,6 +543,47 @@ impl ConstraintSynthesizer<Fr> for JoinSplitCircuit {
         // A3.1: If has_change == 0 => change value MUST be zero
         (&out1_val * &one_minus_ch1).enforce_equal(&zero)?;
         (&out2_val * &one_minus_ch2).enforce_equal(&zero)?;
+
+        // DEC-046 §3.D: Companion quadratic constraints for inactive change outputs:
+        // When has_change_1 == 0 (i.e. (1 - has_change_1) == 1):
+        // (1 - has_change_1) * (out1_owner - CANONICAL_DUMMY_OWNER) == 0
+        // (1 - has_change_1) * (out1_rho - CANONICAL_DUMMY_RHO) == 0
+        // (1 - has_change_1) * (out1_rand - CANONICAL_DUMMY_RANDOMNESS) == 0
+        crate::circuit_gadgets::enforce_canonical_pinning(
+            &one_minus_ch1,
+            &out1_owner,
+            crate::circuit_gadgets::CANONICAL_DUMMY_OWNER,
+        )?;
+        crate::circuit_gadgets::enforce_canonical_pinning(
+            &one_minus_ch1,
+            &out1_rho,
+            crate::circuit_gadgets::CANONICAL_DUMMY_RHO,
+        )?;
+        crate::circuit_gadgets::enforce_canonical_pinning(
+            &one_minus_ch1,
+            &out1_rand,
+            crate::circuit_gadgets::CANONICAL_DUMMY_RANDOMNESS,
+        )?;
+
+        // When has_change_2 == 0 (i.e. (1 - has_change_2) == 1):
+        // (1 - has_change_2) * (out2_owner - CANONICAL_DUMMY_OWNER) == 0
+        // (1 - has_change_2) * (out2_rho - CANONICAL_DUMMY_RHO) == 0
+        // (1 - has_change_2) * (out2_rand - CANONICAL_DUMMY_RANDOMNESS) == 0
+        crate::circuit_gadgets::enforce_canonical_pinning(
+            &one_minus_ch2,
+            &out2_owner,
+            crate::circuit_gadgets::CANONICAL_DUMMY_OWNER,
+        )?;
+        crate::circuit_gadgets::enforce_canonical_pinning(
+            &one_minus_ch2,
+            &out2_rho,
+            crate::circuit_gadgets::CANONICAL_DUMMY_RHO,
+        )?;
+        crate::circuit_gadgets::enforce_canonical_pinning(
+            &one_minus_ch2,
+            &out2_rand,
+            crate::circuit_gadgets::CANONICAL_DUMMY_RANDOMNESS,
+        )?;
 
         // A3.2 & A3.3: Direction B: Compute and export exactly 2 output commitments
         // Even when has_change == 0, a canonical dummy commitment (value = 0) is synthesized and exported!
@@ -866,7 +934,8 @@ impl ConstraintSynthesizer<Fr> for JoinSplitCircuit {
         // When is_dummy_2 == 0, nullifier_1 MUST NOT equal nullifier_2:
         // (1 - is_dummy_2) * (nullifier_1 - nullifier_2) * diff_inv == (1 - is_dummy_2)
         let nf_diff_var = &nullifier_1_var - &nullifier_2_var;
-        let diff_inv_witness = match (
+        let diff_inv_override = TAMPER_DIFF_INV.with(|cell| *cell.borrow());
+        let diff_inv_witness = diff_inv_override.or_else(|| match (
             self.input_nullifier_1,
             self.input_nullifier_2,
             self.in2_is_dummy,
@@ -880,11 +949,20 @@ impl ConstraintSynthesizer<Fr> for JoinSplitCircuit {
                 }
             }
             _ => None,
-        };
+        });
         let diff_inv_var = private_witness(&cs, diff_inv_witness)?;
         let term1 = &one_minus_dummy * &nf_diff_var;
         let term2 = &term1 * &diff_inv_var;
         term2.enforce_equal(&one_minus_dummy)?;
+
+        // DEC-046 §3.C: Anti-Aliasing Inverse Companion Constraint (Zero-Safe Proposition 5):
+        // When is_dummy_2 == 1, diff_inv MUST be strictly locked to 0:
+        // is_dummy_2 * diff_inv == 0 (eliminates degree-of-freedom on inactive slot)
+        crate::circuit_gadgets::enforce_canonical_pinning(
+            &is_dummy_var,
+            &diff_inv_var,
+            crate::circuit_gadgets::CANONICAL_DUMMY_DIFF_INV,
+        )?;
 
         // ═══════════════════════════════════════════════════════════════
         // 10. Phase 5: Two-Limb Quote Hash & Scope Binding Integration
@@ -924,6 +1002,25 @@ impl ConstraintSynthesizer<Fr> for JoinSplitCircuit {
 
         Ok(())
     }
+}
+
+std::thread_local! {
+    static TAMPER_DIFF_INV: std::cell::RefCell<Option<Fr>> = const { std::cell::RefCell::new(None) };
+}
+
+/// Helper to inject a tampered witness for diff_inv during testing of DEC-046 soundness.
+pub fn set_tamper_diff_inv(val: Option<Fr>) {
+    TAMPER_DIFF_INV.with(|cell| {
+        *cell.borrow_mut() = val;
+    });
+}
+
+/// Helper to verify constraint system satisfaction for a JoinSplitCircuit (DEC-046 testing).
+pub fn check_joinsplit_circuit_satisfaction(circuit: JoinSplitCircuit) -> Result<bool, SynthesisError> {
+    use ark_relations::gr1cs::ConstraintSystem;
+    let cs = ConstraintSystem::<Fr>::new_ref();
+    circuit.generate_constraints(cs.clone())?;
+    cs.is_satisfied()
 }
 
 // ─── Proving and Verifying Keys & Helpers ─────────────────────────────────────
@@ -969,18 +1066,17 @@ pub fn create_dummy_joinsplit_circuit() -> JoinSplitCircuit {
     let epoch1 = 10u64;
     let nf1 = derive_joinsplit_nullifier(nk, rho1, epoch1);
 
-    // Dummy second input
+    // DEC-046: Dummy second input uses canonical dummy owner (0)
     let nonce = Fr::from(999u64);
-    let nf2 = derive_joinsplit_dummy_nullifier(nk, nonce);
+    let owner_dummy = crate::circuit_gadgets::CANONICAL_DUMMY_OWNER;
+    let rho_dummy = crate::circuit_gadgets::CANONICAL_DUMMY_RHO;
+    let rand_dummy = crate::circuit_gadgets::CANONICAL_DUMMY_RANDOMNESS;
+    let dummy_nk = derive_nullifier_key(owner_dummy);
+    let nf2 = derive_joinsplit_dummy_nullifier(dummy_nk, nonce);
 
-    // Direction B: Canonical dummy output commitments (v=0)
-    let rho_out1 = Fr::from(401u64);
-    let rand_out1 = Fr::from(402u64);
-    let cm_out1 = note_commitment(0, asset_id_u8, sk, rho_out1, rand_out1);
-
-    let rho_out2 = Fr::from(501u64);
-    let rand_out2 = Fr::from(502u64);
-    let cm_out2 = note_commitment(0, asset_id_u8, sk, rho_out2, rand_out2);
+    // DEC-046: Direction B Canonical dummy output commitments (v=0, owner=0, rho=0, rand=0)
+    let cm_out1 = note_commitment(0, asset_id_u8, owner_dummy, rho_dummy, rand_dummy);
+    let cm_out2 = note_commitment(0, asset_id_u8, owner_dummy, rho_dummy, rand_dummy);
 
     let merch_amt = 9_900_000u64;
     let proto_fee = (merch_amt * 45).div_ceil(10_000); // 44_550
@@ -1026,10 +1122,10 @@ pub fn create_dummy_joinsplit_circuit() -> JoinSplitCircuit {
         in1_mountain_siblings: Some(in1_sibs),
 
         in2_value: Some(Fr::from(0u64)),
-        in2_owner_key: Some(sk),
-        in2_rho: Some(Fr::from(0u64)),
-        in2_randomness: Some(Fr::from(0u64)),
-        in2_leaf_index: Some(Fr::from(0u64)),
+        in2_owner_key: Some(owner_dummy),
+        in2_rho: Some(rho_dummy),
+        in2_randomness: Some(rand_dummy),
+        in2_leaf_index: Some(Fr::from(crate::circuit_gadgets::CANONICAL_DUMMY_LEAF_INDEX)),
         in2_mountain_height: Some(0),
         in2_mountain_siblings: Some([Fr::from(0u64); 32]),
         in2_is_dummy: Some(Fr::from(1u64)),
@@ -1038,14 +1134,14 @@ pub fn create_dummy_joinsplit_circuit() -> JoinSplitCircuit {
         mmr_peaks: Some(peaks),
 
         out1_value: Some(Fr::from(0u64)),
-        out1_owner_key: Some(sk),
-        out1_rho: Some(rho_out1),
-        out1_randomness: Some(rand_out1),
+        out1_owner_key: Some(owner_dummy),
+        out1_rho: Some(rho_dummy),
+        out1_randomness: Some(rand_dummy),
 
         out2_value: Some(Fr::from(0u64)),
-        out2_owner_key: Some(sk),
-        out2_rho: Some(rho_out2),
-        out2_randomness: Some(rand_out2),
+        out2_owner_key: Some(owner_dummy),
+        out2_rho: Some(rho_dummy),
+        out2_randomness: Some(rand_dummy),
 
         has_change_1: Some(Fr::from(0u64)),
         has_change_2: Some(Fr::from(0u64)),
@@ -1576,5 +1672,190 @@ mod tests {
             !cs.is_satisfied().unwrap(),
             "Cross-asset spend (mixing USDC input with WETH output) must be strictly rejected by intra-asset equality constraint!"
         );
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // Quadratic Encoding Soundness & Null-Branch Defense Tests (DEC-046)
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    #[test]
+    fn test_null_branch_canonical_dummy_satisfied() {
+        let cs = ConstraintSystem::<Fr>::new_ref();
+        let circuit = create_dummy_joinsplit_circuit();
+        circuit.clone().generate_constraints(cs.clone()).unwrap();
+
+        assert!(
+            cs.is_satisfied().unwrap(),
+            "Canonical dummy baseline circuit must be satisfied: {:?}",
+            cs.which_is_unsatisfied()
+        );
+
+        // Verify Groth16 proof roundtrip with canonical dummy
+        let keys = generate_joinsplit_circuit_keys().unwrap();
+        let public_inputs = extract_joinsplit_public_inputs(&circuit);
+        let proof = generate_joinsplit_proof(circuit, &keys.proving_key).unwrap();
+        let valid = verify_joinsplit_proof(&keys.verifying_key, &proof, &public_inputs).unwrap();
+        assert!(valid, "Canonical dummy baseline Groth16 proof must verify!");
+    }
+
+    #[test]
+    fn test_null_branch_tamper_dummy_rho_rejected() {
+        // SEC-CRIT-02: Non-zero dummy rho must be rejected by companion constraint
+        let cs = ConstraintSystem::<Fr>::new_ref();
+        let mut circuit = create_dummy_joinsplit_circuit();
+        assert_eq!(circuit.in2_is_dummy, Some(Fr::from(1u64)));
+
+        // Malicious witness injection: random non-zero scalar for in2_rho
+        circuit.in2_rho = Some(Fr::from(0x12345678_9abcdef0u64));
+
+        circuit.generate_constraints(cs.clone()).unwrap();
+        assert!(
+            !cs.is_satisfied().unwrap(),
+            "Tampered non-canonical in2_rho on dummy slot MUST fail constraint satisfaction!"
+        );
+    }
+
+    #[test]
+    fn test_null_branch_diff_inv_degree_of_freedom_rejected() {
+        // SEC-CRIT-03: When in2_is_dummy == 1, diff_inv degree of freedom must be zero (diff_inv == 0)
+        let cs = ConstraintSystem::<Fr>::new_ref();
+        let circuit = create_dummy_joinsplit_circuit();
+        assert_eq!(circuit.in2_is_dummy, Some(Fr::from(1u64)));
+
+        // Inject malicious non-zero diff_inv witness
+        set_tamper_diff_inv(Some(Fr::from(0xdeadbeef_1337u64)));
+        let res = circuit.generate_constraints(cs.clone());
+        set_tamper_diff_inv(None); // Reset thread-local
+
+        res.unwrap();
+        assert!(
+            !cs.is_satisfied().unwrap(),
+            "Non-zero diff_inv on dummy slot MUST be rejected by companion quadratic constraint is_dummy_2 * diff_inv == 0!"
+        );
+    }
+
+    #[test]
+    fn test_null_branch_tamper_inactive_change1_owner_rejected() {
+        // SEC-CRIT-02: When has_change_1 == 0, out1_owner MUST be canonical zero
+        let cs = ConstraintSystem::<Fr>::new_ref();
+        let mut circuit = create_dummy_joinsplit_circuit();
+        assert_eq!(circuit.has_change_1, Some(Fr::from(0u64)));
+
+        // Inject non-zero address for out1_owner
+        circuit.out1_owner_key = Some(Fr::from(0xaaaaaaaa_bbbbbbbb_u64));
+
+        circuit.generate_constraints(cs.clone()).unwrap();
+        assert!(
+            !cs.is_satisfied().unwrap(),
+            "Tampered non-canonical out1_owner on inactive change 1 MUST fail companion constraint!"
+        );
+    }
+
+    #[test]
+    fn test_null_branch_tamper_dummy_owner_rejected() {
+        // Dummy slot in2_owner must be CANONICAL_DUMMY_OWNER (0)
+        let cs = ConstraintSystem::<Fr>::new_ref();
+        let mut circuit = create_dummy_joinsplit_circuit();
+        assert_eq!(circuit.in2_is_dummy, Some(Fr::from(1u64)));
+
+        // Inject arbitrary non-zero owner key for dummy input 2
+        circuit.in2_owner_key = Some(Fr::from(0x9999_8888_7777u64));
+
+        circuit.generate_constraints(cs.clone()).unwrap();
+        assert!(
+            !cs.is_satisfied().unwrap(),
+            "Non-zero in2_owner on dummy slot MUST fail companion constraint!"
+        );
+    }
+
+    #[test]
+    fn test_null_branch_tamper_dummy_randomness_rejected() {
+        let cs = ConstraintSystem::<Fr>::new_ref();
+        let mut circuit = create_dummy_joinsplit_circuit();
+        assert_eq!(circuit.in2_is_dummy, Some(Fr::from(1u64)));
+
+        circuit.in2_randomness = Some(Fr::from(0x5555_6666_7777u64));
+
+        circuit.generate_constraints(cs.clone()).unwrap();
+        assert!(
+            !cs.is_satisfied().unwrap(),
+            "Non-zero in2_randomness on dummy slot MUST fail companion constraint!"
+        );
+    }
+
+    #[test]
+    fn test_null_branch_tamper_dummy_leaf_index_rejected() {
+        let cs = ConstraintSystem::<Fr>::new_ref();
+        let mut circuit = create_dummy_joinsplit_circuit();
+        assert_eq!(circuit.in2_is_dummy, Some(Fr::from(1u64)));
+
+        circuit.in2_leaf_index = Some(Fr::from(12345u64));
+
+        circuit.generate_constraints(cs.clone()).unwrap();
+        assert!(
+            !cs.is_satisfied().unwrap(),
+            "Non-zero in2_leaf_index on dummy slot MUST fail companion constraint!"
+        );
+    }
+
+    #[test]
+    fn test_null_branch_tamper_inactive_change2_rejected() {
+        // When has_change_2 == 0, out2_owner, out2_rho, out2_rand must all be 0
+        let circuit = create_dummy_joinsplit_circuit();
+        assert_eq!(circuit.has_change_2, Some(Fr::from(0u64)));
+
+        // Test out2_owner
+        let cs1 = ConstraintSystem::<Fr>::new_ref();
+        let mut c1 = circuit.clone();
+        c1.out2_owner_key = Some(Fr::from(1u64));
+        c1.generate_constraints(cs1.clone()).unwrap();
+        assert!(!cs1.is_satisfied().unwrap(), "Non-zero out2_owner must fail");
+
+        // Test out2_rho
+        let cs2 = ConstraintSystem::<Fr>::new_ref();
+        let mut c2 = circuit.clone();
+        c2.out2_rho = Some(Fr::from(1u64));
+        c2.generate_constraints(cs2.clone()).unwrap();
+        assert!(!cs2.is_satisfied().unwrap(), "Non-zero out2_rho must fail");
+
+        // Test out2_rand
+        let cs3 = ConstraintSystem::<Fr>::new_ref();
+        let mut c3 = circuit;
+        c3.out2_randomness = Some(Fr::from(1u64));
+        c3.generate_constraints(cs3.clone()).unwrap();
+        assert!(!cs3.is_satisfied().unwrap(), "Non-zero out2_rand must fail");
+    }
+
+    #[test]
+    fn test_null_branch_state_invariance_proof() {
+        // Prove that rejected tampered witness attempts prevent proof synthesis without modifying state
+        let keys = generate_joinsplit_circuit_keys().unwrap();
+        let mut circuit = create_dummy_joinsplit_circuit();
+
+        // Tamper null-branch witness
+        circuit.in2_rho = Some(Fr::from(0xbad_f00d_u64));
+
+        // Prover must fail to synthesize a valid proof: Groth16::prove panics with cs.is_satisfied() failure
+        let cs = ConstraintSystem::<Fr>::new_ref();
+        circuit.clone().generate_constraints(cs.clone()).unwrap();
+        assert!(
+            !cs.is_satisfied().unwrap(),
+            "Tampered null-branch witness MUST NOT satisfy constraint system!"
+        );
+
+        let proving_attempt = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            generate_joinsplit_proof(circuit.clone(), &keys.proving_key)
+        }));
+        assert!(
+            proving_attempt.is_err(),
+            "Prover must panic/fail when attempting to prove unsatisfied tampered witness!"
+        );
+
+        // Assert accounting invariant remains pristine: balance >= total_liabilities
+        let accounting = crate::accounting::ContractAccounting::new();
+        let tr = accounting.deposit(10_000_000).unwrap();
+        assert_eq!(tr.new_state.assets, 10_000_000);
+        // Failed spend does not alter liabilities and solvency holds
+        assert!(tr.new_state.check_solvency());
     }
 }

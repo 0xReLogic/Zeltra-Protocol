@@ -453,6 +453,90 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             );
         }
 
+        "test_null_branch_witness" => {
+            // DEC-046: Test null-branch witness injection resistance
+            // Usage: inpool_interop test_null_branch_witness <field> [value]
+            if args.len() < 3 {
+                eprintln!("Usage: inpool_interop test_null_branch_witness <field> [value]");
+                std::process::exit(1);
+            }
+            let field = args[2].as_str();
+            let mut circuit = zeltra_core::create_dummy_joinsplit_circuit();
+
+            if field == "baseline" {
+                match zeltra_core::joinsplit_circuit::check_joinsplit_circuit_satisfaction(circuit) {
+                    Ok(true) => {
+                        println!(r#"{{"satisfied":true,"status":"SATISFIED","field":"baseline"}}"#);
+                        std::process::exit(0);
+                    }
+                    Ok(false) => {
+                        eprintln!("Constraint system not satisfied: baseline circuit failed");
+                        println!(r#"{{"satisfied":false,"status":"REJECTED","field":"baseline"}}"#);
+                        std::process::exit(1);
+                    }
+                    Err(e) => {
+                        eprintln!("Constraint synthesis error: {e}");
+                        println!(r#"{{"satisfied":false,"status":"ERROR","error":"{e}"}}"#);
+                        std::process::exit(1);
+                    }
+                }
+            }
+
+            if args.len() < 4 {
+                eprintln!("Usage: inpool_interop test_null_branch_witness <field> <value>");
+                std::process::exit(1);
+            }
+
+            let val_str = &args[3];
+            let tamper_val = parse_fr_flexible(val_str).unwrap_or_else(|e| {
+                eprintln!("Failed to parse scalar: {e}");
+                std::process::exit(1);
+            });
+
+            let is_diff_inv = field == "diff_inv";
+            if is_diff_inv {
+                zeltra_core::joinsplit_circuit::set_tamper_diff_inv(Some(tamper_val));
+            } else {
+                match field {
+                    "in2_rho" => circuit.in2_rho = Some(tamper_val),
+                    "in2_owner" | "in2_owner_key" => circuit.in2_owner_key = Some(tamper_val),
+                    "in2_randomness" | "in2_rand" => circuit.in2_randomness = Some(tamper_val),
+                    "in2_leaf_index" | "in2_index" => circuit.in2_leaf_index = Some(tamper_val),
+                    "out1_owner" | "out1_owner_key" => circuit.out1_owner_key = Some(tamper_val),
+                    "out1_rho" => circuit.out1_rho = Some(tamper_val),
+                    "out1_randomness" | "out1_rand" => circuit.out1_randomness = Some(tamper_val),
+                    "out2_owner" | "out2_owner_key" => circuit.out2_owner_key = Some(tamper_val),
+                    "out2_rho" => circuit.out2_rho = Some(tamper_val),
+                    "out2_randomness" | "out2_rand" => circuit.out2_randomness = Some(tamper_val),
+                    _ => {
+                        eprintln!("Unknown tamper field: {}", field);
+                        std::process::exit(1);
+                    }
+                }
+            }
+
+            let res = zeltra_core::joinsplit_circuit::check_joinsplit_circuit_satisfaction(circuit);
+            if is_diff_inv {
+                zeltra_core::joinsplit_circuit::set_tamper_diff_inv(None);
+            }
+
+            match res {
+                Ok(true) => {
+                    println!(r#"{{"satisfied":true,"status":"UNEXPECTEDLY_SATISFIED","field":"{}"}}"#, field);
+                    std::process::exit(0);
+                }
+                Ok(false) => {
+                    eprintln!("Constraint system not satisfied: DEC-046 null-branch constraint rejected tampered witness for field '{}'", field);
+                    println!(r#"{{"satisfied":false,"status":"REJECTED","field":"{}"}}"#, field);
+                    std::process::exit(1);
+                }
+                Err(e) => {
+                    eprintln!("Constraint synthesis error: {e}");
+                    println!(r#"{{"satisfied":false,"status":"ERROR","error":"{e}"}}"#);
+                    std::process::exit(1);
+                }
+            }
+        }
         _ => {
             eprintln!("Unknown command: {}", command);
             std::process::exit(1);
@@ -460,4 +544,29 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     Ok(())
+}
+
+fn parse_fr_flexible(s: &str) -> Result<zeltra_core::Fr, String> {
+    let s = s.trim();
+    if s == "-1" {
+        return Ok(-zeltra_core::Fr::from(1u64));
+    }
+    if let Ok(v) = s.parse::<u64>() {
+        return Ok(zeltra_core::Fr::from(v));
+    }
+    let clean_str = s.strip_prefix("0x").unwrap_or(s);
+    let clean = if !clean_str.len().is_multiple_of(2) {
+        format!("0{}", clean_str)
+    } else {
+        clean_str.to_string()
+    };
+    let bytes = hex::decode(&clean).map_err(|e| format!("Invalid hex: {e}"))?;
+    if bytes.len() <= 32 {
+        let mut padded = [0u8; 32];
+        padded[32 - bytes.len()..].copy_from_slice(&bytes);
+        zeltra_core::fr_from_be_bytes(&padded)
+            .ok_or_else(|| "Non-canonical field scalar (>= r)".to_string())
+    } else {
+        Err(format!("Hex too long: {} bytes", bytes.len()))
+    }
 }

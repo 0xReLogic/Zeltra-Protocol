@@ -15,19 +15,22 @@
 - **Viewing Key Export Suite & CEX Selective Disclosure (DEC-040):** 4-tier key hierarchy (`sk`, `nk`, `fvk`, `ivk`/`ovk`), `SelectiveDisclosureCircuit` Groth16 dengan Verifier Binding bursa (Binance/Coinbase), dan engine verifier mandiri (`zeltra-sdk/src/compliance/verifier.rs`).
 - **In-Browser WebAssembly SDK Prover (DEC-041):** Runner prover Groth16 langsung di browser via Web Worker dengan siklus isolasi memori sekali pakai (`worker.terminate()`) anti-OOM linear.
 - **Pure ZK-UTXO HTTP 402 AI Agent Facilitator (DEC-042):** Mikropembayaran AI Agent sub-sen murni Groth16 1-in-1-out, dynamic dust threshold tracking, dan universal merchant payout on-chain.
+- **In-Memory Incremental MMR Engine & Proof Acceleration (DEC-045):** Flat Post-Order MMR Node Array (`nodes: Vec<Fr>`) formula Peter Todd di `zeltra-core`, $O(\log N)$ proof generation tanpa poseidon hash (<20 µs), concurrent thread-safe accumulator `Arc<RwLock<FlatMerkleMountainRange>>` di `zeltra-node`, dan 1-byte HKDF View Tag protocol di memo 96-byte `zeltra-sdk` untuk 23.6x scanning speedup.
 - **Stateless Sequencer Relayer (DEC-038C):** Single sequencer daemon (`scripts/start_relayer.sh`), dynamic MMR proof sync, fail-closed preflight validation, dan dual-layer nullifier double-spend prevention.
 
 ---
 
-## 1. Kriptografi, Circuit Freeze & MPC Trusted Setup (Fase 2)
-Ref: [`docs/roadmap.md`](file:///workspaces/Zeltra-Protocol/docs/roadmap.md) (Fase 2) & [`research/decisions/DEC-035`](file:///workspaces/Zeltra-Protocol/research/decisions/DEC-035-cryptographic-canonicality-public-input-binding-and-mmr.md)
+## 1. Kriptografi, Circuit Hardening & MPC Setup (Fase 2 — Fleksibilitas R&D Terbuka)
+Ref: [`docs/roadmap.md`](file:///workspaces/Zeltra-Protocol/docs/roadmap.md) (Fase 2), [`research/decisions/DEC-035`](file:///workspaces/Zeltra-Protocol/research/decisions/DEC-035-cryptographic-canonicality-public-input-binding-and-mmr.md), & [`research/decisions/DEC-046`](file:///workspaces/Zeltra-Protocol/research/decisions/DEC-046-null-branch-witness-attack-defense-and-quadratic-encoding-soundness.md)
 
-- [ ] **In-Memory Incremental MMR Engine & Zero-Hash Proof Acceleration (DEC-045 Series):**
-  - **DEC-045A (`zeltra-core`):** Implementasikan Flat Post-Order MMR Node Array (`nodes: Vec<Fr>`) dengan formula Peter Todd, simpan intermediate parent nodes saat append, dan jadikan `generate_proof()` murni $O(\log N)$ array read (0 Poseidon Hash, latensi < 20 µs).
-  - **DEC-045B (`zeltra-node`):** Integrasikan `Arc<tokio::sync::RwLock<FlatMerkleMountainRange>>` pada `AppState`, refaktor `handle_mmr_proof` read-path, implementasikan single-writer inkremental append di `mmr_indexer` (~500 µs), dan definisikan abstraksi trait `MMRStore` (siap RocksDB/mmap).
-  - **DEC-045C (`zeltra-sdk`):** Implementasikan 1-byte View Tag protocol derivasi HKDF pada memo 96-byte dan refaktor loop scanner dompet agar memfilter 99.5% note asing sebelum AEAD (23.6x speedup).
-- [ ] **Circuit ABI & Constraints Freeze:**
-  - Kunci mati parameter R1CS dan public-input ABI pada 16 PI (`PrivateNoteCircuit`) dan 19 PI (`JoinSplitCircuit`).
+> [!NOTE]
+> **Status Fleksibilitas:** Mengingat deploy Arbitrum sedang jeda/freeze (Oktober 2026), **sirkuit ZK BELUM DIKUNCI**. Tim bebas mengembangkan fitur inovatif (SBM Prover, MinMandate, iSimplePIR) dan memperkuat aljabar sirkuit tanpa terburu-buru melakukan *circuit freeze*.
+
+- [ ] **DEC-046 Quadratic Encoding Soundness & Null-Branch Defense:**
+  - Terapkan gerbang pendamping kuadratik kanonikal deterministik pada [`zeltra-core/src/joinsplit_circuit.rs`](file:///workspaces/Zeltra-Protocol/zeltra-core/src/joinsplit_circuit.rs) (pinning dummy input slot 2, inactive change outputs 1 & 2, dan zero-safe anti-aliasing inverse `diff_inv`).
+  - Uji soundness sirkuit dengan memasukkan saksi non-kanonikal pada cabang null untuk memastikan prover gagal (`cs.is_satisfied() == false`).
+- [ ] **Circuit ABI & Constraints Freeze (Ditangguhkan hingga R&D Lengkap):**
+  - Kunci mati parameter R1CS dan public-input ABI pada 16 PI (`PrivateNoteCircuit`) dan 19 PI (`JoinSplitCircuit`) ketika seluruh fitur siap ke mainnet.
   - Finalisasi parameter Two-Limb quote hash, Formal Scope Binding Gadget, dan 448 quadratic range gates.
 - [ ] **Proving/Verifying Keys Management:**
   - Simpan proving/verifying key resmi sebagai artifact versioned; pastikan test runner menggunakan cached dev keys secara terisolasi.

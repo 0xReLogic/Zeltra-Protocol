@@ -6,11 +6,40 @@
 //! - `enforce_joinsplit_flags_packed`: binds Slot 17 `flags_packed == has_change_1 + 2 * has_change_2 + 4 * asset_id`
 
 use ark_bls12_381::Fr;
-use ark_ff::PrimeField;
+use ark_ff::{AdditiveGroup, PrimeField};
 use ark_r1cs_std::eq::EqGadget;
 use ark_r1cs_std::fields::fp::{AllocatedFp, FpVar};
 use ark_r1cs_std::fields::FieldVar;
 use ark_relations::gr1cs::{ConstraintSystemRef, SynthesisError};
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Canonical Deterministic Domain Constants for Null-Branch Pinning (DEC-046)
+// ═══════════════════════════════════════════════════════════════════════════
+
+/// Canonical deterministic domain constants for Zeltra null-branch pinning (DEC-046).
+pub const CANONICAL_DUMMY_VALUE: u64 = 0;
+pub const CANONICAL_DUMMY_OWNER: Fr = Fr::ZERO;
+pub const CANONICAL_DUMMY_RHO: Fr = Fr::ZERO;
+pub const CANONICAL_DUMMY_RANDOMNESS: Fr = Fr::ZERO;
+pub const CANONICAL_DUMMY_LEAF_INDEX: u64 = 0;
+pub const CANONICAL_DUMMY_SESSION_NONCE: Fr = Fr::ZERO;
+pub const CANONICAL_DUMMY_DIFF_INV: Fr = Fr::ZERO;
+
+/// Enforces companion quadratic constraint pinning a witness variable to a canonical constant:
+/// `condition * (var - canonical_constant) == 0`.
+///
+/// When `condition == 1` (the inactive branch), `var` is strictly pinned to `canonical_constant`.
+/// When `condition == 0`, the constraint is vacuously satisfied (0 * (var - c) == 0).
+pub fn enforce_canonical_pinning(
+    condition: &FpVar<Fr>,
+    var: &FpVar<Fr>,
+    canonical_constant: Fr,
+) -> Result<(), SynthesisError> {
+    let zero = FpVar::Constant(Fr::from(0u64));
+    let target = FpVar::Constant(canonical_constant);
+    let diff = var - &target;
+    (condition * &diff).enforce_equal(&zero)
+}
 
 /// Helper: allocate a private witness variable and wrap as FpVar.
 pub fn private_witness(

@@ -77,6 +77,13 @@ pub use joinsplit_circuit::{
     NUM_JOINSPLIT_PUBLIC_INPUTS,
 };
 
+// Re-export Canonical Dummy Constants (DEC-046)
+pub use circuit_gadgets::{
+    CANONICAL_DUMMY_DIFF_INV, CANONICAL_DUMMY_LEAF_INDEX, CANONICAL_DUMMY_OWNER,
+    CANONICAL_DUMMY_RANDOMNESS, CANONICAL_DUMMY_RHO, CANONICAL_DUMMY_SESSION_NONCE,
+    CANONICAL_DUMMY_VALUE,
+};
+
 // Re-export Selective Disclosure Circuit (DEC-040A)
 pub use selective_disclosure_circuit::{
     decompose_challenge_to_limbs, generate_disclosure_proof, setup_disclosure_circuit_params,
