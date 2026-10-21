@@ -317,4 +317,4 @@ sequenceDiagram
 - [`todo.md`](file:///workspaces/Zeltra-Protocol/todo.md) — Master active backlog & test status
 - [`VISION.md`](file:///workspaces/Zeltra-Protocol/VISION.md) & [`docs/bisnis.md`](file:///workspaces/Zeltra-Protocol/docs/bisnis.md) — Product vision, business model, & fee architecture
 - [`docs/`](file:///workspaces/Zeltra-Protocol/docs/) — Documentation (`bisnis.md`, `roadmap.md`, `X402_INTEGRATION_STRATEGY.md`, `analisis/`)
-- [`research/decisions/`](file:///workspaces/Zeltra-Protocol/research/decisions/) — 71 Architecture Decision Records (DEC-001 through DEC-047)
+- [`research/decisions/`](file:///workspaces/Zeltra-Protocol/research/decisions/) — 72 Architecture Decision Records (DEC-001 through DEC-048)
