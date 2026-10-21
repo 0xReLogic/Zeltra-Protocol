@@ -29,6 +29,11 @@ Ref: [`docs/roadmap.md`](file:///workspaces/Zeltra-Protocol/docs/roadmap.md) (Fa
 - [ ] **DEC-046 Quadratic Encoding Soundness & Null-Branch Defense:**
   - Terapkan gerbang pendamping kuadratik kanonikal deterministik pada [`zeltra-core/src/joinsplit_circuit.rs`](file:///workspaces/Zeltra-Protocol/zeltra-core/src/joinsplit_circuit.rs) (pinning dummy input slot 2, inactive change outputs 1 & 2, dan zero-safe anti-aliasing inverse `diff_inv`).
   - Uji soundness sirkuit dengan memasukkan saksi non-kanonikal pada cabang null untuk memastikan prover gagal (`cs.is_satisfied() == false`).
+- [ ] **DEC-047 Automated Jacobian Diagnostics & Tangent-Space Rigidity Auditing (IACR 2026/1852):**
+  - Implementasikan engine evaluasi matriks Jacobian teraugmentasi $M(a) = \begin{pmatrix} J(a) \\ E_F \end{pmatrix}$ langsung dari representasi R1CS Arkworks di [`zeltra-core/src/formal_tests.rs`](file:///workspaces/Zeltra-Protocol/zeltra-core/src/formal_tests.rs).
+  - Terapkan eliminasi Gauss renggang (Markowitz pivoting) untuk uji ruang-baris $e_j^T \in \text{rowspan}(M(a))$ guna membuktikan kekakuan variabel target secara simultan.
+  - Implementasikan generator sintesis sertifikat garis afin eksak (Proposisi 27: $Q_i(v) = \ell_i(v) r_i(v) = 0$) untuk mendeteksi non-uniqueness $\mathbb{F}_p$ seketika.
+  - Jalankan evaluasi diagnostik melintasi matriks 6 keluarga saksi adversarial untuk mengatasi kebutaan saksi tunggal (*Witness-Locality Separation*).
 - [ ] **Circuit ABI & Constraints Freeze (Ditangguhkan hingga R&D Lengkap):**
   - Kunci mati parameter R1CS dan public-input ABI pada 16 PI (`PrivateNoteCircuit`) dan 19 PI (`JoinSplitCircuit`) ketika seluruh fitur siap ke mainnet.
   - Finalisasi parameter Two-Limb quote hash, Formal Scope Binding Gadget, dan 448 quadratic range gates.
