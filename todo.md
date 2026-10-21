@@ -17,6 +17,8 @@
 - **Pure ZK-UTXO HTTP 402 AI Agent Facilitator (DEC-042):** Mikropembayaran AI Agent sub-sen murni Groth16 1-in-1-out, dynamic dust threshold tracking, dan universal merchant payout on-chain.
 - **In-Memory Incremental MMR Engine & Proof Acceleration (DEC-045):** Flat Post-Order MMR Node Array (`nodes: Vec<Fr>`) formula Peter Todd di `zeltra-core`, $O(\log N)$ proof generation tanpa poseidon hash (<20 µs), concurrent thread-safe accumulator `Arc<RwLock<FlatMerkleMountainRange>>` di `zeltra-node`, dan 1-byte HKDF View Tag protocol di memo 96-byte `zeltra-sdk` untuk 23.6x scanning speedup.
 - **Stateless Sequencer Relayer (DEC-038C):** Single sequencer daemon (`scripts/start_relayer.sh`), dynamic MMR proof sync, fail-closed preflight validation, dan dual-layer nullifier double-spend prevention.
+- **Circuit Hardening & Null-Branch Defense (DEC-046 — IACR 2026/2235):** Gerbang pendamping kuadratik kanonikal deterministik anti-null branch pada dummy input slot 2 (`in2_is_dummy * (owner, rho, r, index) == 0`), inactive change outputs 1 & 2 (`(1 - has_change) * (owner, rho, r) == 0`), dan zero-safe anti-aliasing inverse (`enforce_zero_safe_diff_inv`). 16 negative tests membuktikan saksi tampered tertolak mutlak.
+- **Augmented Jacobian Diagnostics & Rigidity Auditing (DEC-047 — IACR 2026/1852):** Engine evaluasi $M(a) = \begin{pmatrix} J(a) \\ E_F \end{pmatrix}$, eliminasi Gauss sparse Markowitz over $\mathbb{F}_p$, row-space test $e_j^T \in \text{rowspan}(M(a))$, dan sintesis sertifikat garis afin Proposisi 27. Matriks 6 keluarga saksi adversarial (FAM-1 s/d FAM-6) 100% rigid ($r_T = 0$), terverifikasi di Rust (`formal_tests.rs`, 26/26 passed) dan harness independen Python (`test_dec046_dec047_jacobian_soundness.py`, 100% verified).
 
 ---
 
@@ -26,9 +28,6 @@ Ref: [`docs/roadmap.md`](file:///workspaces/Zeltra-Protocol/docs/roadmap.md) (Fa
 > [!NOTE]
 > **Status Fleksibilitas:** Mengingat deploy Arbitrum sedang jeda/freeze (Oktober 2026), **sirkuit ZK BELUM DIKUNCI**. Tim bebas mengembangkan fitur inovatif (SBM Prover, MinMandate, iSimplePIR) dan memperkuat aljabar sirkuit tanpa terburu-buru melakukan *circuit freeze*.
 
-- [ ] **DEC-046 Quadratic Encoding Soundness & Null-Branch Defense:**
-  - Terapkan gerbang pendamping kuadratik kanonikal deterministik pada [`zeltra-core/src/joinsplit_circuit.rs`](file:///workspaces/Zeltra-Protocol/zeltra-core/src/joinsplit_circuit.rs) (pinning dummy input slot 2, inactive change outputs 1 & 2, dan zero-safe anti-aliasing inverse `diff_inv`).
-  - Uji soundness sirkuit dengan memasukkan saksi non-kanonikal pada cabang null untuk memastikan prover gagal (`cs.is_satisfied() == false`).
 - [ ] **Circuit ABI & Constraints Freeze (Ditangguhkan hingga R&D Lengkap):**
   - Kunci mati parameter R1CS dan public-input ABI pada 16 PI (`PrivateNoteCircuit`) dan 19 PI (`JoinSplitCircuit`) ketika seluruh fitur siap ke mainnet.
   - Finalisasi parameter Two-Limb quote hash, Formal Scope Binding Gadget, dan 448 quadratic range gates.

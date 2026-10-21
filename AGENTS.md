@@ -85,7 +85,7 @@ scripts/           — Automation & Testing Scripts
   ├── scripts/test_real_case_dec043c_inpool_wallet.py — Independent 44/44 Python test harness for in-pool transfer
   └── scripts/check_balance.py, ht01_init_verification.py, ht04_spend_negative_tests.py, ht05_refund_tests.py, ht10_signed_quote_tests.py
 
-research/decisions/ — 70 Architecture Decision Records (DEC-001 through DEC-046)
+research/decisions/ — 71 Architecture Decision Records (DEC-001 through DEC-047)
 docs/              — Chapter-based modular docs (bisnis.md, analisis/, contract/, core/, relayer/, sdk/, cli/, todos/)
 todo.md            — Master active checklist (pending tasks only)
 ```
@@ -194,7 +194,7 @@ WITHOUT exposing spending authority (sk), unspent notes, or total account balanc
 ### Before Coding
 
 1. **Read `todo.md`** — check item status before touching it.
-2. **Check `research/decisions/`** — 64 ADRs available for reference.
+2. **Check `research/decisions/`** — 71 ADRs available for reference (DEC-001 through DEC-047).
 3. **Navigasi Kode & Arsitektur Wajib Graphify-First:**
    - **Refleks Pertama (Graphify):** Sebelum melakukan grep atau membaca file mentah, SELALU jalankan:
      * `graphify query "<pertanyaan arsitektur atau integrasi>"` (atau via MCP `query_graph`) untuk melihat subgraph relasi antar file/fungsi.
@@ -218,6 +218,9 @@ WITHOUT exposing spending authority (sk), unspent notes, or total account balanc
 ### While Coding
 
 - **Circuit Status (FLEXIBLE & UNLOCKED):** Deploy Arbitrum sedang dalam masa pause/freeze (Oktober 2026), sehingga sirkuit Zeltra **BELUM DIKUNCI (CIRCUIT IS NOT FROZEN)**. Tim memiliki fleksibilitas penuh untuk menyempurnakan sirkuit, menambah gadget, dan mengubah public inputs tanpa batasan freeze prematur.
+- **Circuit Security Dual Gate (DEC-046 & DEC-047):** Setiap kali menambah atau memodifikasi logika sirkuit R1CS:
+  * **Design Gate (DEC-046):** Wajib pasang gerbang pendamping kuadratik deterministik (*companion constraint*) pada seluruh cabang kondisional/dummy agar derajat kebebasan kawat non-aktif terkunci ke konstanta kanonikal (Zero Degrees of Freedom).
+  * **Verification Gate (DEC-047):** Wajib lulus evaluasi Augmented Jacobian $M(a)$ di test suite formal (`formal_tests.rs`) dengan $r_{T_{\text{financial}}} = 0$ melintasi matriks 6 keluarga saksi adversarial (*Witness-Locality Sweep*), anti-komplasensi saksi tunggal.
 - `cargo fmt` + `clippy` clean
 - Never bypass crypto verification with `#[cfg(test)]` in production paths
 - Never fall back to mock/test keys when secrets are unavailable — fail closed
@@ -251,7 +254,7 @@ WITHOUT exposing spending authority (sk), unspent notes, or total account balanc
 - [`todo.md`](file:///workspaces/Zeltra-Protocol/todo.md) — Master active backlog & test status
 - [`VISION.md`](file:///workspaces/Zeltra-Protocol/VISION.md) & [`docs/bisnis.md`](file:///workspaces/Zeltra-Protocol/docs/bisnis.md) — Product vision, business model, & fee architecture
 - [`docs/`](file:///workspaces/Zeltra-Protocol/docs/) — Chapter-based modular docs (`core/`, `contract/`, `relayer/`, `sdk/`, `cli/`)
-- [`research/decisions/`](file:///workspaces/Zeltra-Protocol/research/decisions/) — 70 Architecture ADRs (DEC-001 through DEC-046)
+- [`research/decisions/`](file:///workspaces/Zeltra-Protocol/research/decisions/) — 71 Architecture ADRs (DEC-001 through DEC-047)
 
 ## Environment, Deployment & Cluster
 

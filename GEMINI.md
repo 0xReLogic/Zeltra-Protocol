@@ -27,11 +27,12 @@ Dokumen ini adalah memori konteks persisten untuk agen AI saat bekerja di reposi
 2. **Direct MMR Deposit (DEC-038B / DEC-034B):** Deposit langsung via `deposit_direct_note` (USDC) atau `deposit_direct_native_eth` (ETH payable auto-wrap) menyisipkan komitmen note ke Merkle Mountain Range (`_mmr_insert`), memancarkan event `NoteCommitmentAppended` berisi 96-byte AEAD memo, dan seketika berstatus unspent tanpa perantara kunci $k$.
 3. **Stateless Sequencer Relayer (DEC-038C):** Single stateless sequencer node (`scripts/start_relayer.sh`), murni melayani ingress ZK spend, preflight verification, Zero-Oracle gas reimbursement (Gwei untuk WETH, Micro-USDC untuk USDC), dan dynamic MMR sync.
 
-### B. Pondasi Kriptografi, Sirkuit ZK & Ekosistem Lengkap (DEC-034 s/d DEC-046)
+### B. Pondasi Kriptografi, Sirkuit ZK & Ekosistem Lengkap (DEC-034 s/d DEC-047)
 * **Sirkuit Groth16 (zeltra-core):**
   - **1-in-1-out (`PrivateNoteCircuit`):** 16 Public Inputs (DEC-035A), 128-bit Two-Limb quote hash, Formal Scope Binding Gadget (DEC-035B), Poseidon Grain-128 LFSR (DEC-021), 64-bit integer range constraints, dan evolusi nullifier 2-Epoch (DEC-033).
   - **Universal 2-in-2-out (`JoinSplitCircuit`):** 19 Public Inputs (DEC-036A), constant-arity topology, canonical dummy input/output slots, multi-asset bit-packing (`flags_packed`), 448 quadratic range gates, dan penguncian gerbang pendamping kuadratik deterministik anti-null branch (DEC-046).
   - **CEX Selective Disclosure (`SelectiveDisclosureCircuit` - DEC-040A):** Sirkuit kepatuhan Groth16 dengan Verifier Binding (mengikat alamat bursa CEX & challenge nonce) untuk membuktikan asal dana note secara selektif ke Binance/Coinbase tanpa mengekspos kunci belanja ($sk$).
+  - **Automated Jacobian Diagnostics (DEC-047):** Mesin verifikasi aljabar diferensial berbasis sparse augmented Jacobian $M(a) = \begin{pmatrix} J(a) \\ E_F \end{pmatrix}$, uji ruang-baris kekakuan target $e_j^T \in \text{rowspan}(M(a))$, sintesis sertifikat garis afin eksak non-uniqueness (Proposisi 27), dan sapuan saksi adversarial multi-cabang (IACR 2026/1852).
 * **Akumulator MMR & Akselerasi Proof (DEC-032 & DEC-045):** In-memory dan on-chain Merkle Mountain Range. Flat Post-Order Array (`FlatMerkleMountainRange`) dengan formula Peter Todd, $O(\log N)$ zero-hash proof (<20 µs), concurrent thread-safe accumulator di `zeltra-node`, dan 1-byte HKDF View Tag memo di `zeltra-sdk` (23.6x scanning acceleration).
 * **Smart Contract Stylus (zeltra-contracts):**
   - Verifikasi Groth16 BLS12-381 via EIP-2537 (`0x0c` MSM + `0x0f` Pairing Check) di WASM Stylus.
@@ -54,14 +55,14 @@ Seluruh task di **Fase 0 (Dual-Asset)** dan **Fase 1 (SDK, Browser Prover & Ekos
 
 > [!NOTE]
 > **PENTING UNTUK AGENT (Sirkuit BELUM Dikunci):**  
-> Status deployment Arbitrum sedang mengalami jeda/freeze (Oktober 2026), sehingga Zeltra memiliki banyak waktu luang dan fleksibilitas (*flexible runway*). **Sirkuit ZK TIDAK/BELUM DIKUNCI (Circuit is UNLOCKED & FLEXIBLE)**. Agent tidak perlu bersikap kaku atau paranoid soal circuit freeze. Parameter sirkuit, public input, dan R1CS gadgets masih bebas dikembangkan dan dioptimasi (misal: SBM Groth16 streaming di SDK, MinMandate untuk AI Agent, iSimplePIR di Relayer, dan penguatan aljabar DEC-046).
+> Status deployment Arbitrum sedang mengalami jeda/freeze (Oktober 2026), sehingga Zeltra memiliki banyak waktu luang dan fleksibilitas (*flexible runway*). **Sirkuit ZK TIDAK/BELUM DIKUNCI (Circuit is UNLOCKED & FLEXIBLE)**. Agent tidak perlu bersikap kaku atau paranoid soal circuit freeze. Parameter sirkuit, public input, dan R1CS gadgets masih bebas dikembangkan dan dioptimasi (misal: SBM Groth16 streaming di SDK, MinMandate untuk AI Agent, iSimplePIR di Relayer, penguatan aljabar DEC-046, dan audit Jacobian DEC-047).
 
 Mengacu pada master checklist [`todo.md`](file:///workspaces/Zeltra-Protocol/todo.md) dan [`docs/roadmap.md`](file:///workspaces/Zeltra-Protocol/docs/roadmap.md), prioritas aktif saat ini adalah:
 
 1. **Fase 2 — Hardening Kriptografi, Eksplorasi Fitur & Persiapan MPC:**
    * Hardening aljabar sirkuit (DEC-046: penguncian cabang dummy slot & anti-aliasing inverse zero-safe) tanpa terburu-buru mengunci R1CS.
+   * Diagnostik otomatis & audit kekakuan tangen sirkuit via rank matriks Jacobian (DEC-047, `formal_tests.rs`, IACR 2026/1852).
    * Eksplorasi inovasi riset unggul (SBM Streaming Prover $O(\sqrt{N})$, iSimplePIR, MinMandate).
-   * Verifikasi diagnostik otomatis via rank matriks Jacobian (`formal_tests.rs`, IACR 2026/1852).
    * Persiapan harness upacara MPC Phase 2 Trusted Setup (dijalankan nanti saat siap mainnet).
    * Review keamanan sirkuit independen & smart contract Stylus.
 2. **Fase 3 — Keamanan & Sanitasi Kredensial:**
@@ -157,7 +158,7 @@ Mengacu pada master checklist [`todo.md`](file:///workspaces/Zeltra-Protocol/tod
 │   ├── scripts/test_real_case_dec043c_inpool_wallet.py — Test suite Python independen 44/44 lolos
 │   └── scripts/check_balance.py, ht01_init_verification.py, ht04_spend_negative_tests.py, ht05_refund_tests.py, ht10_signed_quote_tests.py
 │
-├── research/decisions/       — 70 Dokumen Arsitektur & Keputusan Desain Resmi (DEC-001 s/d DEC-046)
+├── research/decisions/       — 71 Dokumen Arsitektur & Keputusan Desain Resmi (DEC-001 s/d DEC-047)
 ├── todo.md                   — Master Active Backlog (murni task pending [ ])
 └── docs/                     — Dokumentasi Analisis & Panduan Modular (bisnis.md, analisis/, contract/, core/, relayer/, sdk/, cli/)
 ```
@@ -182,6 +183,9 @@ Mengacu pada master checklist [`todo.md`](file:///workspaces/Zeltra-Protocol/tod
    * Jangan pernah membypass verifikasi kriptografi di production path.
    * `fail-closed` jika rahasia/kunci tidak tersedia (dilarang fallback ke mock key di mode non-test).
    * Uji selalu kondisi negatif (tes gagal harus membuktikan state on-chain/DB tidak berubah).
+7. **Circuit Security Dual Gate (Wajib Setiap Ada Modifikasi Sirkuit):**
+   * *Design Gate (DEC-046):* Kunci cabang kondisional/dummy ke konstanta kanonikal dengan gerbang pendamping kuadratik (*Zero Degrees of Freedom*).
+   * *Verification Gate (DEC-047):* Uji rank Jacobian teraugmentasi $M(a)$ di `formal_tests.rs` dengan $r_{T_{\text{financial}}} = 0$ melintasi matriks 6 keluarga saksi (*Witness-Locality Sweep*).
 
 ---
 

@@ -933,35 +933,30 @@ impl ConstraintSynthesizer<Fr> for JoinSplitCircuit {
         // Singularity Multi-Input Aliasing Defense (A7.4):
         // When is_dummy_2 == 0, nullifier_1 MUST NOT equal nullifier_2:
         // (1 - is_dummy_2) * (nullifier_1 - nullifier_2) * diff_inv == (1 - is_dummy_2)
-        let nf_diff_var = &nullifier_1_var - &nullifier_2_var;
         let diff_inv_override = TAMPER_DIFF_INV.with(|cell| *cell.borrow());
-        let diff_inv_witness = diff_inv_override.or_else(|| match (
-            self.input_nullifier_1,
-            self.input_nullifier_2,
-            self.in2_is_dummy,
-        ) {
-            (Some(n1), Some(n2), Some(dummy)) => {
-                if dummy == Fr::from(0u64) {
-                    let diff = n1 - n2;
-                    Some(diff.inverse().unwrap_or(Fr::from(0u64)))
-                } else {
-                    Some(Fr::from(0u64))
+        let diff_inv_witness = diff_inv_override.or_else(|| {
+            match (
+                self.input_nullifier_1,
+                self.input_nullifier_2,
+                self.in2_is_dummy,
+            ) {
+                (Some(n1), Some(n2), Some(dummy)) => {
+                    if dummy == Fr::from(0u64) {
+                        let diff = n1 - n2;
+                        Some(diff.inverse().unwrap_or(Fr::from(0u64)))
+                    } else {
+                        Some(Fr::from(0u64))
+                    }
                 }
+                _ => None,
             }
-            _ => None,
         });
         let diff_inv_var = private_witness(&cs, diff_inv_witness)?;
-        let term1 = &one_minus_dummy * &nf_diff_var;
-        let term2 = &term1 * &diff_inv_var;
-        term2.enforce_equal(&one_minus_dummy)?;
-
-        // DEC-046 §3.C: Anti-Aliasing Inverse Companion Constraint (Zero-Safe Proposition 5):
-        // When is_dummy_2 == 1, diff_inv MUST be strictly locked to 0:
-        // is_dummy_2 * diff_inv == 0 (eliminates degree-of-freedom on inactive slot)
-        crate::circuit_gadgets::enforce_canonical_pinning(
+        crate::circuit_gadgets::enforce_zero_safe_diff_inv(
             &is_dummy_var,
+            &nullifier_1_var,
+            &nullifier_2_var,
             &diff_inv_var,
-            crate::circuit_gadgets::CANONICAL_DUMMY_DIFF_INV,
         )?;
 
         // ═══════════════════════════════════════════════════════════════
@@ -1016,7 +1011,9 @@ pub fn set_tamper_diff_inv(val: Option<Fr>) {
 }
 
 /// Helper to verify constraint system satisfaction for a JoinSplitCircuit (DEC-046 testing).
-pub fn check_joinsplit_circuit_satisfaction(circuit: JoinSplitCircuit) -> Result<bool, SynthesisError> {
+pub fn check_joinsplit_circuit_satisfaction(
+    circuit: JoinSplitCircuit,
+) -> Result<bool, SynthesisError> {
     use ark_relations::gr1cs::ConstraintSystem;
     let cs = ConstraintSystem::<Fr>::new_ref();
     circuit.generate_constraints(cs.clone())?;
@@ -1723,7 +1720,7 @@ mod tests {
         assert_eq!(circuit.in2_is_dummy, Some(Fr::from(1u64)));
 
         // Inject malicious non-zero diff_inv witness
-        set_tamper_diff_inv(Some(Fr::from(0xdeadbeef_1337u64)));
+        set_tamper_diff_inv(Some(Fr::from(0xdead_beef_1337_u64)));
         let res = circuit.generate_constraints(cs.clone());
         set_tamper_diff_inv(None); // Reset thread-local
 
@@ -1809,7 +1806,10 @@ mod tests {
         let mut c1 = circuit.clone();
         c1.out2_owner_key = Some(Fr::from(1u64));
         c1.generate_constraints(cs1.clone()).unwrap();
-        assert!(!cs1.is_satisfied().unwrap(), "Non-zero out2_owner must fail");
+        assert!(
+            !cs1.is_satisfied().unwrap(),
+            "Non-zero out2_owner must fail"
+        );
 
         // Test out2_rho
         let cs2 = ConstraintSystem::<Fr>::new_ref();

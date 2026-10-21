@@ -41,6 +41,38 @@ pub fn enforce_canonical_pinning(
     (condition * &diff).enforce_equal(&zero)
 }
 
+/// Enforces zero-safe anti-aliasing inverse constraint (DEC-046 §3.C, Proposition 5 Liu et al. 2026/2235):
+/// When is_dummy == 0 (real note): (nullifier_1 - nullifier_2) * diff_inv == 1 (diff != 0)
+/// When is_dummy == 1 (dummy note): diff_inv == 0 (zero degrees of freedom)
+///
+/// Formulation:
+/// active = 1 - is_dummy
+/// term1 = active * (nullifier_1 - nullifier_2)
+/// term2 = term1 * diff_inv
+/// term2 == active
+/// is_dummy * diff_inv == 0  [Companion constraint]
+pub fn enforce_zero_safe_diff_inv(
+    is_dummy_var: &FpVar<Fr>,
+    nullifier_1_var: &FpVar<Fr>,
+    nullifier_2_var: &FpVar<Fr>,
+    diff_inv_var: &FpVar<Fr>,
+) -> Result<(), SynthesisError> {
+    let one = FpVar::Constant(Fr::from(1u64));
+    let zero = FpVar::Constant(Fr::from(0u64));
+    let active = &one - is_dummy_var;
+    let nf_diff = nullifier_1_var - nullifier_2_var;
+
+    let term1 = &active * &nf_diff;
+    let term2 = &term1 * diff_inv_var;
+    term2.enforce_equal(&active)?;
+
+    // Companion constraint: is_dummy * diff_inv == 0
+    let companion = is_dummy_var * diff_inv_var;
+    companion.enforce_equal(&zero)?;
+
+    Ok(())
+}
+
 /// Helper: allocate a private witness variable and wrap as FpVar.
 pub fn private_witness(
     cs: &ConstraintSystemRef<Fr>,
@@ -252,4 +284,77 @@ pub fn poseidon_w5_gadget(
         inputs[3].clone(),
     ];
     crate::poseidon::poseidon_w5_hash(&arr, domain_val, w5_rc, w5_mds)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ark_ff::Field;
+    use ark_relations::gr1cs::ConstraintSystem;
+
+    #[test]
+    fn test_zero_safe_diff_inv_active_real_notes() {
+        let cs = ConstraintSystem::<Fr>::new_ref();
+        let is_dummy_var = private_witness(&cs, Some(Fr::from(0u64))).unwrap();
+        let n1_val = Fr::from(100u64);
+        let n2_val = Fr::from(40u64);
+        let diff = n1_val - n2_val;
+        let diff_inv = diff.inverse().unwrap();
+
+        let n1_var = private_witness(&cs, Some(n1_val)).unwrap();
+        let n2_var = private_witness(&cs, Some(n2_val)).unwrap();
+        let diff_inv_var = private_witness(&cs, Some(diff_inv)).unwrap();
+
+        enforce_zero_safe_diff_inv(&is_dummy_var, &n1_var, &n2_var, &diff_inv_var).unwrap();
+        assert!(cs.is_satisfied().unwrap());
+    }
+
+    #[test]
+    fn test_zero_safe_diff_inv_active_colliding_notes_rejected() {
+        let cs = ConstraintSystem::<Fr>::new_ref();
+        let is_dummy_var = private_witness(&cs, Some(Fr::from(0u64))).unwrap();
+        let n1_val = Fr::from(100u64);
+        let n2_val = Fr::from(100u64); // Collision!
+
+        let n1_var = private_witness(&cs, Some(n1_val)).unwrap();
+        let n2_var = private_witness(&cs, Some(n2_val)).unwrap();
+        let diff_inv_var = private_witness(&cs, Some(Fr::from(0u64))).unwrap();
+
+        enforce_zero_safe_diff_inv(&is_dummy_var, &n1_var, &n2_var, &diff_inv_var).unwrap();
+        assert!(
+            !cs.is_satisfied().unwrap(),
+            "Collision with active notes must be unsatisfied"
+        );
+    }
+
+    #[test]
+    fn test_zero_safe_diff_inv_inactive_canonical_zero_accepted() {
+        let cs = ConstraintSystem::<Fr>::new_ref();
+        let is_dummy_var = private_witness(&cs, Some(Fr::from(1u64))).unwrap();
+        let n1_var = private_witness(&cs, Some(Fr::from(100u64))).unwrap();
+        let n2_var = private_witness(&cs, Some(Fr::from(100u64))).unwrap();
+        let diff_inv_var = private_witness(&cs, Some(CANONICAL_DUMMY_DIFF_INV)).unwrap();
+
+        enforce_zero_safe_diff_inv(&is_dummy_var, &n1_var, &n2_var, &diff_inv_var).unwrap();
+        assert!(
+            cs.is_satisfied().unwrap(),
+            "Canonical zero diff_inv on dummy branch must satisfy"
+        );
+    }
+
+    #[test]
+    fn test_zero_safe_diff_inv_inactive_non_zero_rejected() {
+        let cs = ConstraintSystem::<Fr>::new_ref();
+        let is_dummy_var = private_witness(&cs, Some(Fr::from(1u64))).unwrap();
+        let n1_var = private_witness(&cs, Some(Fr::from(100u64))).unwrap();
+        let n2_var = private_witness(&cs, Some(Fr::from(100u64))).unwrap();
+        // Malicious non-zero diff_inv injected on dummy branch
+        let diff_inv_var = private_witness(&cs, Some(Fr::from(0x1337u64))).unwrap();
+
+        enforce_zero_safe_diff_inv(&is_dummy_var, &n1_var, &n2_var, &diff_inv_var).unwrap();
+        assert!(
+            !cs.is_satisfied().unwrap(),
+            "Non-zero diff_inv on dummy branch must be rejected by companion constraint"
+        );
+    }
 }

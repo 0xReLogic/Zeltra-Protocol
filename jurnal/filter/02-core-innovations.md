@@ -137,8 +137,13 @@ Dokumen ini memetakan paper terpilih untuk lapisan kriptografi fundamental Zeltr
   *Under-constrained arithmetic circuits* adalah salah satu celah keamanan paling mematikan dalam protokol zero-knowledge. Jika suatu wire saksi (*witness wire*) atau variabel perantara dalam sirkuit R1CS tidak terikat secara ketat (*under-constrained*), seorang prover jahat dapat menetapkan nilai alternatif tanpa melanggar persamaan verifikasi (misalnya menduplikasi proof, memanipulasi nilai kembalian uang *change*, atau mengubah flag multi-aset). Pengujian fuzzer acak sering kali gagal mendeteksi celah ini pada sirkuit berukuran puluhan ribu gerbang.
 * **Inovasi Paper:**
   Memperkenalkan metodologi diagnostik aljabar berbasis aljabar linier matriks Jacobian eksak. Dengan menggabungkan matriks Jacobian dari seluruh *constraint* R1CS dan menetapkan koordinat input publik, *kernel* dari Jacobian tersebut merepresentasikan *Zariski tangent space*. Jika terdapat arah pergerakan dalam kernel (*tangent dimension $> 0$*), hal tersebut membuktikan secara matematis keberadaan derajat kebebasan infinitesimal (*infinitesimal freedom / non-uniqueness certificate*). Alat ini memverifikasi sirkuit hingga 66.000 constraints hanya dalam hitungan detik.
+* **Implementasi di Zeltra Core (SELESAI & TERVERIFIKASI [x]):**
+  * Komponen: [`zeltra-core/src/jacobian.rs`](file:///workspaces/Zeltra-Protocol/zeltra-core/src/jacobian.rs), [`zeltra-core/src/formal_tests.rs`](file:///workspaces/Zeltra-Protocol/zeltra-core/src/formal_tests.rs), dan [`scripts/test_dec046_dec047_jacobian_soundness.py`](file:///workspaces/Zeltra-Protocol/scripts/test_dec046_dec047_jacobian_soundness.py) (`DEC-047`).
+  * Mengimplementasikan Sparse Augmented Jacobian $M(a) = \begin{pmatrix} J(a) \\ E_F \end{pmatrix}$, eliminasi Gauss sparse Markowitz over $\mathbb{F}_p$, row-space test $e_j^T \in \text{rowspan}(M(a))$ untuk kekakuan kawat simultan, dan generator sertifikat garis afin Proposisi 27.
+  * Teruji 100% lolos melintasi matriks 6 keluarga saksi adversarial (FAM-1 s/d FAM-6) dengan $r_T = 0$ (26/26 formal tests passed).
 
 ---
+
 
 ## 12. Accelerated Endomorphism & Side-Channel Regular Scalar Multiplication on BLS12-381 (IACR ePrint 2024/1906)
 * **File Jurnal / ePrint:** IACR ePrint 2024/1906 (September 2026 update)
