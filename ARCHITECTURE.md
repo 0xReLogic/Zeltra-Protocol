@@ -39,6 +39,7 @@ Dokumen ini memetakan struktur kode riil, crate, dan hirarki direktori di seluru
 │   ├── src/note.rs                   — Note primitives (PrivateNoteV1 dengan asset_id, NotePlaintext)
 │   ├── src/keys.rs                   — Derivasi kunci ZSA (SpendingKey, NullifierKey, ViewingKey, IncomingViewingKey)
 │   ├── src/memo.rs                   — Committing AEAD 96B memo (EtH-KS transform, ChaCha20 + HMAC-SHA256, 1B View Tag, DEC-048)
+│   ├── src/memo_ct.rs                — Constant-Time Flag Oblivious Evaluation (CT-FOE), branchless canonical Fr, zeroize (DEC-049)
 │   ├── src/merkle.rs                 — Flat Merkle Mountain Range (FlatMerkleMountainRange, Peter Todd indexing)
 │   ├── src/poseidon.rs               — Poseidon width-3 & width-5, Grain-128 LFSR parameter generator (DEC-021)
 │   ├── src/jacobian.rs               — Mesin kalkulasi Augmented Jacobian M(a) untuk uji kekakuan tangen (DEC-047)
@@ -108,7 +109,8 @@ Dokumen ini memetakan struktur kode riil, crate, dan hirarki direktori di seluru
 │   │   ├── index.ts, index.js        — Entrypoint JS SDK package
 │   │   ├── prover_client.ts/.js      — Client wrapper pengelola worker
 │   │   └── zeltra_prover_worker.js   — Web Worker background thread (DEC-041)
-│   └── src/bin/                      — Benchmark & bridge (bench_e2e.rs, prover_worker_bridge.rs)
+│   ├── tests/side_channel_defense_tests.rs — Matriks uji adversarial 5 kategori & evaluasi timing Dudect (|t| < 4.5) (DEC-049)
+│   └── src/bin/                      — Benchmark & bridge (bench_e2e.rs, prover_worker_bridge.rs, dudect_ct_foe.rs)
 │
 ├── zeltra-cli/                       — Pure ZK CLI Utility Tool
 │   ├── src/main.rs, cli.rs           — Parser Clap: GenerateWallet, CreateDepositNote, InspectMmr, VerifyProof, Compliance

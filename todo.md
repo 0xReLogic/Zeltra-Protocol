@@ -35,13 +35,7 @@ Ref: [`docs/roadmap.md`](file:///workspaces/Zeltra-Protocol/docs/roadmap.md) (Fa
   - **Fairblock:** Analisis arsitektur *conditional confidentiality* (FHE/t-IBE/decentralized MPC) untuk inspirasi batasan perlindungan transaksi privat Zeltra.
   - **ZeroStyl:** Evaluasi *tooling ZK di Arbitrum Stylus* untuk optimasi pipeline verifikasi dan interop host WASM.
   - **Renegade:** Analisis strategi produk & UX *dark pool MPC-ZK* dalam mengubah konsep privasi abstrak menjadi produk dengan use case nyata dan daya tarik pasar tinggi.
-  - *Prinsip:* Studi ini menjadi input komparasi desain; pelaksanaan audit independen Zeltra tetap berjalan paralel sesuai prioritas.
-- [x] **Committing AEAD & Partitioning Oracle Defense (DEC-048 — IACR 2026/240):**
-  - Mengadopsi generic transform `EtH-KS` (Minematsu & Inoue, Oktober 2026) dengan Key Separation berbasis RCR-PRG $G(S) \to (K_{\text{enc}}, K_{\text{cmt}}, N_{11})$ dan CR-PRF $H(K_{\text{cmt}}, N_{11} \parallel A \parallel C)$.
-  - Mengeliminasi kerentanan Partitioning Oracle Attack pada pemindaian memo note on-chain (`AUD-21`), silent wallet desynchronization (`AUD-23`), dan multi-recipient equivocation (`AUD-24`).
-  - Menegakkan invarian Verify-then-Decrypt fail-closed pada `zeltra-core/src/memo.rs` dan scanner klien `zeltra-sdk/src/wallet/note_wallet/sync.rs` dengan tetap mempertahankan batas calldata kanonikal tepat 96 byte dan akselerasi filter 1-byte View Tag (`DEC-045C`).
-  - Menjalankan test harness independen Python `scripts/test_dec048_committing_aead.py` (100% lolos dengan 11 suite pengujian adversarial).
-  - Melakukan verifikasi calldata ingress guard relayer (strictly 96B) dan end-to-end multi-asset lifecycle simulation dengan note bernilai besar (5.000 USDC dan 10 WETH) via `scripts/test_real_case_dec043c_inpool_wallet.py` (61/61 tests lolos 100%, 0 desynchronization). Task C terverifikasi penuh.
+
 - [ ] **Circuit ABI & Constraints Freeze (Ditangguhkan hingga R&D Lengkap):**
   - Kunci mati parameter R1CS dan public-input ABI pada 16 PI (`PrivateNoteCircuit`) dan 19 PI (`JoinSplitCircuit`) ketika seluruh fitur siap ke mainnet.
   - Finalisasi parameter Two-Limb quote hash, Formal Scope Binding Gadget, dan 448 quadratic range gates.
