@@ -64,13 +64,89 @@ Ref: [`docs/todos/testnet-gate-g-checklist.md`](file:///workspaces/Zeltra-Protoc
 
 ---
 
-## Fase 5: Mainnet Arbitrum One Launch & Adopsi Pasar
+## Fase 5: Mainnet Arbitrum One Launch & Go-To-Market Ecosystem
 Ref: [`docs/bisnis.md`](file:///workspaces/Zeltra-Protocol/docs/bisnis.md)
 
 - [ ] **Deploy Production Arbitrum One:**
   - Deployment Stylus contract resmi, registrasi address ke dokumentasi publik, dan peluncuran Bug Bounty.
-- [ ] **Tiga Pilar Produk Komersial:**
-  - **Shielded Checkout Widget:** Komponen 1-baris `<ZeltraCheckout />` untuk merchant global.
-  - **HTTP 402 Facilitator:** Rel pembayaran native untuk autonomous AI Agents.
-  - **Sovereign Shielded RWA Staking Gateway:** Opt-in yield private note (Ondo USDY, BlackRock BUIDL) tanpa bocor ke kompetitor.
+
+### Batasan Keras & Invarian Arsitektur Produk (Non-Negotiable)
+- [ ] **Pemisahan Domain Rel Pembayaran:** Zero credit, zero unsecured lending, zero algorithmic token swap, zero escrow tersentralisasi, dan zero fiat on/off-ramp pada rel transfer pembayaran instan (Mode 2/3). Seluruh fitur akumulasi yield RWA diisolasi penuh pada Product 8 Sovereign Gateway tanpa mencemari likuiditas kas operasional.
+- [ ] **Circuit Rigidity:** Zero perubahan pada sirkuit Groth16, jumlah public inputs (16 PI & 19 PI), parameter Poseidon LFSR, maupun layout storage kontrak on-chain yang telah teruji.
+- [ ] **Cryptographic Intent Boundary:** Tidak mengklaim invoice ID atau deskripsi terikat secara kriptografis ke proof ZK kecuali ada komitmen quote/public-input terverifikasi yang membuktikannya. Seluruh integrasi dimulai dengan payment intent off-chain tervalidasi dan batas kepercayaan (*trust boundary*) terdokumentasi eksplisit.
+
+---
+
+### Product 2 — Zeltra Checkout (Merchant & API Integration)
+**Target:** Integrasi mulus bagi merchant online dan penyedia API tanpa memaksa merchant memahami internal ZK-UTXO Private Note.
+- [ ] **Kontrak API & HTTP Versioned:** Definisikan kontrak API versioned untuk pembuatan payment intent (`create intent`), pengecekan status (`get status`), verifikasi pembayaran on-chain (`verify payment`), pengambilan tanda terima (`fetch receipt`), serta pengiriman webhook terenkripsi.
+- [ ] **SDK Klien Bertipe Ketat:** Rancang interface SDK/client dengan penanganan error bertipe (`typed errors`); pisahkan decoding payload kriptografi protokol dari representasi objek domain merchant.
+- [ ] **Paket Checkout Klien & Aplikasi Merchant:** Sediakan contoh aplikasi merchant serta paket JS/TS checkout mandiri atau hosted checkout prototype; tentukan struktur paket bersih terpisah dari SDK worker bridge.
+- [ ] **Webhook Aman & Idempoten:** Tanda tangan webhook menyertakan timestamp dan proteksi replay; lengkapi dengan retry exponential backoff, deduplication ID, tracking status delivery, serta kebijakan batas waktu (*timeout policy*) terdokumentasi.
+- [ ] **Konfirmasi Berbasis Finalitas Nyata:** Sistem tidak mengembalikan status sukses/lunas (`paid/confirmed`) sebelum tracker settlement mengonfirmasi transaksi sesuai kebijakan finalitas L2 yang disepakati.
+- [ ] **Transparansi Struktur Biaya:** Tampilkan biaya transaksi secara gamblang kepada pembeli. Protokol fee 0 bps pada in-pool transfer (Mode 2) bukan berarti biaya total nol; biaya eksekusi relayer dan network gas outflow wajib ditampilkan transparan jika berlaku.
+- [ ] **Kompatibilitas Envelope x402:** Sediakan modul interoperabilitas terhadap envelope HTTP 402 v2 yang sudah ada dengan tetap menjaga backward compatibility bagi klien aktif.
+
+---
+
+### Product 3 — Zeltra Business Workspace (Cash Operations & Merchant Ledger)
+**Target:** Memberdayakan bisnis mengelola pembayaran masuk, memantau antrean settlement, dan melakukan rekonsiliasi kas tanpa membangun software akuntansi monolitik yang membengkak.
+- [ ] **Manajemen Status Invoice:** Dashboard pelacakan invoice lengkap dengan filter status: *draft, awaiting payment, queued, submitted, confirmed, expired, failed, cancelled*.
+- [ ] **Download Tanda Terima & Ekspor Rekonsiliasi:** Fitur unduh receipt dan ekspor laporan rekonsiliasi (CSV/JSON); integrasikan dengan modul kepatuhan [`zeltra-sdk/src/compliance/exporter.rs`](file:///workspaces/Zeltra-Protocol/zeltra-sdk/src/compliance/exporter.rs) setelah memvalidasi kecocokan skema dengan pembukuan merchant.
+- [ ] **Label & Kategori Kas Lokal:** Label, kategori, dan catatan privat tersimpan di penyimpanan lokal merchant. Metadata pembukuan internal terpisah mutlak dari proof ZK dan public inputs protokol.
+- [ ] **Proyeksi Buku Kas Minimalis:** Proyeksi ledger mencatat nilai invoice, jenis aset (USDC/WETH), payment intent ID, referensi settlement on-chain, rincian fee, dan timestamp. Entitas ledger wajib direkonsiliasi terhadap bukti transaksi riil, bukan diasumsikan sebagai bukti pergerakan dana independen.
+- [ ] **Isolasi Multi-Tenant Bersih:** Penegakan pemisahan akun/tenant yang ketat jika beberapa merchant berbagi instance; portal multi-tenant dilarang langsung menumpang di database inti relayer tanpa arsitektur keamanan terpisah.
+- [ ] **Privasi Data Pelanggan (Anti-PII):** Tidak menyimpan data pribadi pelanggan (PII) secara default. Jika data tertentu dibutuhkan oleh merchant, tetapkan kebijakan retensi, hak hapus/ekspor data, kontrol akses terenkripsi, dan manajemen kunci sebelum rilis.
+
+---
+
+### Product 4 — Zeltra Personal: Pockets & Financial Insights (Local-First)
+**Target:** Memberikan pengalaman manajemen kas harian yang hidup dan interaktif bagi pengguna tanpa menambah kompleksitas atau risiko di lapisan smart contract on-chain.
+- [ ] **Alokasi Kantong Kas Lokal (Pockets):** Pockets diimplementasikan murni sebagai label alokasi dan pembukuan lokal di perangkat pengguna (misal: belanja harian, langganan, tabungan, alokasi AI Agent), bukan brankas kontrak on-chain tambahan dan bukan pembatas saldo on-chain yang kaku.
+- [ ] **Validasi Saldo Berbasis Sinkronisasi:** Tampilan saldo hanya dihitung dari Private Notes yang telah selesai dipindai dan didekripsi penuh oleh wallet; sertakan indikator status sinkronisasi dan timestamp pemindaian terakhir. Jangan pernah menginterpolasi saldo perkiraan jika pemindaian belum tuntas.
+- [ ] **Analitik Finansial On-Device (Insights):** Komputasi kategori dan total pengeluaran diproses 100% lokal di perangkat pengguna; label merchant yang diinput pengguna tetap tersimpan privat di perangkat.
+- [ ] **Ekspor Data Bersih & Teredaksi:** Fitur ekspor data bersifat opt-in dengan sensor otomatis (*mandatory redaction*) terhadap rahasia note, material seed, private keys, nullifier mentah yang tidak relevan, memo terenkripsi, dan metadata pengenal yang berlebihan.
+- [ ] **Perlindungan Privasi AI (Zero-Leakage):** Menolak saran finansial otomatis atau kategorisasi AI cloud yang mengunggah riwayat transaksi lengkap pengguna ke server eksternal tanpa persetujuan eksplisit.
+- [ ] **Zero Circuit Changes:** Tidak ada perubahan sirkuit ZK untuk kebutuhan pelabelan lokal atau pembukuan kantong kas.
+
+---
+
+### Product 5 — Autopay & Pembayaran Berulang (Scheduled Approvals & Autonomous Spend)
+**Target:** Rel pembayaran berulang yang aman dengan otorisasi terikat, dimulai dari alur persetujuan berkala sebelum melangkah ke eksekusi otonom.
+- [ ] **Skema Paket Langganan:** Definisikan parameter rencana langganan: identitas merchant, aset (USDC/WETH), batas nominal atau nilai tetap, frekuensi/periode, jatuh tempo berikutnya, masa kedaluwarsa, aturan pembatalan, dan status otorisasi saat ini.
+- [ ] **Alur Persetujuan & Notifikasi Manual:** Terapkan alur pengingat berkala dengan persetujuan eksplisit dari pengguna untuk setiap eksekusi pengeluaran; tidak ada private key belanja yang disimpan di server relayer atau merchant.
+- [ ] **Desain Otorisasi Pengeluaran Otonom Terdelegasi:** Untuk pengeluaran berulang tanpa intervensi manual, wajib menyusun Architecture Decision Record (ADR) tersendiri yang merumuskan penegakan kriptografis atas cakupan belanja, batas maksimum saldo, kedaluwarsa, proteksi replay, pembatalan (*revocation*), dan pengikatan ke alamat penerima (*recipient binding*).
+- [ ] **Klarifikasi Batasan Proteksi:** Aturan di sisi aplikasi semata bukanlah batas pembelanjaan kriptografis. Aturan anggaran lokal yang dapat dilewati oleh client lain tidak boleh diklaim sebagai batas pengeluaran yang terenkripsi.
+- [ ] **Ketahanan Uji Edge Cases:** Test suite mencakup kondisi balapan antara pembatalan vs pembayaran (*cancellation-vs-payment race*), duplikasi antrean jadwal, otorisasi kedaluwarsa, perbedaan zona waktu/kalender, relayer offline, saldo note tidak mencukupi, dan pemulihan status pasca-restart wallet.
+
+---
+
+### Product 6 — Zeltra Agent Treasury (Bounded AI Agent Payments)
+**Target:** Memungkinkan autonomous AI Agent membelanjakan kas dalam batas anggaran yang disetujui untuk pemanggilan layanan API tanpa pernah memegang master spending key milik pemilik.
+- [ ] **Hardening Protokol x402:** Lakukan penguatan menyeluruh pada pipeline x402 yang ada terlebih dahulu; hindari ekspansi skema baru selama semantik settlement dan receipt masih memiliki ambiguitas.
+- [ ] **Model Kebijakan Agen Bertipe (Typed Policy Model):** Susun struktur data kebijakan: `agent_id`, referensi akun pemilik, versi kebijakan, cakupan merchant/resource yang diizinkan, jenis aset, nominal batas per transaksi, batas anggaran kumulatif, waktu kedaluwarsa, pembatas frekuensi (*rate limit*), dan status pencabutan (*revocation*).
+- [ ] **Pemisahan Tegas Kebijakan Advisory vs Enforced:** Bedakan secara eksplisit antara kebijakan off-chain yang bersifat anjuran (*advisory*) dengan pembatasan yang terikat secara kriptografis (*cryptographically enforced*) pada kode program dan dokumentasi produk.
+- [ ] **Isolasi Alokasi Sub-Wallet/Note:** Alokasikan dana operasional agen pada note terpisah atau sub-wallet terisolasi; jangan pernah memberikan akses master spending key kepada runtime agen.
+- [ ] **Proses Formal Perubahan Sirkuit (Jika Diperlukan):** Jika pengikatan merchant atau pembatasan nominal keras menuntut penambahan constraint sirkuit/public-input baru, wajib melalui ADR terpisah dan analisis model ancaman formal; hanya diterapkan setelah review matang tanpa menyelundupkan semantik ke quote hash tanpa pembuktian matematis.
+- [ ] **Proteksi Replay & Uji Pencabutan:** Lengkapi dengan proteksi replay request/response, kedaluwarsa quote, rate-limiting spesifik agen, bukti settlement receipt, uji pencabutan izin seketika (*revocation tests*), dan uji batas anggaran habis (*budget exhaustion*).
+- [ ] **Transparansi Operasional Penuh:** Mulai dengan kontrol anggaran yang transparan, pelaporan penyebab kegagalan transaksi yang jelas, dan batas nilai yang ditentukan pengguna.
+
+---
+
+### Product 7 — Payroll, Membership & Team Payments (Ekspansi Lanjutan)
+**Target:** Rel pembayaran gaji terdistribusi, keanggotaan privat, dan pembayaran tim multi-pihak setelah fondasi checkout dan rekonsiliasi kas stabil sempurna.
+- [ ] **Kriteria Peluncuran Bertahap:** Implementasi baru dimulai setelah alur invoice/checkout digunakan secara konsisten dan proses penerbitan receipt serta rekonsiliasi kas terbukti stabil tanpa kegagalan.
+- [ ] **Rel Penggajian Privat (Privacy-Aware Payroll):** Menuntut onboarding penerima berbasis privasi (ZSA Bech32m), mekanisme pemulihan jika pembayaran tertunda, tinjauan batch payout, serta kepatuhan hukum dan regulasi pajak pada yurisdiksi peluncuran.
+- [ ] **Keanggotaan & Perks Eksklusif (Membership Credentials):** Menggunakan verifikasi identitas merchant dan bukti kepemilikan privat atau tanda terima ZK yang membuktikan hak akses tanpa membuka riwayat belanja lain milik pengguna.
+- [ ] **Pembagian Tagihan Tim (Group Split):** Mendukung batas waktu kedaluwarsa undangan/klaim, kekebalan terhadap penyelesaian ganda (*duplicate settlement resistance*), penanganan pembayaran sebagian (*partial payments*), dan kejelasan alokasi dana yang tidak diklaim.
+
+---
+
+### Product 8 — Sovereign Shielded RWA Gateway (Confidential Treasury Yield)
+**Target:** Memberikan pintu gerbang opt-in institusional bagi korporat B2B, perbendaharaan DAO, dan whale untuk mengalokasikan idle treasury ke instrumen Real-World Asset (RWA) berbunga (seperti US Treasury yield via Ondo USDY atau BlackRock BUIDL) tanpa mengekspos posisi neraca kas kepada kompetitor on-chain.
+- [ ] **Desain Pembungkus Note Berdaulat (Sovereign Note Wrapper):** Unit aset berbunga dibungkus ke dalam komitmen Private Note ZK (`asset_id` terpisah di luar USDC & WETH standar) sehingga kepemilikan saham/token RWA bersifat fully confidential.
+- [ ] **Solvensi Terisolasi Mutlak (Siloed Yield Accounting):** Hasil yield dari instrumen RWA dihitung secara deterministik dan terisolasi dari pool kas likuid USDC/WETH; tidak ada percampuran liabilitas (*anti-rehypothecation invariant*).
+- [ ] **Selective Compliance & Audit Trail (DEC-040 Integration):** Integrasi langsung dengan modul CEX/B2B Selective Disclosure untuk mengekspor bukti kepemilikan legal RWA ke auditor pajak atau kustodian institusi tanpa membuka private spending key ($sk$).
+- [ ] **Penebusan Kas Instan & Partial Unwrapping:** Mekanisme penukaran kembali (*redemption*) dari note RWA ke USDC pool kas operasional dengan verifikasi proof kepemilikan note yang sah, memungkinkan perpindahan modal yang mulus antara kantong yield dan rel checkout merchant.
+
 

@@ -1,8 +1,8 @@
 use ark_bls12_381::Fr;
 use zeltra_core::{
-    decrypt_committing_note_memo, decrypt_committing_note_memo_payload,
-    decrypt_note_memo_deterministic, decrypt_note_memo_payload, derive_nullifier, derive_owner_key,
-    fr_to_be_bytes, note_commitment, IncomingViewingKey,
+    decrypt_note_memo_deterministic, decrypt_note_memo_payload, derive_ecdh_note_randomness,
+    derive_nullifier, derive_owner_key, fr_to_be_bytes, note_commitment, ConstantTimeMemoScanner,
+    IncomingViewingKey,
 };
 
 use super::types::*;
@@ -88,12 +88,23 @@ impl PrivateNoteWallet {
                 continue;
             }
 
-            // Dual-path decryption:
-            // Step 1: Fast pre-filter with 1-byte View Tag (integrated into decrypt_committing_note_memo)
-            // Step 2: Attempt DEC-048 committing memo decryption via decrypt_committing_note_memo (EtH-KS)
-            // Step 3: If committing decryption returns None, fall back gracefully to legacy memo decryption (DEC-045C / DEC-037)
-            let candidate_pair = decrypt_committing_note_memo(&ev.encrypted_memo, &ivk)
-                .or_else(|| decrypt_note_memo_deterministic(&ev.encrypted_memo, &ivk));
+            // CT-FOE Constant-Time Trial Decryption (DEC-049 / DEC-048):
+            // Step 1: Trial decrypt via ConstantTimeMemoScanner (zero secret-dependent branches, fail-closed)
+            // Step 2: If valid, extract canonical NotePlaintext and derive deterministic randomness
+            // Step 3: If not valid, fall back gracefully to legacy memo decryption (DEC-045C / DEC-037)
+            let memo_arr: &[u8; 96] = ev.encrypted_memo[..].try_into().unwrap();
+            let (is_valid, ct_pt) = ConstantTimeMemoScanner::trial_decrypt_ct_ivk(memo_arr, &ivk);
+
+            let candidate_pair = if bool::from(is_valid) {
+                ct_pt.to_canonical_note().map(|pt| {
+                    let epk_bytes: [u8; 32] = memo_arr[0..32].try_into().unwrap();
+                    let shared_secret = ivk.diffie_hellman(&epk_bytes);
+                    let deterministic_r = derive_ecdh_note_randomness(&shared_secret, &pt.rho);
+                    (pt, deterministic_r)
+                })
+            } else {
+                decrypt_note_memo_deterministic(&ev.encrypted_memo, &ivk)
+            };
 
             if let Some((pt, deterministic_r)) = candidate_pair {
                 // Skip dummy zero-notes to keep active UTXO state clean (AUD-7)
@@ -284,38 +295,44 @@ impl PrivateNoteWallet {
             }
 
             let memo = &ev.encrypted_memo;
-            let eph_pk_bytes: [u8; 32] = memo[0..32].try_into().unwrap();
-            let memo_view_tag = memo[32];
+            let memo_arr: &[u8; 96] = memo[..].try_into().unwrap();
 
-            // 1. Compute ECDH shared secret
-            let shared_secret = ivk.diffie_hellman(&eph_pk_bytes);
+            // Constant-Time Flag Oblivious Evaluation (DEC-049):
+            // Branchlessly evaluates committing memos without early aborts, mitigating Flag DPA (AUD-25).
+            let (is_valid, ct_pt) = ConstantTimeMemoScanner::trial_decrypt_ct_ivk(memo_arr, &ivk);
 
-            // 2. Expected view tag
-            let expected_view_tag = zeltra_core::derive_view_tag(&shared_secret);
+            let mut candidate_pair = if bool::from(is_valid) {
+                ct_pt.to_canonical_note().map(|pt| {
+                    let epk_bytes: [u8; 32] = memo_arr[0..32].try_into().unwrap();
+                    let shared_secret = ivk.diffie_hellman(&epk_bytes);
+                    let deterministic_r = derive_ecdh_note_randomness(&shared_secret, &pt.rho);
+                    (pt, deterministic_r)
+                })
+            } else {
+                None
+            };
 
-            let mut candidate_pair = None;
-
-            // Step 1: Fast pre-filter with 1-byte View Tag (99.6% non-owned memos dropped with 0 AEAD invocations)
-            if memo_view_tag == expected_view_tag {
-                // Step 2: Attempt DEC-048 committing memo decryption via EtH-KS payload
-                if let Some((pt, deterministic_r)) =
-                    decrypt_committing_note_memo_payload(memo, &shared_secret)
-                {
-                    candidate_pair = Some((pt, deterministic_r));
-                } else if let Some((pt, deterministic_r)) =
-                    decrypt_note_memo_payload(memo, &shared_secret)
-                {
-                    // Step 3a: Fall back to DEC-045C fast payload decryption
-                    candidate_pair = Some((pt, deterministic_r));
-                }
-            }
-
-            // Step 3b: Fallback for historical DEC-037 notes or view tag collisions where fast payload did not match
+            // Transparent fallback for historical DEC-045C or DEC-037 notes
             if candidate_pair.is_none() {
-                if let Some((pt, deterministic_r)) =
-                    decrypt_note_memo_deterministic(memo, &ivk)
-                {
-                    candidate_pair = Some((pt, deterministic_r));
+                let eph_pk_bytes: [u8; 32] = memo[0..32].try_into().unwrap();
+                let memo_view_tag = memo[32];
+                let shared_secret = ivk.diffie_hellman(&eph_pk_bytes);
+                let expected_view_tag = zeltra_core::derive_view_tag(&shared_secret);
+
+                if memo_view_tag == expected_view_tag {
+                    if let Some((pt, deterministic_r)) =
+                        decrypt_note_memo_payload(memo, &shared_secret)
+                    {
+                        candidate_pair = Some((pt, deterministic_r));
+                    }
+                }
+
+                if candidate_pair.is_none() {
+                    if let Some((pt, deterministic_r)) =
+                        decrypt_note_memo_deterministic(memo, &ivk)
+                    {
+                        candidate_pair = Some((pt, deterministic_r));
+                    }
                 }
             }
 
@@ -516,8 +533,19 @@ impl PrivateNoteWallet {
                 if ev.encrypted_memo.len() != 96 {
                     continue;
                 }
-                let candidate_pair = decrypt_committing_note_memo(&ev.encrypted_memo, ivk)
-                    .or_else(|| decrypt_note_memo_deterministic(&ev.encrypted_memo, ivk));
+                let memo_arr: &[u8; 96] = ev.encrypted_memo[..].try_into().unwrap();
+                let (is_valid, ct_pt) = ConstantTimeMemoScanner::trial_decrypt_ct_ivk(memo_arr, ivk);
+
+                let candidate_pair = if bool::from(is_valid) {
+                    ct_pt.to_canonical_note().map(|pt| {
+                        let epk_bytes: [u8; 32] = memo_arr[0..32].try_into().unwrap();
+                        let shared_secret = ivk.diffie_hellman(&epk_bytes);
+                        let deterministic_r = derive_ecdh_note_randomness(&shared_secret, &pt.rho);
+                        (pt, deterministic_r)
+                    })
+                } else {
+                    decrypt_note_memo_deterministic(&ev.encrypted_memo, ivk)
+                };
 
                 if let Some((pt, deterministic_r)) = candidate_pair {
                     if pt.value == 0 {

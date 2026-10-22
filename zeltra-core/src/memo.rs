@@ -21,6 +21,7 @@ use subtle::ConstantTimeEq;
 use zeroize::Zeroize;
 
 use crate::keys::{IncomingViewingKey, KeyFormatError, ZeltraShieldedAddress};
+pub use crate::memo_ct::*;
 use crate::note::{derive_note_randomness, PrivateNoteV1};
 
 /// Info tag for AEAD note memo cipher derivation (DEC-037).
@@ -431,7 +432,7 @@ pub fn encrypt_committing_note_memo<R: RecipientViewingKey>(
 }
 
 /// Decrypts a 96-byte committing memo using the recipient's Incoming Viewing Key (IVK).
-/// Enforces Verify-then-Decrypt invariant: returns None without touching ciphertext if tag fails (DEC-048).
+/// Enforces Verify-then-Decrypt invariant with constant-time CT-FOE trial decryption (DEC-048 / DEC-049).
 pub fn decrypt_committing_note_memo(
     encrypted_memo: &[u8],
     ivk: &IncomingViewingKey,
@@ -440,64 +441,16 @@ pub fn decrypt_committing_note_memo(
         return None;
     }
 
-    let epk_bytes: [u8; 32] = encrypted_memo[0..32].try_into().ok()?;
-    let memo_view_tag = encrypted_memo[32];
-    let memo_nonce: [u8; 7] = encrypted_memo[33..40].try_into().ok()?;
-    let memo_ciphertext: [u8; 40] = encrypted_memo[40..80].try_into().ok()?;
-    let memo_tag: [u8; 16] = encrypted_memo[80..96].try_into().ok()?;
-
-    let epk = x25519_dalek::PublicKey::from(epk_bytes);
-    let static_secret = x25519_dalek::StaticSecret::from(ivk.secret_bytes());
-    let shared_secret = static_secret.diffie_hellman(&epk);
-
-    // AUD-26: Non-Contributory Point Defense (rejection of low-order / all-zero points)
-    if shared_secret.was_non_contributory() {
+    let memo_arr: &[u8; ENCRYPTED_MEMO_SIZE] = encrypted_memo.try_into().ok()?;
+    let (is_valid, ct_pt) = ConstantTimeMemoScanner::trial_decrypt_ct_ivk(memo_arr, ivk);
+    if !bool::from(is_valid) {
         return None;
     }
 
-    let shared_secret_bytes = *shared_secret.as_bytes();
-
-    // 1. Fast-Path Pre-Filter: 1-Byte View Tag Check (DEC-045C)
-    let expected_view_tag = derive_view_tag(&shared_secret_bytes);
-    if memo_view_tag != expected_view_tag {
-        return None; // 99.6% non-owned memos discarded in ~50 ns
-    }
-
-    // 2. Key Separation Derivation: G(S) -> (K_enc, K_cmt, N_7)
-    let keys = derive_key_separation(&shared_secret_bytes).ok()?;
-
-    // 3. Strict Nonce Verification
-    if !bool::from(keys.nonce_7.ct_eq(&memo_nonce)) {
-        return None;
-    }
-
-    // 4. VERIFY-THEN-DECRYPT: Constant-Time Committing Tag Verification
-    let expected_tag = compute_committing_tag(
-        &keys.commitment_key,
-        &memo_nonce,
-        &epk_bytes,
-        memo_view_tag,
-        &memo_ciphertext,
-    );
-
-    if !verify_committing_tag_ct(&expected_tag, &memo_tag) {
-        // Tag verification failed: FAIL CLOSED immediately.
-        // Zero decryption executed; zero plaintext allocated.
-        return None;
-    }
-
-    // 5. Verified Stream Cipher Decryption
-    let mut nonce_12 = [0u8; 12];
-    nonce_12[0..7].copy_from_slice(&memo_nonce);
-    // nonce_12[7..12] zero-padded
-
-    let mut cipher = ChaCha20::new(&keys.cipher_key.into(), &nonce_12.into());
-    let mut pt_buf = memo_ciphertext;
-    cipher.apply_keystream(&mut pt_buf);
-
-    // 6. Canonical Field & Asset Bounds Deserialization
-    let pt = NotePlaintext::from_bytes_v3(&pt_buf)?;
-    let randomness = derive_ecdh_note_randomness(&shared_secret_bytes, &pt.rho);
+    let pt = ct_pt.to_canonical_note()?;
+    let epk_bytes: [u8; 32] = memo_arr[0..32].try_into().ok()?;
+    let shared_secret = ivk.diffie_hellman(&epk_bytes);
+    let randomness = derive_ecdh_note_randomness(&shared_secret, &pt.rho);
 
     Some((pt, randomness))
 }
