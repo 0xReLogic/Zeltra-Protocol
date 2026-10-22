@@ -35,7 +35,6 @@ Ref: [`docs/roadmap.md`](file:///workspaces/Zeltra-Protocol/docs/roadmap.md) (Fa
   - **Fairblock:** Analisis arsitektur *conditional confidentiality* (FHE/t-IBE/decentralized MPC) untuk inspirasi batasan perlindungan transaksi privat Zeltra.
   - **ZeroStyl:** Evaluasi *tooling ZK di Arbitrum Stylus* untuk optimasi pipeline verifikasi dan interop host WASM.
   - **Renegade:** Analisis strategi produk & UX *dark pool MPC-ZK* dalam mengubah konsep privasi abstrak menjadi produk dengan use case nyata dan daya tarik pasar tinggi.
-  - *Prinsip:* Studi ini menjadi input komparasi desain; pelaksanaan audit independen Zeltra tetap berjalan paralel sesuai prioritas.
 
 - [ ] **Circuit ABI & Constraints Freeze (Ditangguhkan hingga R&D Lengkap):**
   - Kunci mati parameter R1CS dan public-input ABI pada 16 PI (`PrivateNoteCircuit`) dan 19 PI (`JoinSplitCircuit`) ketika seluruh fitur siap ke mainnet.
