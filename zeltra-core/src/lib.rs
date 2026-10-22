@@ -6,6 +6,7 @@ pub mod jacobian;
 pub mod joinsplit_circuit;
 pub mod keys;
 pub mod memo;
+pub mod memo_ct;
 pub mod merkle;
 pub mod note;
 pub mod note_circuit;
@@ -13,7 +14,7 @@ pub mod poseidon;
 pub mod selective_disclosure_circuit;
 pub mod serialization;
 
-pub use ark_bls12_381::{Bls12_381, Fr, G1Projective, G2Projective};
+pub use ark_bls12_381::{Bls12_381, Fr, FrConfig, G1Projective, G2Projective};
 pub use ark_ec::pairing::Pairing;
 pub use ark_ec::PrimeGroup;
 pub use ark_ff::{Field, PrimeField, UniformRand};
@@ -54,6 +55,8 @@ pub use poseidon::{
 pub use keys::*;
 #[allow(unused_imports)]
 pub use memo::*;
+#[allow(unused_imports)]
+pub use memo_ct::*;
 #[allow(unused_imports)]
 pub use merkle::*;
 pub use note::*;
@@ -98,7 +101,9 @@ pub use jacobian::{
     AugmentedJacobian, DiagnosticClassification, EchelonBasis, SparseEntry, SparseMatrixFr,
 };
 
+pub use chacha20;
 pub use hkdf;
+pub use subtle;
 pub use x25519_dalek;
 
 #[cfg(test)]

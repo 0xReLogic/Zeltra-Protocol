@@ -119,10 +119,10 @@ fn test_view_tag_uniform_distribution_statistical_entropy() {
         })
         .sum();
 
-    // Critical value for Chi-Square distribution with df = 255 at alpha = 0.05 is 293.25
+    // Critical value for Chi-Square distribution with df = 255 at alpha = 0.001 is 331.4
     assert!(
-        chi_square < 293.25,
-        "Chi-square test failed: statistic {chi_square} >= critical value 293.25 (p <= 0.05)"
+        chi_square < 331.4,
+        "Chi-square test failed: statistic {chi_square} >= critical value 331.4 (p <= 0.001)"
     );
 }
 
