@@ -40,20 +40,7 @@ Dokumen ini memetakan paper terpilih untuk lapisan kriptografi fundamental Zeltr
 
 ---
 
-## 4. Jacobian Diagnostics for Under-Constrained ZK Circuits (IACR ePrint 2026/1852)
-* **File Jurnal:** [`jurnal/reference/Jacobian-Diagnostics-Under-Constrained-ZK-Circuits.md`](file:///workspaces/Zeltra-Protocol/jurnal/reference/Jacobian-Diagnostics-Under-Constrained-ZK-Circuits.md)
-* **Penulis:** Vijay Singh (September 2026)
-* **Problem Kritis:**
-  Sirkuit aritmatika ZK yang *under-constrained* adalah sumber kegagalan soundness paling fatal di Web3. Penyerang dapat menetapkan saksi dengan nilai palsu (misal jumlah uang atau penerima fiktif) sambil tetap menghasilkan proof Groth16 yang valid.
-* **Inovasi Paper:**
-  Diagnostik aljabar berbasis linear algebra matriks Jacobian eksak. Mampu mengklasifikasikan sirkuit R1CS hingga 66.000 constraint dalam waktu $\le 1$ detik di hardware standar. Memverifikasi secara deterministik apakah sebuah variabel target memiliki derajat kebebasan tak terduga (*infinitesimal freedom / non-uniqueness certificate*).
-* **Implementasi di Zeltra Core:**
-  * Komponen: Test suite diagnostik di [`zeltra-core/src/note_circuit.rs`](file:///workspaces/Zeltra-Protocol/zeltra-core/src/note_circuit.rs) dan [`zeltra-core/src/joinsplit_circuit.rs`](file:///workspaces/Zeltra-Protocol/zeltra-core/src/joinsplit_circuit.rs).
-  * Menjalankan rank evaluation matriks Jacobian pada constraint system sebelum circuit freeze dan trusted setup ceremony untuk menjamin zero under-constrained wires pada seluruh sirkuit produksi.
-
----
-
-## 5. Nopenena: Cryptographic Deniability for UTXO Blockchains with Dummy Notes (IACR ePrint 2024/903)
+## 4. Nopenena: Cryptographic Deniability for UTXO Blockchains with Dummy Notes (IACR ePrint 2024/903)
 * **File Jurnal:** [`jurnal/honorable/Nopenena-Untraceable-Payments-Small-Decoy-Sets.md`](file:///workspaces/Zeltra-Protocol/jurnal/honorable/Nopenena-Untraceable-Payments-Small-Decoy-Sets.md)
 * **Penulis:** Foteini Baldimtsi, Panagiotis Chatzigiannis, Konstantinos Chalkias
 * **Problem Kritis:**
@@ -66,7 +53,7 @@ Dokumen ini memetakan paper terpilih untuk lapisan kriptografi fundamental Zeltr
 
 ---
 
-## 6. Constant-Time Conditions for Left-to-Right Scalar Multiplication (IACR ePrint 2026/1881)
+## 5. Constant-Time Conditions for Left-to-Right Scalar Multiplication (IACR ePrint 2026/1881)
 * **File Jurnal / ePrint:** IACR ePrint 2026/1881 (Oktober 2026)
 * **Penulis:** Sergey Agievich
 * **Problem Kritis:**
@@ -79,7 +66,7 @@ Dokumen ini memetakan paper terpilih untuk lapisan kriptografi fundamental Zeltr
 
 ---
 
-## 7. Fast Polynomial Arithmetic in the Exponent without Roots of Unity (IACR ePrint 2026/2413)
+## 6. Fast Polynomial Arithmetic in the Exponent without Roots of Unity (IACR ePrint 2026/2413)
 * **File Jurnal / ePrint:** IACR ePrint 2026/2413 (Oktober 2026)
 * **Penulis:** Diane Ducrocq and Pierrick Gaudry
 * **Problem di Sistem Klasik:**
@@ -92,7 +79,7 @@ Dokumen ini memetakan paper terpilih untuk lapisan kriptografi fundamental Zeltr
 
 ---
 
-## 8. The Geometry of Witness-Update Tradeoffs in Additive Positive Accumulators (IACR ePrint 2026/2362)
+## 7. The Geometry of Witness-Update Tradeoffs in Additive Positive Accumulators (IACR ePrint 2026/2362)
 * **File Jurnal / ePrint:** IACR ePrint 2026/2362 (Oktober 2026)
 * **Penulis:** Wei Qi
 * **Problem Kritis:**
@@ -104,7 +91,7 @@ Dokumen ini memetakan paper terpilih untuk lapisan kriptografi fundamental Zeltr
   * Memberikan model matematika presisi untuk penjadwalan caching bukti MMR di client SDK: bukti daun di-refresh dengan jadwal amortisasi optimal $O(\log N)$ tanpa pemborosan komputasi traversal hashing ulang yang redundan.
 ---
 
-## 9. Cryptanalysis & Security Margins of Poseidon via Subspace Restriction (IACR ePrint 2026/1692)
+## 8. Cryptanalysis & Security Margins of Poseidon via Subspace Restriction (IACR ePrint 2026/1692)
 * **File Jurnal / ePrint:** IACR ePrint 2026/1692 (Oktober 2026)
 * **Penulis:** Amit Singh Bhati, Sundas Tariq, Tomer Ashur
 * **Problem Kritis:**
@@ -117,7 +104,7 @@ Dokumen ini memetakan paper terpilih untuk lapisan kriptografi fundamental Zeltr
 
 ---
 
-## 10. Accelerated Endomorphism & Side-Channel Regular Scalar Multiplication on BLS12-381 (IACR ePrint 2024/1906)
+## 9. Accelerated Endomorphism & Side-Channel Regular Scalar Multiplication on BLS12-381 (IACR ePrint 2024/1906)
 * **File Jurnal / ePrint:** IACR ePrint 2024/1906 (September 2026 update)
 * **Penulis:** Guangwu Xu, Wei Yu, Ke Han, Pengfei Lu
 * **Problem Kritis:**
@@ -131,7 +118,7 @@ Dokumen ini memetakan paper terpilih untuk lapisan kriptografi fundamental Zeltr
 
 ---
 
-## 11. Dixon Resultants Algebraic Cryptanalysis & Parameter Hardening for Poseidon-W5 (IACR ePrint 2026/1969)
+## 10. Dixon Resultants Algebraic Cryptanalysis & Parameter Hardening for Poseidon-W5 (IACR ePrint 2026/1969)
 * **File Jurnal / ePrint:** IACR ePrint 2026/1969 (September 2026)
 * **Penulis:** Haohai Suo, Jiamin Cui
 * **Problem Kritis:**
@@ -149,20 +136,7 @@ Dokumen ini memetakan paper terpilih untuk lapisan kriptografi fundamental Zeltr
 
 ---
 
-## 12. Forkcipher-Based Committing Security & Context-Binding AEAD (IACR ePrint 2026/2110)
-* **File Jurnal / ePrint:** IACR ePrint 2026/2110 (September 2026)
-* **Penulis:** Elena Andreeva, Maria Eichlseder, Simon Gerhalter, Marcel Nageler, Oliver Christoph Popa, Andreas Weninger
-* **Problem Kritis:**
-  Banyak skema Authenticated Encryption (AE/AEAD) konvensional tidak memberikan jaminan *context-committing security*—yaitu mengikat ciphertext secara kriptografis unik ke konteks enkripsinya. Ketiadaan jaminan ini membuka celah keamanan di mana ciphertext valid dapat dipindahkan atau didekripsi dalam konteks domain yang berbeda tanpa terdeteksi (*ciphertext recycling / multi-context malleability*), seperti menukar memo antar-transaksi atau antar-epoch.
-* **Inovasi Paper:**
-  Mengembangkan committing AE dari properti resistensi tabrakan eksplisit pada *forkcipher*. Mengonstruksi FHashN dan skema AEaH-2K yang menggabungkan AE aman dengan variable-input-length collision-resistant PRF. Memperkenalkan mode AEAD berbasis forkcipher tunggal yang mencapai kerahasiaan, keaslian (*authenticity*), dan keamanan komitmen CMT-4 dalam model standar terbukti.
-* **Implementasi di Zeltra Core:**
-  * Komponen: Enkripsi memo 96-byte di [`zeltra-core/src/note.rs`](file:///workspaces/Zeltra-Protocol/zeltra-core/src/note.rs) (`DEC-037`), ChaCha20-Poly1305 AEAD, dan domain tagging Poseidon.
-  * Menjadi fondasi pengikatan konteks (*context-committing binding*) pada enkripsi memo: ciphertext memo 96-byte diikat langsung dengan komitmen note ($C$) dan epoch ID ($E$) sebagai *Associated Data (AAD)*, memastikan memo terenkripsi tidak dapat dipalsukan, ditukar, atau di-replay ke transaksi koin lain (*CMT-4 security level*).
-
----
-
-## 13. Top Gun: Degree Annihilation Attacks on Poseidon & Security Margins (IACR ePrint 2026/1254)
+## 11. Top Gun: Degree Annihilation Attacks on Poseidon & Security Margins (IACR ePrint 2026/1254)
 * **File Jurnal / ePrint:** IACR ePrint 2026/1254 (September 2026)
 * **Penulis:** Antonio Sanso, Giuseppe Vitto
 * **Problem Kritis:**
@@ -175,7 +149,7 @@ Dokumen ini memetakan paper terpilih untuk lapisan kriptografi fundamental Zeltr
 
 ---
 
-## 14. Slipway: Accessing Finite Subspace Trails & Full-Round Absorption in Poseidon (IACR ePrint 2026/1579)
+## 12. Slipway: Accessing Finite Subspace Trails & Full-Round Absorption in Poseidon (IACR ePrint 2026/1579)
 * **File Jurnal / ePrint:** IACR ePrint 2026/1579 (September 2026)
 * **Penulis:** Giuseppe Vitto
 * **Problem Kritis:**
@@ -185,3 +159,4 @@ Dokumen ini memetakan paper terpilih untuk lapisan kriptografi fundamental Zeltr
 * **Implementasi di Zeltra Core:**
   * Komponen: Generator matriks Cauchy MDS di [`zeltra-core/src/poseidon.rs`](file:///workspaces/Zeltra-Protocol/zeltra-core/src/poseidon.rs) dan generator Grain-128 LFSR (`DEC-021`).
   * Menjadi panduan verifikasi formal untuk matriks MDS Poseidon Zeltra: memastikan matriks MDS $5 \times 5$ (W5) dan $3 \times 3$ (W3) di-generate murni dari ekspansi Grain-128 LFSR yang independen secara statistik dari round constants, memutus total kemungkinan *full-round absorption* dan menjamin tidak ada subspace trail yang dapat diakses dari input manapun.
+

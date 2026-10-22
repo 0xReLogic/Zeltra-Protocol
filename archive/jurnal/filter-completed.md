@@ -52,3 +52,19 @@ Dokumentasi arsitektur formal dan keputusan teknis permanen untuk inovasi ini te
     - Menjamin anti-aliasing inverse `diff_inv` di-pin ke nol kanonikal saat `is_dummy == 1` via gerbang pendamping kuadratik (*Proposition 5 Zero-Safe Inverse*).
   * Terverifikasi dengan 16 negative tests pada saksi tampered yang tertolak mutlak.
 * **Arsitektur Referensi:** [`DEC-046`](../../research/decisions/DEC-046-null-branch-witness-attack-defense-and-quadratic-encoding-soundness.md).
+
+---
+
+## 4. Leakage-Resilient Decapsulation & CT-FOE Defense (IACR CiC Vol. 3, No. 1, 2026)
+* **File Jurnal / ePrint:** IACR Communications in Cryptology (Vol. 3, No. 1, Mei 2026)
+* **Penulis:** Duyên Pay, Thomas Peters, and François-Xavier Standaert (UCLouvain Crypto Group)
+* **Problem Kritis:**
+  Serangan *Flag Differential Power Analysis (Flag DPA)* dan *Control-Flow Timing Leakage* pada proses trial-decryption note terenkripsi (memo 96-byte). Pada skema konvensional, keberadaan operator *short-circuit* (`&&`/`||`), penghentian dini (*early return/abort*), dan perbedaan waktu kalkulasi mengekspos sinyal kendali boolean `is_valid` via lonjakan arus/EM dan mikrodetik variasi eksekusi, memungkinkan penyerang mengekstraksi kunci privat viewing key (`IncomingViewingKey` / `ivk`) pengguna.
+* **Inovasi Paper:**
+  Menganalisis resistensi kebocoran KEM (*leakage-resilient decapsulation*) dan membuktikan bahwa sekadar menghapus FO re-encryption tidak cukup jika evaluasi penanda validitas (*validity flag*) membocorkan informasi melalui saluran samping fisik. Merumuskan evaluasi bendera tanpa kebocoran (*Constant-Time Flag Oblivious Evaluation / CT-FOE*) di mana seluruh penanda validitas dimasker secara bitwise dan operasi dekripsi selalu dieksekusi penuh tanpa *early abort*.
+* **Implementasi di Zeltra Core & SDK (SELESAI & TERVERIFIKASI [x] — DEC-049):**
+  * Komponen: [`zeltra-core/src/memo_ct.rs`](../../zeltra-core/src/memo_ct.rs) (`ConstantTimeMemoScanner`, `CtNotePlaintext`, `is_canonical_fr_ct`), integrasi scanner klien di [`zeltra-sdk/src/wallet/note_wallet/sync.rs`](../../zeltra-sdk/src/wallet/note_wallet/sync.rs), harness statistik [`zeltra-sdk/src/bin/dudect_ct_foe.rs`](../../zeltra-sdk/src/bin/dudect_ct_foe.rs), dan test suite [`zeltra-sdk/tests/side_channel_defense_tests.rs`](../../zeltra-sdk/tests/side_channel_defense_tests.rs).
+  * Mengeliminasi seluruh *control-flow branching* pada trial-decryption memo 96B; akumulasi penanda validitas via bitwise AND `subtle::Choice`.
+  * Mempertahankan waktu eksekusi identik melalui substitusi titik dummy generator jika menerima kurva non-contributory/orde rendah, dekripsi ChaCha20 selalu penuh, dan zeroization kondisional branchless.
+  * Teruji 100% lolos Gate V-2 (5 kategori adversarial matrix), Gate V-3 evaluasi statistik diferensial Dudect Welch t-test $|t| < 4.5$ tanpa false positive, dan Gate V-4 inspeksi objdump linear bebas instruksi jump rahasia.
+* **Arsitektur Referensi:** [`DEC-049`](../../research/decisions/DEC-049-leakage-resilient-decapsulation-and-constant-time-flag-defense.md).
