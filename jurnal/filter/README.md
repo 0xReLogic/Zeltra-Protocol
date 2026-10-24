@@ -11,13 +11,13 @@ Folder `jurnal/filter/` berisi hasil kurasi dan ekstraksi analitis dari jurnal k
 | [`01-contract-innovations.md`](file:///workspaces/Zeltra-Protocol/jurnal/filter/01-contract-innovations.md) | **`zeltra-contracts`** (Stylus WASM) | `spend.rs`, `deposit.rs`, `storage.rs`, EIP-2537 | **7 Paper**: FlatMerkle gas optimization, Merkle Mountain Range, gasless rate-limiting, EIP-2537 batch verification, ring buffer pruning, exponential Verkle forest authenticated dictionaries, DelegProof EIP-7702 & namespaced storage security. |
 | [`02-core-innovations.md`](file:///workspaces/Zeltra-Protocol/jurnal/filter/02-core-innovations.md) | **`zeltra-core`** (Rust Crypto) | `note_circuit.rs`, `joinsplit_circuit.rs`, `poseidon.rs`, `evm.rs` | **17 Paper**: Committing AEAD & context binding, polynomial arithmetic without roots of unity, additive accumulators, Poseidon subspace cryptanalysis & Dixon resultants, Poseidon degree annihilation margins, Slipway finite subspace trails & full-round absorption defense, Jacobian circuit diagnostics, regular $\tau$-NAF on BLS12-381, null-branch dummy slot pinning. |
 | [`03-relayer-innovations.md`](file:///workspaces/Zeltra-Protocol/jurnal/filter/03-relayer-innovations.md) | **`zeltra-node`** (Sequencer & Relayer) | `validation.rs`, `database.rs`, `evm_client.rs`, `handlers/` | **20 Paper**: Oblivious search trees, SkrrtPIR & iSimplePIR (incremental single-server PIR), RisePIR (d-ary segmented cuckoo filters), anonymous tokens, wpORAM for oblivious RPC, plus **8 Paper Fondasi Desentralisasi** (Fair leader election, bandwidth-balanced broadcast, batched threshold encryption with silent setup, early-stopping Byzantine agreement, bandwidth fee mechanisms, payload blindness anti-MEV, harm-proof TFM, UABC atomic broadcast, dan stake-weighted threshold encryption). |
-| [`04-sdk-innovations.md`](file:///workspaces/Zeltra-Protocol/jurnal/filter/04-sdk-innovations.md) | **`zeltra-sdk`** (Client & Wallet) | `note_wallet.rs`, `zk_wasm.rs`, Viewing Keys, Compliance | **17 Paper**: Bounded-memory Groth16, ZKPoSP HD provenance proofs & CCIP anti-hijacking, secure MSM outsourcing, strong resettable NIZK (anti-memory reset), viewing key provable anonymity, DuraShare manual BIP-39 recovery, auditable stealth addresses (zkBSA), MinMandate. |
+| [`04-sdk-innovations.md`](file:///workspaces/Zeltra-Protocol/jurnal/filter/04-sdk-innovations.md) | **`zeltra-sdk`** (Client & Wallet) | `note_wallet.rs`, `zk_wasm.rs`, Viewing Keys, Compliance | **16 Paper**: ZKPoSP HD provenance proofs & CCIP anti-hijacking, secure MSM outsourcing, strong resettable NIZK (anti-memory reset), viewing key provable anonymity, DuraShare manual BIP-39 recovery, auditable stealth addresses (zkBSA), MinMandate. *(SBM/Sluice diarsipkan ke [`archive/sbm/`](file:///workspaces/Zeltra-Protocol/archive/sbm/))*. |
 
 ---
 
 ## Ringkasan Metrik Kurasi
 - **Total Paper Dianalisis:** 1.000+ paper dari repositori IACR ePrint 2024–2026.
-- **Total Paper Lolos Kurasi Mendalam:** **61 Paper Kriptografi Terpilih**.
+- **Total Paper Lolos Kurasi Mendalam:** **60 Paper Kriptografi Terpilih** *(1 paper SBM diarsipkan)*.
 - **Status Antrean `raw.md`:** **100% Selesai & Dikosongkan (Queue Cleared)**.
 - **Kategori Khusus Roadmap Desentralisasi:** 8 paper ditandai dengan badge `[DESENTRALISASI MASA DEPAN (ROADMAP)]` di `03-relayer-innovations.md` untuk memandu fase transisi dari Single Stateless Sequencer menuju Decentralized Multi-Relayer Network.
 
@@ -28,10 +28,10 @@ Folder `jurnal/filter/` berisi hasil kurasi dan ekstraksi analitis dari jurnal k
 ```
 +-------------------------------------------------------------------------+
 |                               ZELTRA SDK                                |
-|   Bounded-Memory Groth16 (2026/1758) | HD Seed Provenance (2026/2204)   |
-|   Oblivious Note Sync (2025/2031)    | Auditable Stealth Addr (zkBSA)   |
-|   Secure MSM Outsourcing (2026/686)  | DuraShare Paper Backup (2026/2300)|
-|   Strong Resettable NIZK (2026/1036) | MinMandate Agentic Spending      |
+|   HD Seed Provenance (2026/2204)     | Auditable Stealth Addr (zkBSA)   |
+|   Oblivious Note Sync (2025/2031)    | DuraShare Paper Backup (2026/2300)|
+|   Secure MSM Outsourcing (2026/686)  | MinMandate Agentic Spending      |
+|   Strong Resettable NIZK (2026/1036) | [SBM Bounded-RAM: Di-Arsipkan]   |
 +--------------------------------------+----------------------------------+
                                        | (ZK Proofs & Public Inputs)
                                        v
