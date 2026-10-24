@@ -138,20 +138,7 @@ Dokumen ini memetakan paper terpilih untuk arsitektur client SDK dan manajemen w
 
 ---
 
-## 11. SBM: Prove-Phase Bounded-Memory Groth16 via Read-Write Streaming (IACR ePrint 2026/1758)
-* **File Jurnal / ePrint:** IACR ePrint 2026/1758 (Oktober 2026)
-* **Penulis:** Kyeongtae Lee, Jihye Kim, Hyunok Oh
-* **Problem Kritis:**
-  Membuktikan sirkuit ZK Groth16 (`JoinSplitCircuit` 19 public inputs, 448 quadratic range gates) di dalam browser Web Worker (WASM 32-bit di mobile / client devices, DEC-041) membutuhkan alokasi memori kerja acak $O(N)$ yang besar. Pada perangkat mobile atau tab browser dengan resource terbatas, proses ini rentan memicu Web Worker crash akibat Out-of-Memory (OOM).
-* **Inovasi Paper:**
-  Memperkenalkan *Read-Write Streaming Groth16 Prover* yang memangkas kebutuhan working memory dari $O(N)$ menjadi **$O(\sqrt{N})$** secara drastis melalui streaming Number Theoretic Transform (NTT), streaming sparse R1CS evaluation, dan chunked Pippenger MSM. Yang paling revolusioner: **Interface Groth16 tetap identik (3 elemen grup $A, B, C$) dan verifikasi pairing smart contract Stylus EIP-2537 100% UNCHANGED (tidak perlu diubah sama sekali)**!
-* **Implementasi di Zeltra SDK:**
-  * Komponen: Runner prover Web Worker browser di [`zeltra-sdk/src/zk_wasm.rs`](file:///workspaces/Zeltra-Protocol/zeltra-sdk/src/zk_wasm.rs) (DEC-041) dan [`zeltra-core/src/joinsplit_circuit.rs`](file:///workspaces/Zeltra-Protocol/zeltra-core/src/joinsplit_circuit.rs).
-  * Memungkinkan pengguna mengeksekusi pembuktian transaksi ZK-UTXO (Mode 2 In-Pool Transfer dan Mode 3 Public Spend) langsung di smartphone atau browser tanpa takut memory spike atau tab browser force-close.
-
----
-
-## 12. ZKPoSP: Zero-Knowledge Proofs of Seed Provenance for Hierarchical Deterministic Wallets (IACR ePrint 2026/1508)
+## 11. ZKPoSP: Zero-Knowledge Proofs of Seed Provenance for Hierarchical Deterministic Wallets (IACR ePrint 2026/1508)
 * **File Jurnal / ePrint:** IACR ePrint 2026/1508 (Oktober 2026)
 * **Penulis:** Vincenzo Botta, Michal Pospieszalski, Emanuele Ragnoli, Justus Ranvier
 * **Problem Fundamental:**
@@ -164,7 +151,7 @@ Dokumen ini memetakan paper terpilih untuk arsitektur client SDK dan manajemen w
 
 ---
 
-## 13. Secure MSM Outsourcing Computation for Mobile Client Prover (IACR ePrint 2026/686)
+## 12. Secure MSM Outsourcing Computation for Mobile Client Prover (IACR ePrint 2026/686)
 * **File Jurnal / ePrint:** IACR ePrint 2026/686 (Oktober 2026)
 * **Penulis:** Wujie Xiong, Arefeh Rahaei, Sangwon Shin, Xinxin Fan, Taeweon Suh, Veronika Kuchta, Francesco Sica, Weidong Shi, Lei Xu
 * **Problem Kritis:**
@@ -180,7 +167,7 @@ Dokumen ini memetakan paper terpilih untuk arsitektur client SDK dan manajemen w
 
 ---
 
-## 14. Strong Resettable NIZK: Randomness Reset & Replay Defense for Web Worker Provers (IACR ePrint 2026/1036)
+## 13. Strong Resettable NIZK: Randomness Reset & Replay Defense for Web Worker Provers (IACR ePrint 2026/1036)
 * **File Jurnal / ePrint:** IACR ePrint 2026/1036 (Oktober 2026)
 * **Penulis:** Behzad Abdolmaleki, Matteo Campanelli, Quang Dao, Shadman Mohammadi, Nahid Roustaeifar
 * **Problem Kritis:**
@@ -193,7 +180,7 @@ Dokumen ini memetakan paper terpilih untuk arsitektur client SDK dan manajemen w
 
 ---
 
-## 15. Provable Anonymity Guarantees Under Viewing Key Compromise & CEX Evasion Defense (IACR ePrint 2026/872)
+## 14. Provable Anonymity Guarantees Under Viewing Key Compromise & CEX Evasion Defense (IACR ePrint 2026/872)
 * **File Jurnal / ePrint:** IACR ePrint 2026/872 (Oktober 2026)
 * **Penulis:** Adrian Cinal
 * **Problem Kritis:**
@@ -205,7 +192,7 @@ Dokumen ini memetakan paper terpilih untuk arsitektur client SDK dan manajemen w
 
 ---
 
-## 16. DuraShare: BIP39-Native Secret Sharing with Full Manual Fallback (IACR ePrint 2026/2300)
+## 15. DuraShare: BIP39-Native Secret Sharing with Full Manual Fallback (IACR ePrint 2026/2300)
 * **File Jurnal / ePrint:** IACR ePrint 2026/2300 (Oktober 2026)
 * **Penulis:** Jeroen van de Graaf, Renato Schiavinato Lopez
 * **Problem Kritis:**
@@ -222,7 +209,7 @@ Dokumen ini memetakan paper terpilih untuk arsitektur client SDK dan manajemen w
 
 ---
 
-## 17. ZK Provenance Proofs for HD Wallet Derivation & Cross-Chain CCIP Anti-Hijacking (IACR ePrint 2026/2204)
+## 16. ZK Provenance Proofs for HD Wallet Derivation & Cross-Chain CCIP Anti-Hijacking (IACR ePrint 2026/2204)
 * **File Jurnal / ePrint:** IACR ePrint 2026/2204 (September 2026)
 * **Penulis:** Vincenzo Botta, Michal Pospieszalski, Emanuele Ragnoli, Justus Ranvier
 * **Problem Kritis:**
