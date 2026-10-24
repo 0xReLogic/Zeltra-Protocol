@@ -186,11 +186,8 @@ impl ConstantTimeMemoScanner {
             asset_id,
             rho_limbs,
         };
-        let final_note = CtNotePlaintext::conditional_select(
-            &CtNotePlaintext::dummy(),
-            &candidate,
-            is_valid,
-        );
+        let final_note =
+            CtNotePlaintext::conditional_select(&CtNotePlaintext::dummy(), &candidate, is_valid);
 
         // 10. Explicit Memory Sanitization
         epk_bytes.zeroize();
@@ -261,8 +258,8 @@ impl ConstantTimeMemoScanner {
         view_tag: u8,
         ciphertext: &[u8; 40],
     ) -> [u8; 16] {
-        let mut mac = <HmacSha256 as Mac>::new_from_slice(commitment_key)
-            .expect("HMAC supports 32-byte key");
+        let mut mac =
+            <HmacSha256 as Mac>::new_from_slice(commitment_key).expect("HMAC supports 32-byte key");
         mac.update(nonce);
         mac.update(epk);
         mac.update(&[view_tag]);
@@ -328,9 +325,7 @@ pub fn derive_view_tag_ct(shared_secret: &[u8; 32]) -> u8 {
 }
 
 #[inline(always)]
-pub fn derive_key_separation_ct(
-    shared_secret: &[u8; 32],
-) -> (Choice, [u8; 32], [u8; 32], [u8; 7]) {
+pub fn derive_key_separation_ct(shared_secret: &[u8; 32]) -> (Choice, [u8; 32], [u8; 32], [u8; 7]) {
     ConstantTimeMemoScanner::derive_key_separation_ct(shared_secret)
 }
 

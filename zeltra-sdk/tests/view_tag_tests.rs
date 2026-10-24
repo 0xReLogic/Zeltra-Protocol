@@ -14,12 +14,11 @@ use rand::rngs::OsRng;
 use rand::RngCore;
 
 use zeltra_core::{
-    create_legacy_dec037_memo, derive_owner_key, derive_view_tag,
-    encrypt_committing_note_memo, encrypt_note_memo_deterministic, fr_to_be_bytes, note_commitment,
-    x25519_dalek, ENCRYPTED_MEMO_SIZE, INFO_MEMO_CIPHER_V1,
+    create_legacy_dec037_memo, derive_owner_key, derive_view_tag, encrypt_committing_note_memo,
+    encrypt_note_memo_deterministic, fr_to_be_bytes, note_commitment, x25519_dalek,
+    ENCRYPTED_MEMO_SIZE, INFO_MEMO_CIPHER_V1,
 };
 use zeltra_sdk::wallet::note_wallet::{NoteEvent, PrivateNoteWallet};
-
 
 // ═══════════════════════════════════════════════════════════════════════════
 // POSITIVE TESTS (3 Tests)
@@ -92,7 +91,11 @@ fn test_view_tag_derivation_and_fast_scan_success() {
     );
 
     let res = wallet.scan_memos_fast(&events).expect("fast scan succeeds");
-    assert_eq!(res.recovered_notes.len(), 1, "Must find exactly 1 target note");
+    assert_eq!(
+        res.recovered_notes.len(),
+        1,
+        "Must find exactly 1 target note"
+    );
     assert_eq!(res.total_unspent_balance, value);
     assert_eq!(res.recovered_notes[0].commitment_hex, target_cm_hex);
     assert_eq!(wallet.get_balance(asset_id as u8).unwrap(), value);
@@ -138,12 +141,8 @@ fn test_view_tag_backward_compatible_fallback_scan() {
     // 1. Legacy DEC-037 note (48-byte plaintext)
     let val_legacy = 25_000_000u64; // 25 USDC
     let rho_legacy = Fr::rand(&mut rng);
-    let (legacy_memo, rand_legacy) = create_legacy_dec037_memo(
-        val_legacy,
-        rho_legacy,
-        1,
-        zsa.incoming_viewing_public_key,
-    );
+    let (legacy_memo, rand_legacy) =
+        create_legacy_dec037_memo(val_legacy, rho_legacy, 1, zsa.incoming_viewing_public_key);
     let cm_legacy = note_commitment(val_legacy, 1, owner_key, rho_legacy, rand_legacy);
     let cm_legacy_hex = format!("0x{}", hex::encode(fr_to_be_bytes(&cm_legacy)));
 
@@ -218,9 +217,13 @@ fn test_view_tag_rejects_corrupted_ciphertext_mac_failure() {
     let zsa = wallet.shielded_address().unwrap();
     let initial_balance = wallet.get_balance(1).unwrap_or(0);
 
-    let (mut memo, _) =
-        encrypt_note_memo_deterministic(50_000_000, Fr::rand(&mut rng), 1, &zsa.incoming_viewing_public_key)
-            .unwrap();
+    let (mut memo, _) = encrypt_note_memo_deterministic(
+        50_000_000,
+        Fr::rand(&mut rng),
+        1,
+        &zsa.incoming_viewing_public_key,
+    )
+    .unwrap();
 
     // Tamper 1 byte in ciphertext (bytes 44..80) while preserving matching tag at memo[32]
     memo[50] ^= 0x55;
@@ -234,8 +237,14 @@ fn test_view_tag_rejects_corrupted_ciphertext_mac_failure() {
         block_number: Some(1),
     };
 
-    let res = wallet.scan_memos_fast(&[event]).expect("scanner does not panic");
-    assert_eq!(res.recovered_notes.len(), 0, "MAC failure must drop candidate");
+    let res = wallet
+        .scan_memos_fast(&[event])
+        .expect("scanner does not panic");
+    assert_eq!(
+        res.recovered_notes.len(),
+        0,
+        "MAC failure must drop candidate"
+    );
     assert_eq!(
         wallet.get_balance(1).unwrap_or(0),
         initial_balance,
@@ -251,9 +260,13 @@ fn test_view_tag_rejects_tampered_view_tag() {
     let zsa = wallet.shielded_address().unwrap();
     let initial_balance = wallet.get_balance(1).unwrap_or(0);
 
-    let (mut memo, _) =
-        encrypt_note_memo_deterministic(50_000_000, Fr::rand(&mut rng), 1, &zsa.incoming_viewing_public_key)
-            .unwrap();
+    let (mut memo, _) = encrypt_note_memo_deterministic(
+        50_000_000,
+        Fr::rand(&mut rng),
+        1,
+        &zsa.incoming_viewing_public_key,
+    )
+    .unwrap();
 
     // Tamper view tag at offset 32
     memo[32] ^= 0x01;
@@ -267,8 +280,14 @@ fn test_view_tag_rejects_tampered_view_tag() {
         block_number: Some(1),
     };
 
-    let res = wallet.scan_memos_fast(&[event]).expect("scanner does not panic");
-    assert_eq!(res.recovered_notes.len(), 0, "Pre-filter tag mismatch must drop note");
+    let res = wallet
+        .scan_memos_fast(&[event])
+        .expect("scanner does not panic");
+    assert_eq!(
+        res.recovered_notes.len(),
+        0,
+        "Pre-filter tag mismatch must drop note"
+    );
     assert_eq!(
         wallet.get_balance(1).unwrap_or(0),
         initial_balance,
@@ -282,12 +301,7 @@ fn test_view_tag_rejects_invalid_memo_length() {
     let mut wallet = PrivateNoteWallet::new(&seed);
     let initial_balance = wallet.get_balance(1).unwrap_or(0);
 
-    let invalid_memos = vec![
-        vec![0u8; 0],
-        vec![0u8; 95],
-        vec![0u8; 97],
-        vec![0u8; 128],
-    ];
+    let invalid_memos = vec![vec![0u8; 0], vec![0u8; 95], vec![0u8; 97], vec![0u8; 128]];
 
     let events: Vec<NoteEvent> = invalid_memos
         .into_iter()
@@ -302,7 +316,9 @@ fn test_view_tag_rejects_invalid_memo_length() {
         })
         .collect();
 
-    let res = wallet.scan_memos_fast(&events).expect("no panic on invalid lengths");
+    let res = wallet
+        .scan_memos_fast(&events)
+        .expect("no panic on invalid lengths");
     assert_eq!(res.recovered_notes.len(), 0);
     assert_eq!(wallet.get_balance(1).unwrap_or(0), initial_balance);
 }
@@ -320,9 +336,13 @@ fn test_view_tag_fails_with_wrong_incoming_viewing_key() {
     let bob_initial_balance = bob_wallet.get_balance(1).unwrap_or(0);
 
     // Note encrypted for Alice
-    let (memo, _) =
-        encrypt_note_memo_deterministic(100_000_000, Fr::rand(&mut rng), 1, &alice_zsa.incoming_viewing_public_key)
-            .unwrap();
+    let (memo, _) = encrypt_note_memo_deterministic(
+        100_000_000,
+        Fr::rand(&mut rng),
+        1,
+        &alice_zsa.incoming_viewing_public_key,
+    )
+    .unwrap();
 
     let event = NoteEvent {
         leaf_index: 0,
@@ -335,7 +355,11 @@ fn test_view_tag_fails_with_wrong_incoming_viewing_key() {
 
     // Bob scans Alice's memo
     let res = bob_wallet.scan_memos_fast(&[event]).expect("no panic");
-    assert_eq!(res.recovered_notes.len(), 0, "Bob cannot recover Alice's note");
+    assert_eq!(
+        res.recovered_notes.len(),
+        0,
+        "Bob cannot recover Alice's note"
+    );
     assert_eq!(bob_wallet.get_balance(1).unwrap_or(0), bob_initial_balance);
 }
 
@@ -347,9 +371,13 @@ fn test_view_tag_rejects_tampered_ephemeral_pubkey() {
     let zsa = wallet.shielded_address().unwrap();
     let initial_balance = wallet.get_balance(1).unwrap_or(0);
 
-    let (mut memo, _) =
-        encrypt_note_memo_deterministic(50_000_000, Fr::rand(&mut rng), 1, &zsa.incoming_viewing_public_key)
-            .unwrap();
+    let (mut memo, _) = encrypt_note_memo_deterministic(
+        50_000_000,
+        Fr::rand(&mut rng),
+        1,
+        &zsa.incoming_viewing_public_key,
+    )
+    .unwrap();
 
     // Tamper ephemeral public key bytes 0..32
     memo[0] ^= 0xff;
@@ -391,7 +419,11 @@ fn test_view_tag_ignores_dummy_change_note() {
     };
 
     let res = wallet.scan_memos_fast(&[event]).expect("no panic");
-    assert_eq!(res.recovered_notes.len(), 0, "Zero-value dummy note must be dropped");
+    assert_eq!(
+        res.recovered_notes.len(),
+        0,
+        "Zero-value dummy note must be dropped"
+    );
     assert_eq!(
         wallet.get_balance(1).unwrap_or(0),
         initial_balance,

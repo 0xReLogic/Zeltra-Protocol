@@ -295,13 +295,7 @@ async fn test_relayer_handle_mmr_proof_rejects_out_of_bounds() {
         state.in_memory_mmr.write().await.append(fr);
         state
             .db
-            .insert_mmr_leaf(
-                i,
-                &format!("0x{:064x}", i + 1),
-                "0xtx",
-                100,
-                &[0x44; 96],
-            )
+            .insert_mmr_leaf(i, &format!("0x{:064x}", i + 1), "0xtx", 100, &[0x44; 96])
             .await
             .unwrap();
     }
@@ -407,13 +401,7 @@ async fn test_relayer_mmr_indexer_skips_duplicate_leaves() {
         state.in_memory_mmr.write().await.append(fr);
         state
             .db
-            .insert_mmr_leaf(
-                i,
-                &format!("0x{:064x}", i + 1),
-                "0xtx",
-                100,
-                &[0x55; 96],
-            )
+            .insert_mmr_leaf(i, &format!("0x{:064x}", i + 1), "0xtx", 100, &[0x55; 96])
             .await
             .unwrap();
     }
@@ -499,7 +487,13 @@ async fn test_relayer_mmr_indexer_recovers_from_shallow_reorg() {
     // Block 101: 2 leaves (to be reorged)
     // Block 102: 2 leaves (to be reorged)
     for i in 0..8u64 {
-        let blk = if i < 4 { 100 } else if i < 6 { 101 } else { 102 };
+        let blk = if i < 4 {
+            100
+        } else if i < 6 {
+            101
+        } else {
+            102
+        };
         let fr = Fr::from((i + 1) * 3);
         state.in_memory_mmr.write().await.append(fr);
         state
@@ -568,13 +562,7 @@ async fn test_relayer_concurrency_stress_zero_deadlock() {
         state.in_memory_mmr.write().await.append(fr);
         state
             .db
-            .insert_mmr_leaf(
-                i,
-                &format!("0x{:064x}", i + 1),
-                "0xtx",
-                100,
-                &[0xaa; 96],
-            )
+            .insert_mmr_leaf(i, &format!("0x{:064x}", i + 1), "0xtx", 100, &[0xaa; 96])
             .await
             .unwrap();
     }
@@ -636,7 +624,10 @@ async fn test_relayer_concurrency_stress_zero_deadlock() {
         "CONCURRENCY STRESS SUCCESS: {} proofs served concurrently with zero deadlock",
         total_served
     );
-    assert!(total_served > 500, "Must serve at least 500 proofs without blocking");
+    assert!(
+        total_served > 500,
+        "Must serve at least 500 proofs without blocking"
+    );
     assert_eq!(state.in_memory_mmr.read().await.leaf_count(), 80);
 }
 

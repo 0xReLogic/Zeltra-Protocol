@@ -941,7 +941,9 @@ mod tests {
             in2_owner_key: Some(owner_dummy),
             in2_rho: Some(rho_dummy),
             in2_randomness: Some(rand_dummy),
-            in2_leaf_index: Some(Fr::from(zeltra_core::circuit_gadgets::CANONICAL_DUMMY_LEAF_INDEX)),
+            in2_leaf_index: Some(Fr::from(
+                zeltra_core::circuit_gadgets::CANONICAL_DUMMY_LEAF_INDEX,
+            )),
             in2_mountain_height: Some(0),
             in2_mountain_siblings: Some([Fr::from(0u64); 32]),
             in2_is_dummy: Some(Fr::from(1u64)),
@@ -965,6 +967,8 @@ mod tests {
             has_change_2: Some(Fr::from(0u64)),
             public_asset_id: Some(Fr::from(1u64)),
             expected_binding: Some(binding),
+            perm_bit: Some(Fr::from(0u64)),
+            is_decoy: Some(Fr::from(0u64)),
         }
     }
 

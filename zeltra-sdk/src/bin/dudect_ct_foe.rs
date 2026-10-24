@@ -90,7 +90,10 @@ fn main() {
     };
 
     println!("═══════════════════════════════════════════════════════════════════════");
-    println!("  DEC-049 GATE V-3: STATISTICAL DUDECT VERIFICATION (N = {})", n_traces);
+    println!(
+        "  DEC-049 GATE V-3: STATISTICAL DUDECT VERIFICATION (N = {})",
+        n_traces
+    );
     println!("═══════════════════════════════════════════════════════════════════════");
 
     let mut rng = OsRng;
@@ -155,13 +158,24 @@ fn main() {
 
     println!("───────────────────────────────────────────────────────────────────────");
     println!("Evaluation Completed in: {:?}", elapsed);
-    println!("Valid Memos:   Mean = {:.2} cycles, Variance = {:.2}", valid_stats.mean, valid_stats.variance());
-    println!("Random Memos:  Mean = {:.2} cycles, Variance = {:.2}", random_stats.mean, random_stats.variance());
+    println!(
+        "Valid Memos:   Mean = {:.2} cycles, Variance = {:.2}",
+        valid_stats.mean,
+        valid_stats.variance()
+    );
+    println!(
+        "Random Memos:  Mean = {:.2} cycles, Variance = {:.2}",
+        random_stats.mean,
+        random_stats.variance()
+    );
     println!("Final Welch's t-statistic: {:.4}", t_final);
     println!("───────────────────────────────────────────────────────────────────────");
 
     if t_final.abs() < 4.5 {
-        println!(">>> GATE V-3 VERIFICATION PASSED: |t| = {:.4} < 4.5 (Constant-Time Verified!) <<<", t_final.abs());
+        println!(
+            ">>> GATE V-3 VERIFICATION PASSED: |t| = {:.4} < 4.5 (Constant-Time Verified!) <<<",
+            t_final.abs()
+        );
     } else {
         panic!(">>> GATE V-3 FAILED: |t| = {:.4} >= 4.5 <<<", t_final.abs());
     }

@@ -734,6 +734,14 @@ impl ReadOnlyAuditorSession {
                 NoteStatus::Unspent
             };
 
+            let classification = if cand.value == 0 {
+                NoteClassification::DecoyDummy
+            } else if is_spent {
+                NoteClassification::Spent
+            } else {
+                NoteClassification::ActiveSpendable
+            };
+
             let wallet_note = WalletNote {
                 commitment_hex: cand.cm_hex.clone(),
                 value: cand.value,
@@ -746,6 +754,7 @@ impl ReadOnlyAuditorSession {
                 epoch_id: Some(0),
                 merkle_path_hex: None,
                 status,
+                classification,
                 created_at_secs: now_secs,
                 session_id: None,
             };

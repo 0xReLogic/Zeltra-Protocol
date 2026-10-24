@@ -150,6 +150,7 @@ impl PrivateNoteWallet {
                 total_required: sum_in,
                 change_amount: consolidated_out,
                 has_change: true,
+                has_decoy_dummy: false,
             };
 
             let session_id = format!("consolidate_{}_{}", rounds_executed, current_time_secs);
@@ -437,6 +438,7 @@ impl PrivateNoteWallet {
                 epoch_id: input_note_1.epoch_id.or(Some(0)),
                 merkle_path_hex: None,
                 status: NoteStatus::Unconfirmed,
+                classification: NoteClassification::ActiveSpendable,
                 created_at_secs: current_time_secs,
                 session_id: Some(session_id.to_string()),
             };
@@ -591,6 +593,9 @@ impl PrivateNoteWallet {
             in2_asset_id: Some(asset_id_fr),
             out1_asset_id: Some(asset_id_fr),
             out2_asset_id: Some(asset_id_fr),
+
+            perm_bit: Some(Fr::from(0u64)),
+            is_decoy: Some(Fr::from(0u64)),
         };
 
         // 8. Generate Groth16 Proof
@@ -960,13 +965,11 @@ impl PrivateNoteWallet {
 
         let (ch2_val, cm_2, memo_2, has_change_2, ch2_rho, ch2_rand) = if change_amount > 0 {
             let rho_2 = Fr::rand(&mut rng);
-            let (memo_2, rand_2) = encrypt_committing_note_memo(
-                change_amount,
-                rho_2,
-                asset_id as u64,
-                &sender_pk_ivk,
-            )
-            .map_err(|e| WalletError::CryptoError(format!("Memo 2 encryption failed: {e}")))?;
+            let (memo_2, rand_2) =
+                encrypt_committing_note_memo(change_amount, rho_2, asset_id as u64, &sender_pk_ivk)
+                    .map_err(|e| {
+                        WalletError::CryptoError(format!("Memo 2 encryption failed: {e}"))
+                    })?;
 
             let c_cm = note_commitment(change_amount, asset_id, sender_owner_key, rho_2, rand_2);
 
@@ -988,6 +991,7 @@ impl PrivateNoteWallet {
                 epoch_id: input_note_1.epoch_id.or(Some(0)),
                 merkle_path_hex: None,
                 status: NoteStatus::Unconfirmed,
+                classification: NoteClassification::ActiveSpendable,
                 created_at_secs: current_time_secs,
                 session_id: Some(session_id.clone()),
             };
@@ -999,10 +1003,9 @@ impl PrivateNoteWallet {
             // Random encryption for dummy memo (AUD-7: anti-topologic leak)
             let rho_2 = Fr::rand(&mut rng);
             let (dummy_memo, _rand_2) =
-                encrypt_committing_note_memo(0, rho_2, asset_id as u64, &sender_pk_ivk)
-                    .map_err(|e| {
-                        WalletError::CryptoError(format!("Dummy memo encryption failed: {e}"))
-                    })?;
+                encrypt_committing_note_memo(0, rho_2, asset_id as u64, &sender_pk_ivk).map_err(
+                    |e| WalletError::CryptoError(format!("Dummy memo encryption failed: {e}")),
+                )?;
 
             let dummy_cm = note_commitment(
                 CANONICAL_DUMMY_VALUE,
@@ -1121,6 +1124,9 @@ impl PrivateNoteWallet {
             in2_asset_id: Some(asset_id_fr),
             out1_asset_id: Some(asset_id_fr),
             out2_asset_id: Some(asset_id_fr),
+
+            perm_bit: Some(Fr::from(0u64)),
+            is_decoy: Some(Fr::from(0u64)),
         };
 
         // 11. Generate Groth16 Proof
@@ -1230,6 +1236,7 @@ impl PrivateNoteWallet {
             total_required: execution_fee,
             change_amount: consolidated_value,
             has_change: true,
+            has_decoy_dummy: false,
         };
 
         // Recipient is Address::ZERO for autonomous in-pool consolidation
@@ -1338,6 +1345,7 @@ impl PrivateNoteWallet {
                 total_required: val,
                 change_amount: 0,
                 has_change: false,
+                has_decoy_dummy: true,
             };
 
             let session_id = format!(

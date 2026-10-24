@@ -219,6 +219,13 @@ impl PrivateNoteWallet {
                 } else {
                     NoteStatus::Unspent
                 },
+                classification: if cand.value == 0 {
+                    NoteClassification::DecoyDummy
+                } else if is_spent {
+                    NoteClassification::Spent
+                } else {
+                    NoteClassification::ActiveSpendable
+                },
                 created_at_secs: 0,
                 session_id: None,
             };
@@ -249,10 +256,7 @@ impl PrivateNoteWallet {
     /// Pre-filters incoming on-chain events by checking `memo[32] == derive_view_tag(&shared_secret)`.
     /// 99.6% of non-owned memos are dropped immediately without invoking ChaCha20Poly1305.
     /// Also supports transparent fallback for legacy DEC-037 memos.
-    pub fn scan_memos_fast(
-        &mut self,
-        events: &[NoteEvent],
-    ) -> Result<RecoveryResult, WalletError> {
+    pub fn scan_memos_fast(&mut self, events: &[NoteEvent]) -> Result<RecoveryResult, WalletError> {
         self.scan_memos_fast_with_checker(events, |nfs| Ok(vec![false; nfs.len()]))
     }
 
@@ -328,8 +332,7 @@ impl PrivateNoteWallet {
                 }
 
                 if candidate_pair.is_none() {
-                    if let Some((pt, deterministic_r)) =
-                        decrypt_note_memo_deterministic(memo, &ivk)
+                    if let Some((pt, deterministic_r)) = decrypt_note_memo_deterministic(memo, &ivk)
                     {
                         candidate_pair = Some((pt, deterministic_r));
                     }
@@ -449,6 +452,13 @@ impl PrivateNoteWallet {
                 } else {
                     NoteStatus::Unspent
                 },
+                classification: if cand.value == 0 {
+                    NoteClassification::DecoyDummy
+                } else if is_spent {
+                    NoteClassification::Spent
+                } else {
+                    NoteClassification::ActiveSpendable
+                },
                 created_at_secs: 0,
                 session_id: None,
             };
@@ -534,7 +544,8 @@ impl PrivateNoteWallet {
                     continue;
                 }
                 let memo_arr: &[u8; 96] = ev.encrypted_memo[..].try_into().unwrap();
-                let (is_valid, ct_pt) = ConstantTimeMemoScanner::trial_decrypt_ct_ivk(memo_arr, ivk);
+                let (is_valid, ct_pt) =
+                    ConstantTimeMemoScanner::trial_decrypt_ct_ivk(memo_arr, ivk);
 
                 let candidate_pair = if bool::from(is_valid) {
                     ct_pt.to_canonical_note().map(|pt| {
@@ -567,27 +578,29 @@ impl PrivateNoteWallet {
                     let cm_direct =
                         note_commitment(pt.value, pt.asset_id as u8, sk, pt.rho, deterministic_r);
                     let r_legacy = zeltra_core::derive_note_randomness(sk, pt.rho);
-                    let cm_legacy = note_commitment(pt.value, pt.asset_id as u8, sk, pt.rho, r_legacy);
+                    let cm_legacy =
+                        note_commitment(pt.value, pt.asset_id as u8, sk, pt.rho, r_legacy);
                     let cm_legacy_zsa =
                         note_commitment(pt.value, pt.asset_id as u8, owner_zsa, pt.rho, r_legacy);
 
-                    let (matched_cm, matched_r) = if hex::encode(fr_to_be_bytes(&cm_zsa))
-                        .eq_ignore_ascii_case(ev_cm_clean)
-                    {
-                        (cm_zsa, deterministic_r)
-                    } else if hex::encode(fr_to_be_bytes(&cm_direct)).eq_ignore_ascii_case(ev_cm_clean)
-                    {
-                        (cm_direct, deterministic_r)
-                    } else if hex::encode(fr_to_be_bytes(&cm_legacy)).eq_ignore_ascii_case(ev_cm_clean)
-                    {
-                        (cm_legacy, r_legacy)
-                    } else if hex::encode(fr_to_be_bytes(&cm_legacy_zsa))
-                        .eq_ignore_ascii_case(ev_cm_clean)
-                    {
-                        (cm_legacy_zsa, r_legacy)
-                    } else {
-                        continue;
-                    };
+                    let (matched_cm, matched_r) =
+                        if hex::encode(fr_to_be_bytes(&cm_zsa)).eq_ignore_ascii_case(ev_cm_clean) {
+                            (cm_zsa, deterministic_r)
+                        } else if hex::encode(fr_to_be_bytes(&cm_direct))
+                            .eq_ignore_ascii_case(ev_cm_clean)
+                        {
+                            (cm_direct, deterministic_r)
+                        } else if hex::encode(fr_to_be_bytes(&cm_legacy))
+                            .eq_ignore_ascii_case(ev_cm_clean)
+                        {
+                            (cm_legacy, r_legacy)
+                        } else if hex::encode(fr_to_be_bytes(&cm_legacy_zsa))
+                            .eq_ignore_ascii_case(ev_cm_clean)
+                        {
+                            (cm_legacy_zsa, r_legacy)
+                        } else {
+                            continue;
+                        };
 
                     let cm_hex = format!("0x{}", hex::encode(fr_to_be_bytes(&matched_cm)));
                     let nullifier = derive_nullifier(nk, matched_cm, ev.leaf_index, 0);
@@ -655,6 +668,13 @@ impl PrivateNoteWallet {
                         } else {
                             NoteStatus::Unspent
                         },
+                        classification: if cand.value == 0 {
+                            NoteClassification::DecoyDummy
+                        } else if is_spent {
+                            NoteClassification::Spent
+                        } else {
+                            NoteClassification::ActiveSpendable
+                        },
                         created_at_secs: 0,
                         session_id: None,
                     };
@@ -692,6 +712,11 @@ impl PrivateNoteWallet {
             epoch_id: Some(0),
             merkle_path_hex: None,
             status: NoteStatus::Unconfirmed,
+            classification: if value == 0 {
+                NoteClassification::DecoyDummy
+            } else {
+                NoteClassification::ActiveSpendable
+            },
             created_at_secs: std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .unwrap_or_default()

@@ -352,6 +352,9 @@ mod tests {
             in2_asset_id: Some(Fr::from(asset_id_u8 as u64)),
             out1_asset_id: Some(Fr::from(asset_id_u8 as u64)),
             out2_asset_id: Some(Fr::from(asset_id_u8 as u64)),
+
+            perm_bit: Some(Fr::from(0u64)),
+            is_decoy: Some(Fr::from(0u64)),
         }
     }
 

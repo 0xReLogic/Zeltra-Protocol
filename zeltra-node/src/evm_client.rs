@@ -1321,7 +1321,10 @@ impl EvmClient {
             root.copy_from_slice(&result[result.len() - 32..]);
             Ok(root)
         } else {
-            anyhow::bail!("Invalid response length from note_tree_root: expected 32 bytes, got {}", result.len())
+            anyhow::bail!(
+                "Invalid response length from note_tree_root: expected 32 bytes, got {}",
+                result.len()
+            )
         }
     }
 

@@ -12,7 +12,12 @@
 
 use ark_bls12_381::{Bls12_381, Fr};
 use ark_ff::{Field, PrimeField};
+use ark_r1cs_std::alloc::AllocVar;
+use ark_r1cs_std::boolean::Boolean;
+use ark_r1cs_std::eq::EqGadget;
 use ark_r1cs_std::fields::fp::{AllocatedFp, FpVar};
+use ark_r1cs_std::fields::FieldVar;
+use ark_r1cs_std::select::CondSelectGadget;
 use ark_relations::gr1cs::{ConstraintSynthesizer, ConstraintSystemRef, SynthesisError};
 use ark_snark::SNARK;
 use ark_std::rand::rngs::StdRng;
@@ -113,6 +118,62 @@ pub struct JoinSplitCircuit {
     pub in2_asset_id: Option<Fr>,
     pub out1_asset_id: Option<Fr>,
     pub out2_asset_id: Option<Fr>,
+
+    // ── Private witnesses: Deniability Permutation & Decoy (DEC-051) ──
+    pub perm_bit: Option<Fr>,
+    pub is_decoy: Option<Fr>,
+}
+
+/// Nopenena Cryptographic Deniability & Decoy Permutation Gadget (DEC-051 / IACR 2024/903).
+///
+/// Implements a 7-constraint R1CS secret permutation and decoy pinning gadget:
+/// 1. Companion constraint (DEC-046): `is_decoy * aux_val == 0` (locks decoy output value strictly to 0)
+/// 2. Permutation of output values based on secret bit pi:
+///    - `out1_val = (1 - pi) * target_val + pi * aux_val`
+///    - `out2_val = pi * target_val + (1 - pi) * aux_val`
+/// 3. Permutation of output commitments based on secret bit pi:
+///    - `out1_cm = (1 - pi) * target_cm + pi * aux_cm`
+///    - `out2_cm = pi * target_cm + (1 - pi) * aux_cm`
+#[derive(Clone, Debug)]
+pub struct DeniabilityPermutationGadget {
+    pub perm_bit: Boolean<Fr>,
+    pub out1_val: FpVar<Fr>,
+    pub out2_val: FpVar<Fr>,
+    pub out1_cm: FpVar<Fr>,
+    pub out2_cm: FpVar<Fr>,
+}
+
+impl DeniabilityPermutationGadget {
+    pub fn enforce_permutation(
+        _cs: ConstraintSystemRef<Fr>,
+        perm_bit: &Boolean<Fr>,
+        target_val: &FpVar<Fr>,
+        target_cm: &FpVar<Fr>,
+        aux_val: &FpVar<Fr>,
+        aux_cm: &FpVar<Fr>,
+        is_decoy: &Boolean<Fr>,
+    ) -> Result<Self, SynthesisError> {
+        // 1. Enforce DEC-046 companion constraint on decoy slot:
+        // if is_decoy == true, aux_val MUST be exactly 0
+        let zero_val = FpVar::<Fr>::zero();
+        aux_val.conditional_enforce_equal(&zero_val, is_decoy)?;
+
+        // 2. Permute values based on secret bit pi
+        let out1_val = FpVar::conditionally_select(perm_bit, aux_val, target_val)?;
+        let out2_val = FpVar::conditionally_select(perm_bit, target_val, aux_val)?;
+
+        // 3. Permute commitments based on secret bit pi
+        let out1_cm = FpVar::conditionally_select(perm_bit, aux_cm, target_cm)?;
+        let out2_cm = FpVar::conditionally_select(perm_bit, target_cm, aux_cm)?;
+
+        Ok(Self {
+            perm_bit: perm_bit.clone(),
+            out1_val,
+            out2_val,
+            out1_cm,
+            out2_cm,
+        })
+    }
 }
 
 impl JoinSplitCircuit {
@@ -593,7 +654,6 @@ impl ConstraintSynthesizer<Fr> for JoinSplitCircuit {
             w5_rc,
             w5_mds,
         )?;
-        cm_out1.enforce_equal(&output_cm1_var)?;
 
         let cm_out2 = poseidon_w5_hash(
             &[out2_value_packed, out2_owner, out2_rho, out2_rand],
@@ -601,7 +661,62 @@ impl ConstraintSynthesizer<Fr> for JoinSplitCircuit {
             w5_rc,
             w5_mds,
         )?;
-        cm_out2.enforce_equal(&output_cm2_var)?;
+
+        // ═══════════════════════════════════════════════════════════════
+        // 6.B DEC-051: Nopenena Deniability Permutation & Companion Gadget
+        // ═══════════════════════════════════════════════════════════════
+        let perm_override = TAMPER_PERM_BIT.with(|cell| *cell.borrow());
+        let perm_val = perm_override.or(self.perm_bit).unwrap_or(Fr::from(0u64));
+        let perm_bool = perm_val == Fr::from(1u64);
+        let perm_bit_var = Boolean::new_witness(cs.clone(), || Ok(perm_bool))?;
+        if perm_val != Fr::from(0u64) && perm_val != Fr::from(1u64) {
+            if let Boolean::Var(ref b) = perm_bit_var {
+                let v = b.variable();
+                if v.is_witness() {
+                    if let Some(idx) = v.get_variable_index(0) {
+                        if let Some(mut cs_b) = cs.borrow_mut() {
+                            if idx < cs_b.assignments.witness_assignment.len() {
+                                cs_b.assignments.witness_assignment[idx] = perm_val;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        let is_decoy_override = TAMPER_IS_DECOY.with(|cell| *cell.borrow());
+        let is_decoy_val = is_decoy_override
+            .or(self.is_decoy)
+            .unwrap_or(Fr::from(0u64));
+        let is_decoy_bool = is_decoy_val == Fr::from(1u64);
+        let is_decoy_var = Boolean::new_witness(cs.clone(), || Ok(is_decoy_bool))?;
+        if is_decoy_val != Fr::from(0u64) && is_decoy_val != Fr::from(1u64) {
+            if let Boolean::Var(ref b) = is_decoy_var {
+                let v = b.variable();
+                if v.is_witness() {
+                    if let Some(idx) = v.get_variable_index(0) {
+                        if let Some(mut cs_b) = cs.borrow_mut() {
+                            if idx < cs_b.assignments.witness_assignment.len() {
+                                cs_b.assignments.witness_assignment[idx] = is_decoy_val;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        let permuted = DeniabilityPermutationGadget::enforce_permutation(
+            cs.clone(),
+            &perm_bit_var,
+            &out1_val,
+            &cm_out1,
+            &out2_val,
+            &cm_out2,
+            &is_decoy_var,
+        )?;
+
+        permuted.out1_cm.enforce_equal(&output_cm1_var)?;
+        permuted.out2_cm.enforce_equal(&output_cm2_var)?;
 
         // ═══════════════════════════════════════════════════════════════
         // 7. Value Conservation & Protocol Fee Ceiling Division (A1.2 & A1.3)
@@ -609,8 +724,11 @@ impl ConstraintSynthesizer<Fr> for JoinSplitCircuit {
         // Linear combination equality:
         // (v_in1 + v_in2) == (v_merchant + v_protocol_fee + v_execution_fee + v_out1 + v_out2)
         let total_inputs = &in1_value + &in2_value;
-        let total_outputs =
-            &merchant_var + &protocol_fee_var + &exec_fee_var + &out1_val + &out2_val;
+        let total_outputs = &merchant_var
+            + &protocol_fee_var
+            + &exec_fee_var
+            + &permuted.out1_val
+            + &permuted.out2_val;
         total_inputs.enforce_equal(&total_outputs)?;
 
         // A1.3: Flat 45 bps Protocol Fee Ceiling Division Gadget
@@ -1001,11 +1119,27 @@ impl ConstraintSynthesizer<Fr> for JoinSplitCircuit {
 
 std::thread_local! {
     static TAMPER_DIFF_INV: std::cell::RefCell<Option<Fr>> = const { std::cell::RefCell::new(None) };
+    static TAMPER_PERM_BIT: std::cell::RefCell<Option<Fr>> = const { std::cell::RefCell::new(None) };
+    static TAMPER_IS_DECOY: std::cell::RefCell<Option<Fr>> = const { std::cell::RefCell::new(None) };
 }
 
 /// Helper to inject a tampered witness for diff_inv during testing of DEC-046 soundness.
 pub fn set_tamper_diff_inv(val: Option<Fr>) {
     TAMPER_DIFF_INV.with(|cell| {
+        *cell.borrow_mut() = val;
+    });
+}
+
+/// Helper to inject a tampered witness for perm_bit during testing of DEC-051 soundness.
+pub fn set_tamper_perm_bit(val: Option<Fr>) {
+    TAMPER_PERM_BIT.with(|cell| {
+        *cell.borrow_mut() = val;
+    });
+}
+
+/// Helper to inject a tampered witness for is_decoy during testing of DEC-051 soundness.
+pub fn set_tamper_is_decoy(val: Option<Fr>) {
+    TAMPER_IS_DECOY.with(|cell| {
         *cell.borrow_mut() = val;
     });
 }
@@ -1149,6 +1283,9 @@ pub fn create_dummy_joinsplit_circuit() -> JoinSplitCircuit {
         in2_asset_id: Some(Fr::from(asset_id_u8 as u64)),
         out1_asset_id: Some(Fr::from(asset_id_u8 as u64)),
         out2_asset_id: Some(Fr::from(asset_id_u8 as u64)),
+
+        perm_bit: Some(Fr::from(0u64)),
+        is_decoy: Some(Fr::from(0u64)),
     }
 }
 
@@ -1368,6 +1505,9 @@ mod tests {
             in2_asset_id: Some(Fr::from(asset_id_u8 as u64)),
             out1_asset_id: Some(Fr::from(asset_id_u8 as u64)),
             out2_asset_id: Some(Fr::from(asset_id_u8 as u64)),
+
+            perm_bit: Some(Fr::from(0u64)),
+            is_decoy: Some(Fr::from(0u64)),
         };
 
         circuit.generate_constraints(cs.clone()).unwrap();

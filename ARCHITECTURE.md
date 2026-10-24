@@ -33,7 +33,7 @@ Dokumen ini memetakan struktur kode riil, crate, dan hirarki direktori di seluru
 ├── zeltra-core/                      — Primitif Kriptografi & Sirkuit ZK (Arkworks 0.6.0 BLS12-381)
 │   ├── src/lib.rs                    — Re-export BLS12-381, Poseidon, EVM, fees, MMR, dan sirkuit
 │   ├── src/note_circuit.rs           — PrivateNoteCircuit (1-in-1-out Groth16, 16 public inputs, two-limb quote hash, DEC-035B)
-│   ├── src/joinsplit_circuit.rs      — JoinSplitCircuit (Universal 2-in-2-out Groth16, 19 public inputs, companion constraints DEC-046)
+│   ├── src/joinsplit_circuit.rs      — JoinSplitCircuit (Universal 2-in-2-out Groth16, 19 public inputs, companion constraints DEC-046, DeniabilityPermutationGadget DEC-051)
 │   ├── src/selective_disclosure_circuit.rs — SelectiveDisclosureCircuit (CEX compliance Groth16 dengan Verifier Binding, DEC-040A)
 │   ├── src/circuit_gadgets.rs        — Reusable R1CS gadgets (flags_packed multi-asset, range checks, Poseidon gadgets)
 │   ├── src/note.rs                   — Note primitives (PrivateNoteV1 dengan asset_id, NotePlaintext)
@@ -49,7 +49,8 @@ Dokumen ini memetakan struktur kode riil, crate, dan hirarki direktori di seluru
 │   ├── src/curve_opt.rs              — Fast Jacobian point tripling 3P (4S+6M) & Eisenstein tau-endomorphism (3S+3M, DEC-050)
 │   ├── src/evm.rs                    — Serialisasi & formatting EVM untuk G1, G2, skalar, dan proof BLS12-381
 │   ├── src/serialization.rs          — Helper serialisasi data arkworks
-│   └── src/bin/                      — Binary CLI / benchmarks (bench.rs, flat_mmr_interop.rs, zsa_interop.rs)
+│   ├── tests/deniability_tests.rs    — Suite pengujian KAT & adversarial boundary DEC-051 (9/9 tests passed)
+│   └── src/bin/                      — Binary CLI / benchmarks (bench.rs, bench_curve.rs, bench_deniability.rs, flat_mmr_interop.rs, zsa_interop.rs)
 │
 ├── zeltra-node/                      — Stateless Single-Sequencer Relayer Node (Axum 0.8)
 │   ├── src/main.rs                   — Server boot, background worker orchestration, rate limiter

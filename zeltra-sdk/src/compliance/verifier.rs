@@ -652,6 +652,7 @@ mod tests {
                 epoch_id: Some(0),
                 merkle_path_hex: Some(vec!["00".repeat(32)]),
                 status: NoteStatus::Unspent,
+                classification: crate::wallet::note_wallet::NoteClassification::ActiveSpendable,
                 created_at_secs: 1773619200,
                 session_id: None,
             },

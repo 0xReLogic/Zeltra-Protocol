@@ -190,7 +190,9 @@ pub async fn index_mmr_events_tick(state: &AppState, client: &EvmClient) -> Resu
                 blocks.push(leaf.block_number);
             }
         }
-        state.last_indexed_block.store(to_block, std::sync::atomic::Ordering::SeqCst);
+        state
+            .last_indexed_block
+            .store(to_block, std::sync::atomic::Ordering::SeqCst);
 
         println!(
             "MMR_INDEXER: Indexed {} new MMR commitments up to block {}, new leaf_count: {}",
@@ -200,7 +202,9 @@ pub async fn index_mmr_events_tick(state: &AppState, client: &EvmClient) -> Resu
         );
     } else {
         state.db.update_mmr_indexed_block(to_block).await?;
-        state.last_indexed_block.store(to_block, std::sync::atomic::Ordering::SeqCst);
+        state
+            .last_indexed_block
+            .store(to_block, std::sync::atomic::Ordering::SeqCst);
     }
 
     Ok(())

@@ -323,6 +323,7 @@ impl PrivateNoteWallet {
                 epoch_id: change_epoch,
                 merkle_path_hex: None,
                 status: NoteStatus::Unconfirmed,
+                classification: NoteClassification::ActiveSpendable,
                 created_at_secs: current_time_secs,
                 session_id: Some(session_id.to_string()),
             };
@@ -612,6 +613,7 @@ impl PrivateNoteWallet {
             total_required: execution_fee,
             change_amount,
             has_change: true,
+            has_decoy_dummy: false,
         };
 
         let session_id = format!(

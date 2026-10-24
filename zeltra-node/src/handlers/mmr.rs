@@ -60,9 +60,15 @@ pub async fn handle_mmr_proof(
             }
         };
 
-        let root_hex = format!("0x{}", hex::encode(zeltra_core::fr_to_be_bytes(&tree.get_root())));
+        let root_hex = format!(
+            "0x{}",
+            hex::encode(zeltra_core::fr_to_be_bytes(&tree.get_root()))
+        );
         let commitment_fr = tree.get_leaf(leaf_index as usize).unwrap_or_default();
-        let cm_hex = format!("0x{}", hex::encode(zeltra_core::fr_to_be_bytes(&commitment_fr)));
+        let cm_hex = format!(
+            "0x{}",
+            hex::encode(zeltra_core::fr_to_be_bytes(&commitment_fr))
+        );
 
         let blk = {
             let blocks = state.in_memory_leaf_blocks.read().await;
@@ -112,7 +118,10 @@ pub async fn handle_mmr_tip(State(state): State<AppState>) -> Response {
         if count > 0 {
             (
                 count,
-                format!("0x{}", hex::encode(zeltra_core::fr_to_be_bytes(&tree.get_root()))),
+                format!(
+                    "0x{}",
+                    hex::encode(zeltra_core::fr_to_be_bytes(&tree.get_root()))
+                ),
             )
         } else {
             (
@@ -122,11 +131,15 @@ pub async fn handle_mmr_tip(State(state): State<AppState>) -> Response {
         }
     };
 
-    let mut last_indexed_block = state.last_indexed_block.load(std::sync::atomic::Ordering::Relaxed);
+    let mut last_indexed_block = state
+        .last_indexed_block
+        .load(std::sync::atomic::Ordering::Relaxed);
     if last_indexed_block == 0 {
         if let Ok(Some(b)) = state.db.get_mmr_last_indexed_block().await {
             last_indexed_block = b;
-            state.last_indexed_block.store(b, std::sync::atomic::Ordering::Relaxed);
+            state
+                .last_indexed_block
+                .store(b, std::sync::atomic::Ordering::Relaxed);
         }
     }
 

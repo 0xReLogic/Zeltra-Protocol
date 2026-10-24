@@ -40,20 +40,7 @@ Dokumen ini memetakan paper terpilih untuk lapisan kriptografi fundamental Zeltr
 
 ---
 
-## 4. Nopenena: Cryptographic Deniability for UTXO Blockchains with Dummy Notes (IACR ePrint 2024/903)
-* **File Jurnal:** [`jurnal/honorable/Nopenena-Untraceable-Payments-Small-Decoy-Sets.md`](file:///workspaces/Zeltra-Protocol/jurnal/honorable/Nopenena-Untraceable-Payments-Small-Decoy-Sets.md)
-* **Penulis:** Foteini Baldimtsi, Panagiotis Chatzigiannis, Konstantinos Chalkias
-* **Problem Kritis:**
-  Pada sistem pembayaran privat berbasis UTXO, pengembalian saldo sisa (*Change Note*) secara linier rentan terhadap analisis graf transaksi heuristik (*payment-graph analysis*). Pengamat on-chain dapat menebak nominal change note dan mengidentifikasi kepemilikan note lanjutan, menyebabkan degradasi anonymity set sebesar 40%–59%.
-* **Inovasi Paper:**
-  Protokol pembayaran rahasia berbasis decoy set kecil yang membuktikan secara matematis sifat *cryptographic deniability*: pengamat luar tidak dapat membedakan mana note pembayaran riil dan mana dummy change note yang disuntikkan secara acak.
-* **Implementasi di Zeltra Core:**
-  * Komponen: Universal JoinSplit circuit di [`zeltra-core/src/joinsplit_circuit.rs`](file:///workspaces/Zeltra-Protocol/zeltra-core/src/joinsplit_circuit.rs) (DEC-036A) dengan slot dummy canonical dan 448 range gates.
-  * Memungkinkan penyisipan dummy slot konstan bernilai nol/acak untuk memutus korelasi grafik saldo secara statistik dan menjamin privasi jangka panjang bagi AI Agent dan retail.
-
----
-
-## 5. Constant-Time Conditions for Left-to-Right Scalar Multiplication (IACR ePrint 2026/1881)
+## 4. Constant-Time Conditions for Left-to-Right Scalar Multiplication (IACR ePrint 2026/1881)
 * **File Jurnal / ePrint:** IACR ePrint 2026/1881 (Oktober 2026)
 * **Penulis:** Sergey Agievich
 * **Problem Kritis:**
@@ -66,7 +53,7 @@ Dokumen ini memetakan paper terpilih untuk lapisan kriptografi fundamental Zeltr
 
 ---
 
-## 6. Fast Polynomial Arithmetic in the Exponent without Roots of Unity (IACR ePrint 2026/2413)
+## 5. Fast Polynomial Arithmetic in the Exponent without Roots of Unity (IACR ePrint 2026/2413)
 * **File Jurnal / ePrint:** IACR ePrint 2026/2413 (Oktober 2026)
 * **Penulis:** Diane Ducrocq and Pierrick Gaudry
 * **Problem di Sistem Klasik:**
@@ -79,7 +66,7 @@ Dokumen ini memetakan paper terpilih untuk lapisan kriptografi fundamental Zeltr
 
 ---
 
-## 7. The Geometry of Witness-Update Tradeoffs in Additive Positive Accumulators (IACR ePrint 2026/2362)
+## 6. The Geometry of Witness-Update Tradeoffs in Additive Positive Accumulators (IACR ePrint 2026/2362)
 * **File Jurnal / ePrint:** IACR ePrint 2026/2362 (Oktober 2026)
 * **Penulis:** Wei Qi
 * **Problem Kritis:**
@@ -91,7 +78,7 @@ Dokumen ini memetakan paper terpilih untuk lapisan kriptografi fundamental Zeltr
   * Memberikan model matematika presisi untuk penjadwalan caching bukti MMR di client SDK: bukti daun di-refresh dengan jadwal amortisasi optimal $O(\log N)$ tanpa pemborosan komputasi traversal hashing ulang yang redundan.
 ---
 
-## 8. Cryptanalysis & Security Margins of Poseidon via Subspace Restriction (IACR ePrint 2026/1692)
+## 7. Cryptanalysis & Security Margins of Poseidon via Subspace Restriction (IACR ePrint 2026/1692)
 * **File Jurnal / ePrint:** IACR ePrint 2026/1692 (Oktober 2026)
 * **Penulis:** Amit Singh Bhati, Sundas Tariq, Tomer Ashur
 * **Problem Kritis:**
@@ -104,7 +91,7 @@ Dokumen ini memetakan paper terpilih untuk lapisan kriptografi fundamental Zeltr
 
 ---
 
-## 9. Dixon Resultants Algebraic Cryptanalysis & Parameter Hardening for Poseidon-W5 (IACR ePrint 2026/1969)
+## 8. Dixon Resultants Algebraic Cryptanalysis & Parameter Hardening for Poseidon-W5 (IACR ePrint 2026/1969)
 * **File Jurnal / ePrint:** IACR ePrint 2026/1969 (September 2026)
 * **Penulis:** Haohai Suo, Jiamin Cui
 * **Problem Kritis:**
@@ -122,7 +109,7 @@ Dokumen ini memetakan paper terpilih untuk lapisan kriptografi fundamental Zeltr
 
 ---
 
-## 10. Top Gun: Degree Annihilation Attacks on Poseidon & Security Margins (IACR ePrint 2026/1254)
+## 9. Top Gun: Degree Annihilation Attacks on Poseidon & Security Margins (IACR ePrint 2026/1254)
 * **File Jurnal / ePrint:** IACR ePrint 2026/1254 (September 2026)
 * **Penulis:** Antonio Sanso, Giuseppe Vitto
 * **Problem Kritis:**
@@ -135,7 +122,7 @@ Dokumen ini memetakan paper terpilih untuk lapisan kriptografi fundamental Zeltr
 
 ---
 
-## 11. Slipway: Accessing Finite Subspace Trails & Full-Round Absorption in Poseidon (IACR ePrint 2026/1579)
+## 10. Slipway: Accessing Finite Subspace Trails & Full-Round Absorption in Poseidon (IACR ePrint 2026/1579)
 * **File Jurnal / ePrint:** IACR ePrint 2026/1579 (September 2026)
 * **Penulis:** Giuseppe Vitto
 * **Problem Kritis:**

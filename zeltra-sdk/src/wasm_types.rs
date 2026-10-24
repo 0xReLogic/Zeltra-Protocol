@@ -377,4 +377,3 @@ pub struct WasmFastScanResult {
     pub recovered_notes: Vec<WasmRecoveredNote>,
     pub elapsed_ms: u64,
 }
-

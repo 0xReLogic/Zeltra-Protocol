@@ -23,7 +23,7 @@ use zeltra_sdk::compliance::{
     VerifierBinding,
 };
 use zeltra_sdk::wallet::note_wallet::{
-    NoteEvent, NoteStatus, PrivateNoteWallet, ReadOnlyAuditorSession, SelectedSpend, WalletError,
+    NoteClassification, NoteEvent, NoteStatus, PrivateNoteWallet, ReadOnlyAuditorSession, SelectedSpend, WalletError,
     WalletNote,
 };
 
@@ -53,6 +53,7 @@ fn insert_test_note(
             epoch_id: Some(0),
             merkle_path_hex: Some(vec!["00".repeat(32); 5]),
             status,
+            classification: NoteClassification::ActiveSpendable,
             created_at_secs: now,
             session_id: None,
         },
@@ -476,6 +477,7 @@ fn test_csv_export_properly_formatted() {
             epoch_id: Some(0),
             merkle_path_hex: Some(vec![]),
             status: NoteStatus::Unspent,
+            classification: NoteClassification::ActiveSpendable,
             created_at_secs: now,
             session_id: None,
         },
@@ -535,6 +537,7 @@ fn test_cex_proof_generation_valid() {
             epoch_id: Some(0),
             merkle_path_hex: Some(vec!["00".repeat(32)]),
             status: NoteStatus::Unspent,
+            classification: NoteClassification::ActiveSpendable,
             created_at_secs: 1773619200,
             session_id: None,
         },
@@ -772,6 +775,7 @@ fn test_export_never_leaks_spending_key() {
             epoch_id: Some(0),
             merkle_path_hex: Some(vec![]),
             status: NoteStatus::Unspent,
+            classification: NoteClassification::ActiveSpendable,
             created_at_secs: now,
             session_id: None,
         },
@@ -831,6 +835,7 @@ fn test_auditor_session_cannot_spend() {
         total_required: 52,
         change_amount: 48,
         has_change: true,
+        has_decoy_dummy: false,
     };
     let res_joinsplit = session.prepare_joinsplit_spend_proof(
         &dummy_selected,

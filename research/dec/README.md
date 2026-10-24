@@ -76,14 +76,14 @@ Folder `research/dec/` memuat seluruh catatan keputusan arsitektur resmi (*Archi
 | **DEC-045A** | [`DEC-045A-flat-postorder-mmr-array-and-zero-hash-proof-engine.md`](file:///workspaces/Zeltra-Protocol/research/dec/DEC-045A-flat-postorder-mmr-array-and-zero-hash-proof-engine.md) | Flat Post-Order MMR Array, Bitwise Sibling Navigation & Zero-Hash Proof Engine | - |
 | **DEC-045B** | [`DEC-045B-in-memory-concurrent-accumulator-and-relayer-proof-ingress.md`](file:///workspaces/Zeltra-Protocol/research/dec/DEC-045B-in-memory-concurrent-accumulator-and-relayer-proof-ingress.md) | In-Memory Concurrent Accumulator, Incremental Indexer & Zero-Latency Proof Ingress | - |
 | **DEC-045C** | [`DEC-045C-view-tag-memo-protocol-and-client-scanning-acceleration.md`](file:///workspaces/Zeltra-Protocol/research/dec/DEC-045C-view-tag-memo-protocol-and-client-scanning-acceleration.md) | 1-Byte View Tag Memo Protocol & High-Throughput Client Trial Decryption | - |
-| **DEC-046** | [`DEC-046-null-branch-witness-attack-defense-and-quadratic-encoding-soundness.md`](file:///workspaces/Zeltra-Protocol/research/dec/DEC-046-null-branch-witness-attack-defense-and-quadratic-encoding-soundness.md) | Null-Branch Witness Attack Defense, Quadratic Encoding Soundness & R1CS Relation-Encoding Hardening for Conditional ZK-UTXO Circuits | - |
-| **DEC-047** | [`DEC-047-jacobian-diagnostics-and-tangent-space-rigidity-auditing-for-underconstrained-circuits.md`](file:///workspaces/Zeltra-Protocol/research/dec/DEC-047-jacobian-diagnostics-and-tangent-space-rigidity-auditing-for-underconstrained-circuits.md) | Automated Jacobian Diagnostics and Tangent-Space Rigidity Auditing for Under-Constrained Zero-Knowledge Circuits | - |
+| **DEC-046** | [`DEC-046-null-branch-witness-attack-defense-and-quadratic-encoding-soundness.md`](file:///workspaces/Zeltra-Protocol/research/dec/DEC-046-null-branch-witness-attack-defense-and-quadratic-encoding-soundness.md) | Null-Branch Witness Attack Defense, Quadratic Encoding Soundness & R1CS Relation-Encoding Hardening for Conditional ZK-UTXO| **DEC-047** | [`DEC-047-jacobian-diagnostics-and-tangent-space-rigidity-auditing-for-underconstrained-circuits.md`](file:///workspaces/Zeltra-Protocol/research/dec/DEC-047-jacobian-diagnostics-and-tangent-space-rigidity-auditing-for-underconstrained-circuits.md) | Automated Jacobian Diagnostics and Tangent-Space Rigidity Auditing for Under-Constrained Zero-Knowledge Circuits | - |
 | **DEC-048** | [`DEC-048-committing-aead-partitioning-oracle-defense-and-key-binding-memos.md`](file:///workspaces/Zeltra-Protocol/research/dec/DEC-048-committing-aead-partitioning-oracle-defense-and-key-binding-memos.md) | Committing AEAD & Partitioning Oracle Defense for Encrypted Note Memos | - |
 | **DEC-050** | [`DEC-050-fast-jacobian-tripling-and-eisenstein-endomorphism-bls12-381.md`](file:///workspaces/Zeltra-Protocol/research/dec/DEC-050-fast-jacobian-tripling-and-eisenstein-endomorphism-bls12-381.md) | Fast Jacobian Point Tripling and Eisenstein Endomorphism on BLS12-381 (G1) | 2026-10-24 |
+| **DEC-051** | [`DEC-051-nopenena-cryptographic-deniability-small-decoy-sets-dummy-notes.md`](file:///workspaces/Zeltra-Protocol/research/dec/DEC-051-nopenena-cryptographic-deniability-small-decoy-sets-dummy-notes.md) | Nopenena Cryptographic Deniability, Small Decoy Sets, and Dummy Note Architecture | 2026-10-24 |
 
 ---
 
-##  Pengelompokan Berdasarkan Domain Arsitektur
+## 📂 Pengelompokan Berdasarkan Domain Arsitektur
 
 ### 1. Legacy Phase & Genesis (Archived Reference)
 - **DEC-001 s/d DEC-015**: Alur awal deposit-reveal, collateral lifecycle, threshold BLS signature, dan mitigasi refund timeout.
@@ -98,6 +98,7 @@ Folder `research/dec/` memuat seluruh catatan keputusan arsitektur resmi (*Archi
 - **DEC-046**: Null-Branch Witness Attack Defense & Quadratic Encoding Soundness (IACR 2026/2235).
 - **DEC-047**: Augmented Jacobian Diagnostics & Tangent Space Rigidity Auditing (IACR 2026/1852).
 - **DEC-050**: Fast Jacobian Point Tripling & Eisenstein Endomorphism on BLS12-381 G1 (IACR 2024/1906).
+- **DEC-051**: Nopenena Cryptographic Deniability, Small Decoy Sets & Dummy Note Architecture (IACR 2024/903).
 
 ### 3. Dual-Asset (USDC & WETH) & Merkle Mountain Range (MMR)
 - **DEC-032**: Merkle Mountain Range (MMR) Commitment Accumulator.
@@ -111,6 +112,7 @@ Folder `research/dec/` memuat seluruh catatan keputusan arsitektur resmi (*Archi
 - **DEC-043 (A/B/C)**: Shielded-to-Shielded In-Pool Transfer (Strict Mode 2 JoinSplit), ZSA Bech32m Address (`zs1...`), dan Merchant Masking.
 - **DEC-048**: Committing AEAD Partitioning Oracle Defense (`EtH-KS` Minematsu & Inoue, IACR 2026/240).
 - **DEC-049**: Leakage-Resilient Decapsulation & Constant-Time Branchless Scan CT-FOE (Pay, Peters & Standaert 2026).
+- **DEC-051**: Decoy Dummy Note Indistinguishability & Secret Permutation Routing.Standaert 2026).
 
 ### 5. Institutional Compliance & Web3 Commercial Pillars
 - **DEC-040 (A/B/C)**: Viewing Key Export Suite (`sk`, `nk`, `fvk`, `ivk`), Selective Disclosure Circuit, CEX Audit Verification Engine (Binance/Coinbase).

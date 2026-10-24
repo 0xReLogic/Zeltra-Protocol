@@ -12,7 +12,9 @@ use rand::rngs::OsRng;
 use std::time::Instant;
 use zeltra_sdk::coin_selection::{select_notes_stochastic_knapsack, KnapsackConfig};
 use zeltra_sdk::storage::{DbNoteRecord, DbNoteStatus, SqlCipherNoteStore};
-use zeltra_sdk::wallet::note_wallet::{NoteStatus, PrivateNoteWallet, WalletNote};
+use zeltra_sdk::wallet::note_wallet::{
+    NoteClassification, NoteStatus, PrivateNoteWallet, WalletNote,
+};
 
 fn mock_wallet_note(cm: &str, val: u64, epoch: u32) -> WalletNote {
     WalletNote {
@@ -27,6 +29,7 @@ fn mock_wallet_note(cm: &str, val: u64, epoch: u32) -> WalletNote {
         epoch_id: Some(epoch),
         merkle_path_hex: Some(vec!["00".repeat(32); 20]),
         status: NoteStatus::Unspent,
+        classification: NoteClassification::ActiveSpendable,
         created_at_secs: 1000,
         session_id: None,
     }
@@ -110,6 +113,7 @@ fn test_b6_2_progressive_consolidation_6_notes_to_2_notes() {
             epoch_id: Some(1),
             merkle_path_hex: Some(vec!["00".repeat(32); 20]),
             status: NoteStatus::Unspent,
+            classification: NoteClassification::ActiveSpendable,
             created_at_secs: 1000,
             session_id: None,
         };
@@ -179,6 +183,7 @@ fn test_b6_2_progressive_consolidation_6_notes_to_2_notes() {
             epoch_id: Some(1),
             merkle_path_hex: Some(vec!["00".repeat(32); 20]),
             status: NoteStatus::Unspent,
+            classification: NoteClassification::ActiveSpendable,
             created_at_secs: 1010 + round as u64,
             session_id: None,
         };
@@ -251,6 +256,7 @@ fn test_b6_4_crash_recovery_end_to_end_simulation() {
             leaf_index: Some(1),
             epoch_id: 1,
             status: DbNoteStatus::Active,
+            is_decoy: false,
             created_at: 1000,
             updated_at: 1000,
         };
@@ -264,6 +270,7 @@ fn test_b6_4_crash_recovery_end_to_end_simulation() {
             leaf_index: Some(2),
             epoch_id: 1,
             status: DbNoteStatus::Active,
+            is_decoy: false,
             created_at: 1000,
             updated_at: 1000,
         };
@@ -280,6 +287,7 @@ fn test_b6_4_crash_recovery_end_to_end_simulation() {
             leaf_index: None,
             epoch_id: 1,
             status: DbNoteStatus::Unconfirmed,
+            is_decoy: false,
             created_at: 1005,
             updated_at: 1005,
         };

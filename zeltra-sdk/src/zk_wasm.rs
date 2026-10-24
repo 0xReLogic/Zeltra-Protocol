@@ -17,12 +17,11 @@ use ark_serialize::CanonicalDeserialize;
 use wasm_bindgen::prelude::*;
 
 use zeltra_core::{
-    compute_binding_commitment, compute_scope_hash,
-    decompose_challenge_to_limbs, derive_joinsplit_dummy_nullifier, derive_joinsplit_nullifier,
-    derive_note_randomness, derive_nullifier, derive_nullifier_key,
-    extract_joinsplit_public_inputs, extract_public_inputs, from_evm_scalar,
-    generate_disclosure_proof, generate_joinsplit_proof, generate_note_proof, note_commitment,
-    to_evm_g1, to_evm_g2, to_evm_scalar, JoinSplitCircuit, PrivateNoteCircuit,
+    compute_binding_commitment, compute_scope_hash, decompose_challenge_to_limbs,
+    derive_joinsplit_dummy_nullifier, derive_joinsplit_nullifier, derive_note_randomness,
+    derive_nullifier, derive_nullifier_key, extract_joinsplit_public_inputs, extract_public_inputs,
+    from_evm_scalar, generate_disclosure_proof, generate_joinsplit_proof, generate_note_proof,
+    note_commitment, to_evm_g1, to_evm_g2, to_evm_scalar, JoinSplitCircuit, PrivateNoteCircuit,
     SelectiveDisclosureCircuit, CANONICAL_DUMMY_LEAF_INDEX, CANONICAL_DUMMY_OWNER,
     CANONICAL_DUMMY_RANDOMNESS, CANONICAL_DUMMY_RHO, CANONICAL_DUMMY_VALUE,
     NUM_DISCLOSURE_PUBLIC_INPUTS, NUM_JOINSPLIT_PUBLIC_INPUTS, NUM_PUBLIC_INPUTS,
@@ -632,6 +631,9 @@ pub fn prove_joinsplit_with_pk(
         in2_asset_id: Some(aid_fr),
         out1_asset_id: Some(aid_fr),
         out2_asset_id: Some(aid_fr),
+
+        perm_bit: Some(Fr::from(0u64)),
+        is_decoy: Some(Fr::from(0u64)),
     };
 
     // Preflight constraint satisfiability verification (DEC-041 Invariant 5: Fail-closed zero-panic)
@@ -927,14 +929,18 @@ pub fn scan_memos_fast_wasm(request_json: &str) -> Result<String, JsValue> {
 
         let mut candidate_pair = None;
         if memo_view_tag == expected_tag {
-            if let Some((pt, rand)) = zeltra_core::decrypt_note_memo_payload(&memo_bytes, &shared_secret) {
+            if let Some((pt, rand)) =
+                zeltra_core::decrypt_note_memo_payload(&memo_bytes, &shared_secret)
+            {
                 candidate_pair = Some((pt, rand));
             }
         }
 
         // Fallback for legacy notes without tag
         if candidate_pair.is_none() {
-            if let Some((pt, rand)) = zeltra_core::decrypt_note_memo_deterministic(&memo_bytes, &ivk) {
+            if let Some((pt, rand)) =
+                zeltra_core::decrypt_note_memo_deterministic(&memo_bytes, &ivk)
+            {
                 candidate_pair = Some((pt, rand));
             }
         }
@@ -947,7 +953,10 @@ pub fn scan_memos_fast_wasm(request_json: &str) -> Result<String, JsValue> {
                     value: pt.value,
                     asset_id: pt.asset_id,
                     rho_hex: format!("0x{}", hex::encode(zeltra_core::fr_to_be_bytes(&pt.rho))),
-                    randomness_hex: format!("0x{}", hex::encode(zeltra_core::fr_to_be_bytes(&rand))),
+                    randomness_hex: format!(
+                        "0x{}",
+                        hex::encode(zeltra_core::fr_to_be_bytes(&rand))
+                    ),
                 });
             }
             prefilter_passed += 1;
@@ -966,7 +975,5 @@ pub fn scan_memos_fast_wasm(request_json: &str) -> Result<String, JsValue> {
         elapsed_ms,
     };
 
-    serde_json::to_string(&res)
-        .map_err(|e| JsValue::from_str(&format!("Serialization error: {e}")))
+    serde_json::to_string(&res).map_err(|e| JsValue::from_str(&format!("Serialization error: {e}")))
 }
-
