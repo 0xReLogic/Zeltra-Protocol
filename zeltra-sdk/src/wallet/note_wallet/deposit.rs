@@ -101,6 +101,7 @@ impl PrivateNoteWallet {
             epoch_id: Some(0),
             merkle_path_hex: None,
             status: NoteStatus::PendingDeposit,
+            classification: NoteClassification::ActiveSpendable,
             created_at_secs: now_secs,
             session_id: None,
         };
@@ -194,6 +195,7 @@ impl PrivateNoteWallet {
             epoch_id: Some(0),
             merkle_path_hex: None,
             status: NoteStatus::Unconfirmed,
+            classification: NoteClassification::ActiveSpendable,
             created_at_secs: current_time_secs,
             session_id: None,
         };
@@ -251,6 +253,7 @@ impl PrivateNoteWallet {
             epoch_id: Some(epoch_id),
             merkle_path_hex: None,
             status: NoteStatus::Unconfirmed,
+            classification: NoteClassification::ActiveSpendable,
             created_at_secs: current_time_secs,
             session_id: None,
         };

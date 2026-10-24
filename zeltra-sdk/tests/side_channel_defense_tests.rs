@@ -63,7 +63,11 @@ fn test_gate_v2_category_1_non_contributory_epk() {
     let mut bad_memo_one = bad_memo_zero;
     bad_memo_one[0] = 1;
     let (is_valid_one, pt_one) = trial_decrypt_ct(&bad_memo_one, &ivk.secret_bytes());
-    assert_eq!(is_valid_one.unwrap_u8(), 0, "Low-order point 1 must fail-closed");
+    assert_eq!(
+        is_valid_one.unwrap_u8(),
+        0,
+        "Low-order point 1 must fail-closed"
+    );
     assert_eq!(pt_one, CtNotePlaintext::dummy());
 
     // Case 1C: SDK Wallet Level Verification
@@ -352,8 +356,7 @@ fn test_gate_v3_statistical_dudect_evaluation() {
     for i in 0..num_pool {
         let rho = Fr::rand(&mut rng);
         let (memo, _) =
-            encrypt_committing_note_memo((i as u64 + 1) * 1000, rho, (i % 2) as u64, &ivk)
-                .unwrap();
+            encrypt_committing_note_memo((i as u64 + 1) * 1000, rho, (i % 2) as u64, &ivk).unwrap();
         let memo_arr: [u8; ENCRYPTED_MEMO_SIZE] = memo.try_into().unwrap();
         valid_memos.push(memo_arr);
     }
@@ -390,19 +393,13 @@ fn test_gate_v3_statistical_dudect_evaluation() {
     let n_control = 1000usize;
     for i in 0..n_control {
         let valid_idx = i % num_pool;
-        let cycles_v = unsafe {
-            measure_trace_cycles(|| {
-                leaky_decrypt(&valid_memos[valid_idx], &ivk_bytes)
-            })
-        };
+        let cycles_v =
+            unsafe { measure_trace_cycles(|| leaky_decrypt(&valid_memos[valid_idx], &ivk_bytes)) };
         pos_group_valid.update(cycles_v as f64);
 
         let rand_idx = i % num_pool;
-        let cycles_r = unsafe {
-            measure_trace_cycles(|| {
-                leaky_decrypt(&random_memos[rand_idx], &ivk_bytes)
-            })
-        };
+        let cycles_r =
+            unsafe { measure_trace_cycles(|| leaky_decrypt(&random_memos[rand_idx], &ivk_bytes)) };
         pos_group_random.update(cycles_r as f64);
     }
 
@@ -427,18 +424,10 @@ fn test_gate_v3_statistical_dudect_evaluation() {
         let r0 = &random_memos[i % num_pool];
         let r1 = &random_memos[(i + 1) % num_pool];
 
-        let c0 = unsafe {
-            measure_trace_cycles(|| {
-                trial_decrypt_ct(r0, &ivk_bytes)
-            })
-        };
+        let c0 = unsafe { measure_trace_cycles(|| trial_decrypt_ct(r0, &ivk_bytes)) };
         neg_group_0.update(c0 as f64);
 
-        let c1 = unsafe {
-            measure_trace_cycles(|| {
-                trial_decrypt_ct(r1, &ivk_bytes)
-            })
-        };
+        let c1 = unsafe { measure_trace_cycles(|| trial_decrypt_ct(r1, &ivk_bytes)) };
         neg_group_1.update(c1 as f64);
     }
 
@@ -468,24 +457,16 @@ fn test_gate_v3_statistical_dudect_evaluation() {
 
         // Alternating measurement to distribute system interrupt jitter equally
         if i % 2 == 0 {
-            let cv = unsafe {
-                measure_trace_cycles(|| trial_decrypt_ct(v_memo, &ivk_bytes))
-            };
+            let cv = unsafe { measure_trace_cycles(|| trial_decrypt_ct(v_memo, &ivk_bytes)) };
             ct_group_valid.update(cv as f64);
 
-            let cr = unsafe {
-                measure_trace_cycles(|| trial_decrypt_ct(r_memo, &ivk_bytes))
-            };
+            let cr = unsafe { measure_trace_cycles(|| trial_decrypt_ct(r_memo, &ivk_bytes)) };
             ct_group_random.update(cr as f64);
         } else {
-            let cr = unsafe {
-                measure_trace_cycles(|| trial_decrypt_ct(r_memo, &ivk_bytes))
-            };
+            let cr = unsafe { measure_trace_cycles(|| trial_decrypt_ct(r_memo, &ivk_bytes)) };
             ct_group_random.update(cr as f64);
 
-            let cv = unsafe {
-                measure_trace_cycles(|| trial_decrypt_ct(v_memo, &ivk_bytes))
-            };
+            let cv = unsafe { measure_trace_cycles(|| trial_decrypt_ct(v_memo, &ivk_bytes)) };
             ct_group_valid.update(cv as f64);
         }
     }

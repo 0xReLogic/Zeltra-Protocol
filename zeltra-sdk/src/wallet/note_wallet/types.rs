@@ -159,6 +159,16 @@ fn default_wallet_note_asset_id() -> u8 {
     1 // USDC
 }
 
+/// Note Classification for DEC-051 Cryptographic Deniability & Decoy Dummy Notes
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub enum NoteClassification {
+    #[default]
+    ActiveSpendable,
+    PendingSpend,
+    Spent,
+    DecoyDummy, // Nopenena decoy note (v = 0, excluded from spendable balance)
+}
+
 /// UTXO Note stored in client wallet
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct WalletNote {
@@ -175,6 +185,8 @@ pub struct WalletNote {
     pub epoch_id: Option<u32>,
     pub merkle_path_hex: Option<Vec<String>>,
     pub status: NoteStatus,
+    #[serde(default)]
+    pub classification: NoteClassification, // DEC-051
     pub created_at_secs: u64,
     pub session_id: Option<String>,
 }
@@ -193,6 +205,10 @@ pub enum NoteEpochStatus {
 impl WalletNote {
     pub fn epoch(&self) -> u32 {
         self.epoch_id.unwrap_or(0)
+    }
+
+    pub fn is_decoy(&self) -> bool {
+        self.classification == NoteClassification::DecoyDummy || self.value == 0
     }
 
     pub fn check_epoch_status(&self, current_epoch: u32) -> NoteEpochStatus {
@@ -228,6 +244,7 @@ pub struct SelectedSpend {
     pub total_required: u64,
     pub change_amount: u64,
     pub has_change: bool,
+    pub has_decoy_dummy: bool, // DEC-051
 }
 
 impl SelectedSpend {

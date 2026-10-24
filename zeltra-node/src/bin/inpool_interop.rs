@@ -464,7 +464,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             let mut circuit = zeltra_core::create_dummy_joinsplit_circuit();
 
             if field == "baseline" {
-                match zeltra_core::joinsplit_circuit::check_joinsplit_circuit_satisfaction(circuit) {
+                match zeltra_core::joinsplit_circuit::check_joinsplit_circuit_satisfaction(circuit)
+                {
                     Ok(true) => {
                         println!(r#"{{"satisfied":true,"status":"SATISFIED","field":"baseline"}}"#);
                         std::process::exit(0);
@@ -522,12 +523,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
             match res {
                 Ok(true) => {
-                    println!(r#"{{"satisfied":true,"status":"UNEXPECTEDLY_SATISFIED","field":"{}"}}"#, field);
+                    println!(
+                        r#"{{"satisfied":true,"status":"UNEXPECTEDLY_SATISFIED","field":"{}"}}"#,
+                        field
+                    );
                     std::process::exit(0);
                 }
                 Ok(false) => {
                     eprintln!("Constraint system not satisfied: DEC-046 null-branch constraint rejected tampered witness for field '{}'", field);
-                    println!(r#"{{"satisfied":false,"status":"REJECTED","field":"{}"}}"#, field);
+                    println!(
+                        r#"{{"satisfied":false,"status":"REJECTED","field":"{}"}}"#,
+                        field
+                    );
                     std::process::exit(1);
                 }
                 Err(e) => {

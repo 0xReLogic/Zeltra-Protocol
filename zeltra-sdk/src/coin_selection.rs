@@ -146,13 +146,17 @@ pub fn select_notes_stochastic_knapsack<'a>(
         .ok_or_else(|| WalletError::CryptoError("Total required spend amount overflow".into()))?;
 
     // Filter spendable candidates:
-    // 1. Must have valid Merkle witness / leaf index
-    // 2. Status must be Unspent or expired Reserved
-    // 3. Must not be ExpiredRequiresRollover (DEC-036B B1.4)
+    // 1. Must not be DecoyDummy note (v = 0, DEC-051)
+    // 2. Must have valid Merkle witness / leaf index
+    // 3. Status must be Unspent or expired Reserved
+    // 4. Must not be ExpiredRequiresRollover (DEC-036B B1.4)
     let spendable: Vec<&'a WalletNote> = candidates
         .iter()
         .copied()
         .filter(|n| {
+            if n.is_decoy() || n.value == 0 {
+                return false;
+            }
             if n.merkle_path_hex.is_none() || n.leaf_index.is_none() {
                 return false;
             }
@@ -184,6 +188,7 @@ pub fn select_notes_stochastic_knapsack<'a>(
             total_required,
             change_amount: 0,
             has_change: false,
+            has_decoy_dummy: true, // DEC-051: Injects Decoy Dummy Note on Exact Pay
         });
     }
 
@@ -218,6 +223,7 @@ pub fn select_notes_stochastic_knapsack<'a>(
             total_required: selected_note.value - change_amount,
             change_amount,
             has_change,
+            has_decoy_dummy: !has_change, // DEC-051: Injects Decoy Dummy when change absorbed as dust
         });
     }
 
@@ -281,6 +287,7 @@ pub fn select_notes_stochastic_knapsack<'a>(
             total_required: sum - change_amount,
             change_amount,
             has_change,
+            has_decoy_dummy: !has_change, // DEC-051: Injects Decoy Dummy on exact pay or dust absorption
         });
     }
 
@@ -302,6 +309,7 @@ pub fn select_notes_stochastic_knapsack<'a>(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::wallet::note_wallet::NoteClassification;
 
     fn mock_note(cm: &str, val: u64, epoch: u32, status: NoteStatus) -> WalletNote {
         mock_note_with_asset(cm, val, 1 /* USDC */, epoch, status)
@@ -326,6 +334,7 @@ mod tests {
             epoch_id: Some(epoch),
             merkle_path_hex: Some(vec!["0x04".to_string(); 20]),
             status,
+            classification: NoteClassification::ActiveSpendable,
             created_at_secs: 1000,
             session_id: None,
         }

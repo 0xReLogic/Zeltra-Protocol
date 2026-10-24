@@ -89,6 +89,8 @@ pub struct DbNoteRecord {
     pub nullifier_key: String,
     pub epoch_id: u32,
     pub status: DbNoteStatus,
+    #[serde(default)]
+    pub is_decoy: bool,
     pub created_at: u64,
     pub updated_at: u64,
 }
@@ -178,7 +180,7 @@ impl SqlCipherNoteStore {
         )
         .map_err(|e| StorageError::DbError(format!("Pragma WAL failed: {e}")))?;
 
-        // 3. Migrate tables according to DEC-036B Section 8
+        // 3. Migrate tables according to DEC-036B Section 8 & DEC-051
         conn.execute_batch(
             "CREATE TABLE IF NOT EXISTS private_notes (
                 commitment TEXT PRIMARY KEY,
@@ -190,6 +192,7 @@ impl SqlCipherNoteStore {
                 nullifier_key TEXT NOT NULL,
                 epoch_id INTEGER NOT NULL,
                 status TEXT NOT NULL CHECK(status IN ('UNCONFIRMED', 'ACTIVE', 'SPENT_PENDING', 'SPENT_CONFIRMED')),
+                is_decoy INTEGER DEFAULT 0,
                 created_at INTEGER NOT NULL,
                 updated_at INTEGER NOT NULL
             );
@@ -207,6 +210,11 @@ impl SqlCipherNoteStore {
         )
         .map_err(|e| StorageError::DbError(format!("Migration failed: {e}")))?;
 
+        let _ = conn.execute(
+            "ALTER TABLE private_notes ADD COLUMN is_decoy INTEGER DEFAULT 0;",
+            [],
+        );
+
         Ok(())
     }
 
@@ -219,12 +227,13 @@ impl SqlCipherNoteStore {
 
         conn.execute(
             "INSERT INTO private_notes (
-                commitment, leaf_index, value, owner_pk, rho, rand, nullifier_key, epoch_id, status, created_at, updated_at
-            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)
+                commitment, leaf_index, value, owner_pk, rho, rand, nullifier_key, epoch_id, status, is_decoy, created_at, updated_at
+            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)
             ON CONFLICT(commitment) DO UPDATE SET
                 leaf_index = excluded.leaf_index,
                 value = excluded.value,
                 status = excluded.status,
+                is_decoy = excluded.is_decoy,
                 updated_at = excluded.updated_at;",
             rusqlite::params![
                 note.commitment,
@@ -236,6 +245,7 @@ impl SqlCipherNoteStore {
                 note.nullifier_key,
                 note.epoch_id as i64,
                 note.status.as_str(),
+                if note.is_decoy { 1i64 } else { 0i64 },
                 note.created_at as i64,
                 note.updated_at as i64,
             ],
@@ -254,7 +264,7 @@ impl SqlCipherNoteStore {
 
         let mut stmt = conn
             .prepare(
-                "SELECT commitment, leaf_index, value, owner_pk, rho, rand, nullifier_key, epoch_id, status, created_at, updated_at
+                "SELECT commitment, leaf_index, value, owner_pk, rho, rand, nullifier_key, epoch_id, status, is_decoy, created_at, updated_at
                  FROM private_notes WHERE commitment = ?1;",
             )
             .map_err(|e| StorageError::DbError(e.to_string()))?;
@@ -283,11 +293,12 @@ impl SqlCipherNoteStore {
             let epoch_i64: i64 = row
                 .get(7)
                 .map_err(|e| StorageError::DbError(e.to_string()))?;
+            let is_decoy_i64: i64 = row.get(9).unwrap_or(0);
             let created_i64: i64 = row
-                .get(9)
+                .get(10)
                 .map_err(|e| StorageError::DbError(e.to_string()))?;
             let updated_i64: i64 = row
-                .get(10)
+                .get(11)
                 .map_err(|e| StorageError::DbError(e.to_string()))?;
 
             Ok(Some(DbNoteRecord {
@@ -310,6 +321,7 @@ impl SqlCipherNoteStore {
                     .map_err(|e| StorageError::DbError(e.to_string()))?,
                 epoch_id: epoch_i64 as u32,
                 status,
+                is_decoy: is_decoy_i64 == 1,
                 created_at: created_i64 as u64,
                 updated_at: updated_i64 as u64,
             }))
@@ -327,7 +339,7 @@ impl SqlCipherNoteStore {
 
         let mut stmt = conn
             .prepare(
-                "SELECT commitment, leaf_index, value, owner_pk, rho, rand, nullifier_key, epoch_id, status, created_at, updated_at
+                "SELECT commitment, leaf_index, value, owner_pk, rho, rand, nullifier_key, epoch_id, status, is_decoy, created_at, updated_at
                  FROM private_notes WHERE status = 'ACTIVE' ORDER BY value ASC;",
             )
             .map_err(|e| StorageError::DbError(e.to_string()))?;
@@ -339,8 +351,9 @@ impl SqlCipherNoteStore {
                 let leaf_idx_i64: Option<i64> = row.get(1)?;
                 let val_i64: i64 = row.get(2)?;
                 let epoch_i64: i64 = row.get(7)?;
-                let created_i64: i64 = row.get(9)?;
-                let updated_i64: i64 = row.get(10)?;
+                let is_decoy_i64: i64 = row.get(9).unwrap_or(0);
+                let created_i64: i64 = row.get(10)?;
+                let updated_i64: i64 = row.get(11)?;
                 Ok(DbNoteRecord {
                     commitment: row.get(0)?,
                     leaf_index: leaf_idx_i64.map(|idx| idx as u64),
@@ -351,6 +364,55 @@ impl SqlCipherNoteStore {
                     nullifier_key: row.get(6)?,
                     epoch_id: epoch_i64 as u32,
                     status,
+                    is_decoy: is_decoy_i64 == 1,
+                    created_at: created_i64 as u64,
+                    updated_at: updated_i64 as u64,
+                })
+            })
+            .map_err(|e| StorageError::DbError(e.to_string()))?;
+
+        let mut list = Vec::new();
+        for r in rows {
+            list.push(r.map_err(|e| StorageError::DbError(e.to_string()))?);
+        }
+        Ok(list)
+    }
+
+    /// Retrieves all ACTIVE spendable notes (strictly excluding DecoyDummy notes, DEC-051).
+    pub fn get_spendable_active_notes(&self) -> Result<Vec<DbNoteRecord>, StorageError> {
+        let conn = self
+            .conn
+            .lock()
+            .map_err(|_| StorageError::DbError("Mutex poisoned".into()))?;
+
+        let mut stmt = conn
+            .prepare(
+                "SELECT commitment, leaf_index, value, owner_pk, rho, rand, nullifier_key, epoch_id, status, is_decoy, created_at, updated_at
+                 FROM private_notes WHERE status = 'ACTIVE' AND (is_decoy = 0 OR is_decoy IS NULL) AND value > 0 ORDER BY value ASC;",
+            )
+            .map_err(|e| StorageError::DbError(e.to_string()))?;
+
+        let rows = stmt
+            .query_map([], |row| {
+                let status_str: String = row.get(8)?;
+                let status = DbNoteStatus::from_str(&status_str).unwrap_or(DbNoteStatus::Active);
+                let leaf_idx_i64: Option<i64> = row.get(1)?;
+                let val_i64: i64 = row.get(2)?;
+                let epoch_i64: i64 = row.get(7)?;
+                let is_decoy_i64: i64 = row.get(9).unwrap_or(0);
+                let created_i64: i64 = row.get(10)?;
+                let updated_i64: i64 = row.get(11)?;
+                Ok(DbNoteRecord {
+                    commitment: row.get(0)?,
+                    leaf_index: leaf_idx_i64.map(|idx| idx as u64),
+                    value: val_i64 as u64,
+                    owner_pk: row.get(3)?,
+                    rho: row.get(4)?,
+                    rand: row.get(5)?,
+                    nullifier_key: row.get(6)?,
+                    epoch_id: epoch_i64 as u32,
+                    status,
+                    is_decoy: is_decoy_i64 == 1,
                     created_at: created_i64 as u64,
                     updated_at: updated_i64 as u64,
                 })
@@ -408,8 +470,8 @@ impl SqlCipherNoteStore {
         for ch in change_notes {
             tx.execute(
                 "INSERT INTO private_notes (
-                    commitment, leaf_index, value, owner_pk, rho, rand, nullifier_key, epoch_id, status, created_at, updated_at
-                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 'UNCONFIRMED', ?9, ?10);",
+                    commitment, leaf_index, value, owner_pk, rho, rand, nullifier_key, epoch_id, status, is_decoy, created_at, updated_at
+                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 'UNCONFIRMED', ?9, ?10, ?11);",
                 rusqlite::params![
                     ch.commitment,
                     ch.leaf_index.map(|idx| idx as i64),
@@ -419,6 +481,7 @@ impl SqlCipherNoteStore {
                     ch.rand,
                     ch.nullifier_key,
                     ch.epoch_id as i64,
+                    if ch.is_decoy { 1i64 } else { 0i64 },
                     current_time_i64,
                     current_time_i64,
                 ],
@@ -693,6 +756,7 @@ mod tests {
             nullifier_key: "0xnk".into(),
             epoch_id: 1,
             status: DbNoteStatus::Active,
+            is_decoy: false,
             created_at: 1000,
             updated_at: 1000,
         };
@@ -706,6 +770,7 @@ mod tests {
             nullifier_key: "0xnk".into(),
             epoch_id: 1,
             status: DbNoteStatus::Active,
+            is_decoy: false,
             created_at: 1000,
             updated_at: 1000,
         };
@@ -725,6 +790,7 @@ mod tests {
             nullifier_key: "0xnk".into(),
             epoch_id: 1,
             status: DbNoteStatus::Unconfirmed,
+            is_decoy: false,
             created_at: 1100,
             updated_at: 1100,
         };
@@ -780,6 +846,7 @@ mod tests {
             nullifier_key: "0xnk".into(),
             epoch_id: 1,
             status: DbNoteStatus::Active,
+            is_decoy: false,
             created_at: 1000,
             updated_at: 1000,
         };
@@ -795,6 +862,7 @@ mod tests {
             nullifier_key: "0xnk".into(),
             epoch_id: 1,
             status: DbNoteStatus::Unconfirmed,
+            is_decoy: false,
             created_at: 1100,
             updated_at: 1100,
         };
@@ -838,6 +906,7 @@ mod tests {
             nullifier_key: "0xnk".into(),
             epoch_id: 1,
             status: DbNoteStatus::Active,
+            is_decoy: false,
             created_at: 1000,
             updated_at: 1000,
         };
@@ -853,6 +922,7 @@ mod tests {
             nullifier_key: "0xnk".into(),
             epoch_id: 1,
             status: DbNoteStatus::Unconfirmed,
+            is_decoy: false,
             created_at: 1000,
             updated_at: 1000,
         };
@@ -876,5 +946,61 @@ mod tests {
             DbNoteStatus::Active
         );
         assert!(store.get_note("cm_ch_crash").unwrap().is_none());
+    }
+
+    #[test]
+    fn test_storage_decoy_dummy_isolation() {
+        let store = SqlCipherNoteStore::open_in_memory("test_secret").unwrap();
+
+        // Real active note
+        let real_note = DbNoteRecord {
+            commitment: "cm_real".into(),
+            leaf_index: Some(0),
+            value: 50_000_000,
+            owner_pk: "0xowner".into(),
+            rho: "0xrho1".into(),
+            rand: "0xrand1".into(),
+            nullifier_key: "0xnk".into(),
+            epoch_id: 1,
+            status: DbNoteStatus::Active,
+            is_decoy: false,
+            created_at: 1000,
+            updated_at: 1000,
+        };
+
+        // Decoy dummy note (v = 0, is_decoy = true, DEC-051)
+        let decoy_note = DbNoteRecord {
+            commitment: "cm_decoy".into(),
+            leaf_index: Some(1),
+            value: 0,
+            owner_pk: "0xowner".into(),
+            rho: "0xrho2".into(),
+            rand: "0xrand2".into(),
+            nullifier_key: "0xnk".into(),
+            epoch_id: 1,
+            status: DbNoteStatus::Active,
+            is_decoy: true,
+            created_at: 1000,
+            updated_at: 1000,
+        };
+
+        store.insert_note(&real_note).unwrap();
+        store.insert_note(&decoy_note).unwrap();
+
+        // All active notes: contains both real and decoy
+        let all_active = store.get_active_notes().unwrap();
+        assert_eq!(all_active.len(), 2);
+
+        // Spendable active notes: strictly excludes decoy notes!
+        let spendable = store.get_spendable_active_notes().unwrap();
+        assert_eq!(spendable.len(), 1);
+        assert_eq!(spendable[0].commitment, "cm_real");
+        assert_eq!(spendable[0].value, 50_000_000);
+        assert!(!spendable[0].is_decoy);
+
+        // Retrieved decoy record has is_decoy == true
+        let fetched_decoy = store.get_note("cm_decoy").unwrap().unwrap();
+        assert!(fetched_decoy.is_decoy);
+        assert_eq!(fetched_decoy.value, 0);
     }
 }

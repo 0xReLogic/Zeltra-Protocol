@@ -80,7 +80,8 @@ pub use note_circuit::{
 pub use joinsplit_circuit::{
     create_dummy_joinsplit_circuit, extract_joinsplit_public_inputs,
     generate_joinsplit_circuit_keys, generate_joinsplit_proof, get_or_init_joinsplit_circuit_keys,
-    verify_joinsplit_proof, JoinSplitCircuit, JoinSplitCircuitKeys, JOINSPLIT_CIRCUIT_SETUP_SEED,
+    set_tamper_is_decoy, set_tamper_perm_bit, verify_joinsplit_proof, DeniabilityPermutationGadget,
+    JoinSplitCircuit, JoinSplitCircuitKeys, JOINSPLIT_CIRCUIT_SETUP_SEED,
     NUM_JOINSPLIT_PUBLIC_INPUTS,
 };
 

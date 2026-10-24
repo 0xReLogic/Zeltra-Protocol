@@ -126,10 +126,7 @@ async fn handle_test_append_leaves(
         .into_response()
 }
 
-async fn handle_test_rollback(
-    State(state): State<AppState>,
-    Path(block): Path<u64>,
-) -> Response {
+async fn handle_test_rollback(State(state): State<AppState>, Path(block): Path<u64>) -> Response {
     match state.rollback_mmr_to_block(block).await {
         Ok(_) => {
             let tree = state.in_memory_mmr.read().await;

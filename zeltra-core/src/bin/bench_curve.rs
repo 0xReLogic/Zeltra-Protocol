@@ -1,7 +1,7 @@
-use std::time::Instant;
 use ark_bls12_381::{Fr, G1Affine, G1Projective};
 use ark_ec::{CurveGroup, VariableBaseMSM};
 use ark_ff::{AdditiveGroup, UniformRand};
+use std::time::Instant;
 
 fn main() {
     let mut rng = ark_std::rand::thread_rng();
@@ -23,7 +23,11 @@ fn main() {
         let ops_per_sec = iters as f64 / elapsed.as_secs_f64();
         println!(
             "{:<35} | Total: {:<8.2} ms | Avg: {:<8.2} ns ({:<6.3} us) | {:<10.0} ops/s",
-            "G1 Point Doubling (2P)", elapsed.as_secs_f64() * 1000.0, avg_ns, avg_ns / 1000.0, ops_per_sec
+            "G1 Point Doubling (2P)",
+            elapsed.as_secs_f64() * 1000.0,
+            avg_ns,
+            avg_ns / 1000.0,
+            ops_per_sec
         );
     }
 
@@ -42,7 +46,11 @@ fn main() {
         let ops_per_sec = iters as f64 / elapsed.as_secs_f64();
         println!(
             "{:<35} | Total: {:<8.2} ms | Avg: {:<8.2} ns ({:<6.3} us) | {:<10.0} ops/s",
-            "G1 Point Addition (P + Q)", elapsed.as_secs_f64() * 1000.0, avg_ns, avg_ns / 1000.0, ops_per_sec
+            "G1 Point Addition (P + Q)",
+            elapsed.as_secs_f64() * 1000.0,
+            avg_ns,
+            avg_ns / 1000.0,
+            ops_per_sec
         );
     }
 
@@ -73,17 +81,29 @@ fn main() {
         let ops_fast = iters as f64 / elapsed_fast.as_secs_f64();
 
         let speedup = (avg_ns_std - avg_ns_fast) / avg_ns_std * 100.0;
-        println!("--------------------------------------------------------------------------------");
         println!(
-            "{:<35} | Total: {:<8.2} ms | Avg: {:<8.2} ns ({:<6.3} us) | {:<10.0} ops/s",
-            "Standard 3P (2P + P in Arkworks)", elapsed_std.as_secs_f64() * 1000.0, avg_ns_std, avg_ns_std / 1000.0, ops_std
+            "--------------------------------------------------------------------------------"
         );
         println!(
             "{:<35} | Total: {:<8.2} ms | Avg: {:<8.2} ns ({:<6.3} us) | {:<10.0} ops/s",
-            "FAST 3P (DEC-050: 4S + 6M)", elapsed_fast.as_secs_f64() * 1000.0, avg_ns_fast, avg_ns_fast / 1000.0, ops_fast
+            "Standard 3P (2P + P in Arkworks)",
+            elapsed_std.as_secs_f64() * 1000.0,
+            avg_ns_std,
+            avg_ns_std / 1000.0,
+            ops_std
+        );
+        println!(
+            "{:<35} | Total: {:<8.2} ms | Avg: {:<8.2} ns ({:<6.3} us) | {:<10.0} ops/s",
+            "FAST 3P (DEC-050: 4S + 6M)",
+            elapsed_fast.as_secs_f64() * 1000.0,
+            avg_ns_fast,
+            avg_ns_fast / 1000.0,
+            ops_fast
         );
         println!(">>> Point Tripling Speedup: {:.2}% faster!", speedup);
-        println!("--------------------------------------------------------------------------------");
+        println!(
+            "--------------------------------------------------------------------------------"
+        );
     }
 
     // 2C. HEAD-TO-HEAD: Endomorphism tau P = P - phi(P) vs Fast Jacobian (3S + 3M)
@@ -97,7 +117,7 @@ fn main() {
         let mut sink_std = p;
         for _ in 0..iters {
             let phi = fast_phi_p(&sink_std);
-            sink_std = sink_std - phi;
+            sink_std -= phi;
         }
         let elapsed_std = start_std.elapsed();
         let avg_ns_std = elapsed_std.as_nanos() as f64 / iters as f64;
@@ -116,14 +136,24 @@ fn main() {
         let speedup = (avg_ns_std - avg_ns_fast) / avg_ns_std * 100.0;
         println!(
             "{:<35} | Total: {:<8.2} ms | Avg: {:<8.2} ns ({:<6.3} us) | {:<10.0} ops/s",
-            "Standard tau P (P - phi(P))", elapsed_std.as_secs_f64() * 1000.0, avg_ns_std, avg_ns_std / 1000.0, ops_std
+            "Standard tau P (P - phi(P))",
+            elapsed_std.as_secs_f64() * 1000.0,
+            avg_ns_std,
+            avg_ns_std / 1000.0,
+            ops_std
         );
         println!(
             "{:<35} | Total: {:<8.2} ms | Avg: {:<8.2} ns ({:<6.3} us) | {:<10.0} ops/s",
-            "FAST tau P (DEC-050: 3S + 3M)", elapsed_fast.as_secs_f64() * 1000.0, avg_ns_fast, avg_ns_fast / 1000.0, ops_fast
+            "FAST tau P (DEC-050: 3S + 3M)",
+            elapsed_fast.as_secs_f64() * 1000.0,
+            avg_ns_fast,
+            avg_ns_fast / 1000.0,
+            ops_fast
         );
         println!(">>> Endomorphism tau P Speedup: {:.2}% faster!", speedup);
-        println!("--------------------------------------------------------------------------------");
+        println!(
+            "--------------------------------------------------------------------------------"
+        );
     }
 
     // 3. Single Scalar Multiplication [k]P (255-bit scalar Fr)
@@ -141,13 +171,19 @@ fn main() {
         let ops_per_sec = iters as f64 / elapsed.as_secs_f64();
         println!(
             "{:<35} | Total: {:<8.2} ms | Avg: {:<8.2} us ({:<6.3} ms) | {:<10.0} ops/s",
-            "G1 Single Scalar Mult [k]P", elapsed.as_secs_f64() * 1000.0, avg_us, avg_ms, ops_per_sec
+            "G1 Single Scalar Mult [k]P",
+            elapsed.as_secs_f64() * 1000.0,
+            avg_us,
+            avg_ms,
+            ops_per_sec
         );
     }
 
     // 4. MSM of size 20 (JoinSplit Public Inputs Linear Combination in Groth16 Verify)
     {
-        let bases: Vec<G1Affine> = (0..20).map(|_| G1Projective::rand(&mut rng).into_affine()).collect();
+        let bases: Vec<G1Affine> = (0..20)
+            .map(|_| G1Projective::rand(&mut rng).into_affine())
+            .collect();
         let scalars: Vec<Fr> = (0..20).map(|_| Fr::rand(&mut rng)).collect();
         let iters = 2_000;
         let start = Instant::now();
@@ -160,16 +196,27 @@ fn main() {
         let ops_per_sec = iters as f64 / elapsed.as_secs_f64();
         println!(
             "{:<35} | Total: {:<8.2} ms | Avg: {:<8.2} us ({:<6.3} ms) | {:<10.0} ops/s",
-            "G1 MSM Size 20 (Groth16 Verifier L)", elapsed.as_secs_f64() * 1000.0, avg_us, avg_ms, ops_per_sec
+            "G1 MSM Size 20 (Groth16 Verifier L)",
+            elapsed.as_secs_f64() * 1000.0,
+            avg_us,
+            avg_ms,
+            ops_per_sec
         );
     }
 
     // 5. MSM of size 34,571 (Full JoinSplit Circuit Constraints - Groth16 Prover)
     {
         const CIRCUIT_MSM_SIZE: usize = 34571;
-        println!("--------------------------------------------------------------------------------");
-        println!("Preparing MSM of size {} (identical to JoinSplit Groth16 witness)...", CIRCUIT_MSM_SIZE);
-        let bases: Vec<G1Affine> = (0..CIRCUIT_MSM_SIZE).map(|_| G1Projective::rand(&mut rng).into_affine()).collect();
+        println!(
+            "--------------------------------------------------------------------------------"
+        );
+        println!(
+            "Preparing MSM of size {} (identical to JoinSplit Groth16 witness)...",
+            CIRCUIT_MSM_SIZE
+        );
+        let bases: Vec<G1Affine> = (0..CIRCUIT_MSM_SIZE)
+            .map(|_| G1Projective::rand(&mut rng).into_affine())
+            .collect();
         let scalars: Vec<Fr> = (0..CIRCUIT_MSM_SIZE).map(|_| Fr::rand(&mut rng)).collect();
         let iters = 5;
         let start = Instant::now();
@@ -181,7 +228,11 @@ fn main() {
         let ops_per_sec = iters as f64 / elapsed.as_secs_f64();
         println!(
             "{:<35} | Total: {:<8.2} ms | Avg: {:<8.2} ms ({:<6.2} s)  | {:<10.2} ops/s",
-            "G1 MSM Size 34,571 (Prover Pippenger)", elapsed.as_secs_f64() * 1000.0, avg_ms, avg_ms / 1000.0, ops_per_sec
+            "G1 MSM Size 34,571 (Prover Pippenger)",
+            elapsed.as_secs_f64() * 1000.0,
+            avg_ms,
+            avg_ms / 1000.0,
+            ops_per_sec
         );
     }
 

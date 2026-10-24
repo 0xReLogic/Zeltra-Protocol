@@ -101,7 +101,11 @@ impl AppState {
 
         let leaves = db.get_all_mmr_leaves().await.unwrap_or_default();
         let leaf_blocks: Vec<u64> = leaves.iter().map(|l| l.block_number).collect();
-        let last_block = db.get_mmr_last_indexed_block().await.unwrap_or(None).unwrap_or(0);
+        let last_block = db
+            .get_mmr_last_indexed_block()
+            .await
+            .unwrap_or(None)
+            .unwrap_or(0);
 
         Self {
             db,
@@ -131,8 +135,14 @@ impl AppState {
         let remaining_leaves = self.db.get_all_mmr_leaves().await.unwrap_or_default();
         let remaining_blocks: Vec<u64> = remaining_leaves.iter().map(|l| l.block_number).collect();
         *self.in_memory_leaf_blocks.write().await = remaining_blocks;
-        let last_block = self.db.get_mmr_last_indexed_block().await.unwrap_or(None).unwrap_or(fork_block);
-        self.last_indexed_block.store(last_block, std::sync::atomic::Ordering::SeqCst);
+        let last_block = self
+            .db
+            .get_mmr_last_indexed_block()
+            .await
+            .unwrap_or(None)
+            .unwrap_or(fork_block);
+        self.last_indexed_block
+            .store(last_block, std::sync::atomic::Ordering::SeqCst);
         println!(
             "MMR_ROLLBACK: Reorg rollback complete to block {}. New leaf count: {}, root: 0x{}",
             fork_block,

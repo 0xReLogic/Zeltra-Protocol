@@ -678,7 +678,11 @@ impl Database {
     }
 
     /// Insert a batch of MMR nodes (by pos) for MMRStore implementation (DEC-045B)
-    pub async fn batch_insert_mmr_nodes(&self, start_pos: u64, nodes: &[zeltra_core::Fr]) -> Result<()> {
+    pub async fn batch_insert_mmr_nodes(
+        &self,
+        start_pos: u64,
+        nodes: &[zeltra_core::Fr],
+    ) -> Result<()> {
         let path = self.path.clone();
         let db_key = database_key()?;
         let nodes_vec: Vec<(u64, String)> = nodes
@@ -728,9 +732,10 @@ impl Database {
                 Some(hash) => {
                     let clean = hash.trim_start_matches("0x");
                     let bytes = hex::decode(clean)?;
-                    let bytes_arr: [u8; 32] = bytes.as_slice().try_into().map_err(|_| {
-                        anyhow::anyhow!("Node hash must be 32 bytes")
-                    })?;
+                    let bytes_arr: [u8; 32] = bytes
+                        .as_slice()
+                        .try_into()
+                        .map_err(|_| anyhow::anyhow!("Node hash must be 32 bytes"))?;
                     let fr = zeltra_core::from_evm_scalar(&bytes_arr)
                         .ok_or_else(|| anyhow::anyhow!("Invalid scalar field element"))?;
                     Ok(Some(fr))
@@ -742,7 +747,12 @@ impl Database {
     }
 
     /// Save MMR checkpoint for MMRStore (DEC-045B)
-    pub async fn save_mmr_checkpoint(&self, leaf_count: u64, bagged_root: &str, block_number: u64) -> Result<()> {
+    pub async fn save_mmr_checkpoint(
+        &self,
+        leaf_count: u64,
+        bagged_root: &str,
+        block_number: u64,
+    ) -> Result<()> {
         let path = self.path.clone();
         let db_key = database_key()?;
         let root = bagged_root.to_string();
@@ -770,13 +780,25 @@ impl Database {
 #[allow(dead_code)]
 pub trait MMRStore: Send + Sync {
     /// Retrieve node hash at specific post-order position `pos`
-    fn get_node(&self, pos: u64) -> impl std::future::Future<Output = Result<Option<zeltra_core::Fr>>> + Send;
+    fn get_node(
+        &self,
+        pos: u64,
+    ) -> impl std::future::Future<Output = Result<Option<zeltra_core::Fr>>> + Send;
 
     /// Persist a slice of newly appended nodes starting at position `start_pos`
-    fn append_nodes(&self, start_pos: u64, nodes: &[zeltra_core::Fr]) -> impl std::future::Future<Output = Result<()>> + Send;
+    fn append_nodes(
+        &self,
+        start_pos: u64,
+        nodes: &[zeltra_core::Fr],
+    ) -> impl std::future::Future<Output = Result<()>> + Send;
 
     /// Save state snapshot checkpoint (leaf count, bagged root hex, block number)
-    fn save_checkpoint(&self, leaf_count: u64, bagged_root: &str, block_number: u64) -> impl std::future::Future<Output = Result<()>> + Send;
+    fn save_checkpoint(
+        &self,
+        leaf_count: u64,
+        bagged_root: &str,
+        block_number: u64,
+    ) -> impl std::future::Future<Output = Result<()>> + Send;
 }
 
 /// SQLite + SQLCipher implementation of `MMRStore` (DEC-045B).
@@ -794,20 +816,35 @@ impl SqliteMmrStore {
 }
 
 impl MMRStore for SqliteMmrStore {
-    fn get_node(&self, pos: u64) -> impl std::future::Future<Output = Result<Option<zeltra_core::Fr>>> + Send {
+    fn get_node(
+        &self,
+        pos: u64,
+    ) -> impl std::future::Future<Output = Result<Option<zeltra_core::Fr>>> + Send {
         let db = self.db.clone();
         async move { db.get_mmr_node(pos).await }
     }
 
-    fn append_nodes(&self, start_pos: u64, nodes: &[zeltra_core::Fr]) -> impl std::future::Future<Output = Result<()>> + Send {
+    fn append_nodes(
+        &self,
+        start_pos: u64,
+        nodes: &[zeltra_core::Fr],
+    ) -> impl std::future::Future<Output = Result<()>> + Send {
         let db = self.db.clone();
         let nodes = nodes.to_vec();
         async move { db.batch_insert_mmr_nodes(start_pos, &nodes).await }
     }
 
-    fn save_checkpoint(&self, leaf_count: u64, bagged_root: &str, block_number: u64) -> impl std::future::Future<Output = Result<()>> + Send {
+    fn save_checkpoint(
+        &self,
+        leaf_count: u64,
+        bagged_root: &str,
+        block_number: u64,
+    ) -> impl std::future::Future<Output = Result<()>> + Send {
         let db = self.db.clone();
         let root = bagged_root.to_string();
-        async move { db.save_mmr_checkpoint(leaf_count, &root, block_number).await }
+        async move {
+            db.save_mmr_checkpoint(leaf_count, &root, block_number)
+                .await
+        }
     }
 }

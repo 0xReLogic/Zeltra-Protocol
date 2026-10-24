@@ -114,7 +114,7 @@ impl PrivateNoteWallet {
         }
     }
 
-    /// Returns total active balance per asset ID (DEC-034C).
+    /// Returns total active balance per asset ID (DEC-034C / DEC-051).
     /// - `asset_id == 0`: WETH total balance in Gwei (9 decimals)
     /// - `asset_id == 1`: USDC total balance in Micro-USDC (6 decimals)
     pub fn get_balance(&self, asset_id: u8) -> Result<u64, WalletError> {
@@ -123,7 +123,7 @@ impl PrivateNoteWallet {
                 let from_notes: u64 = self
                     .notes
                     .values()
-                    .filter(|n| n.status == NoteStatus::Unspent && n.asset_id == 0)
+                    .filter(|n| n.status == NoteStatus::Unspent && n.asset_id == 0 && !n.is_decoy())
                     .map(|n| n.value)
                     .sum();
                 if from_notes > 0 {
@@ -136,7 +136,7 @@ impl PrivateNoteWallet {
                 let from_notes: u64 = self
                     .notes
                     .values()
-                    .filter(|n| n.status == NoteStatus::Unspent && n.asset_id == 1)
+                    .filter(|n| n.status == NoteStatus::Unspent && n.asset_id == 1 && !n.is_decoy())
                     .map(|n| n.value)
                     .sum();
                 if from_notes > 0 {
@@ -161,12 +161,12 @@ impl PrivateNoteWallet {
         }
     }
 
-    /// Returns the exact unspent balance in base integer units for the specified asset.
+    /// Returns the exact unspent balance in base integer units for the specified asset (excluding decoy dummy notes).
     pub fn get_unspent_balance(&self, asset_id: u8) -> u64 {
         let from_notes: u64 = self
             .notes
             .values()
-            .filter(|n| n.status == NoteStatus::Unspent && n.asset_id == asset_id)
+            .filter(|n| n.status == NoteStatus::Unspent && n.asset_id == asset_id && !n.is_decoy())
             .map(|n| n.value)
             .sum();
         if from_notes > 0 {
@@ -176,24 +176,84 @@ impl PrivateNoteWallet {
         }
     }
 
-    /// Aggregate balance of all fully confirmed, spendable notes.
+    /// Aggregate balance of all fully confirmed, spendable notes (excluding decoy dummy notes).
     pub fn balance(&self) -> u64 {
         self.notes
             .values()
-            .filter(|n| n.status == NoteStatus::Unspent)
+            .filter(|n| n.status == NoteStatus::Unspent && !n.is_decoy())
             .map(|n| n.value)
             .sum()
     }
 
-    /// Balance of notes currently locked in active spend reservations.
+    /// Total spendable balance across all assets strictly excluding DecoyDummy notes (DEC-051).
+    pub fn spendable_balance(&self) -> u64 {
+        self.balance()
+    }
+
+    /// Spendable balance for a specific asset strictly excluding DecoyDummy notes (DEC-051).
+    pub fn spendable_balance_for_asset(&self, asset_id: u8) -> u64 {
+        self.get_unspent_balance(asset_id)
+    }
+
+    /// Generates a cryptographically indistinguishable decoy dummy note (v = 0, DEC-051 / Nopenena).
+    pub fn generate_decoy_dummy_note(
+        &self,
+        asset_id: u8,
+    ) -> Result<(WalletNote, [u8; 96]), WalletError> {
+        use ark_ff::UniformRand;
+        let mut rng = rand::rngs::OsRng;
+        let rho_dummy = Fr::rand(&mut rng);
+        let r_dummy = Fr::rand(&mut rng);
+        let sk = self.spending_key()?;
+        let cm = zeltra_core::note_commitment(0, asset_id, sk, rho_dummy, r_dummy);
+
+        let sender_pk_ivk = self.incoming_viewing_public_key()?;
+        let (memo_bytes, _r) = zeltra_core::encrypt_committing_note_memo(
+            0,
+            rho_dummy,
+            asset_id as u64,
+            &sender_pk_ivk,
+        )
+        .map_err(|e| WalletError::CryptoError(format!("Decoy memo encryption failed: {e}")))?;
+
+        let memo_arr: [u8; 96] = memo_bytes
+            .try_into()
+            .map_err(|_| WalletError::CryptoError("Decoy memo byte length must be 96".into()))?;
+
+        let note = WalletNote {
+            commitment_hex: hex::encode(fr_to_be_bytes(&cm)),
+            value: 0,
+            asset_id,
+            owner_key_hex: hex::encode(fr_to_be_bytes(&sk)),
+            rho_hex: hex::encode(fr_to_be_bytes(&rho_dummy)),
+            randomness_hex: hex::encode(fr_to_be_bytes(&r_dummy)),
+            leaf_index: None,
+            leaf_count: None,
+            epoch_id: Some(0),
+            merkle_path_hex: None,
+            status: NoteStatus::Unconfirmed,
+            classification: NoteClassification::DecoyDummy,
+            created_at_secs: 0,
+            session_id: None,
+        };
+
+        Ok((note, memo_arr))
+    }
+
+    /// Balance of notes currently locked in active spend reservations (excluding decoy dummy notes).
     pub fn reserved_balance(&self, current_time_secs: u64) -> u64 {
         self.notes
             .values()
-            .filter(|n| match &n.status {
-                NoteStatus::Reserved {
-                    lease_expiry_secs, ..
-                } => *lease_expiry_secs > current_time_secs,
-                _ => false,
+            .filter(|n| {
+                if n.is_decoy() {
+                    return false;
+                }
+                match &n.status {
+                    NoteStatus::Reserved {
+                        lease_expiry_secs, ..
+                    } => *lease_expiry_secs > current_time_secs,
+                    _ => false,
+                }
             })
             .map(|n| n.value)
             .sum()
@@ -208,12 +268,17 @@ impl PrivateNoteWallet {
     pub fn effective_balance(&self, current_time_secs: u64) -> u64 {
         self.notes
             .values()
-            .filter(|n| match &n.status {
-                NoteStatus::Unspent => true,
-                NoteStatus::Reserved {
-                    lease_expiry_secs, ..
-                } => *lease_expiry_secs <= current_time_secs,
-                _ => false,
+            .filter(|n| {
+                if n.is_decoy() {
+                    return false;
+                }
+                match &n.status {
+                    NoteStatus::Unspent => true,
+                    NoteStatus::Reserved {
+                        lease_expiry_secs, ..
+                    } => *lease_expiry_secs <= current_time_secs,
+                    _ => false,
+                }
             })
             .map(|n| n.value)
             .sum()
