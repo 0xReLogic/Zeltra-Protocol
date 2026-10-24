@@ -46,6 +46,7 @@ Dokumen ini memetakan struktur kode riil, crate, dan hirarki direktori di seluru
 │   ├── src/formal_tests.rs           — Test suite formal Augmented Jacobian & verifikasi rank finansial (DEC-047)
 │   ├── src/accounting.rs             — State machine ContractAccounting & validasi invariant matematis
 │   ├── src/fees.rs                   — Kalkulasi fee (0 bps deposit, 0 bps transfer, 45 bps spend, relayer markup)
+│   ├── src/curve_opt.rs              — Fast Jacobian point tripling 3P (4S+6M) & Eisenstein tau-endomorphism (3S+3M, DEC-050)
 │   ├── src/evm.rs                    — Serialisasi & formatting EVM untuk G1, G2, skalar, dan proof BLS12-381
 │   ├── src/serialization.rs          — Helper serialisasi data arkworks
 │   └── src/bin/                      — Binary CLI / benchmarks (bench.rs, flat_mmr_interop.rs, zsa_interop.rs)
@@ -127,7 +128,7 @@ Dokumen ini memetakan struktur kode riil, crate, dan hirarki direktori di seluru
 │   ├── test_dec046_dec047_jacobian_soundness.py — Suite verifikasi formal Jacobian rank DEC-046 & DEC-047
 │   └── check_balance.py, ht01_init_verification.py, ht04_spend_negative_tests.py, ht05_refund_tests.py, ht10_signed_quote_tests.py
 │
-├── research/dec/               — 73 Architecture Decision Records (DEC-001 s/d DEC-049)
+├── research/dec/               — 74 Architecture Decision Records (DEC-001 s/d DEC-050)
 ├── docs/                             — Documentation (bisnis.md, roadmap.md, X402_INTEGRATION_STRATEGY.md, analisis/)
 └── todo.md                           — Master active checklist (pending tasks only)
 ```
