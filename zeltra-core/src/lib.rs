@@ -1,5 +1,6 @@
 pub mod accounting;
 pub mod circuit_gadgets;
+pub mod curve_opt;
 pub mod evm;
 pub mod fees;
 pub mod jacobian;
@@ -13,6 +14,8 @@ pub mod note_circuit;
 pub mod poseidon;
 pub mod selective_disclosure_circuit;
 pub mod serialization;
+
+pub use curve_opt::{endomorphism_beta, fast_phi_p, fast_tau_p, fast_triple_p};
 
 pub use ark_bls12_381::{Bls12_381, Fr, FrConfig, G1Projective, G2Projective};
 pub use ark_ec::pairing::Pairing;

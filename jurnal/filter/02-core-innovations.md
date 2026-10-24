@@ -104,21 +104,7 @@ Dokumen ini memetakan paper terpilih untuk lapisan kriptografi fundamental Zeltr
 
 ---
 
-## 9. Accelerated Endomorphism & Side-Channel Regular Scalar Multiplication on BLS12-381 (IACR ePrint 2024/1906)
-* **File Jurnal / ePrint:** IACR ePrint 2024/1906 (September 2026 update)
-* **Penulis:** Guangwu Xu, Wei Yu, Ke Han, Pengfei Lu
-* **Problem Kritis:**
-  Perhitungan perkalian skalar $[k]P$ pada kurva eliptik pairing-friendly (terutama $G_1$ dari kurva BLS12-381) adalah operasi komputasi terberat dalam pembuktian Groth16, evaluasi kombinasi linier input publik, serta derivasi kunci publik note ephemeral di [`zeltra-core/`](file:///workspaces/Zeltra-Protocol/zeltra-core/). Algoritma GLV standar membutuhkan tabel prekomputasi besar dan rentan terhadap serangan analisis saluran samping (*side-channel timing attacks*) jika pengolahan bit skalar bocor saat eksekusi.
-* **Inovasi Paper:**
-  Memperluas algoritma window $\tau$-NAF Solinas ke famili kurva $y^2 = x^3 + b$ di atas $\mathbb{F}_p$ dengan $p \equiv 1 \pmod 3$, yang secara spesifik mencakup kurva **BLS12-381** ($b = 4$):
-  1. Memanfaatkan endomorfisme $\tau = [\omega]$ dalam gelanggang bilangan bulat Eisenstein $\mathbb{Z}[\omega]$, di mana pemetaan $\tau$ dalam koordinat proyektif Jacobian hanya membutuhkan **1 perkalian medan ($1M$)**.
-  2. Menghasilkan formula point-tripling baru hanya dengan $6M + 2S$ (mengungguli rekor sebelumnya $7M + 2S$).
-  3. Memanfaatkan simetri lipat-enam (*sixfold symmetry*) di bawah grup unit $\mathbb{Z}[\omega]^\times$, memangkas memori tabel prekomputasi hingga **5/6 bagian (penghematan 83%)**.
-  4. Merumuskan varian reguler (*regular window $\tau$-NAF*) yang kebal terhadap serangan side-channel, sekaligus meningkatkan efisiensi sebesar **18.2%–20.5%** dibanding metode GLV tercanggih saat ini.
-
----
-
-## 10. Dixon Resultants Algebraic Cryptanalysis & Parameter Hardening for Poseidon-W5 (IACR ePrint 2026/1969)
+## 9. Dixon Resultants Algebraic Cryptanalysis & Parameter Hardening for Poseidon-W5 (IACR ePrint 2026/1969)
 * **File Jurnal / ePrint:** IACR ePrint 2026/1969 (September 2026)
 * **Penulis:** Haohai Suo, Jiamin Cui
 * **Problem Kritis:**
@@ -136,7 +122,7 @@ Dokumen ini memetakan paper terpilih untuk lapisan kriptografi fundamental Zeltr
 
 ---
 
-## 11. Top Gun: Degree Annihilation Attacks on Poseidon & Security Margins (IACR ePrint 2026/1254)
+## 10. Top Gun: Degree Annihilation Attacks on Poseidon & Security Margins (IACR ePrint 2026/1254)
 * **File Jurnal / ePrint:** IACR ePrint 2026/1254 (September 2026)
 * **Penulis:** Antonio Sanso, Giuseppe Vitto
 * **Problem Kritis:**
@@ -149,7 +135,7 @@ Dokumen ini memetakan paper terpilih untuk lapisan kriptografi fundamental Zeltr
 
 ---
 
-## 12. Slipway: Accessing Finite Subspace Trails & Full-Round Absorption in Poseidon (IACR ePrint 2026/1579)
+## 11. Slipway: Accessing Finite Subspace Trails & Full-Round Absorption in Poseidon (IACR ePrint 2026/1579)
 * **File Jurnal / ePrint:** IACR ePrint 2026/1579 (September 2026)
 * **Penulis:** Giuseppe Vitto
 * **Problem Kritis:**
@@ -159,4 +145,5 @@ Dokumen ini memetakan paper terpilih untuk lapisan kriptografi fundamental Zeltr
 * **Implementasi di Zeltra Core:**
   * Komponen: Generator matriks Cauchy MDS di [`zeltra-core/src/poseidon.rs`](file:///workspaces/Zeltra-Protocol/zeltra-core/src/poseidon.rs) dan generator Grain-128 LFSR (`DEC-021`).
   * Menjadi panduan verifikasi formal untuk matriks MDS Poseidon Zeltra: memastikan matriks MDS $5 \times 5$ (W5) dan $3 \times 3$ (W3) di-generate murni dari ekspansi Grain-128 LFSR yang independen secara statistik dari round constants, memutus total kemungkinan *full-round absorption* dan menjamin tidak ada subspace trail yang dapat diakses dari input manapun.
+
 

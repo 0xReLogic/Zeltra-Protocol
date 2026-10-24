@@ -79,7 +79,7 @@ Folder `research/dec/` memuat seluruh catatan keputusan arsitektur resmi (*Archi
 | **DEC-046** | [`DEC-046-null-branch-witness-attack-defense-and-quadratic-encoding-soundness.md`](file:///workspaces/Zeltra-Protocol/research/dec/DEC-046-null-branch-witness-attack-defense-and-quadratic-encoding-soundness.md) | Null-Branch Witness Attack Defense, Quadratic Encoding Soundness & R1CS Relation-Encoding Hardening for Conditional ZK-UTXO Circuits | - |
 | **DEC-047** | [`DEC-047-jacobian-diagnostics-and-tangent-space-rigidity-auditing-for-underconstrained-circuits.md`](file:///workspaces/Zeltra-Protocol/research/dec/DEC-047-jacobian-diagnostics-and-tangent-space-rigidity-auditing-for-underconstrained-circuits.md) | Automated Jacobian Diagnostics and Tangent-Space Rigidity Auditing for Under-Constrained Zero-Knowledge Circuits | - |
 | **DEC-048** | [`DEC-048-committing-aead-partitioning-oracle-defense-and-key-binding-memos.md`](file:///workspaces/Zeltra-Protocol/research/dec/DEC-048-committing-aead-partitioning-oracle-defense-and-key-binding-memos.md) | Committing AEAD & Partitioning Oracle Defense for Encrypted Note Memos | - |
-| **DEC-049** | [`DEC-049-leakage-resilient-decapsulation-and-constant-time-flag-defense.md`](file:///workspaces/Zeltra-Protocol/research/dec/DEC-049-leakage-resilient-decapsulation-and-constant-time-flag-defense.md) | Leakage-Resilient Decapsulation, Constant-Time Flag Evaluation & Side-Channel Defense for Note Decryption and Post-Quantum Migration | - |
+| **DEC-050** | [`DEC-050-fast-jacobian-tripling-and-eisenstein-endomorphism-bls12-381.md`](file:///workspaces/Zeltra-Protocol/research/dec/DEC-050-fast-jacobian-tripling-and-eisenstein-endomorphism-bls12-381.md) | Fast Jacobian Point Tripling and Eisenstein Endomorphism on BLS12-381 (G1) | 2026-10-24 |
 
 ---
 
@@ -97,6 +97,7 @@ Folder `research/dec/` memuat seluruh catatan keputusan arsitektur resmi (*Archi
 - **DEC-036 (A)**: Universal 2-in-2-out JoinSplit R1CS Circuit Specification.
 - **DEC-046**: Null-Branch Witness Attack Defense & Quadratic Encoding Soundness (IACR 2026/2235).
 - **DEC-047**: Augmented Jacobian Diagnostics & Tangent Space Rigidity Auditing (IACR 2026/1852).
+- **DEC-050**: Fast Jacobian Point Tripling & Eisenstein Endomorphism on BLS12-381 G1 (IACR 2024/1906).
 
 ### 3. Dual-Asset (USDC & WETH) & Merkle Mountain Range (MMR)
 - **DEC-032**: Merkle Mountain Range (MMR) Commitment Accumulator.
