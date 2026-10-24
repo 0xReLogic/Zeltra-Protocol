@@ -127,7 +127,7 @@ Dokumen ini memetakan struktur kode riil, crate, dan hirarki direktori di seluru
 │   ├── test_dec046_dec047_jacobian_soundness.py — Suite verifikasi formal Jacobian rank DEC-046 & DEC-047
 │   └── check_balance.py, ht01_init_verification.py, ht04_spend_negative_tests.py, ht05_refund_tests.py, ht10_signed_quote_tests.py
 │
-├── research/decisions/               — 73 Architecture Decision Records (DEC-001 s/d DEC-049)
+├── research/dec/               — 73 Architecture Decision Records (DEC-001 s/d DEC-049)
 ├── docs/                             — Documentation (bisnis.md, roadmap.md, X402_INTEGRATION_STRATEGY.md, analisis/)
 └── todo.md                           — Master active checklist (pending tasks only)
 ```

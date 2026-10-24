@@ -9,7 +9,7 @@ Dokumen ini adalah kompas urutan pengerjaan tim.
 ---
 
 ## Fase 1: SDK, Browser Prover & Ekosistem Fitur [SELESAI 100% & TERVERIFIKASI]
-Ref: [`research/decisions/DEC-040`](file:///workspaces/Zeltra-Protocol/research/decisions/DEC-040-viewing-key-export-suite-and-cex-selective-disclosure.md), [`DEC-041`](file:///workspaces/Zeltra-Protocol/research/decisions/DEC-041-in-browser-wasm-groth16-prover-and-disposable-worker.md), [`DEC-042`](file:///workspaces/Zeltra-Protocol/research/decisions/DEC-042-privacy-preserving-x402-facilitator-and-pure-zk-utxo-micropayments.md), [`DEC-043`](file:///workspaces/Zeltra-Protocol/research/decisions/DEC-043-shielded-to-shielded-in-pool-transfer-and-merchant-masking.md)
+Ref: [`research/dec/DEC-040`](file:///workspaces/Zeltra-Protocol/research/dec/DEC-040-viewing-key-export-suite-and-cex-selective-disclosure.md), [`DEC-041`](file:///workspaces/Zeltra-Protocol/research/dec/DEC-041-in-browser-wasm-groth16-prover-and-disposable-worker.md), [`DEC-042`](file:///workspaces/Zeltra-Protocol/research/dec/DEC-042-privacy-preserving-x402-facilitator-and-pure-zk-utxo-micropayments.md), [`DEC-043`](file:///workspaces/Zeltra-Protocol/research/dec/DEC-043-shielded-to-shielded-in-pool-transfer-and-merchant-masking.md)
 
 - [x] **Client SDK & Browser Runner (`zeltra-sdk`):**
   - In-Browser WebAssembly SDK Prover: Eksekusi Groth16 client-side non-blocking via Web Worker dengan isolasi memori anti-OOM linear (`worker.terminate()`) (DEC-041).
@@ -25,7 +25,7 @@ Ref: [`research/decisions/DEC-040`](file:///workspaces/Zeltra-Protocol/research/
 ---
 
 ## Fase 2: Circuit Freeze, Security Audit & Trusted Setup MPC (FOKUS AKTIF SAAT INI)
-Ref: [`research/decisions/DEC-035`](file:///workspaces/Zeltra-Protocol/research/decisions/DEC-035-cryptographic-canonicality-public-input-binding-and-mmr.md) & [`DEC-036`](file:///workspaces/Zeltra-Protocol/research/decisions/DEC-036-universal-2-in-2-out-joinsplit-full-stack-architecture.md)
+Ref: [`research/dec/DEC-035`](file:///workspaces/Zeltra-Protocol/research/dec/DEC-035-cryptographic-canonicality-public-input-binding-and-mmr.md) & [`DEC-036`](file:///workspaces/Zeltra-Protocol/research/dec/DEC-036-universal-2-in-2-out-joinsplit-full-stack-architecture.md)
 
 *Kunci mati seluruh spesifikasi sebelum menyentuh jaringan publik:*
 
