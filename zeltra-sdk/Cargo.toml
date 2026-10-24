@@ -21,7 +21,7 @@ hex = "0.4.3"
 js-sys = "0.3"
 k256 = { version = "0.14", features = ["ecdsa", "arithmetic"] }
 zeltra-core = { path = "../zeltra-core" }
-rand = "0.8.6"
+rand = "0.10.3"
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.150"
 sha2 = "0.10.9"
