@@ -26,7 +26,7 @@
 ---
 
 ## 1. Kriptografi, Circuit Hardening & MPC Setup (Fase 2 — Fleksibilitas R&D Terbuka)
-Ref: [`docs/roadmap.md`](file:///workspaces/Zeltra-Protocol/docs/roadmap.md) (Fase 2), [`research/decisions/DEC-035`](file:///workspaces/Zeltra-Protocol/research/decisions/DEC-035-cryptographic-canonicality-public-input-binding-and-mmr.md), & [`research/decisions/DEC-046`](file:///workspaces/Zeltra-Protocol/research/decisions/DEC-046-null-branch-witness-attack-defense-and-quadratic-encoding-soundness.md)
+Ref: [`docs/roadmap.md`](file:///workspaces/Zeltra-Protocol/docs/roadmap.md) (Fase 2), [`research/dec/DEC-035`](file:///workspaces/Zeltra-Protocol/research/dec/DEC-035-cryptographic-canonicality-public-input-binding-and-mmr.md), & [`research/dec/DEC-046`](file:///workspaces/Zeltra-Protocol/research/dec/DEC-046-null-branch-witness-attack-defense-and-quadratic-encoding-soundness.md)
 
 > [!NOTE]
 > **Status Fleksibilitas:** Mengingat deploy Arbitrum sedang jeda/freeze (Oktober 2026), **sirkuit ZK BELUM DIKUNCI**. Tim bebas mengembangkan fitur inovatif (SBM Prover, MinMandate, iSimplePIR) dan memperkuat aljabar sirkuit tanpa terburu-buru melakukan *circuit freeze*.

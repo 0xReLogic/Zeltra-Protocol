@@ -230,7 +230,7 @@ sequenceDiagram
 2. **Read `todo.md`:**
    - Check item status before touching it. Do not duplicate backlog management across arbitrary files.
 3. **Avoid Bureaucratic Bloat (Zero Fluff Documentation):**
-   - Keep architectural findings inside [`research/decisions/`](file:///workspaces/Zeltra-Protocol/research/decisions/) and chapter guides in [`docs/`](file:///workspaces/Zeltra-Protocol/docs/). Never spawn random markdown checklists or fragmented files that distract developers.
+   - Keep architectural findings inside [`research/dec/`](file:///workspaces/Zeltra-Protocol/research/dec/) and chapter guides in [`docs/`](file:///workspaces/Zeltra-Protocol/docs/). Never spawn random markdown checklists or fragmented files that distract developers.
 4. **Graphify-First Navigation (Mandatory Reflex):**
    - *Graph Topology:* Before grep or reading raw files, run `graphify query "<question>"` (or MCP `query_graph`), `graphify explain "<Symbol>"` (or MCP `get_node`), or `graphify path "<A>" "<B>"` (or MCP `shortest_path`).
    - *Prohibition:* Never dump raw `graphify-out/graph.json` or monolithic `GRAPH_REPORT.md` into the LLM context.
@@ -241,7 +241,7 @@ sequenceDiagram
 6. **Research Gate & External Intel (Exa & Tavily):**
    - *Exa MCP (`web_search_exa`, `web_fetch_exa`):* Semantic & Deep Technical Search. Best for cryptography papers (2024–2026), audit post-mortems, deep architecture, and external crate implementations.
    - *Tavily MCP (`tavily_search`, `tavily_extract`, `tavily_crawl`):* Real-Time Fact, News & Ecosystem Intel. Best for live Arbitrum/Stylus releases, governance proposals (AIP), and immediate fact checks.
-   - *Synergy:* Map ecosystem landscape with Tavily, dive deep into technical papers with Exa, and document key findings in `research/decisions/`.
+   - *Synergy:* Map ecosystem landscape with Tavily, dive deep into technical papers with Exa, and document key findings in `research/dec/`.
 7. **Groq LPU Acceleration (`qwen/qwen3.8-27b`):**
    - Ultra-fast inference engine (~200–400+ tok/s) via OpenAI-compatible endpoint (`OPENAI_BASE_URL="https://api.groq.com/openai/v1"`). Used for zero-delay Graphify semantic extraction and fast benchmarking.
 
@@ -317,4 +317,4 @@ sequenceDiagram
 - [`todo.md`](file:///workspaces/Zeltra-Protocol/todo.md) — Master active backlog & test status
 - [`VISION.md`](file:///workspaces/Zeltra-Protocol/VISION.md) & [`docs/bisnis.md`](file:///workspaces/Zeltra-Protocol/docs/bisnis.md) — Product vision, business model, & fee architecture
 - [`docs/`](file:///workspaces/Zeltra-Protocol/docs/) — Documentation (`bisnis.md`, `roadmap.md`, `X402_INTEGRATION_STRATEGY.md`, `analisis/`)
-- [`research/decisions/`](file:///workspaces/Zeltra-Protocol/research/decisions/) — 72 Architecture Decision Records (DEC-001 through DEC-048)
+- [`research/dec/`](file:///workspaces/Zeltra-Protocol/research/dec/) — 72 Architecture Decision Records (DEC-001 through DEC-048)
