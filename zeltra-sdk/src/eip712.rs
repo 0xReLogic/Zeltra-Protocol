@@ -77,9 +77,7 @@ pub fn sign_quote(
 
     let hash = compute_quote_hash(quote, chain_id, contract_address);
 
-    let (signature, recovery_id) = signing_key
-        .sign_prehash_recoverable(&hash.0)
-        .map_err(|e| format!("Signing failed: {}", e))?;
+    let (signature, recovery_id) = signing_key.sign_prehash_recoverable(&hash.0);
 
     let sig_bytes = signature.to_bytes();
     let r = sig_bytes[..32].try_into().unwrap();
@@ -139,7 +137,7 @@ pub fn verify_quote_signature(
 
 /// Convert a public key to an Ethereum address
 fn public_key_to_address(public_key: &k256::ecdsa::VerifyingKey) -> Address {
-    let public_key_bytes = public_key.to_encoded_point(false);
+    let public_key_bytes = public_key.to_sec1_point(false);
     let public_key_bytes = public_key_bytes.as_bytes();
 
     // Skip the first byte (0x04 prefix for uncompressed public keys)
@@ -199,10 +197,13 @@ mod tests {
     #[test]
     fn test_eip712_signature_roundtrip() {
         use k256::ecdsa::SigningKey;
+        use rand::RngCore;
 
         // Generate a random private key for testing
-        let private_key_bytes = SigningKey::random(&mut rand::thread_rng()).to_bytes();
-        let private_key: [u8; 32] = private_key_bytes.into();
+        let mut private_key = [0u8; 32];
+        rand::thread_rng().fill_bytes(&mut private_key);
+        // Ensure non-zero
+        private_key[0] |= 1;
 
         // Derive the public key and address
         let signing_key = SigningKey::from_bytes((&private_key).into()).unwrap();
@@ -241,14 +242,15 @@ mod tests {
     #[test]
     fn test_eip712_wrong_signer_fails() {
         use k256::ecdsa::SigningKey;
+        use rand::RngCore;
 
         // Generate two different keys
-        let private_key1: [u8; 32] = SigningKey::random(&mut rand::thread_rng())
-            .to_bytes()
-            .into();
-        let private_key2: [u8; 32] = SigningKey::random(&mut rand::thread_rng())
-            .to_bytes()
-            .into();
+        let mut private_key1 = [0u8; 32];
+        let mut private_key2 = [0u8; 32];
+        rand::thread_rng().fill_bytes(&mut private_key1);
+        rand::thread_rng().fill_bytes(&mut private_key2);
+        private_key1[0] |= 1;
+        private_key2[0] |= 2;
 
         let signing_key2 = SigningKey::from_bytes((&private_key2).into()).unwrap();
         let wrong_signer = public_key_to_address(signing_key2.verifying_key());
@@ -280,10 +282,11 @@ mod tests {
     #[test]
     fn test_eip712_tampered_quote_fails() {
         use k256::ecdsa::SigningKey;
+        use rand::RngCore;
 
-        let private_key: [u8; 32] = SigningKey::random(&mut rand::thread_rng())
-            .to_bytes()
-            .into();
+        let mut private_key = [0u8; 32];
+        rand::thread_rng().fill_bytes(&mut private_key);
+        private_key[0] |= 1;
         let signing_key = SigningKey::from_bytes((&private_key).into()).unwrap();
         let signer_address = public_key_to_address(signing_key.verifying_key());
 
@@ -324,9 +327,11 @@ mod tests {
     #[test]
     fn test_eip712_quote_hash_binds_asset_id() {
         use k256::ecdsa::SigningKey;
+        use rand::RngCore;
 
-        let private_key_bytes = SigningKey::random(&mut rand::thread_rng()).to_bytes();
-        let private_key: [u8; 32] = private_key_bytes.into();
+        let mut private_key = [0u8; 32];
+        rand::thread_rng().fill_bytes(&mut private_key);
+        private_key[0] |= 1;
         let signing_key = SigningKey::from_bytes((&private_key).into()).unwrap();
         let signer_address = public_key_to_address(signing_key.verifying_key());
 
