@@ -9,7 +9,7 @@ pub use note_wallet::{
     build_audit_report_inner, check_nullifiers_spent_batch, get_or_init_disclosure_keys,
     recover_from_viewing_key, recover_from_viewing_key_batch, ConsolidationEstimate,
     ConsolidationRoundResult, ConsolidationSummary, DirectDepositPayload,
-    JoinSplitSpendProofPayload, NoteEpochStatus, NoteEvent, NoteStatus, PrivateNoteWallet,
-    PrivateNoteWitness, ReadOnlyAuditorSession, RecoveredNote, RecoveryResult, SelectedSpend,
-    SpendProofPayload, WalletError, WalletNote,
+    JoinSplitSpendProofPayload, NoteClassification, NoteEpochStatus, NoteEvent, NoteStatus,
+    PrivateNoteWallet, PrivateNoteWitness, ReadOnlyAuditorSession, RecoveredNote, RecoveryResult,
+    SelectedSpend, SpendProofPayload, WalletError, WalletNote,
 };

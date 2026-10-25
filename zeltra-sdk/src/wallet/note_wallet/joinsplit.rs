@@ -608,6 +608,22 @@ impl PrivateNoteWallet {
         let proof_b = to_evm_g2(&proof.b);
         let proof_c = to_evm_g1(&proof.c);
 
+        // DEC-052: Fast Client-side Sanitizer Gate
+        let mut proof_a_fixed = [0u8; 128];
+        proof_a_fixed.copy_from_slice(&proof_a_neg);
+        let mut proof_b_fixed = [0u8; 256];
+        proof_b_fixed.copy_from_slice(&proof_b);
+        let mut proof_c_fixed = [0u8; 128];
+        proof_c_fixed.copy_from_slice(&proof_c);
+
+        zeltra_core::from_evm_proof_sanitized(&proof_a_fixed, &proof_b_fixed, &proof_c_fixed)
+            .map_err(|err| {
+                WalletError::CryptoError(format!(
+                    "Client-side proof sanitization failed: {:?}",
+                    err
+                ))
+            })?;
+
         // 10. Format canonical 19 Public Inputs (DEC-036A Section 5)
         let pis = extract_joinsplit_public_inputs(&circuit);
         let public_inputs: Vec<String> = pis
@@ -1138,6 +1154,22 @@ impl PrivateNoteWallet {
         let proof_a_neg = to_evm_g1(&-proof.a);
         let proof_b = to_evm_g2(&proof.b);
         let proof_c = to_evm_g1(&proof.c);
+
+        // DEC-052: Fast Client-side Sanitizer Gate
+        let mut proof_a_fixed = [0u8; 128];
+        proof_a_fixed.copy_from_slice(&proof_a_neg);
+        let mut proof_b_fixed = [0u8; 256];
+        proof_b_fixed.copy_from_slice(&proof_b);
+        let mut proof_c_fixed = [0u8; 128];
+        proof_c_fixed.copy_from_slice(&proof_c);
+
+        zeltra_core::from_evm_proof_sanitized(&proof_a_fixed, &proof_b_fixed, &proof_c_fixed)
+            .map_err(|err| {
+                WalletError::CryptoError(format!(
+                    "Client-side proof sanitization failed: {:?}",
+                    err
+                ))
+            })?;
 
         let pis = extract_joinsplit_public_inputs(&circuit);
         let public_inputs: Vec<String> = pis

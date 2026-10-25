@@ -274,6 +274,7 @@ pub async fn handle_export_cex_proof(
                     nullifier_hex: format!("0x{}", "03".repeat(32)),
                     spent_at_secs: 1773619200,
                 },
+                classification: zeltra_sdk::NoteClassification::Spent,
                 created_at_secs: 1773619200,
                 session_id: None,
             },

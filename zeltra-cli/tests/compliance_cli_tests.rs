@@ -16,7 +16,9 @@ use tempfile::tempdir;
 
 use zeltra_core::{fr_to_be_bytes, note_commitment, Fr, UniformRand};
 use zeltra_sdk::compliance::models::{AuditReport, CexProofPayload};
-use zeltra_sdk::wallet::note_wallet::{NoteStatus, PrivateNoteWallet, WalletNote};
+use zeltra_sdk::wallet::note_wallet::{
+    NoteClassification, NoteStatus, PrivateNoteWallet, WalletNote,
+};
 
 #[tokio::test]
 async fn test_cli_export_audit_json_roundtrip() {
@@ -49,6 +51,7 @@ async fn test_cli_export_audit_json_roundtrip() {
             epoch_id: Some(0),
             merkle_path_hex: Some(vec!["00".repeat(32)]),
             status: NoteStatus::Unspent,
+            classification: NoteClassification::ActiveSpendable,
             created_at_secs: 1773619200,
             session_id: None,
         },
@@ -116,6 +119,7 @@ async fn test_cli_export_audit_csv_roundtrip() {
             epoch_id: Some(0),
             merkle_path_hex: Some(vec!["00".repeat(32)]),
             status: NoteStatus::Unspent,
+            classification: NoteClassification::ActiveSpendable,
             created_at_secs: 1773619200,
             session_id: None,
         },
@@ -182,6 +186,7 @@ async fn test_cli_export_and_verify_cex_proof_roundtrip() {
             epoch_id: Some(0),
             merkle_path_hex: Some(vec!["00".repeat(32)]),
             status: NoteStatus::Unspent,
+            classification: NoteClassification::ActiveSpendable,
             created_at_secs: 1773619200,
             session_id: None,
         },
@@ -276,6 +281,7 @@ async fn test_verify_cex_proof_fails_on_tampered_json() {
             epoch_id: Some(0),
             merkle_path_hex: Some(vec!["00".repeat(32)]),
             status: NoteStatus::Unspent,
+            classification: NoteClassification::ActiveSpendable,
             created_at_secs: 1773619200,
             session_id: None,
         },
@@ -350,6 +356,7 @@ async fn test_verify_cex_proof_fails_on_wrong_verifier() {
             epoch_id: Some(0),
             merkle_path_hex: Some(vec!["00".repeat(32)]),
             status: NoteStatus::Unspent,
+            classification: NoteClassification::ActiveSpendable,
             created_at_secs: 1773619200,
             session_id: None,
         },
@@ -415,6 +422,7 @@ async fn test_verify_cex_proof_fails_on_expired_timestamp() {
             epoch_id: Some(0),
             merkle_path_hex: Some(vec!["00".repeat(32)]),
             status: NoteStatus::Unspent,
+            classification: NoteClassification::ActiveSpendable,
             created_at_secs: 1773619200,
             session_id: None,
         },
@@ -485,6 +493,7 @@ async fn test_verify_cex_proof_fails_on_invalid_mmr() {
             epoch_id: Some(0),
             merkle_path_hex: Some(vec!["00".repeat(32)]),
             status: NoteStatus::Unspent,
+            classification: NoteClassification::ActiveSpendable,
             created_at_secs: 1773619200,
             session_id: None,
         },
