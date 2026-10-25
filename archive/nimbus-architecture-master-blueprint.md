@@ -84,7 +84,7 @@ $$\text{Input Note(s)} = \text{Payout} + \text{Protocol Fee} + \text{Execution F
 
 ## 3. Arsitektur Privasi ZK-UTXO (Inflow, Pool, Outflow)
 
-Untuk mencapai privasi maksimal 9.5/10 dan kemudahan produk 10/10, Zeltra menerapkan perlindungan berlapis di tiga zona:
+Untuk mencapai privasi maksimal 10/10 dan kemudahan produk 10/10, Zeltra menerapkan perlindungan berlapis di tiga zona:
 
 ```
 [ PINTU MASUK: INFLOW ]           [ INTERNAL POOL: ACCUMULATOR ]       [ PINTU KELUAR: OUTFLOW ]

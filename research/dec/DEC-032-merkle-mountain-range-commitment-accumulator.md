@@ -79,7 +79,7 @@ Untuk memastikan transisi arsitektur dari LeanIMT ke Merkle Mountain Range (MMR)
 #### 3. Paper Bonsai: Scalable Private Payments (IACR ePrint 2026/1987) & Commonware MMR [4, 5, 6, 7]
 - **Inovasi:** Bonsai (O'Grady, Meier, Policharla - Commonware 2026) [4] membuktikan bahwa Merkle Mountain Range (Peter Todd [Tod12]) [6] memungkinkan akumulasi transaksi tanpa batas ($N \to \infty$) di mana validator hanya perlu menyimpan $O(\log N)$ peak hashes dan ring buffer root terkini $T$ [4, 7].
 - **Optimasi Optimalitas:** Paper CRYPTO 2025 (*Merkle Mountain Ranges are Optimal*, IACR 2025/234) [5] membuktikan secara matematis bahwa varian MMR memiliki frekuensi pembaruan saksi (*witness update frequency*) yang optimal secara asimtotik dibandingkan semua pohon akumulator lainnya.
-- **Pelajaran untuk Zeltra:** Kita dapat meminjam struktur data MMR dari Bonsai untuk akumulasi komitmen koin Zeltra, sambil tetap mempertahankan model ZK-UTXO (1-langkah belanja merchant instan) demi menjaga privasi 9.5/10.
+- **Pelajaran untuk Zeltra:** Kita dapat meminjam struktur data MMR dari Bonsai untuk akumulasi komitmen koin Zeltra, sambil tetap mempertahankan model ZK-UTXO (1-langkah belanja merchant instan) demi menjaga privasi 10/10.
 
 ---
 
@@ -87,9 +87,9 @@ Untuk memastikan transisi arsitektur dari LeanIMT ke Merkle Mountain Range (MMR)
 
 Bonsai (2026/1987) adalah sistem berbasis **Account-Based**, bukan UTXO. Kami secara sadar **menolak** adopsi model akun Bonsai secara penuh karena dua alasan fundamental produk Zeltra:
 
-1. **Privasi On-Chain (Mantra Produk 9.5/10):**
+1. **Privasi On-Chain (Mantra Produk 10/10):**
    * Di Bonsai, setiap transaksi mempublikasikan identitas akun pengirim atau penerima secara terbuka di rantai (`A` berada pada pernyataan publik, lihat Section 2 & Section 6.1 paper). Observer on-chain mengetahui akun mana yang aktif, hanya nominal dan lawan transaksi yang disembunyikan.
-   * Di Zeltra, privasi pengirim adalah **absolut (9.5/10)**. Pengirim membuktikan kepemilikan note di dalam pohon tanpa mengungkap siapa dirinya, alamat dompetnya, atau saldo totalnya.
+   * Di Zeltra, privasi pengirim adalah **absolut (10/10)**. Pengirim membuktikan kepemilikan note di dalam pohon tanpa mengungkap siapa dirinya, alamat dompetnya, atau saldo totalnya.
 2. **Kenyamanan Merchant & Alur 1-Langkah (The Stripe of Web3):**
    * Di Bonsai, pembayaran adalah alur 2-langkah: Pengirim membuat Receipt $\rho$ di MMR $\to$ Penerima harus online, membuat ZK Proof klaim (`Receive`), dan membayar gas transaksi untuk mencairkannya.
    * Di Zeltra, pembayaran ke merchant wajib instan: User membelanjakan note $\to$ Relayer mengeksekusi $\to$ Merchant langsung menerima token USDC ERC-20 di alamat Arbitrum mereka dalam 1 transaksi atomik tanpa merchant perlu memahami ZK atau mengirim bukti apapun.
@@ -356,7 +356,7 @@ Sesuai aturan perilaku Zeltra, implementasi wajib menyertakan rasio pengujian mi
 Dengan pengesahan **DEC-032**:
 1. **Masalah Kapasitas Selesai Selamanya:** Protokol Zeltra terbebas dari ancaman freeze saat mencapai 1 juta transaksi, mampu berjalan hingga $2^{64}$ note tanpa perlu redeploy smart contract.
 2. **Gas Stylus Terpangkas ~85%:** Pengurangan drastis komputasi hashing saat deposit dan spend change note.
-3. **Privasi 9.5/10 Tetap Utuh:** Model ZK-UTXO 1-hop ke merchant dipertahankan tanpa membocorkan identitas akun ke validator.
+3. **Privasi 10/10 Tetap Utuh:** Model ZK-UTXO 1-hop ke merchant dipertahankan tanpa membocorkan identitas akun ke validator.
 4. **Kebal Eksploitasi 2026:** Memasukkan mitigasi kegagalan Hyperbridge (April 2026) dan wrap-around scalar attack langsung ke level constraint sirkuit dan kontrak WASM.
 
 ---

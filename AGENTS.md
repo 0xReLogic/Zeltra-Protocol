@@ -6,7 +6,7 @@
 
 Full vision manifesto: [`VISION.md`](file:///workspaces/Zeltra-Protocol/VISION.md).
 
-Product Mantra: **Privacy 9.5/10, Product 10/10.** Apple Pay / QRIS speed with real-cash mental accounting ($10 - $3 = $7 change via ZK-UTXO Private Notes, or direct peer-to-peer in-pool transfer). Engineering hell stays in the background; user experience stays effortless.
+Product Mantra: **Privacy 10/10, Product 10/10.** Apple Pay / QRIS speed with real-cash mental accounting ($10 - $3 = $7 change via ZK-UTXO Private Notes, or direct peer-to-peer in-pool transfer). Engineering hell stays in the background; user experience stays effortless.
 
 Dual sovereign rails (USDC & WETH / Native ETH), zero-friction inflow (0% deposit fee), volume-over-TVL economic velocity (0% in-pool transfer fee), and absolute mathematical solvency: **one deposit pays out exactly once, no more, no less.**
 

@@ -6,7 +6,7 @@
 
 **Solution Proposal:** Off-chain ZK proof system dimana user generate proof selectively untuk verifier tertentu (e.g., CEX), bukan public proof. Nimbus **hanya cryptographically bind user ke deposit address**, verifier (CEX) check address dengan tools mereka sendiri.
 
-**Key Insight:** Privacy 9.5/10 + Product 10/10 bisa dicapai kalau:
+**Key Insight:** Privacy 10/10 + Product 10/10 bisa dicapai kalau:
 - Deposit on-chain (unavoidable, acceptable tradeoff)
 - Spend fully private (existing nullifier + ZK)
 - Compliance proof **selective** (user pilih siapa yang liat, bukan broadcast public)
@@ -68,7 +68,7 @@
    - Apply Binance policy: risk_score < 0.1 → APPROVE
 ```
 
-**Outcome:** Privacy 9.5/10 (deposit on-chain, spend private) + Product 10/10 (CEX compliance satisfied).
+**Outcome:** Privacy 10/10 (deposit on-chain, spend private) + Product 10/10 (CEX compliance satisfied).
 
 ---
 
@@ -252,7 +252,7 @@ Selective disclosure just saves CEX from manually asking user "what's your depos
 | **CEX verify** | Check ASP root on-chain → verify proof | Verify proof → check address themselves |
 | **Future-proof?** | No (ASP standards change) | Yes (CEX adapt independently) |
 | **Regulatory risk** | Nimbus endorses ASP = liability | Nimbus neutral = no liability |
-| **Privacy** | 8/10 (ASP root might leak info) | 9.5/10 (only address revealed) |
+| **Privacy** | 8/10 (ASP root might leak info) | 10/10 (only address revealed) |
 
 ---
 
@@ -331,7 +331,7 @@ Regulator: "Makes sense. You're like SWIFT (neutral payment rail)." ✅
    - **CEX use existing Chainalysis/compliance tools** (already subscribed)
 
 5. **Privacy vs Compliance Tradeoff Optimal**
-   - Privacy: 9.5/10 (only deposit on-chain, spend hidden, selective disclosure)
+   - Privacy: 10/10 (only deposit on-chain, spend hidden, selective disclosure)
    - Compliance: 10/10 (CEX satisfied, user proves clean source)
    - **No better solution exists without sacrificing one side**
 
@@ -653,7 +653,7 @@ Relay → deposits to Nimbus from relay address (not user address)
 
 **Regulatory:** Compliance-friendly (voluntary disclosure), stronger than alternatives.
 
-**Privacy:** 9.5/10 (only deposit on-chain, spend hidden, selective disclosure).
+**Privacy:** 10/10 (only deposit on-chain, spend hidden, selective disclosure).
 
 **Product:** 10/10 (CEX satisfied, user controls disclosure, Nimbus neutral).
 

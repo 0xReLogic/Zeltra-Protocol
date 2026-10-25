@@ -37,7 +37,7 @@
 ## 1. Executive Summary & Problem Formulation
 
 ### A. Konteks & Problem Statement
-Zeltra Protocol beroperasi di bawah mantra produk: **"Privacy 9.5/10, Product 10/10"** — menghadirkan kecepatan sekelas Apple Pay / QRIS dengan mental model kas nyata ($10 - $3 = $7 change note privat). Untuk menjamin kedaulatan privasi finansial tanpa pihak ketiga (*zero third-party trust*), pembuatan bukti zero-knowledge Groth16 (kurva BLS12-381) **wajib dieksekusi 100% di sisi klien** ([`DEC-041`](DEC-041-in-browser-wasm-groth16-prover-and-disposable-worker.md)).
+Zeltra Protocol beroperasi di bawah mantra produk: **"Privacy 10/10, Product 10/10"** — menghadirkan kecepatan sekelas Apple Pay / QRIS dengan mental model kas nyata ($10 - $3 = $7 change note privat). Untuk menjamin kedaulatan privasi finansial tanpa pihak ketiga (*zero third-party trust*), pembuatan bukti zero-knowledge Groth16 (kurva BLS12-381) **wajib dieksekusi 100% di sisi klien** ([`DEC-041`](DEC-041-in-browser-wasm-groth16-prover-and-disposable-worker.md)).
 
 Namun, arsitektur prover Groth16 standar (termasuk implementasi `arkworks-rs` `ark-groth16 0.6.0` yang saat ini digunakan di `zeltra-core` dan `zeltra-sdk`) menuntut **Random-Access Memory (RAM) berukuran linier $O(N)$**:
 1. **Bottleneck Number Theoretic Transform (NTT):**

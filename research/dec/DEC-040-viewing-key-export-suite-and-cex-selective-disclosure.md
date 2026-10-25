@@ -18,7 +18,7 @@
 
 ## 1. Executive Summary & Context
 
-Zeltra Protocol adalah infrastruktur rel pembayaran privat universal (*"The Stripe of Web3 with Absolute Privacy"*). Dalam model kas nyata (*Private Cash*), privasi transaksi adalah nilai mutlak (*default privacy* 9.5/10). Namun, adopsi skala besar oleh entitas korporat (B2B), merchant global, institusi, dan AI Agent menuntut kemampuan **selective disclosure (keterbukaan selektif)** untuk:
+Zeltra Protocol adalah infrastruktur rel pembayaran privat universal (*"The Stripe of Web3 with Absolute Privacy"*). Dalam model kas nyata (*Private Cash*), privasi transaksi adalah nilai mutlak (*default privacy* 10/10). Namun, adopsi skala besar oleh entitas korporat (B2B), merchant global, institusi, dan AI Agent menuntut kemampuan **selective disclosure (keterbukaan selektif)** untuk:
 1. **Kepatuhan Pajak & Audit Finansial B2B:** Pelaporan SPT Tahunan, PPh/PPN badan usaha, dan audit independen (Big-4 / IFRS / SOC 2) atas arus kas masuk/keluar privat.
 2. **Deposit Bursa Terpusat (CEX Source of Funds):** Menembus pembekuan deposit di CEX (seperti Binance, Coinbase, Kraken, OKX) akibat deteksi interaksi dengan sistem privasi on-chain, dengan membuktikan keaslian sumber dana tanpa membuka seluruh dompet.
 3. **Mantra Kepatuhan DEC-026:** *"Permissionless Privacy, Permissioned Acceptance"*.

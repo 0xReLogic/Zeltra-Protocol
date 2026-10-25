@@ -20,7 +20,7 @@
 
 ## 1. Executive Summary & Context
 
-Zeltra Protocol adalah infrastruktur pembayaran dan penyelesaian privat universal (*"The Stripe of Web3 with Absolute Privacy"*). Filosofi produk Zeltra adalah **"Privacy 9.5/10, Product 10/10"**: pengalaman pengguna secepat dan semudah Apple Pay / QRIS dengan mental model kas nyata ($10 bayar $3 kembali $7 lewat ZK-UTXO Private Note), di mana seluruh komputasi kriptografi diselesaikan dengan mulus di belakang layar.
+Zeltra Protocol adalah infrastruktur pembayaran dan penyelesaian privat universal (*"The Stripe of Web3 with Absolute Privacy"*). Filosofi produk Zeltra adalah **"Privacy 10/10, Product 10/10"**: pengalaman pengguna secepat dan semudah Apple Pay / QRIS dengan mental model kas nyata ($10 bayar $3 kembali $7 lewat ZK-UTXO Private Note), di mana seluruh komputasi kriptografi diselesaikan dengan mulus di belakang layar.
 
 ### A. Dilema Privasi Klien vs Kenyamanan UX
 Untuk mencapai privasi transaksi tanpa kompromi (*default financial privacy*):
