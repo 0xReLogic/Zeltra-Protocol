@@ -20,10 +20,9 @@
 //! 2. Derivation of $nf = \text{Poseidon\_W5}([nk, \rho, epoch\_id, 0], \text{DOMAIN\_NULLIFIER})$
 //! 3. Nullifier equality constraint: $computed\_nf == nullifier$
 //! 4. Non-Malleable Challenge Range Binding: $challenge\_hi, challenge\_lo \in [0, 2^{128})$
-//! 5. Owner key anti-malleability wire constraint: $owner\_key^2 == expected\_owner\_sq$ (ensures $IC[1] \neq \mathcal{O}_{G1}$)
+//! 5. Owner key canonical derivation wire binding: $owner\_key == \text{Poseidon\_W3}(sk, 0, \text{DOMAIN\_OWNER\_KEY})$ (SEC-002)
 
 use ark_bls12_381::{Bls12_381, Fr};
-use ark_ff::Field;
 use ark_groth16::{prepare_verifying_key, PreparedVerifyingKey, Proof, ProvingKey, VerifyingKey};
 use ark_r1cs_std::fields::fp::FpVar;
 use ark_r1cs_std::prelude::*;
@@ -130,7 +129,7 @@ impl ConstraintSynthesizer<Fr> for SelectiveDisclosureCircuit {
         let domain_nk = FpVar::Constant(crate::note::domain_nullifier_key());
         let zero_var = FpVar::Constant(Fr::from(0u64));
         let nk_var =
-            poseidon_w3_gadget(cs.clone(), &[spending_key_var, zero_var.clone()], domain_nk)?;
+            poseidon_w3_gadget(cs.clone(), &[spending_key_var.clone(), zero_var.clone()], domain_nk)?;
 
         // ═══════════════════════════════════════════════════════════════
         // 4. Constraint 2: Derivation of Canonical Nullifier via Poseidon-W5
@@ -139,7 +138,7 @@ impl ConstraintSynthesizer<Fr> for SelectiveDisclosureCircuit {
         let domain_nf = FpVar::Constant(crate::note::domain_nullifier());
         let computed_nf = poseidon_w5_gadget(
             cs.clone(),
-            &[nk_var, rho_var, epoch_id_var, zero_var],
+            &[nk_var, rho_var, epoch_id_var, zero_var.clone()],
             domain_nf,
         )?;
         computed_nf.enforce_equal(&nullifier_var)?;
@@ -151,13 +150,18 @@ impl ConstraintSynthesizer<Fr> for SelectiveDisclosureCircuit {
         enforce_dummy_range_binding(cs.clone(), &challenge_hi_var, &challenge_lo_var)?;
 
         // ═══════════════════════════════════════════════════════════════
-        // 6. Constraint 4: Owner Key Anti-Malleability Wire Binding
-        //    Enforce owner_key^2 == expected_owner_sq to guarantee IC[1] != O_G1
+        // 6. Constraint 4: Owner Key Canonical Derivation & Wire Binding (SEC-002)
+        //    Enforce owner_key == Poseidon_W3([sk, 0], DOMAIN_OWNER_KEY)
+        //    Guarantees that only the holder of the spending key can claim
+        //    ownership of the note, preventing identity spoofing and false attribution.
         // ═══════════════════════════════════════════════════════════════
-        let owner_sq = &owner_key_var * &owner_key_var;
-        let owner_sq_val = self.owner_key.map(|k| k.square());
-        let expected_owner_sq = private_witness(&cs, owner_sq_val)?;
-        owner_sq.enforce_equal(&expected_owner_sq)?;
+        let domain_owner = FpVar::Constant(crate::keys::domain_owner_key());
+        let computed_owner = poseidon_w3_gadget(
+            cs.clone(),
+            &[spending_key_var, zero_var],
+            domain_owner,
+        )?;
+        computed_owner.enforce_equal(&owner_key_var)?;
 
         Ok(())
     }
@@ -238,7 +242,7 @@ mod tests {
     fn sample_circuit_inputs() -> (Fr, u32, Fr, Fr, Fr, Fr, Fr) {
         let spending_key = Fr::from(1337u64);
         let epoch_id = 1u32;
-        let owner_key = Fr::from(99999u64);
+        let owner_key = crate::keys::derive_owner_key(spending_key);
         let rho = Fr::from(42u64);
 
         let nk = derive_nullifier_key(spending_key);
@@ -452,6 +456,60 @@ mod tests {
         assert!(
             !result,
             "Verification MUST fail when owner_key is tampered (Anti-Malleability)!"
+        );
+    }
+
+    #[test]
+    fn test_disclosure_circuit_rejects_spoofed_owner_key() {
+        let mut rng = StdRng::seed_from_u64(0xdec040a);
+        let (pk, _vk) = setup_disclosure_circuit_params(&mut rng);
+
+        // Attacker credentials
+        let attacker_sk = Fr::from(1337u64);
+        let epoch_id = 1u32;
+        let rho = Fr::from(42u64);
+        let nk = derive_nullifier_key(attacker_sk);
+        let nullifier = derive_joinsplit_nullifier(nk, rho, epoch_id as u64);
+
+        let challenge_bytes = [0x5au8; 32];
+        let (challenge_hi, challenge_lo) = decompose_challenge_to_limbs(&challenge_bytes);
+
+        // Victim's owner key (observed on-chain or CEX deposit log)
+        let victim_owner_key = Fr::from(0xdead_beef_9999u64);
+
+        // Attacker creates a circuit attempting to claim victim_owner_key without victim's sk
+        let circuit = SelectiveDisclosureCircuit::new(
+            attacker_sk,
+            epoch_id,
+            victim_owner_key,
+            rho,
+            nullifier,
+            challenge_hi,
+            challenge_lo,
+        );
+
+        let cs = ConstraintSystem::<Fr>::new_ref();
+        circuit
+            .clone()
+            .generate_constraints(cs.clone())
+            .expect("constraint generation executes");
+
+        // SEC-002 Fix Verification: R1CS constraints MUST NOT be satisfied
+        assert!(
+            !cs.is_satisfied().unwrap(),
+            "FIX VERIFIED (SEC-002): Constraint system MUST reject witness where owner_key != derive_owner_key(sk)!"
+        );
+
+        let public_inputs = circuit.extract_public_inputs().unwrap();
+        assert_eq!(public_inputs[0], victim_owner_key);
+
+        // Attempting to generate proof from unsatisfied system must fail/panic inside prover
+        let prover_result = std::panic::catch_unwind(|| {
+            let _ = generate_disclosure_proof(circuit, &pk);
+        });
+        assert!(
+            prover_result.is_err(),
+            "FIX VERIFIED (SEC-002): Prover MUST panic/abort when attempting to prove false statement!"
         );
     }
 

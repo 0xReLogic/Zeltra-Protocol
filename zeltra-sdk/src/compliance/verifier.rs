@@ -627,12 +627,13 @@ mod tests {
         let seed = [0x88u8; 32];
         let mut wallet = PrivateNoteWallet::new(&seed);
         let sk = wallet.spending_key().unwrap();
+        let owner_key = zeltra_core::derive_owner_key(sk);
 
         let mut rng = OsRng;
         let rho = Fr::rand(&mut rng);
         let r = Fr::rand(&mut rng);
         let val = 25_000_000_000u64; // 25,000 USDC
-        let cm = note_commitment(val, 1, sk, rho, r);
+        let cm = note_commitment(val, 1, owner_key, rho, r);
         let cm_bytes = fr_to_be_bytes(&cm);
         let cm_hex = format!("0x{}", hex::encode(cm_bytes));
 
@@ -644,7 +645,7 @@ mod tests {
                 commitment_hex: cm_hex.clone(),
                 value: val,
                 asset_id: 1,
-                owner_key_hex: hex::encode(fr_to_be_bytes(&sk)),
+                owner_key_hex: hex::encode(fr_to_be_bytes(&owner_key)),
                 rho_hex: hex::encode(fr_to_be_bytes(&rho)),
                 randomness_hex: hex::encode(fr_to_be_bytes(&r)),
                 leaf_index: Some(0),
