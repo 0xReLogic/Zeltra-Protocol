@@ -18,15 +18,15 @@ Dokumen ini memetakan struktur kode riil, crate, dan hirarki direktori di seluru
 │   ├── src/spend.rs                  — Logika eksekusi Strict 3-Mode JoinSplit & private spend
 │   ├── src/merkle.rs                 — Akumulator on-chain Merkle Mountain Range (_mmr_insert, canonical peak bagging)
 │   ├── src/storage.rs                — Stylus sol_storage! Zeltra layout (MMR state, accepted roots, nullifiers, multi-asset)
-│   ├── src/groth16_note_verifier.rs  — Verifier Groth16 BLS12-381 untuk PrivateNoteCircuit (16 public inputs) via precompile 0x0c & 0x0f
-│   ├── src/groth16_joinsplit_verifier.rs — Verifier Groth16 BLS12-381 untuk JoinSplitCircuit (19 public inputs) via precompile 0x0c & 0x0f
+│   ├── src/groth16_note_verifier.rs  — Verifier Groth16 BLS12-381 untuk PrivateNoteCircuit (16 public inputs, sanitasi gerbang titik kurva DEC-052) via precompile 0x0c & 0x0f
+│   ├── src/groth16_joinsplit_verifier.rs — Verifier Groth16 BLS12-381 untuk JoinSplitCircuit (19 public inputs, sanitasi gerbang titik kurva DEC-052) via precompile 0x0c & 0x0f
 │   ├── src/verification.rs          — Wrapper pemanggilan host precompile EIP-2537 (call_msm_g1 0x0c, call_pairing 0x0f)
 │   ├── src/vault.rs                  — Akuntansi solvensi multi-aset terisolasi (_check_asset_solvency_invariant, total_assets)
 │   ├── src/views.rs                  — View/getter functions untuk status on-chain
 │   ├── src/governance.rs             — Pause, unpause, dan pengaturan parameter darurat
 │   ├── src/events.rs                 — Event NoteCommitmentAppended (memo 96B), JoinSplitSpendExecuted, dll.
 │   ├── src/poseidon_w5_constants.rs  — Konstanta round constants & MDS matrix Poseidon width-5 in-contract
-│   ├── src/interfaces.rs, types.rs, constants.rs, helpers.rs — Interface ERC-20 / CCIP & konversi tipe EVM
+│   ├── src/interfaces.rs, types.rs, constants.rs, helpers.rs — Interface ERC-20 / CCIP, tipe EVM & fungsi sanitasi titik G1/G2 (DEC-052)
 │   ├── src/bin/contract_interop.rs   — Binary interop contract CLI
 │   └── abi/IZeltra.sol               — Antarmuka Solidity ABI
 │
@@ -46,8 +46,8 @@ Dokumen ini memetakan struktur kode riil, crate, dan hirarki direktori di seluru
 │   ├── src/formal_tests.rs           — Test suite formal Augmented Jacobian & verifikasi rank finansial (DEC-047)
 │   ├── src/accounting.rs             — State machine ContractAccounting & validasi invariant matematis
 │   ├── src/fees.rs                   — Kalkulasi fee (0 bps deposit, 0 bps transfer, 45 bps spend, relayer markup)
-│   ├── src/curve_opt.rs              — Fast Jacobian point tripling 3P (4S+6M) & Eisenstein tau-endomorphism (3S+3M, DEC-050)
-│   ├── src/evm.rs                    — Serialisasi & formatting EVM untuk G1, G2, skalar, dan proof BLS12-381
+│   ├── src/curve_opt.rs              — Fast Jacobian point tripling 3P, Eisenstein tau-endomorphism (DEC-050) & endomorfisme Argo S (DEC-052)
+│   ├── src/evm.rs                    — Sanitasi deterministik titik G1/G2 EIP-2537 5-Gate & serialisasi EVM (DEC-052)
 │   ├── src/serialization.rs          — Helper serialisasi data arkworks
 │   ├── tests/deniability_tests.rs    — Suite pengujian KAT & adversarial boundary DEC-051 (9/9 tests passed)
 │   └── src/bin/                      — Binary CLI / benchmarks (bench.rs, bench_curve.rs, bench_deniability.rs, flat_mmr_interop.rs, zsa_interop.rs)
@@ -70,7 +70,7 @@ Dokumen ini memetakan struktur kode riil, crate, dan hirarki direktori di seluru
 │   │   ├── mmr.rs, nullifiers.rs     — Leaf cache & status nullifier on-chain
 │   │   ├── relayer_tx.rs, ccip.rs    — Transaksi broadcast & tracking CCIP
 │   │   └── idempotency.rs            — Idempotency deduplication guard
-│   ├── src/validation/               — Preflight validation (spend_preflight.rs: skalar kanonikal, nullifier check)
+│   ├── src/validation/               — Preflight validation (spend_preflight.rs: skalar kanonikal, sanitasi kurva & nullifier check DEC-052)
 │   ├── src/evm_client.rs             — Alloy client untuk broadcast L2 tx, gas bumping, dan receipt tracking
 │   ├── src/mmr_indexer.rs            — Background worker pengindeks event NoteCommitmentAppended & memo
 │   ├── src/mempool_watchdog.rs       — Background worker pemulih lease stalled & pemantau nullifier
@@ -100,7 +100,8 @@ Dokumen ini memetakan struktur kode riil, crate, dan hirarki direktori di seluru
 │   │       ├── keys.rs               — Manajemen kunci wallet & derive child keys
 │   │       ├── state_2pc.rs          — Two-phase commit safe state transitions
 │   │       └── types.rs              — Tipe data internal note wallet
-│   ├── src/compliance/               — Modul Kepatuhan & Audit B2B (DEC-040):
+│   ├── src/compliance/               — Modul Kepatuhan & Audit B2B (DEC-040 & DEC-052):
+│   │   ├── argo.rs                   — Argo Groth16 invalidity encoding codec & O(1) fraud slashing (DEC-052)
 │   │   ├── exporter.rs               — Ekspor laporan audit double-entry (CSV/JSON)
 │   │   ├── verifier.rs               — Mesin verifikasi independen CEX (Binance/Coinbase)
 │   │   └── models.rs                 — Model data compliance & challenge-response
@@ -124,12 +125,13 @@ Dokumen ini memetakan struktur kode riil, crate, dan hirarki direktori di seluru
 ├── scripts/                          — Automation, Testing & Deployment
 │   ├── start_relayer.sh              — Daemon runner relayer sequencer tunggal (start|status|stop|restart)
 │   ├── deploy_testnet.sh             — Deployment contract Stylus ke Arbitrum Sepolia
+│   ├── test_dec052_argo_verification.py — Suite verifikasi aljabar & empiris gerbang subgroup Argo DEC-052
 │   ├── test_dec048_committing_aead.py — Suite verifikasi adversarial EtH-KS committing AEAD DEC-048 (11/11 passed)
 │   ├── test_real_case_dec043c_inpool_wallet.py — Test suite Python independen (61/61 in-pool lifecycle tests)
 │   ├── test_dec046_dec047_jacobian_soundness.py — Suite verifikasi formal Jacobian rank DEC-046 & DEC-047
 │   └── check_balance.py, ht01_init_verification.py, ht04_spend_negative_tests.py, ht05_refund_tests.py, ht10_signed_quote_tests.py
 │
-├── research/dec/               — 74 Architecture Decision Records (DEC-001 s/d DEC-050)
+├── research/dec/               — 75 Architecture Decision Records (DEC-001 s/d DEC-052)
 ├── docs/                             — Documentation (bisnis.md, roadmap.md, X402_INTEGRATION_STRATEGY.md, analisis/)
 └── todo.md                           — Master active checklist (pending tasks only)
 ```

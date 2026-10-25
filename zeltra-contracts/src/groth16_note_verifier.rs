@@ -117,6 +117,12 @@ pub fn verify_private_note_groth16(
         return Err(b"INVALID_PROOF_LENGTHS".to_vec());
     }
 
+    // DEC-052: Strict pre-pairing curve point sanitization gates
+    crate::types::sanitize_g1_point(proof_a_neg.as_ref())?;
+    crate::types::sanitize_g2_point(proof_b.as_ref())?;
+    crate::types::sanitize_g1_point(proof_c.as_ref())?;
+    crate::types::sanitize_g1_point(public_inputs_g1.as_ref())?;
+
     // Construct 1536-byte input for BLS12_PAIRING_CHECK (4 pairs)
     let mut input = Vec::with_capacity(1536);
     // Pair 1: -A (G1, 128B) and B (G2, 256B)

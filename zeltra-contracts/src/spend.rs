@@ -699,9 +699,9 @@ mod tests {
         let change_cm_2 = FixedBytes::<32>::from_slice(&[0x2b; 32]);
         let quote_hash = FixedBytes::<32>::from_slice(&[0x3a; 32]);
 
-        let proof_a = vec![0x11; 128].into();
-        let proof_b = vec![0x22; 256].into();
-        let proof_c = vec![0x33; 128].into();
+        let proof_a = crate::tests::valid_test_g1();
+        let proof_b = crate::tests::valid_test_g2();
+        let proof_c = crate::tests::valid_test_g1();
 
         // Dual 96-byte AEAD memos (DEC-043B / AUD-5)
         let memo_1: Bytes = vec![0xaa; 96].into();
@@ -797,9 +797,9 @@ mod tests {
         let change_cm_2 = FixedBytes::<32>::from_slice(&[0x3b; 32]);
         let quote_hash = FixedBytes::<32>::from_slice(&[0x4a; 32]);
 
-        let proof_a = vec![0x11; 128].into();
-        let proof_b = vec![0x22; 256].into();
-        let proof_c = vec![0x33; 128].into();
+        let proof_a = crate::tests::valid_test_g1();
+        let proof_b = crate::tests::valid_test_g2();
+        let proof_c = crate::tests::valid_test_g1();
 
         let memo_1: Bytes = vec![0xcc; 96].into();
         let memo_2: Bytes = vec![0xdd; 96].into();

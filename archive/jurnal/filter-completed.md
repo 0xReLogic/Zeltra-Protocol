@@ -68,3 +68,23 @@ Dokumentasi arsitektur formal dan keputusan teknis permanen untuk inovasi ini te
   * Mempertahankan waktu eksekusi identik melalui substitusi titik dummy generator jika menerima kurva non-contributory/orde rendah, dekripsi ChaCha20 selalu penuh, dan zeroization kondisional branchless.
   * Teruji 100% lolos Gate V-2 (5 kategori adversarial matrix), Gate V-3 evaluasi statistik diferensial Dudect Welch t-test $|t| < 4.5$ tanpa false positive, dan Gate V-4 inspeksi objdump linear bebas instruksi jump rahasia.
 * **Arsitektur Referensi:** [`DEC-049`](../../research/decisions/DEC-049-leakage-resilient-decapsulation-and-constant-time-flag-defense.md).
+
+---
+
+## 5. Argo: Groth16 Invalidity Encoding & Strict Curve Point Sanitation (ACM CCS / IACR ePrint 2026/2165)
+* **File Jurnal / PDF:** [`jurnal/pdf/2026-2165.pdf`](../../jurnal/pdf/2026-2165.pdf)
+* **Penulis:** Liam Eagen (Blockstream) & Ying Tong Lai (Ideal Group / Geometry)
+* **Problem Kritis:**
+  Banyak protokol ZK rentan terhadap *small subgroup confinement*, titik kurva tidak valid (*invalid curve attack*), atau manipulasi koordinat non-kanonikal. Selain itu, pada pembuktian fraud cross-chain atau optimistic dispute, verifikasi Groth16 penuh di rantai tujuan sangat mahal dan lambat.
+* **Inovasi Paper:**
+  Merumuskan *Randomized Encoding for Groth16 Invalidity* berbasis aljabar pairing Type-3 bilinear groups dan endomorfisme Eisenstein $S = \{0, \pm 1, \pm \omega, \pm \omega^2\}$ ($|S| = 7$). Membuktikan bahwa bukti valid membocorkan tepat 0 bit rahasia (aman di bawah asumsi DDH), sedangkan bukti tidak valid mengekstrak kunci rahasia pembukti secara deterministik dalam $O(1)$ pencarian tabel diskret. Namun, Section 8.1 paper secara mutlak mensyaratkan sanitasi gerbang titik kurva prima $r$ agar terhindar dari kolisi pigeonhole dan kebocoran rahasia.
+* **Implementasi di Zeltra Core, Contract, Node & SDK (SELESAI & TERVERIFIKASI [x] — DEC-052):**
+  * Komponen:
+    - Sanitasi kurva deterministik 5-Gate di [`zeltra-core/src/evm.rs`](../../zeltra-core/src/evm.rs) (`sanitize_g1_point`, `sanitize_g2_point`).
+    - Aljabar endomorfisme Eisenstein di [`zeltra-core/src/curve_opt.rs`](../../zeltra-core/src/curve_opt.rs) (`EisensteinScalar`, `fast_s_pow_gt`, `ArgoMemoizedPowers`).
+    - Sanitasi host calldata verifier di [`zeltra-contracts/src/groth16_joinsplit_verifier.rs`](../../zeltra-contracts/src/groth16_joinsplit_verifier.rs), [`groth16_note_verifier.rs`](../../zeltra-contracts/src/groth16_note_verifier.rs), dan [`types.rs`](../../zeltra-contracts/src/types.rs).
+    - Preflight ingress sanitization di [`zeltra-node/src/validation/spend_preflight.rs`](../../zeltra-node/src/validation/spend_preflight.rs).
+    - Argo randomized invalidity encoder & $O(1)$ fraud slashing decoder di [`zeltra-sdk/src/compliance/argo.rs`](../../zeltra-sdk/src/compliance/argo.rs).
+  * Teruji 100% lolos verifikasi aljabar & empiris di [`scripts/test_dec052_argo_verification.py`](../../scripts/test_dec052_argo_verification.py) dan seluruh test suite workspace (80 contract tests, 288 core tests, 117 sdk tests, 117 node tests).
+* **Arsitektur Referensi:** [`DEC-052`](../../research/dec/DEC-052-argo-groth16-invalidity-encoding-and-curve-point-sanitation.md).
+

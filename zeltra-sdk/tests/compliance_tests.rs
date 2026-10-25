@@ -23,8 +23,8 @@ use zeltra_sdk::compliance::{
     VerifierBinding,
 };
 use zeltra_sdk::wallet::note_wallet::{
-    NoteClassification, NoteEvent, NoteStatus, PrivateNoteWallet, ReadOnlyAuditorSession, SelectedSpend, WalletError,
-    WalletNote,
+    NoteClassification, NoteEvent, NoteStatus, PrivateNoteWallet, ReadOnlyAuditorSession,
+    SelectedSpend, WalletError, WalletNote,
 };
 
 #[allow(clippy::too_many_arguments)]

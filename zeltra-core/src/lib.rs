@@ -15,7 +15,10 @@ pub mod poseidon;
 pub mod selective_disclosure_circuit;
 pub mod serialization;
 
-pub use curve_opt::{endomorphism_beta, fast_phi_p, fast_tau_p, fast_triple_p};
+pub use curve_opt::{
+    endomorphism_beta, fast_phi_p, fast_phi_sq_p, fast_s_pow_gt, fast_tau_p, fast_triple_p,
+    scalar_omega, scalar_omega_sq, ArgoMemoizedPowers, EisensteinScalar,
+};
 
 pub use ark_bls12_381::{Bls12_381, Fr, FrConfig, G1Projective, G2Projective};
 pub use ark_ec::pairing::Pairing;
@@ -33,7 +36,9 @@ pub use serialization::{deserialize_from_bytes, serialize_to_bytes};
 
 // Re-export EVM helpers
 pub use evm::{
-    from_evm_g1, from_evm_g2, from_evm_proof, from_evm_scalar, to_evm_g1, to_evm_g2, to_evm_scalar,
+    from_evm_g1, from_evm_g1_sanitized, from_evm_g2, from_evm_g2_sanitized, from_evm_proof,
+    from_evm_proof_sanitized, from_evm_scalar, sanitize_evm_g1, sanitize_evm_g2, to_evm_g1,
+    to_evm_g2, to_evm_scalar, CurveSanitationError, BLS12_381_Q_BE,
 };
 
 // Re-export fee policy helpers

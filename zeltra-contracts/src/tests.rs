@@ -194,8 +194,22 @@ pub unsafe extern "C" fn read_return_data(dest: *mut u8, _offset: usize, size: u
     }
     if size == 32 {
         PAIRING_RESULT.with(|result| dest_slice[31] = *result.borrow());
+    } else if size == 128 {
+        use ark_ec::AffineRepr;
+        let g1_bytes = to_evm_g1(&G1Affine::generator());
+        dest_slice.copy_from_slice(&g1_bytes);
     }
     size
+}
+
+pub(crate) fn valid_test_g1() -> Bytes {
+    use ark_ec::AffineRepr;
+    to_evm_g1(&G1Affine::generator()).to_vec().into()
+}
+
+pub(crate) fn valid_test_g2() -> Bytes {
+    use ark_ec::AffineRepr;
+    to_evm_g2(&G2Affine::generator()).to_vec().into()
 }
 
 #[test]
@@ -1022,9 +1036,9 @@ fn test_spend_private_note_success_with_change() {
     let change_cm = FixedBytes::<32>::from_slice(&[0x01; 32]);
     let quote_hash = FixedBytes::<32>::from_slice(&[0x05; 32]);
 
-    let proof_a = vec![0x11; 128].into();
-    let proof_b = vec![0x22; 256].into();
-    let proof_c = vec![0x33; 128].into();
+    let proof_a = valid_test_g1();
+    let proof_b = valid_test_g2();
+    let proof_c = valid_test_g1();
 
     let result = contract.spend_private_note(
         initial_root,
@@ -1106,9 +1120,9 @@ fn test_spend_private_note_double_spend_rejected() {
             U256::from(2000),
             U256::from(1),
             U256::ZERO,
-            vec![0x11; 128].into(),
-            vec![0x22; 256].into(),
-            vec![0x33; 128].into(),
+            valid_test_g1(),
+            valid_test_g2(),
+            valid_test_g1(),
             vec![].into(),
         )
         .unwrap();
@@ -1129,9 +1143,9 @@ fn test_spend_private_note_double_spend_rejected() {
         U256::from(2000),
         U256::from(1),
         U256::ZERO,
-        vec![0x11; 128].into(),
-        vec![0x22; 256].into(),
-        vec![0x33; 128].into(),
+        valid_test_g1(),
+        valid_test_g2(),
+        valid_test_g1(),
         vec![].into(),
     );
 
@@ -1347,9 +1361,9 @@ fn test_spend_private_note_invalid_groth16_proof_rejected() {
         U256::ZERO,
         U256::ZERO,
         U256::ZERO,
-        vec![0x11; 128].into(),
-        vec![0x22; 256].into(),
-        vec![0x33; 128].into(),
+        valid_test_g1(),
+        valid_test_g2(),
+        valid_test_g1(),
         vec![].into(),
     );
 
@@ -1491,9 +1505,9 @@ fn test_epoch_normal_spend_in_same_epoch() {
         U256::from(2000),
         U256::from(1),
         U256::ZERO, // is_rollover = 0
-        vec![0x11; 128].into(),
-        vec![0x22; 256].into(),
-        vec![0x33; 128].into(),
+        valid_test_g1(),
+        valid_test_g2(),
+        valid_test_g1(),
         vec![].into(),
     );
 
@@ -1546,9 +1560,9 @@ fn test_epoch_grace_window_spend_epoch_minus_one() {
         U256::from(5000),
         U256::from(1),
         U256::ZERO,
-        vec![0x11; 128].into(),
-        vec![0x22; 256].into(),
-        vec![0x33; 128].into(),
+        valid_test_g1(),
+        valid_test_g2(),
+        valid_test_g1(),
         vec![].into(),
     );
 
@@ -1595,9 +1609,9 @@ fn test_epoch_standalone_refresh_execution() {
         U256::from(2000),
         U256::from(1), // has_change = 1
         U256::from(1), // is_rollover = 1
-        vec![0x11; 128].into(),
-        vec![0x22; 256].into(),
-        vec![0x33; 128].into(),
+        valid_test_g1(),
+        valid_test_g2(),
+        valid_test_g1(),
         vec![].into(),
     );
 
@@ -1920,9 +1934,9 @@ fn test_epoch_generational_nullifier_double_spend_rejected() {
             U256::from(2000),
             U256::from(1),
             U256::ZERO,
-            vec![0x11; 128].into(),
-            vec![0x22; 256].into(),
-            vec![0x33; 128].into(),
+            valid_test_g1(),
+            valid_test_g2(),
+            valid_test_g1(),
             vec![].into(),
         )
         .unwrap();
@@ -1943,9 +1957,9 @@ fn test_epoch_generational_nullifier_double_spend_rejected() {
         U256::from(2000),
         U256::from(1),
         U256::ZERO,
-        vec![0x11; 128].into(),
-        vec![0x22; 256].into(),
-        vec![0x33; 128].into(),
+        valid_test_g1(),
+        valid_test_g2(),
+        valid_test_g1(),
         vec![].into(),
     );
 
@@ -1980,9 +1994,9 @@ fn test_spend_joinsplit_success_1_in_dummy_change() {
     let change_cm_2 = FixedBytes::<32>::from_slice(&[0x2b; 32]);
     let quote_hash = FixedBytes::<32>::from_slice(&[0x3a; 32]);
 
-    let proof_a = vec![0x11; 128].into();
-    let proof_b = vec![0x22; 256].into();
-    let proof_c = vec![0x33; 128].into();
+    let proof_a = valid_test_g1();
+    let proof_b = valid_test_g2();
+    let proof_c = valid_test_g1();
 
     let result = contract.spend_joinsplit(
         proof_a,
@@ -2341,9 +2355,9 @@ fn test_spend_joinsplit_invalid_proof_rejected() {
     set_pairing_result(false);
 
     let result = contract.spend_joinsplit(
-        vec![0x11; 128].into(),
-        vec![0x22; 256].into(),
-        vec![0x33; 128].into(),
+        valid_test_g1(),
+        valid_test_g2(),
+        valid_test_g1(),
         initial_root,
         U256::from(1),
         nf1,
@@ -2473,9 +2487,9 @@ fn test_dec037_encrypted_memo_lifecycle() {
             U256::from(5000),
             U256::from(1), // has_change = 1
             U256::from(2), // flags_packed: is_rollover = 0, asset_id = 1 (USDC)
-            vec![0x11; 128].into(),
-            vec![0x22; 256].into(),
-            vec![0x33; 128].into(),
+            valid_test_g1(),
+            valid_test_g2(),
+            valid_test_g1(),
             change_memo,
         )
         .unwrap();
@@ -2857,4 +2871,91 @@ fn test_usdc_revert_leaves_weth_solvent() {
         contract.user_note_liabilities(U256::from(1)).unwrap(),
         U256::ZERO
     );
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// DEC-052: Strict 5-Gate Curve Point Sanitation Contract Tests
+// ═══════════════════════════════════════════════════════════════════════
+
+#[test]
+fn test_dec052_contract_sanitizes_infinity_point() {
+    let inf_point: Bytes = vec![0u8; 128].into();
+    let err = crate::types::sanitize_g1_point(&inf_point).unwrap_err();
+    assert_eq!(err, b"PointAtInfinityNotAllowed".to_vec());
+}
+
+#[test]
+fn test_dec052_contract_sanitizes_non_canonical_coordinates() {
+    let mut bytes = vec![0u8; 128];
+    bytes[63] = 1;
+    bytes[127] = 1;
+    // Non-zero padding in leading 16 bytes
+    bytes[0] = 0x01;
+    let err = crate::types::sanitize_g1_point(&bytes).unwrap_err();
+    assert_eq!(err, b"NonCanonicalFieldElement".to_vec());
+}
+
+#[test]
+fn test_dec052_contract_sanitizes_off_curve_point() {
+    // Canonical coordinates but not on curve
+    let mut bytes = [0u8; 128];
+    bytes[63] = 1; // x = 1
+    bytes[127] = 1; // y = 1 (y^2 = 1 != 1^3 + 4 = 5)
+    let err = crate::types::sanitize_g1_point(&bytes).unwrap_err();
+    assert_eq!(err, b"CurvePointNotOnCurve".to_vec());
+}
+
+#[test]
+fn test_dec052_contract_sanitizes_small_subgroup_order3_point() {
+    // (0, 2) is on curve y^2 = x^3 + 4 but has small order 3 (divides cofactor h1)
+    let mut bytes = [0u8; 128];
+    bytes[127] = 2; // y = 2, x = 0
+    let err = crate::types::sanitize_g1_point(&bytes).unwrap_err();
+    assert_eq!(err, b"SubgroupCheckFailed".to_vec());
+}
+
+#[test]
+fn test_dec052_contract_spend_private_note_rejects_subgroup_injected_proof() {
+    reset_test_state();
+    let owner = address!("1111111111111111111111111111111111111111");
+    let merchant = address!("2222222222222222222222222222222222222222");
+    let mut contract = Zeltra::default();
+    contract.init(owner, Address::ZERO, Address::ZERO).unwrap();
+
+    let root = FixedBytes::<32>::from_slice(&crate::poseidon_w5_constants::EMPTY_TREE_ROOT_BYTES);
+    contract.accepted_note_roots.insert(root, U256::from(1000));
+    contract
+        .user_note_liabilities
+        .setter(U256::ZERO)
+        .set(U256::from(100_000_000));
+
+    // Subgroup-injected proof: A has order 3 (x=0, y=2)
+    let mut bad_proof_a = vec![0u8; 128];
+    bad_proof_a[127] = 2;
+
+    let canonical_nullifier = FixedBytes::<32>::from_slice(&[0x0a; 32]);
+    let canonical_change_cm = FixedBytes::<32>::from_slice(&[0x0b; 32]);
+
+    let res = contract.spend_private_note(
+        root,
+        U256::from(1),
+        canonical_nullifier,
+        U256::ZERO,
+        canonical_change_cm,
+        merchant,
+        U256::from(5_000_000),
+        U256::from(22_500),
+        U256::from(23_000),
+        U256::from(25_000),
+        FixedBytes::ZERO,
+        U256::from(2000),
+        U256::from(1),
+        U256::ZERO,
+        bad_proof_a.into(),
+        valid_test_g2(),
+        valid_test_g1(),
+        vec![].into(),
+    );
+
+    assert_eq!(res, Err(b"SubgroupCheckFailed".to_vec()));
 }

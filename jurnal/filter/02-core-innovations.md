@@ -4,19 +4,7 @@ Dokumen ini memetakan paper terpilih untuk lapisan kriptografi fundamental Zeltr
 
 ---
 
-## 1. Argo: Leaking a Secret from an Invalid Groth16 Proof (ACM CCS / IACR 2024–2025)
-* **File Jurnal:** [`jurnal/Argo-Leaking-Secret-Invalid-Groth16.md`](file:///workspaces/Zeltra-Protocol/jurnal/Argo-Leaking-Secret-Invalid-Groth16.md)
-* **Problem Kritis:**
-  Banyak protokol ZK mengabaikan sanitasi titik kurva Groth16 publik ($A \in G_1, B \in G_2, C \in G_1$). Paper *Argo* mendemonstrasikan serangan di mana prover jahat atau relayer manipulatif dapat mengekstraksi saksi rahasia (*witness leakage*) melalui pembuktian dengan titik kurva titik tak valid (invalid curve attack / small subgroup confinement).
-* **Inovasi & Mitigasi:**
-  Validasi subgroup wajib (`into_affine()`, non-infinity check, dan subgroup membership check) sebelum mengevaluasi pairing.
-* **Implementasi di Zeltra Core:**
-  * Komponen: [`zeltra-core/src/circuit.rs`](file:///workspaces/Zeltra-Protocol/zeltra-core/src/circuit.rs) dan deserializer Groth16.
-  * Menjamin `proof_a_neg`, `proof_b`, dan `proof_c` lolos sanitasi strict subgroup sebelum dikirimkan ke verifier Stylus contract, mencegah kebocoran secret spend key (`sk_spend`) klien.
-
----
-
-## 2. Cryptographic Erasure on Public Ledgers (IACR ePrint 2026/1109)
+## 1. Cryptographic Erasure on Public Ledgers (IACR ePrint 2026/1109)
 * **File Jurnal:** [`jurnal/Cryptographic-Erasure-Public-Ledgers.md`](file:///workspaces/Zeltra-Protocol/jurnal/Cryptographic-Erasure-Public-Ledgers.md)
 * **Problem Fundamental:**
   Pertentangan antara sifat *immutability* blockchain dan hak penghapusan data *Right to be Forgotten* (GDPR Art. 17).
@@ -27,7 +15,7 @@ Dokumen ini memetakan paper terpilih untuk lapisan kriptografi fundamental Zeltr
 
 ---
 
-## 3. Auditable Data Structures: Strong History-Independence (IACR ePrint 2016/755)
+## 2. Auditable Data Structures: Strong History-Independence (IACR ePrint 2016/755)
 * **File Jurnal / PDF:** [`jurnal/pdf/2016-755.pdf`](file:///workspaces/Zeltra-Protocol/jurnal/pdf/2016-755.pdf)
 * **Penulis:** Michael T. Goodrich, Evgenios M. Kornaropoulos, Michael Mitzenmacher, Roberto Tamassia
 * **Problem di Sistem Klasik:**
@@ -40,7 +28,7 @@ Dokumen ini memetakan paper terpilih untuk lapisan kriptografi fundamental Zeltr
 
 ---
 
-## 4. Constant-Time Conditions for Left-to-Right Scalar Multiplication (IACR ePrint 2026/1881)
+## 3. Constant-Time Conditions for Left-to-Right Scalar Multiplication (IACR ePrint 2026/1881)
 * **File Jurnal / ePrint:** IACR ePrint 2026/1881 (Oktober 2026)
 * **Penulis:** Sergey Agievich
 * **Problem Kritis:**
@@ -53,7 +41,7 @@ Dokumen ini memetakan paper terpilih untuk lapisan kriptografi fundamental Zeltr
 
 ---
 
-## 5. Fast Polynomial Arithmetic in the Exponent without Roots of Unity (IACR ePrint 2026/2413)
+## 4. Fast Polynomial Arithmetic in the Exponent without Roots of Unity (IACR ePrint 2026/2413)
 * **File Jurnal / ePrint:** IACR ePrint 2026/2413 (Oktober 2026)
 * **Penulis:** Diane Ducrocq and Pierrick Gaudry
 * **Problem di Sistem Klasik:**
@@ -66,7 +54,7 @@ Dokumen ini memetakan paper terpilih untuk lapisan kriptografi fundamental Zeltr
 
 ---
 
-## 6. The Geometry of Witness-Update Tradeoffs in Additive Positive Accumulators (IACR ePrint 2026/2362)
+## 5. The Geometry of Witness-Update Tradeoffs in Additive Positive Accumulators (IACR ePrint 2026/2362)
 * **File Jurnal / ePrint:** IACR ePrint 2026/2362 (Oktober 2026)
 * **Penulis:** Wei Qi
 * **Problem Kritis:**
@@ -78,7 +66,7 @@ Dokumen ini memetakan paper terpilih untuk lapisan kriptografi fundamental Zeltr
   * Memberikan model matematika presisi untuk penjadwalan caching bukti MMR di client SDK: bukti daun di-refresh dengan jadwal amortisasi optimal $O(\log N)$ tanpa pemborosan komputasi traversal hashing ulang yang redundan.
 ---
 
-## 7. Cryptanalysis & Security Margins of Poseidon via Subspace Restriction (IACR ePrint 2026/1692)
+## 6. Cryptanalysis & Security Margins of Poseidon via Subspace Restriction (IACR ePrint 2026/1692)
 * **File Jurnal / ePrint:** IACR ePrint 2026/1692 (Oktober 2026)
 * **Penulis:** Amit Singh Bhati, Sundas Tariq, Tomer Ashur
 * **Problem Kritis:**
@@ -91,7 +79,7 @@ Dokumen ini memetakan paper terpilih untuk lapisan kriptografi fundamental Zeltr
 
 ---
 
-## 8. Dixon Resultants Algebraic Cryptanalysis & Parameter Hardening for Poseidon-W5 (IACR ePrint 2026/1969)
+## 7. Dixon Resultants Algebraic Cryptanalysis & Parameter Hardening for Poseidon-W5 (IACR ePrint 2026/1969)
 * **File Jurnal / ePrint:** IACR ePrint 2026/1969 (September 2026)
 * **Penulis:** Haohai Suo, Jiamin Cui
 * **Problem Kritis:**
@@ -109,7 +97,7 @@ Dokumen ini memetakan paper terpilih untuk lapisan kriptografi fundamental Zeltr
 
 ---
 
-## 9. Top Gun: Degree Annihilation Attacks on Poseidon & Security Margins (IACR ePrint 2026/1254)
+## 8. Top Gun: Degree Annihilation Attacks on Poseidon & Security Margins (IACR ePrint 2026/1254)
 * **File Jurnal / ePrint:** IACR ePrint 2026/1254 (September 2026)
 * **Penulis:** Antonio Sanso, Giuseppe Vitto
 * **Problem Kritis:**
@@ -122,7 +110,7 @@ Dokumen ini memetakan paper terpilih untuk lapisan kriptografi fundamental Zeltr
 
 ---
 
-## 10. Slipway: Accessing Finite Subspace Trails & Full-Round Absorption in Poseidon (IACR ePrint 2026/1579)
+## 9. Slipway: Accessing Finite Subspace Trails & Full-Round Absorption in Poseidon (IACR ePrint 2026/1579)
 * **File Jurnal / ePrint:** IACR ePrint 2026/1579 (September 2026)
 * **Penulis:** Giuseppe Vitto
 * **Problem Kritis:**
@@ -132,5 +120,3 @@ Dokumen ini memetakan paper terpilih untuk lapisan kriptografi fundamental Zeltr
 * **Implementasi di Zeltra Core:**
   * Komponen: Generator matriks Cauchy MDS di [`zeltra-core/src/poseidon.rs`](file:///workspaces/Zeltra-Protocol/zeltra-core/src/poseidon.rs) dan generator Grain-128 LFSR (`DEC-021`).
   * Menjadi panduan verifikasi formal untuk matriks MDS Poseidon Zeltra: memastikan matriks MDS $5 \times 5$ (W5) dan $3 \times 3$ (W3) di-generate murni dari ekspansi Grain-128 LFSR yang independen secara statistik dari round constants, memutus total kemungkinan *full-round absorption* dan menjamin tidak ada subspace trail yang dapat diakses dari input manapun.
-
-

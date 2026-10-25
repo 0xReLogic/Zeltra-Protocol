@@ -4,10 +4,12 @@
 //! asset-partitioned balance sheet reconciliation, anti-CSV formula injection sanitization,
 //! and CEX Selective Disclosure proof generation.
 
+pub mod argo;
 pub mod exporter;
 pub mod models;
 pub mod verifier;
 
+pub use argo::*;
 pub use exporter::*;
 pub use models::*;
 pub use verifier::*;

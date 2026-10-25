@@ -706,6 +706,22 @@ pub async fn validate_private_note_spend_preflight(
         }
     }
 
+    // DEC-052: Strict curve point sanitization preflight check (AUD-30/AUD-32 defense)
+    if let Err(sanitation_err) =
+        zeltra_core::from_evm_proof_sanitized(&proof_a_bytes, &proof_b_bytes, &proof_c_bytes)
+    {
+        eprintln!(
+            "SECURITY TELEMETRY [AUD-30/AUD-32/DEC-052]: Adversarial proof rejected during preflight! Error: {:?}",
+            sanitation_err
+        );
+        return Err(PrivateNoteSpendResponse {
+            status: "REJECTED".to_string(),
+            message: format!("Invalid Groth16 proof: preflight verification failed - curve point sanitization rejected ({:?})", sanitation_err),
+            queue_position: 0,
+            estimated_gas_usdc: None,
+        });
+    }
+
     if !zeltra_core::verify_evm_note_proof(
         &proof_a_bytes,
         &proof_b_bytes,
@@ -1628,15 +1644,29 @@ pub async fn validate_joinsplit_spend_preflight(
         }
     }
 
-    let Some(proof) = zeltra_core::from_evm_proof(&proof_a_bytes, &proof_b_bytes, &proof_c_bytes)
-    else {
-        return Err(JoinSplitSpendResponse {
-            status: "REJECTED".to_string(),
-            message: "Failed to deserialize Groth16 proof points".to_string(),
-            tx_hash: None,
-            queue_position: 0,
-            estimated_gas_usdc: None,
-        });
+    // DEC-052: Strict curve point sanitization preflight check (AUD-30/AUD-32 defense)
+    let proof = match zeltra_core::from_evm_proof_sanitized(
+        &proof_a_bytes,
+        &proof_b_bytes,
+        &proof_c_bytes,
+    ) {
+        Ok(p) => p,
+        Err(sanitation_err) => {
+            eprintln!(
+                "SECURITY TELEMETRY [AUD-30/AUD-32/DEC-052]: Adversarial JoinSplit proof rejected during preflight! Error: {:?}",
+                sanitation_err
+            );
+            return Err(JoinSplitSpendResponse {
+                status: "REJECTED".to_string(),
+                message: format!(
+                    "Invalid Groth16 proof: Failed to deserialize Groth16 proof points ({:?})",
+                    sanitation_err
+                ),
+                tx_hash: None,
+                queue_position: 0,
+                estimated_gas_usdc: None,
+            });
+        }
     };
 
     let keys = zeltra_core::joinsplit_circuit::get_or_init_joinsplit_circuit_keys();
