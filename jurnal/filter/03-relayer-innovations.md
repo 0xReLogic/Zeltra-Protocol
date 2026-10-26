@@ -157,7 +157,7 @@ Dokumen ini memetakan paper terpilih untuk lapisan relayer dan cluster konsensus
 * **File Jurnal / ePrint:** IACR ePrint 2026/2284 (September 2026)
 * **Penulis:** Michele Ciampi, Pouyan Forghani, Yun Lu, Vassilis Zikas
 * **Problem di Sistem Desentralisasi:**
-  Untuk mempertahankan mantra produk Zeltra (*"Privacy 9.5/10, Product 10/10"* dengan kecepatan sekelas Apple Pay / QRIS <1 detik), jaringan relayer terdesentralisasi tidak boleh melambat karena protokol konsensus Byzantine Agreement yang lambat atau menunggu timeout fixed yang lama saat ada node yang offline atau melambat.
+  Untuk mempertahankan mantra produk Zeltra (*"Privacy 10/10, Product 10/10"* dengan kecepatan sekelas Apple Pay / QRIS <1 detik), jaringan relayer terdesentralisasi tidak boleh melambat karena protokol konsensus Byzantine Agreement yang lambat atau menunggu timeout fixed yang lama saat ada node yang offline atau melambat.
 * **Inovasi Paper:**
   Merumuskan kompilator *Randomized Early-Stopping Byzantine Agreement (BA)* pertama yang menggabungkan dua keunggulan terbaik:
   1. *Expected constant rounds* ($O(1)$) pada kondisi normal (konfirmasi instan sub-detik).

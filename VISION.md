@@ -12,7 +12,7 @@
 * **Nama Resmi:** **Zeltra Protocol** *(codebase transisi: Zeltra)*.
 * **Kategori:** *Universal Shielded Payment & Settlement Rail* (Human, B2B & Autonomous AI Economy).
 * **Visi Inti:** Menjadi infrastruktur pembayaran universal di era Web3 dan agen AI otonom. Aliran likuiditas bergerak secepat dan semudah Apple Pay / QRIS, dilindungi benteng matematika privasi zero-knowledge mutlak tanpa celah doxxing.
-* **Mantra Produk:** **Privasi 9.5/10, Produk 10/10.**
+* **Mantra Produk:** **Privasi 10/10, Produk 10/10.**
   * Privasi sejati tidak boleh mengorbankan kenyamanan pengguna.
   * Mental model kas nyata & fleksibilitas ganda:
     * **In-Pool Peer-to-Peer:** Bayar langsung ke alamat privat merchant/lawan transaksi tanpa token keluar ke publik (*Shielded-to-Shielded In-Pool Transfer*).

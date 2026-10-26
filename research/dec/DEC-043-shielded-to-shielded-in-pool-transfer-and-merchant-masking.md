@@ -32,7 +32,7 @@
 ## 1. Executive Summary & Problem Statement
 
 ### A. Dilema Privasi Merchant pada Pembayaran Terdesentralisasi (The Merchant Exposure Paradox)
-Dalam implementasi standar *Private Note Spend* dan *Universal JoinSplit* saat ini ([`DEC-036`](file:///workspaces/Zeltra-Protocol/research/dec/DEC-036-universal-2-in-2-out-joinsplit-full-stack-architecture.md)), arsitektur Zeltra melindungi identitas dan saldo pengirim secara mutlak (Privasi 9.5/10). Namun, alur penyelesaian pembayaran mengeksekusi transfer ERC-20 publik di layer EVM (`asset_safe_transfer` ke alamat `recipient` publik).
+Dalam implementasi standar *Private Note Spend* dan *Universal JoinSplit* saat ini ([`DEC-036`](file:///workspaces/Zeltra-Protocol/research/dec/DEC-036-universal-2-in-2-out-joinsplit-full-stack-architecture.md)), arsitektur Zeltra melindungi identitas dan saldo pengirim secara mutlak (Privasi 10/10). Namun, alur penyelesaian pembayaran mengeksekusi transfer ERC-20 publik di layer EVM (`asset_safe_transfer` ke alamat `recipient` publik).
 
 Hal ini menimbulkan paradoks privasi yang fatal bagi pelaku usaha, merchant B2B, platform langganan AI Agent, dan vendor komersial:
 1. **Kebocoran Volume Bisnis & Omzet Total:** Setiap kali pelanggan membayar $10 USDC ke merchant, smart contract memancarkan event `Transfer(address(Zeltra), merchant, 10_000_000)` di Arbitrum. Analis on-chain, kompetitor, dan bot dapat mengagregasi total pendapatan harian merchant secara transparan.

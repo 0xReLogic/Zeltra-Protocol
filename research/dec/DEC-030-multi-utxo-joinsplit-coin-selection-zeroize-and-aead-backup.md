@@ -48,7 +48,7 @@ Untuk menyelesaikan problem saldo terpecah tanpa mengorbankan privasi atau membe
 ### Analisis Mendalam Alternatif:
 
 1. **Mengapa Bukan 4-in 4-out?**
-   Meskipun DEC-016A sempat merencanakan hingga 4 input notes, analisis komputasi membuktikan bahwa 4 pohon Merkle verifier (4 × 20 = 80 Poseidon hashes) menghasilkan lebih dari **27.500 R1CS constraints**. Pada lingkungan client browser WebAssembly (misal mobile Safari/Chrome untuk AI Agent & retail), konsumsi memori melonjak hingga >250 MB dengan proving latency mendekati 10 detik. Ini melanggar mantra produk: *"Privasi 9.5/10, Produk 10/10 (Apple Pay / QRIS speed)"*.
+   Meskipun DEC-016A sempat merencanakan hingga 4 input notes, analisis komputasi membuktikan bahwa 4 pohon Merkle verifier (4 × 20 = 80 Poseidon hashes) menghasilkan lebih dari **27.500 R1CS constraints**. Pada lingkungan client browser WebAssembly (misal mobile Safari/Chrome untuk AI Agent & retail), konsumsi memori melonjak hingga >250 MB dengan proving latency mendekati 10 detik. Ini melanggar mantra produk: *"Privasi 10/10, Produk 10/10 (Apple Pay / QRIS speed)"*.
 2. **Mengapa Bukan Zcash Orchard Action Bundle?**
    Orchard menggunakan arsitektur Halo2 dengan siklus kurva Pasta (Pallas/Vesta) yang mengizinkan recursive aggregation tanpa trusted setup. Namun, Arbitrum Stylus dan EVM saat ini hanya memiliki precompile EIP-2537 terakselerasi untuk kurva **BLS12-381** (`0x0b`–`0x0f`). Memverifikasi Halo2 tanpa precompile asli di WASM Stylus akan menelan jutaan gas, menjadikannya tidak layak secara komersial.
 3. **Mengapa Universal 2-in-2-out JoinSplit Adalah Pilihan Terbaik?**

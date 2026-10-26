@@ -29,7 +29,7 @@ Keputusan arsitektur ini merumuskan mitigasi terintegrasi untuk persoalan di ata
 Meskipun model biaya dinamis berbasis utilisasi (*kinked utilization curve* ala Aave/Uniswap) tampak menarik secara teoretis, analisis mendalam terhadap perilaku pasar kripto (*crypto-native psychology*) dan otomatisasi agen AI membuktikan bahwa kurva dinamis pada rel privasi menghasilkan efek destruktif:
 
 1. **Kehancuran Mental Accounting UX ($10 - $3 = $7):**
-   Keunggulan produk utama Zeltra adalah *"Privacy 9.5/10, Product 10/10"* dengan kecepatan Apple Pay / QRIS dan akuntansi mental uang kas nyata. Jika pengguna membayar $3 dari note $10, mereka mengharapkan kembalian uang pas $7 (dikurangi fee tetap yang sudah diketahui di awal). Jika biaya penarikan berfluktuasi antara 35 bps hingga 70 bps tergantung volume penarikan orang lain di blok tersebut, pengguna merasa "dijebak" atau "dipalak" saat jaringan sibuk.
+   Keunggulan produk utama Zeltra adalah *"Privacy 10/10, Product 10/10"* dengan kecepatan Apple Pay / QRIS dan akuntansi mental uang kas nyata. Jika pengguna membayar $3 dari note $10, mereka mengharapkan kembalian uang pas $7 (dikurangi fee tetap yang sudah diketahui di awal). Jika biaya penarikan berfluktuasi antara 35 bps hingga 70 bps tergantung volume penarikan orang lain di blok tersebut, pengguna merasa "dijebak" atau "dipalak" saat jaringan sibuk.
 2. **Kegagalan Deterministik pada Agen AI (Budget Allowance Breaking):**
    AI Agent beroperasi otonom menggunakan kuota pengeluaran terikat (*task-scoped allowance* via EIP-7702 / x402). Fluktuasi tarif keluar dinamis memicu kesalahan *underfunded execution* dan kegagalan transaksi sistemik saat lonjakan pasar terjadi.
 3. **Eliminasi Vektor Eksploitasi Flash-Loan & Manipulasi Oracle:**

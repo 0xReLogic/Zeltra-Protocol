@@ -83,6 +83,7 @@ Folder `research/dec/` memuat seluruh catatan keputusan arsitektur resmi (*Archi
 | **DEC-050** | [`DEC-050-fast-jacobian-tripling-and-eisenstein-endomorphism-bls12-381.md`](file:///workspaces/Zeltra-Protocol/research/dec/DEC-050-fast-jacobian-tripling-and-eisenstein-endomorphism-bls12-381.md) | Fast Jacobian Point Tripling and Eisenstein Endomorphism on BLS12-381 (G1) | 2026-10-24 |
 | **DEC-051** | [`DEC-051-nopenena-cryptographic-deniability-small-decoy-sets-dummy-notes.md`](file:///workspaces/Zeltra-Protocol/research/dec/DEC-051-nopenena-cryptographic-deniability-small-decoy-sets-dummy-notes.md) | Nopenena Cryptographic Deniability, Small Decoy Sets, and Dummy Note Architecture | 2026-10-24 |
 | **DEC-052** | [`DEC-052-argo-groth16-invalidity-encoding-and-curve-point-sanitation.md`](file:///workspaces/Zeltra-Protocol/research/dec/DEC-052-argo-groth16-invalidity-encoding-and-curve-point-sanitation.md) | Argo Randomized Encoding for Groth16 Invalidity, Permissionless Fraud Gating & Strict Subgroup Defense | 2026-10-25 |
+| **DEC-053** | [`DEC-053-ammboost-state-growth-control-and-ephemeral-pruning.md`](file:///workspaces/Zeltra-Protocol/research/dec/DEC-053-ammboost-state-growth-control-and-ephemeral-pruning.md) | ammBoost State Growth Control & Ephemeral Settlement Pruning (Bounded Ring-Buffer Storage) | 2026-10-26 |
 
 ---
 
@@ -109,6 +110,7 @@ Folder `research/dec/` memuat seluruh catatan keputusan arsitektur resmi (*Archi
 - **DEC-034 (A/B/C)**: Dual-Asset Architecture, Siloed Solvency, Payable Native ETH Wrapping, dan Zero-Oracle Gas Reimbursement.
 - **DEC-038 (A/B/C)**: Pure ZK-UTXO Migration, Direct MMR Deposit (0 bps fee), dan Zero-Legacy Purge.
 - **DEC-045 (A/B/C)**: In-Memory Flat MMR Array Peter Todd ($O(\log N)$ proof), Concurrent Accumulator, dan 1B View Tag Scan Acceleration.
+- **DEC-053**: ammBoost State Growth Control & Ephemeral Settlement Pruning ($O(1)$ Bounded Storage Eviction).
 
 ### 4. Privacy, Memos & Side-Channel Defenses
 - **DEC-037 & DEC-039**: 96-Byte Note Encryption Memo Protocol & Integrity Defense.

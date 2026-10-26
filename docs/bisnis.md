@@ -3,7 +3,7 @@
 > **"The Stripe of Web3 with Absolute Privacy."**  
 > *Engine: Pure ZK-UTXO on Arbitrum Stylus (Rust WASM + EIP-2537 BLS12-381)*  
 > *Dual Sovereign Rails: USDC (Micro-USDC) & WETH / Native ETH (Gwei)*  
-> *Mantra: Privasi 9.5/10, Produk 10/10 — Kecepatan Apple Pay / QRIS dengan Mental Kas Nyata ($10 - $3 = $7)*
+> *Mantra: Privasi 10/10, Produk 10/10 — Kecepatan Apple Pay / QRIS dengan Mental Kas Nyata ($10 - $3 = $7)*
 
 ---
 

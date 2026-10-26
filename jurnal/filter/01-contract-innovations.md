@@ -40,20 +40,7 @@ Dokumen ini memetakan paper terpilih untuk arsitektur smart contract Zeltra ([`z
 
 ---
 
-## 4. ammBoost: State Growth Control for Accumulators (IACR ePrint 2024/1021)
-* **File Jurnal / PDF:** [`jurnal/pdf/2024-1021.pdf`](file:///workspaces/Zeltra-Protocol/jurnal/pdf/2024-1021.pdf)
-* **Penulis:** Nicolas Michel, Mohamed E. Najd, Ghada Almashaqbeh (2024/2025)
-* **Problem di Sistem Klasik:**
-  Pertumbuhan pohon Merkle dan state accumulator on-chain yang tak terbatas menyebabkan pembengkakan storage kontrak dan degradasi performa sinkronisasi node.
-* **Inovasi Paper:**
-  Mekanisme *bounded historical root window* dan *cryptographic state pruning* terverifikasi: membatasi kedalaman riwayat root yang disimpan on-chain tanpa merusak verifikasi bukti keanggotaan Merkle.
-* **Implementasi di Zeltra Stylus:**
-  * Komponen: [`zeltra-contracts/src/merkle.rs`](file:///workspaces/Zeltra-Protocol/zeltra-contracts/src/merkle.rs) (ring buffer `root_history` size 100 dan `accepted_note_roots` mapping).
-  * Menjaga ukuran storage Stylus WASM tetap terkendali dan hemat gas, mencegah memory bloat pada validator Arbitrum.
-
----
-
-## 5. ZK Email (NFA-based Regex): Identity & Recovery Engine (IACR ePrint 2026)
+## 4. ZK Email (NFA-based Regex): Identity & Recovery Engine (IACR ePrint 2026)
 * **File Jurnal:** [`jurnal/ZK-Proofs-Regex-Email-Verification.md`](file:///workspaces/Zeltra-Protocol/jurnal/ZK-Proofs-Regex-Email-Verification.md)
 * **Problem di Sistem Klasik:**
   Verifikasi bukti kepemilikan email DKIM secara on-chain di EVM/Stylus konvensional membutuhkan evaluasi string regex yang memakan jutaan gas dan puluhan ribu constraint sirkuit jika menggunakan automata DFA naif.
@@ -65,7 +52,7 @@ Dokumen ini memetakan paper terpilih untuk arsitektur smart contract Zeltra ([`z
 
 ---
 
-## 6. Faster Incremental Authenticated Dictionaries: Removing the Query Bottleneck (IACR ePrint 2026/2098)
+## 5. Faster Incremental Authenticated Dictionaries: Removing the Query Bottleneck (IACR ePrint 2026/2098)
 * **File Jurnal / ePrint:** IACR ePrint 2026/2098 (September 2026)
 * **Penulis:** Michael A. Bender, John Kuszmaul, William Kuszmaul
 * **Problem di Sistem Klasik:**
@@ -81,7 +68,7 @@ Dokumen ini memetakan paper terpilih untuk arsitektur smart contract Zeltra ([`z
 
 ---
 
-## 7. DelegProof: Machine-Checked Security Analysis of EIP-7702 Delegation (IACR ePrint 2026/2060)
+## 6. DelegProof: Machine-Checked Security Analysis of EIP-7702 Delegation (IACR ePrint 2026/2060)
 * **File Jurnal / ePrint:** IACR ePrint 2026/2060 (September 2026)
 * **Penulis:** Rong Qian, Yu Cheng, Lingyu Gao, Yuchang Zhang, Zengli Guo
 * **Problem Kritis:**
@@ -96,3 +83,4 @@ Dokumen ini memetakan paper terpilih untuk arsitektur smart contract Zeltra ([`z
   * Memberikan validasi keamanan formal bagi smart contract Stylus Zeltra:
     - Penegakan ketat binding domain `chain_id` pada seluruh verifikasi Groth16 dan quote eksekusi ([`DEC-035B`](file:///workspaces/Zeltra-Protocol/research/decisions/DEC-035B-formal-scope-binding-and-groth16-proof-malleability-hardening.md)), menutup celah replay lintas chain secara mutlak.
     - Struktur penyimpanan `sol_storage!` Zeltra mengadopsi namespaced layout terisolasi untuk data multi-aset, riwayat MMR, dan generational nullifiers, menjamin kekebalan penuh terhadap *storage confusion* jika kontrak Zeltra dipanggil oleh akun EOA yang didelegasikan via EIP-7702 atau ERC-4337 smart account.
+
