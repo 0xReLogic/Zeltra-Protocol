@@ -218,7 +218,7 @@ Untuk menjamin relayer tidak mengalami kebangkrutan operasional dan kas pengguna
 │                        TIGA PILAR FINANSIAL ANTI-RUGI BANDAR                           │
 ├────────────────────────────────┬───────────────────────────────────────────────────────┤
 │ 1. Self-Paying Conservation    │ Input Note = Output Note + Execution Fee (in-circuit) │
-│ 2. Guaranteed 15% Markup       │ Relayer selalu dibayar gas + 15% profit on-chain      │
+│ 2. Guaranteed 15% Buffer       │ Relayer selalu dibayar gas + 15% execution overhead   │
 │ 3. Dust Elimination ($2.00)    │ Koin receh dilarang rollover mandiri (anti-spam DoS)  │
 └────────────────────────────────┴───────────────────────────────────────────────────────┘
 ```
@@ -230,11 +230,11 @@ $$\text{protocol\_fee} = 0 \quad (\text{0 bps - Protokol tidak mengambil untung 
 Persamaan konservasi di sirkuit:
 $$\text{input\_value} = \text{output\_change\_value} + \text{execution\_fee}$$
 Di mana:
-$$\text{execution\_fee} = \text{gas\_cost} + \text{relayer\_markup}$$
+$$\text{execution\_fee} = \text{gas\_cost} + \text{execution\_overhead}$$
 
 > [!IMPORTANT]
 > **Jaminan Keuangan Relayer:**
-> Biaya gas relayer dipotong langsung dari saldo koin yang di-rollover. Relayer tidak pernah menalangi gas dari kantong pribadi. Relayer menerima reimbursement gas L2 penuh ditambah markup 15% secara instan on-chain (`accrued_execution_fee_liability`).
+> Biaya gas relayer dipotong langsung dari saldo koin yang di-rollover. Relayer tidak pernah menalangi gas dari kantong pribadi. Relayer menerima reimbursement gas L2 penuh ditambah execution overhead buffer 15% secara instan on-chain (`accrued_execution_fee_liability`, DEC-054).
 
 ### B. Dust Elimination Threshold (Anti-Spam Bot DoS)
 Untuk mencegah serangan DoS di mana penyerang membuat ribuan koin \$0.001 dan memicu rollover massal untuk menghabiskan kuota mempool relayer:
@@ -292,7 +292,7 @@ Sesuai aturan baku Zeltra, implementasi wajib menyertakan minimal 2x tes negatif
 1. `test_epoch_normal_spend_in_same_epoch`: Belanja koin segar pada epoch yang sama berlangsung sukses dengan 1 bukti Groth16.
 2. `test_epoch_grace_window_spend_epoch_minus_one`: Belanja koin pada epoch $E-1$ dalam masa tenggang 180 hari berhasil tanpa rollover.
 3. `test_epoch_in_flight_auto_rollover_spend`: Belanja koin kadaluarsa ($E-2$) otomatis mencetak change note di epoch $E$ dan membayar merchant sukses.
-4. `test_epoch_standalone_refresh_execution`: Pembaruan status koin mandiri sukses memotong gas reimburse dan mengkredit relayer markup 15%.
+4. `test_epoch_standalone_refresh_execution`: Pembaruan status koin mandiri sukses memotong gas reimburse dan mengkredit execution overhead 15%.
 
 ### B. Negative Tests (Pertahanan Batas & Anti-Eksploit)
 1. `test_epoch_expired_note_direct_spend_rejected`: Mencoba belanja koin $E-2$ tanpa mencetak change note epoch baru wajib revert `EPOCH_EXPIRED_REQUIRE_ROLLOVER`.

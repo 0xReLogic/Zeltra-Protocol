@@ -56,7 +56,8 @@ pub struct ExecutionQuoteRequest {
 pub struct ExecutionQuoteResponse {
     pub asset_id: u8,
     pub base_gas_fee: u64,
-    pub relayer_markup_fee: u64,    // Flat 15% markup (DEC-031)
+    #[serde(alias = "relayerMarkupFee", rename = "executionOverheadFee")]
+    pub execution_overhead_fee: u64, // Flat 15% execution gas overhead buffer (DEC-031 / DEC-054)
     pub total_execution_fee: u64,   // Satuan Gwei (WETH) atau Mikro (USDC)
     pub quote_hash: String,
     pub expiry: u64,                // Maksimum 20 detik (anti-volatility free option)

@@ -296,7 +296,8 @@ sequenceDiagram
 | Inflow (Deposit) | 0 bps (0.00%) | `deposit.rs` + `fees.rs` | Zero-friction liquidity entry (DEC-038B / DEC-034B) |
 | In-Pool Transfer (Mode 2) | 0 bps (0.00%) | `spend.rs` + `fees.rs` | Circular liquidity velocity inside pool (DEC-043B) |
 | Public Outflow Spend (Mode 3) | 45 bps (0.45% Flat) | `spend.rs` + `fees.rs` | Protocol monetization upon withdrawal (DEC-028) |
-| Relayer Execution | Gas reimbursement + 15% markup | `quote.rs` + `fees.rs` | Zero-oracle gas reimbursement in native units (DEC-031 / DEC-034C) |
+| Relayer Execution | Gas reimbursement + 15% execution overhead | `quote.rs` + `fees.rs` | Zero-oracle gas reimbursement in native units (DEC-031 / DEC-034C / DEC-054) |
+| Direct Self-Broadcast | 0% relayer fee (0 bps, gas self-paid) | `note_wallet/` | Safe harbor unhosted wallet path (DEC-054) |
 
 ---
 

@@ -387,25 +387,26 @@ pub struct ExecutionQuoteRequest {
     pub estimated_gas_limit: u64,
 }
 
-/// Signed Execution Quote Response for Dual-Asset zero-oracle rails (DEC-034C)
+/// Signed Execution Quote Response for Dual-Asset zero-oracle rails (DEC-034C / DEC-054)
 #[derive(Clone, Serialize, Deserialize, Debug)]
 pub struct ExecutionQuoteResponse {
     pub asset_id: u8,
     pub base_gas_fee: u64,
-    pub relayer_markup_fee: u64,  // Flat 15% markup (DEC-031)
-    pub total_execution_fee: u64, // Gwei (WETH)  Mikro (USDC)
+    #[serde(rename = "executionOverheadFee")]
+    pub execution_overhead_fee: u64, // 15% execution gas volatility & DA buffer (DEC-054)
+    pub total_execution_fee: u64, // Gwei (WETH) or Micro-USDC (USDC)
     pub quote_hash: String,
     pub expiry: u64,               // Maks 20 detik
     pub relayer_signature: String, // EIP-712 Signature
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Debug, Clone)]
 pub struct PrivateSpendQuoteRequest {
     pub merchant_amount: u64,
     #[serde(default)]
     pub estimated_gas_cost: Option<u64>,
-    #[serde(default)]
-    pub relayer_markup_bps: Option<u64>,
+    #[serde(default, rename = "gasOverheadBps")]
+    pub gas_overhead_bps: Option<u64>,
     #[serde(default)]
     #[allow(dead_code)]
     pub association_root: Option<String>,
@@ -414,18 +415,27 @@ pub struct PrivateSpendQuoteRequest {
     pub destination_chain_selector: Option<u64>,
 }
 
-#[derive(Serialize)]
+impl PrivateSpendQuoteRequest {
+    #[inline]
+    pub fn gas_overhead_bps(&self) -> Option<u64> {
+        self.gas_overhead_bps
+    }
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct PrivateSpendQuoteResponse {
     pub status: String,
     pub merchant_amount: u64,
     pub contract_amount: u64,
     pub protocol_fee: u64,
     pub gas_cost: u64,
-    pub relayer_markup: u64,
+    #[serde(rename = "executionOverhead")]
+    pub execution_overhead: u64,
     pub execution_fee: u64,
     pub user_total_debit: u64,
     pub fee_bps: u64,
-    pub relayer_markup_bps: u64,
+    #[serde(rename = "gasOverheadBps")]
+    pub gas_overhead_bps: u64,
     /// Transparent fee breakdown: pure local Arbitrum relayer execution gas cost (USDC base units)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub relayer_gas_cost: Option<u64>,
@@ -504,6 +514,11 @@ pub struct HealthResponse {
     pub queued_transactions: usize,
     pub processed_nullifiers: usize,
     pub relayer_wallet_balance_eth: f64,
+    #[serde(
+        alias = "relayerAccumulatedProfitUsdc",
+        alias = "relayer_accumulated_profit_usdc",
+        rename = "operationalGasReserveUsdc"
+    )]
     pub relayer_accumulated_profit_usdc: f64,
     /// Active ETH price in USDC used for margin accounting (DEC-029)
     #[serde(skip_serializing_if = "Option::is_none")]

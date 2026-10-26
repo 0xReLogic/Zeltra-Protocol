@@ -1,7 +1,7 @@
 pub const FEE_DENOMINATOR_BPS: u64 = 10_000;
 pub const DEPOSIT_FEE_BPS: u64 = 0; // 0% Deposit Fee (Immutable Zero-Friction Inflow)
 pub const PRIVATE_SPEND_FEE_BPS: u64 = 45; // 0.45% (< 30 days)
-pub const DEFAULT_RELAYER_MARKUP_BPS: u64 = 1_500; // 15%
+pub const DEFAULT_EXECUTION_OVERHEAD_BPS: u64 = 1_500; // 15% execution gas volatility & DA buffer (DEC-054)
 
 pub const THIRTY_DAYS_SECS: u64 = 30 * 24 * 60 * 60;
 pub const SPEND_FEE_30DAY_BPS: u64 = 45; // DEC-028: Unified flat 45 bps (holding-time discount abolished)
@@ -19,7 +19,7 @@ pub struct SpendQuote {
     pub contract_amount: u64,
     pub protocol_fee: u64,
     pub gas_cost: u64,
-    pub relayer_markup: u64,
+    pub execution_overhead: u64, // 15% execution gas volatility & DA overhead buffer (DEC-054)
     pub execution_fee: u64,
     pub user_total_debit: u64,
 }
@@ -68,34 +68,38 @@ pub fn gross_up_private_spend_amount(merchant_amount: u64) -> Option<u64> {
     gross_up_for_exact_net(merchant_amount, PRIVATE_SPEND_FEE_BPS)
 }
 
-pub fn quote_execution_fee(gas_cost: u64, relayer_markup_bps: u64) -> Option<(u64, u64)> {
-    let relayer_markup = fee_round_up(gas_cost, relayer_markup_bps)?;
-    let execution_fee = gas_cost.checked_add(relayer_markup)?;
-    Some((relayer_markup, execution_fee))
+pub fn quote_execution_fee(gas_cost: u64, gas_overhead_bps: u64) -> Option<(u64, u64)> {
+    let execution_overhead = fee_round_up(gas_cost, gas_overhead_bps)?;
+    let execution_fee = gas_cost.checked_add(execution_overhead)?;
+    Some((execution_overhead, execution_fee))
+}
+
+pub fn quote_execution_overhead(gas_cost: u64, gas_overhead_bps: u64) -> Option<(u64, u64)> {
+    quote_execution_fee(gas_cost, gas_overhead_bps)
 }
 
 /// Quotes execution fee with a pass-through fee (such as Chainlink CCIP network fee).
-/// Relayer markup is applied ONLY to the relayer gas cost, never to the pass-through fee.
+/// Relayer gas overhead buffer is applied ONLY to the relayer gas cost, never to the pass-through fee.
 pub fn quote_execution_fee_with_pass_through(
     relayer_gas: u64,
     pass_through: u64,
-    relayer_markup_bps: u64,
+    gas_overhead_bps: u64,
 ) -> Option<(u64, u64)> {
-    let relayer_markup = fee_round_up(relayer_gas, relayer_markup_bps)?;
+    let execution_overhead = fee_round_up(relayer_gas, gas_overhead_bps)?;
     let execution_fee = relayer_gas
-        .checked_add(relayer_markup)?
+        .checked_add(execution_overhead)?
         .checked_add(pass_through)?;
-    Some((relayer_markup, execution_fee))
+    Some((execution_overhead, execution_fee))
 }
 
 pub fn quote_private_spend(
     merchant_amount: u64,
     gas_cost: u64,
-    relayer_markup_bps: u64,
+    gas_overhead_bps: u64,
 ) -> Option<SpendQuote> {
     let contract_amount = merchant_amount;
     let protocol_fee = private_spend_fee(merchant_amount)?;
-    let (relayer_markup, execution_fee) = quote_execution_fee(gas_cost, relayer_markup_bps)?;
+    let (execution_overhead, execution_fee) = quote_execution_fee(gas_cost, gas_overhead_bps)?;
     let user_total_debit = contract_amount
         .checked_add(protocol_fee)?
         .checked_add(execution_fee)?;
@@ -105,7 +109,7 @@ pub fn quote_private_spend(
         contract_amount,
         protocol_fee,
         gas_cost,
-        relayer_markup,
+        execution_overhead,
         execution_fee,
         user_total_debit,
     })
@@ -135,15 +139,15 @@ pub fn gwei_to_wei(gwei: u64) -> u128 {
 
 /// Quotes a standalone rollover / refresh transaction (DEC-033).
 /// In standalone rollover, merchant_amount = 0 and protocol_fee = 0 (0 bps).
-/// Relayer receives gas reimbursement + 15% markup directly from the note being rolled over.
-pub fn quote_standalone_rollover(gas_cost: u64, relayer_markup_bps: u64) -> Option<SpendQuote> {
-    let (relayer_markup, execution_fee) = quote_execution_fee(gas_cost, relayer_markup_bps)?;
+/// Relayer receives gas reimbursement + 15% execution overhead buffer directly from the note being rolled over.
+pub fn quote_standalone_rollover(gas_cost: u64, gas_overhead_bps: u64) -> Option<SpendQuote> {
+    let (execution_overhead, execution_fee) = quote_execution_fee(gas_cost, gas_overhead_bps)?;
     Some(SpendQuote {
         merchant_amount: 0,
         contract_amount: 0,
         protocol_fee: 0,
         gas_cost,
-        relayer_markup,
+        execution_overhead,
         execution_fee,
         user_total_debit: execution_fee,
     })
@@ -152,12 +156,12 @@ pub fn quote_standalone_rollover(gas_cost: u64, relayer_markup_bps: u64) -> Opti
 pub fn quote_private_spend_with_fee(
     merchant_amount: u64,
     gas_cost: u64,
-    relayer_markup_bps: u64,
+    gas_overhead_bps: u64,
     fee_bps: u64,
 ) -> Option<SpendQuote> {
     let contract_amount = merchant_amount;
     let protocol_fee = fee_round_up(merchant_amount, fee_bps)?;
-    let (relayer_markup, execution_fee) = quote_execution_fee(gas_cost, relayer_markup_bps)?;
+    let (execution_overhead, execution_fee) = quote_execution_fee(gas_cost, gas_overhead_bps)?;
     let user_total_debit = contract_amount
         .checked_add(protocol_fee)?
         .checked_add(execution_fee)?;
@@ -167,27 +171,27 @@ pub fn quote_private_spend_with_fee(
         contract_amount,
         protocol_fee,
         gas_cost,
-        relayer_markup,
+        execution_overhead,
         execution_fee,
         user_total_debit,
     })
 }
 
 /// Quotes cross-chain private spend where CCIP network fee is a pass-through fee.
-/// Relayer markup is applied ONLY to `relayer_gas_cost`, NOT to `ccip_network_fee`.
+/// Relayer gas overhead buffer is applied ONLY to `relayer_gas_cost`, NOT to `ccip_network_fee`.
 pub fn quote_cross_chain_private_spend_with_fee(
     merchant_amount: u64,
     relayer_gas_cost: u64,
     ccip_network_fee: u64,
-    relayer_markup_bps: u64,
+    gas_overhead_bps: u64,
     fee_bps: u64,
 ) -> Option<SpendQuote> {
     let contract_amount = merchant_amount;
     let protocol_fee = fee_round_up(merchant_amount, fee_bps)?;
-    let (relayer_markup, execution_fee) = quote_execution_fee_with_pass_through(
+    let (execution_overhead, execution_fee) = quote_execution_fee_with_pass_through(
         relayer_gas_cost,
         ccip_network_fee,
-        relayer_markup_bps,
+        gas_overhead_bps,
     )?;
     let gas_cost = relayer_gas_cost.checked_add(ccip_network_fee)?;
     let user_total_debit = contract_amount
@@ -199,7 +203,7 @@ pub fn quote_cross_chain_private_spend_with_fee(
         contract_amount,
         protocol_fee,
         gas_cost,
-        relayer_markup,
+        execution_overhead,
         execution_fee,
         user_total_debit,
     })
@@ -232,13 +236,13 @@ mod tests {
         assert_eq!(quote.contract_amount, 100_000_000);
         assert_eq!(quote.protocol_fee, 450_000);
         assert_eq!(quote.gas_cost, 20_000);
-        assert_eq!(quote.relayer_markup, 3_000);
+        assert_eq!(quote.execution_overhead, 3_000);
         assert_eq!(quote.execution_fee, 23_000);
         assert_eq!(quote.user_total_debit, 100_473_000);
     }
 
     #[test]
-    fn execution_fee_is_gas_plus_relayer_markup() {
+    fn execution_fee_is_gas_plus_execution_overhead() {
         assert_eq!(quote_execution_fee(20_000, 1_500), Some((3_000, 23_000)));
         assert_eq!(quote_execution_fee(1, 1_500), Some((1, 2)));
         assert_eq!(quote_execution_fee(0, 1_500), Some((0, 0)));
@@ -275,22 +279,22 @@ mod tests {
     }
 
     #[test]
-    fn cross_chain_quote_applies_markup_only_to_relayer_gas() {
+    fn cross_chain_quote_applies_overhead_only_to_relayer_gas() {
         let relayer_gas = 20_000;
         let ccip_fee = 800_000;
-        let markup_bps = 1_500; // 15%
+        let overhead_bps = 1_500; // 15%
         let fee_bps = 45; // 0.45%
         let quote = quote_cross_chain_private_spend_with_fee(
             100_000_000,
             relayer_gas,
             ccip_fee,
-            markup_bps,
+            overhead_bps,
             fee_bps,
         )
         .unwrap();
 
-        // 15% of 20_000 = 3_000. CCIP fee is NOT marked up!
-        assert_eq!(quote.relayer_markup, 3_000);
+        // 15% of 20_000 = 3_000. CCIP fee does NOT have execution overhead applied!
+        assert_eq!(quote.execution_overhead, 3_000);
         assert_eq!(quote.gas_cost, 820_000);
         assert_eq!(quote.execution_fee, 20_000 + 3_000 + 800_000);
         assert_eq!(
@@ -302,14 +306,14 @@ mod tests {
     #[test]
     fn standalone_rollover_quote_zero_protocol_fee_and_exact_relayer_reimbursement() {
         let gas_cost = 18_500; // ~$0.0185
-        let markup_bps = DEFAULT_RELAYER_MARKUP_BPS; // 15% (1500 bps)
-        let quote = quote_standalone_rollover(gas_cost, markup_bps).unwrap();
+        let overhead_bps = DEFAULT_EXECUTION_OVERHEAD_BPS; // 15% (1500 bps)
+        let quote = quote_standalone_rollover(gas_cost, overhead_bps).unwrap();
 
         assert_eq!(quote.merchant_amount, 0);
         assert_eq!(quote.contract_amount, 0);
         assert_eq!(quote.protocol_fee, 0);
         // 15% of 18_500 = ceil(18500 * 1500 / 10000) = 2775
-        assert_eq!(quote.relayer_markup, 2_775);
+        assert_eq!(quote.execution_overhead, 2_775);
         assert_eq!(quote.execution_fee, 18_500 + 2_775);
         assert_eq!(quote.user_total_debit, quote.execution_fee);
     }

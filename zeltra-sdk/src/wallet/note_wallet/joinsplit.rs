@@ -686,6 +686,12 @@ impl PrivateNoteWallet {
             public_inputs_hex: public_inputs,
             encrypted_memo_1: hex::encode(memo_1),
             encrypted_memo_2: hex::encode(memo_2),
+            leaf_count: total_leaves,
+            epoch_id_1: input_note_1.epoch(),
+            epoch_id_2: epoch_2,
+            flags_packed: ((if selected.has_change { 1 } else { 0 })
+                | (input_note_1.asset_id << 2)),
+            is_rollover: 0,
         })
     }
 
@@ -1203,6 +1209,11 @@ impl PrivateNoteWallet {
             public_inputs_hex: public_inputs,
             encrypted_memo_1: hex::encode(memo_1),
             encrypted_memo_2: hex::encode(memo_2),
+            leaf_count: total_leaves,
+            epoch_id_1: input_note_1.epoch(),
+            epoch_id_2: epoch_2,
+            flags_packed: (1 | (if has_change_2 { 2 } else { 0 }) | (asset_id << 2)),
+            is_rollover: 0,
         })
     }
 

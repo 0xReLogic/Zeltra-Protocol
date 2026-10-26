@@ -580,7 +580,7 @@ impl PrivateNoteWallet {
     /// Builds a standalone note refresh proof (DEC-033).
     /// Refreshes a note into `target_epoch` without paying a merchant (merchant_amount = 0, protocol_fee = 0).
     /// The note must satisfy `input_value >= MIN_STANDALONE_ROLLOVER_THRESHOLD_USDC` ($2.00 USDC).
-    /// Execution fee (gas reimbursement + 15% relayer markup) is deducted from the note value.
+    /// Execution fee (gas reimbursement + 15% execution overhead buffer) is deducted from the note value.
     #[allow(clippy::too_many_arguments)]
     pub fn build_standalone_refresh(
         &mut self,

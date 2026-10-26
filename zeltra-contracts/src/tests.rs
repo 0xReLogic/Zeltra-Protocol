@@ -1603,7 +1603,7 @@ fn test_epoch_standalone_refresh_execution() {
         Address::ZERO,
         U256::ZERO,         // merchant_amount = 0
         U256::ZERO,         // protocol_fee = 0
-        U256::from(21_275), // execution fee with 15% markup
+        U256::from(21_275), // execution fee with 15% execution overhead buffer
         U256::from(25_000),
         FixedBytes::ZERO,
         U256::from(2000),

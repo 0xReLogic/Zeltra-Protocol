@@ -14,7 +14,7 @@
 Zeltra bukan mixer pool statis, bukan protokol pinjaman berisiko (*anti-rehypothecation*), dan tidak menjual bot AI. Zeltra adalah **lapisan infrastruktur rel keuangan (financial settlement rail)** yang terdiri dari:
 1. **Smart Contract Stylus WASM:** Mesin akuntansi solvensi multi-aset dengan verifikasi Groth16 instan via EIP-2537 (`0x0c` MSM + `0x0f` Pairing).
 2. **Client SDK & In-Browser WASM Prover:** Dompet ZK-UTXO non-kustodian dengan siklus memori sekali pakai anti-OOM (`worker.terminate()`).
-3. **Stateless Sequencer Relayer:** Jaringan relayer tanpa kustodi yang menalangi gas L2 di muka dengan penggantian *zero-oracle* (+15% markup).
+3. **Stateless Sequencer Relayer:** Jaringan relayer tanpa kustodi yang menalangi gas L2 di muka dengan penggantian *zero-oracle* (+15% execution gas overhead buffer, DEC-054).
 4. **CEX Verifier Engine & Compliance Suite:** Alat audit mandiri untuk pembuktian asal dana bersih ke bursa terpusat (Binance/Coinbase) tanpa membocorkan spending key ($sk$) atau saldo total.
 
 ```text
@@ -107,8 +107,9 @@ Zeltra mengadopsi model **konstanta matematis terjamin (*hardcoded immutable con
 | **In-Pool Transfer (Mode 2)** | **0,00% (0 bps)** | N/A | **Volume-Driven Velocity (DEC-043B).** Memaksimalkan perputaran transaksi internal antar ZSA. |
 | **Consolidation / Rollover (Mode 1)**| **0,00% (0 bps)** | N/A | Perapihan UTXO kas pengguna bebas biaya protokol. |
 | **Public Outflow Spend (Mode 3)** | **0,45% (45 bps Flat)** | Protocol Treasury | **Unified Flat Outflow Fee (DEC-028).** Monetisasi saat dana ditarik kembali ke ekosistem publik. |
-| **Relayer Execution Fee** | Gas aktual + 15% markup | Relayer Operator | **Zero-Oracle Gas Reimbursement (DEC-031 / DEC-034C).** Ditagih dalam unit native (Gwei untuk WETH, Micro-USDC untuk USDC). |
-| **Chainlink CCIP Network Fee** | Biaya aktual jaringan CCIP (~$0.80) | Chainlink Network | **Zero-Markup Pass-Through (DEC-020 / DEC-031).** Pass-through 100% murni tanpa markup relayer (hanya pada transfer menyeberang rantai). |
+| **Relayer Execution Fee** | Gas aktual + 15% execution overhead | Relayer Operator | **Zero-Oracle Gas Reimbursement (DEC-031 / DEC-034C / DEC-054).** Ditagih dalam unit native (Gwei untuk WETH, Micro-USDC untuk USDC) sebagai buffer fluktuasi gas L1 DA. |
+| **Direct Self-Broadcast** | **0% Relayer Fee (0 bps, gas mandiri)** | Validator Arbitrum | **Zero-Custody Regulatory Safe Harbor (DEC-054).** Penyiaran transaksi mandiri langsung ke smart contract Stylus tanpa ketergantungan relayer. |
+| **Chainlink CCIP Network Fee** | Biaya aktual jaringan CCIP (~$0.80) | Chainlink Network | **Pure Pass-Through (Zero Overhead, DEC-020 / DEC-031).** Pass-through 100% murni tanpa overhead relayer (hanya pada transfer menyeberang rantai). |
 | **B2B Institutional Query (Opsional)** | Biaya kuota API / SLA | Protocol Treasury | Akses verifikasi audit instan dan manajemen compliance batching untuk entitas berlisensi. |
 
 ---
@@ -159,7 +160,7 @@ Total Pendapatan Bersih Protokol                         : $1.350.000 / tahun
 
 ### Alokasi Arus Kas:
 * **Protocol Treasury:** Menerima 100% dari 45 bps spend fee untuk membiayai audit keamanan independen, program bug bounty, server RPC/infrastruktur, dan insentif likuiditas.
-* **Relayer:** Menerima 100% penggantian gas aktual ditambah markup 15% untuk menjamin keberlanjutan ekonomi operator relayer tanpa subsidi protokol.
+* **Relayer:** Menerima 100% penggantian gas aktual ditambah buffer operasional fluktuasi gas 15% (DEC-054) untuk menjamin keberlanjutan ekonomi operator relayer tanpa subsidi protokol.
 
 ---
 
@@ -193,7 +194,7 @@ Mengacu pada master checklist [`todo.md`](file:///workspaces/Zeltra-Protocol/tod
 - **Dual Sovereign Rails (DEC-034):** USDC & WETH/Native ETH auto-wrap, multi-asset storage, dan zero-oracle gas reimbursement.
 - **Direct MMR Inflow (DEC-038B):** Deposit langsung 250 ms ke pohon MMR on-chain dengan emisi memo 96-byte AEAD.
 - **Shielded-to-Shielded In-Pool Transfer (DEC-043):** Strict 3-Mode JoinSplit state machine (Mode 2 transfer antar ZSA Bech32m lolos 44/44 test Python).
-- **Cross-Chain CCIP Settlement Rail (DEC-015 / DEC-019):** Rel outflow belanja lintas-rantai (Arbitrum $\rightarrow$ Ethereum, Base, Polygon, OP) dengan auto-refund monitor ([`ccip_monitor.rs`](file:///workspaces/Zeltra-Protocol/zeltra-node/src/ccip_monitor.rs)) dan zero-markup fee pass-through.
+- **Cross-Chain CCIP Settlement Rail (DEC-015 / DEC-019):** Rel outflow belanja lintas-rantai (Arbitrum $\rightarrow$ Ethereum, Base, Polygon, OP) dengan auto-refund monitor ([`ccip_monitor.rs`](file:///workspaces/Zeltra-Protocol/zeltra-node/src/ccip_monitor.rs)) dan pure 1:1 fee pass-through (zero overhead).
 - **Viewing Key Suite & CEX Selective Disclosure (DEC-040):** 4-tier key hierarchy dan engine verifikasi bursa independen.
 - **In-Browser WebAssembly SDK Prover (DEC-041):** Runner Groth16 Web Worker anti-OOM linear (`worker.terminate()`).
 - **Pure ZK-UTXO HTTP 402 Facilitator (DEC-042):** Mikropembayaran AI agent terverifikasi.

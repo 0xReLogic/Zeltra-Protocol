@@ -15,7 +15,7 @@ sol! {
         uint8 assetId;
         address targetContract;
         uint64 baseGasFee;
-        uint64 relayerMarkupFee;
+        uint64 executionOverheadFee;
         uint64 totalExecutionFee;
         uint64 expiry;
         uint256 chainId;
@@ -160,7 +160,7 @@ mod tests {
             assetId: 1,
             targetContract: contract_address,
             baseGasFee: 20_000,
-            relayerMarkupFee: 3_000,
+            executionOverheadFee: 3_000,
             totalExecutionFee: 23_000,
             expiry: 1718234567,
             chainId: U256::from(chain_id),
@@ -179,7 +179,7 @@ mod tests {
             assetId: 1,
             targetContract: contract_address,
             baseGasFee: 20_000,
-            relayerMarkupFee: 3_000,
+            executionOverheadFee: 3_000,
             totalExecutionFee: 23_000,
             expiry: 1718234567,
             chainId: U256::from(421614u64),
@@ -217,7 +217,7 @@ mod tests {
             assetId: 0, // WETH
             targetContract: contract_address,
             baseGasFee: 15_000,
-            relayerMarkupFee: 2_250,
+            executionOverheadFee: 2_250,
             totalExecutionFee: 17_250,
             expiry: 1718300000,
             chainId: U256::from(chain_id),
@@ -262,7 +262,7 @@ mod tests {
             assetId: 1,
             targetContract: contract_address,
             baseGasFee: 10_000,
-            relayerMarkupFee: 1_500,
+            executionOverheadFee: 1_500,
             totalExecutionFee: 11_500,
             expiry: 1718400000,
             chainId: U256::from(chain_id),
@@ -297,7 +297,7 @@ mod tests {
             assetId: 1,
             targetContract: contract_address,
             baseGasFee: 20_000,
-            relayerMarkupFee: 3_000,
+            executionOverheadFee: 3_000,
             totalExecutionFee: 23_000,
             expiry: 1718500000,
             chainId: U256::from(chain_id),
@@ -343,7 +343,7 @@ mod tests {
             assetId: 0,
             targetContract: contract_address,
             baseGasFee: 15_000,
-            relayerMarkupFee: 2_250,
+            executionOverheadFee: 2_250,
             totalExecutionFee: 17_250,
             expiry: 1718234567,
             chainId: U256::from(chain_id),

@@ -11,5 +11,5 @@ pub use note_wallet::{
     ConsolidationRoundResult, ConsolidationSummary, DirectDepositPayload,
     JoinSplitSpendProofPayload, NoteClassification, NoteEpochStatus, NoteEvent, NoteStatus,
     PrivateNoteWallet, PrivateNoteWitness, ReadOnlyAuditorSession, RecoveredNote, RecoveryResult,
-    SelectedSpend, SpendProofPayload, WalletError, WalletNote,
+    SelectedSpend, SelfBroadcastTransactionPayload, SpendProofPayload, WalletError, WalletNote,
 };

@@ -29,6 +29,7 @@ pub mod compliance;
 pub mod deposit;
 pub mod joinsplit;
 pub mod keys;
+pub mod self_broadcast;
 pub mod spend;
 pub mod state_2pc;
 pub mod sync;
@@ -41,6 +42,7 @@ pub use compliance::{
     build_audit_report_inner, check_nullifiers_spent_batch, get_or_init_disclosure_keys,
     recover_from_viewing_key, recover_from_viewing_key_batch, ReadOnlyAuditorSession,
 };
+pub use self_broadcast::{encode_joinsplit_calldata, SelfBroadcastTransactionPayload};
 pub use types::*;
 
 /// Private Note Wallet State

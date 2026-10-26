@@ -12,7 +12,7 @@
 //! 3. Tier 3: 2-note combination via Stochastic Knapsack optimization with entropy noise.
 //! 4. Tier 4: Fragmentation lockout error advising `consolidate_notes()`.
 //!
-//! Includes Economic Dust Floor absorption (< 0.10 USDC absorbed into execution fee markup).
+//! Includes Economic Dust Floor absorption (< 0.10 USDC absorbed into execution fee overhead buffer).
 
 use crate::wallet::note_wallet::{
     NoteEpochStatus, NoteStatus, SelectedSpend, WalletError, WalletNote,

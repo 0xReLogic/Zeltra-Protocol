@@ -84,6 +84,7 @@ Folder `research/dec/` memuat seluruh catatan keputusan arsitektur resmi (*Archi
 | **DEC-051** | [`DEC-051-nopenena-cryptographic-deniability-small-decoy-sets-dummy-notes.md`](file:///workspaces/Zeltra-Protocol/research/dec/DEC-051-nopenena-cryptographic-deniability-small-decoy-sets-dummy-notes.md) | Nopenena Cryptographic Deniability, Small Decoy Sets, and Dummy Note Architecture | 2026-10-24 |
 | **DEC-052** | [`DEC-052-argo-groth16-invalidity-encoding-and-curve-point-sanitation.md`](file:///workspaces/Zeltra-Protocol/research/dec/DEC-052-argo-groth16-invalidity-encoding-and-curve-point-sanitation.md) | Argo Randomized Encoding for Groth16 Invalidity, Permissionless Fraud Gating & Strict Subgroup Defense | 2026-10-25 |
 | **DEC-053** | [`DEC-053-ammboost-state-growth-control-and-ephemeral-pruning.md`](file:///workspaces/Zeltra-Protocol/research/dec/DEC-053-ammboost-state-growth-control-and-ephemeral-pruning.md) | ammBoost State Growth Control & Ephemeral Settlement Pruning (Bounded Ring-Buffer Storage) | 2026-10-26 |
+| **DEC-054** | [`DEC-054-zero-custody-safe-harbor-and-direct-self-broadcast.md`](file:///workspaces/Zeltra-Protocol/research/dec/DEC-054-zero-custody-safe-harbor-and-direct-self-broadcast.md) | Zero-Custody Regulatory Safe Harbor & Direct Self-Broadcast Architecture (Unhosted Wallet Path & Gas Overhead Sanitization) | 2026-10-26 |
 
 ---
 

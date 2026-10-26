@@ -151,8 +151,7 @@ Bahkan ketika Zeltra membuka jaringannya untuk relayer pihak ketiga anonim di in
    Dengan arsitektur **Paginated Bulk/Range MMR Sync** (DEC-036 Seksi 7.4), dompet pengguna mengunduh daun komitmen secara gelondongan (1.000 daun per batch = ~32 KB). Bukti inklusi pohon dihitung secara lokal di perangkat pengguna. Relayer tidak pernah tahu daun mana yang dimiliki pengguna.
 3. **Relayer Kebal Terhadap Serangan Spam/Griefing (*CPU Preflight Protection*):**
    Berdasarkan [`DEC-026`](file:///workspaces/Zeltra-Protocol/research/decisions/DEC-026-receiver-enforced-compliance-zero-cost-sanctions-filtering-relayer-protection.md), node relayer memverifikasi bukti Groth16 secara lokal pada CPU sebelum memancarkan transaksi ke blockchain, sehingga penyerang tidak bisa menguras saldo ETH relayer dengan bukti palsu.
-4. **Relayer Selalu Untung (*Economic Solvency*):**
-   Setiap transaksi mengganti 100% biaya gas ETH relayer dalam bentuk USDC ditambah margin keuntungan bersih **+15% markup**, menjamin partisipasi operator relayer independen selalu menguntungkan secara komersial.
+   Setiap transaksi mengganti 100% biaya gas ETH relayer dalam bentuk USDC ditambah buffer deviasi operasional **+15% execution overhead** (DEC-054), menjamin reliabilitas posting calldata L1 dan kelangsungan operasional infrastruktur relayer independen tanpa defisit.
 
 ---
 

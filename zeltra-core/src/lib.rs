@@ -45,11 +45,11 @@ pub use evm::{
 pub use fees::{
     ceil_div, deposit_fee, fee_round_up, gross_up_for_exact_net, gross_up_private_spend_amount,
     gwei_to_wei, net_after_fee, private_spend_fee, quote_cross_chain_private_spend_with_fee,
-    quote_execution_fee, quote_execution_fee_with_pass_through, quote_private_spend,
-    quote_private_spend_with_fee, quote_standalone_rollover, spend_fee_bps_for_holding,
-    wei_to_gwei, SpendQuote, DEFAULT_RELAYER_MARKUP_BPS, DEPOSIT_FEE_BPS, FEE_DENOMINATOR_BPS,
-    MIN_STANDALONE_ROLLOVER_THRESHOLD_USDC, PRIVATE_SPEND_FEE_BPS, SPEND_FEE_30DAY_BPS,
-    THIRTY_DAYS_SECS, WEI_PER_GWEI,
+    quote_execution_fee, quote_execution_fee_with_pass_through, quote_execution_overhead,
+    quote_private_spend, quote_private_spend_with_fee, quote_standalone_rollover,
+    spend_fee_bps_for_holding, wei_to_gwei, SpendQuote, DEFAULT_EXECUTION_OVERHEAD_BPS,
+    DEPOSIT_FEE_BPS, FEE_DENOMINATOR_BPS, MIN_STANDALONE_ROLLOVER_THRESHOLD_USDC,
+    PRIVATE_SPEND_FEE_BPS, SPEND_FEE_30DAY_BPS, THIRTY_DAYS_SECS, WEI_PER_GWEI,
 };
 
 // Re-export Poseidon hash & canonical Grain LFSR (DEC-021)
