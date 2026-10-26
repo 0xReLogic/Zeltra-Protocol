@@ -324,7 +324,7 @@ pub struct SpendProofPayload {
 }
 
 /// Universal 2-in-2-out JoinSplit Spend Proof Payload generated locally by client SDK (DEC-030 / DEC-036B)
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct JoinSplitSpendProofPayload {
     pub session_id: String,
     pub input_commitment_1_hex: String,
@@ -353,6 +353,16 @@ pub struct JoinSplitSpendProofPayload {
     pub encrypted_memo_1: String, // 192 hex chars (96 bytes)
     #[serde(alias = "encrypted_memo_2_hex", default)]
     pub encrypted_memo_2: String, // 192 hex chars (96 bytes)
+    #[serde(default)]
+    pub leaf_count: u64,
+    #[serde(default)]
+    pub epoch_id_1: u32,
+    #[serde(default)]
+    pub epoch_id_2: u32,
+    #[serde(default)]
+    pub flags_packed: u8,
+    #[serde(default)]
+    pub is_rollover: u64,
 }
 
 /// Dual-Witness Assembly for JoinSplit Inputs (DEC-036B Phase 4)

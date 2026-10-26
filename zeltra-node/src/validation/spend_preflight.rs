@@ -821,13 +821,13 @@ pub async fn validate_private_note_spend_preflight(
         let _relayer_addr = Address::from_str(&state.relayer_address).unwrap_or(Address::ZERO);
 
         let base_gas_fee = (payload.max_execution_fee * 100) / 115;
-        let relayer_markup_fee = payload.max_execution_fee.saturating_sub(base_gas_fee);
+        let execution_overhead_fee = payload.max_execution_fee.saturating_sub(base_gas_fee);
 
         let execution_quote = ExecutionQuote {
             assetId: payload.asset_id.unwrap_or(1),
             targetContract: contract_addr,
             baseGasFee: base_gas_fee,
-            relayerMarkupFee: relayer_markup_fee,
+            executionOverheadFee: execution_overhead_fee,
             totalExecutionFee: payload.max_execution_fee,
             expiry: payload.expiry.unwrap_or(0),
             chainId: U256::from(chain_id),

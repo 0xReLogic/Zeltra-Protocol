@@ -154,7 +154,7 @@ Algoritma pemilihan koin pada `zeltra-sdk/src/coin_selection.rs` beroperasi mela
    - $\epsilon \leftarrow \mathcal{U}(0, \sigma)$ adalah faktor derau stokastik acak untuk mengacaukan analisis heuristik surveillance (mencegah *Knapsack fingerprinting*).
 4. **Pencegahan Debu Kembalian (Dust Prevention):**
    Jika sisa kembalian $v_{\text{change}} = (v_i + v_j - T) < \text{min\_dust\_threshold}$ ($100\,000$ unit / $0.10 USDC):
-   - Tambahkan sisa tersebut ke komponen $v_{\text{execution\_fee}}$ (sebagai tip/markup relayer).
+   - Tambahkan sisa tersebut ke komponen $v_{\text{execution\_fee}}$ (sebagai buffer deviasi overhead relayer).
    - Nonaktifkan pembuatan change note 1 (`has_change_1 = false`), dan alihkan ke mode dummy output. Hal ini mencegah terciptanya note debu yang tidak dapat dibelanjakan di masa depan.
 
 ---

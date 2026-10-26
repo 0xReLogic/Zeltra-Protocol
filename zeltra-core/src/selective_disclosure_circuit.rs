@@ -128,8 +128,11 @@ impl ConstraintSynthesizer<Fr> for SelectiveDisclosureCircuit {
         // ═══════════════════════════════════════════════════════════════
         let domain_nk = FpVar::Constant(crate::note::domain_nullifier_key());
         let zero_var = FpVar::Constant(Fr::from(0u64));
-        let nk_var =
-            poseidon_w3_gadget(cs.clone(), &[spending_key_var.clone(), zero_var.clone()], domain_nk)?;
+        let nk_var = poseidon_w3_gadget(
+            cs.clone(),
+            &[spending_key_var.clone(), zero_var.clone()],
+            domain_nk,
+        )?;
 
         // ═══════════════════════════════════════════════════════════════
         // 4. Constraint 2: Derivation of Canonical Nullifier via Poseidon-W5
@@ -156,11 +159,8 @@ impl ConstraintSynthesizer<Fr> for SelectiveDisclosureCircuit {
         //    ownership of the note, preventing identity spoofing and false attribution.
         // ═══════════════════════════════════════════════════════════════
         let domain_owner = FpVar::Constant(crate::keys::domain_owner_key());
-        let computed_owner = poseidon_w3_gadget(
-            cs.clone(),
-            &[spending_key_var, zero_var],
-            domain_owner,
-        )?;
+        let computed_owner =
+            poseidon_w3_gadget(cs.clone(), &[spending_key_var, zero_var], domain_owner)?;
         computed_owner.enforce_equal(&owner_key_var)?;
 
         Ok(())

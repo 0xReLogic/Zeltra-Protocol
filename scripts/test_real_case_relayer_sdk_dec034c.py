@@ -141,17 +141,17 @@ def test_zero_oracle_reimbursement():
     weth_base_gas_fee = (total_wei + WEI_PER_GWEI - 1) // WEI_PER_GWEI
     assert_test(weth_base_gas_fee == 50_000, "WETH Gas Calculation in Gwei", f"Base fee: {weth_base_gas_fee} Gwei")
 
-    # Flat 15% markup with ceiling division
-    weth_markup = (weth_base_gas_fee * 15 + 99) // 100
-    weth_total_execution = weth_base_gas_fee + weth_markup
-    assert_test(weth_markup == 7500, "WETH Relayer 15% Ceiling Markup", f"Markup: {weth_markup} Gwei")
+    # Flat 15% execution overhead buffer with ceiling division (DEC-054)
+    weth_overhead = (weth_base_gas_fee * 15 + 99) // 100
+    weth_total_execution = weth_base_gas_fee + weth_overhead
+    assert_test(weth_overhead == 7500, "WETH Relayer 15% Ceiling Overhead Buffer", f"Overhead: {weth_overhead} Gwei")
     assert_test(weth_total_execution == 57_500, "WETH Total Execution Fee", f"Total: {weth_total_execution} Gwei")
 
     # 2. USDC Micro-USDC Gas Calculation
     usdc_base_gas_fee = 20_000  # $0.02 USDC minimum floor
-    usdc_markup = (usdc_base_gas_fee * 15 + 99) // 100
-    usdc_total_execution = usdc_base_gas_fee + usdc_markup
-    assert_test(usdc_markup == 3000, "USDC Relayer 15% Ceiling Markup", f"Markup: {usdc_markup} micro-USDC ($0.003)")
+    usdc_overhead = (usdc_base_gas_fee * 15 + 99) // 100
+    usdc_total_execution = usdc_base_gas_fee + usdc_overhead
+    assert_test(usdc_overhead == 3000, "USDC Relayer 15% Ceiling Overhead Buffer", f"Overhead: {usdc_overhead} micro-USDC ($0.003)")
     assert_test(usdc_total_execution == 23_000, "USDC Total Execution Fee", f"Total: {usdc_total_execution} micro-USDC ($0.023)")
 
     # 3. Anti-Arbitrase Strict 20s Window Guard

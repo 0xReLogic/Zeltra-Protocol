@@ -6,7 +6,7 @@ pub struct PrivateSpendQuote {
     contract_amount: u64,
     protocol_fee: u64,
     gas_cost: u64,
-    relayer_markup: u64,
+    execution_overhead: u64,
     execution_fee: u64,
     user_total_debit: u64,
 }
@@ -39,8 +39,8 @@ impl PrivateSpendQuote {
     }
 
     #[wasm_bindgen(getter)]
-    pub fn relayer_markup(&self) -> u64 {
-        self.relayer_markup
+    pub fn execution_overhead(&self) -> u64 {
+        self.execution_overhead
     }
 
     #[wasm_bindgen(getter)]
@@ -53,9 +53,9 @@ impl PrivateSpendQuote {
 pub fn quote_private_spend_for_merchant_amount(
     merchant_amount: u64,
     gas_cost: u64,
-    relayer_markup_bps: u64,
+    gas_overhead_bps: u64,
 ) -> Result<PrivateSpendQuote, JsValue> {
-    let quote = zeltra_core::quote_private_spend(merchant_amount, gas_cost, relayer_markup_bps)
+    let quote = zeltra_core::quote_private_spend(merchant_amount, gas_cost, gas_overhead_bps)
         .ok_or_else(|| JsValue::from_str("Invalid input data"))?;
 
     Ok(PrivateSpendQuote {
@@ -63,7 +63,7 @@ pub fn quote_private_spend_for_merchant_amount(
         contract_amount: quote.contract_amount,
         protocol_fee: quote.protocol_fee,
         gas_cost: quote.gas_cost,
-        relayer_markup: quote.relayer_markup,
+        execution_overhead: quote.execution_overhead,
         execution_fee: quote.execution_fee,
         user_total_debit: quote.user_total_debit,
     })

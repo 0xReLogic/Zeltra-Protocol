@@ -41,7 +41,7 @@ Zeltra Protocol menetapkan struktur biaya tetap yang transparan dan deterministi
 * **Deposit Inflow:** **0 bps (0.00% Permanen)** — Bebas gesekan, mendorong adopsi modal tanpa hambatan.
 * **Spend Outflow Standard (< 30 hari):** **45 bps (0.45% Flat)** — Biaya protokol terprediksi untuk transaksi harian.
 * **Spend Outflow Long-Term Hold (≥ 30 hari):** **40 bps (0.40% Flat — Diskon Loyalitas 5 bps)** — Dihitung secara objektif dari timestamp registrasi Merkle root (`clean_association_roots`) di smart contract.
-* **Eksekusi Relayer:** **Gas Reimbursement Aktual + 15% Markup Transparan** — Terikat secara kriptografis pada kuotasi EIP-712 dengan batas kedaluwarsa 5–15 menit.
+* **Eksekusi Relayer:** **Gas Reimbursement Aktual + 15% Execution Overhead Buffer Transparan (DEC-054)** — Terikat secara kriptografis pada kuotasi EIP-712 dengan batas kedaluwarsa 5–15 menit.
 
 ### C. Filosofi Keberlanjutan: Volume over TVL Velocity
 Keberlanjutan finansial relayer dan ekosistem dicapai melalui **kecepatan perputaran modal (velocity)** dari pembayaran agen AI dan retail mikro, bukan dari memeras penarikan pengguna dengan *surge penalty* atau memungut biaya diam (*idle fees*). TVL yang tebal berfungsi sebagai *anonymity shield* yang memperluas *privacy set* bagi seluruh peserta ekosistem.

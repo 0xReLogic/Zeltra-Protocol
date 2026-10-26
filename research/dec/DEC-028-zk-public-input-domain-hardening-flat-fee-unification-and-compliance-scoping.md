@@ -61,7 +61,7 @@ Memberikan diskon 5 bps (40 bps vs 45 bps) berdasarkan umur root terdaftar (`cle
 | **Deposit Inflow** | **0 bps (0.00% Permanen)** | Immutable Inflow Rail |
 | **Private Spend Outflow (ZK-UTXO)** | **45 bps (0.45% Flat)** | Groth16 Value Conservation Constraint |
 | **Legacy / Batch Spend (BLS)** | **45 bps (0.45% Flat)** | Reconstructed Fee Computation on Stylus |
-| **Relayer Gas Execution** | **Gas Aktual + 15% Markup** | EIP-712 Quote Envelope Signed by User |
+| **Relayer Gas Execution** | **Gas Aktual + 15% Execution Overhead Buffer (DEC-054)** | EIP-712 Quote Envelope Signed by User |
 
 ---
 

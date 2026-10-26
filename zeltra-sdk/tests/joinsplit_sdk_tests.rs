@@ -36,7 +36,7 @@ fn mock_wallet_note(cm: &str, val: u64, epoch: u32) -> WalletNote {
 }
 
 #[test]
-fn test_b6_1_knapsack_boundary_and_dust_markup() {
+fn test_b6_1_knapsack_boundary_and_dust_overhead() {
     // 1. Exact match (Tier 1)
     let n1 = mock_wallet_note("cm1", 5_000_000, 1);
     let n2 = mock_wallet_note("cm2", 10_000_000, 1);

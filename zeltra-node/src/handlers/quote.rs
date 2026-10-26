@@ -87,9 +87,9 @@ pub async fn create_quote(
         default_gas_cost().max(20_000)
     };
 
-    // Flat 15% relayer markup with ceiling division (DEC-031 / DEC-034C)
-    let relayer_markup_fee = (base_gas_fee * 15).div_ceil(100);
-    let total_execution_fee = base_gas_fee + relayer_markup_fee;
+    // Flat 15% execution gas overhead buffer with ceiling division (DEC-031 / DEC-034C / DEC-054)
+    let execution_overhead_fee = (base_gas_fee * 15).div_ceil(100);
+    let total_execution_fee = base_gas_fee + execution_overhead_fee;
 
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -101,7 +101,7 @@ pub async fn create_quote(
         assetId: payload.asset_id,
         targetContract: contract_addr,
         baseGasFee: base_gas_fee,
-        relayerMarkupFee: relayer_markup_fee,
+        executionOverheadFee: execution_overhead_fee,
         totalExecutionFee: total_execution_fee,
         expiry,
         chainId: U256::from(chain_id),
@@ -128,7 +128,7 @@ pub async fn create_quote(
     let quote_resp = ExecutionQuoteResponse {
         asset_id: payload.asset_id,
         base_gas_fee,
-        relayer_markup_fee,
+        execution_overhead_fee,
         total_execution_fee,
         quote_hash: quote_hash_hex.clone(),
         expiry,
@@ -178,9 +178,9 @@ pub async fn compute_quote(
     query: PrivateSpendQuoteRequest,
 ) -> Json<PrivateSpendQuoteResponse> {
     let relayer_gas_cost = query.estimated_gas_cost.unwrap_or_else(default_gas_cost);
-    let relayer_markup_bps = query
-        .relayer_markup_bps
-        .unwrap_or_else(default_relayer_markup_bps);
+    let gas_overhead_bps = query
+        .gas_overhead_bps()
+        .unwrap_or_else(default_gas_overhead_bps);
 
     // CCIP fee breakdown: if destination_chain_selector is provided, determine CCIP network fee
     let (ccip_network_fee, destination_chain_selector) = match query.destination_chain_selector {
@@ -200,7 +200,7 @@ pub async fn compute_quote(
             relayer_gas_cost,
             ccip_network_fee,
             destination_chain_selector,
-            relayer_markup_bps,
+            gas_overhead_bps,
             "merchant_amount must be greater than zero",
         ));
     }
@@ -214,13 +214,13 @@ pub async fn compute_quote(
             query.merchant_amount,
             relayer_gas_cost,
             ccip_fee,
-            relayer_markup_bps,
+            gas_overhead_bps,
             fee_bps,
         ),
         None => zeltra_core::quote_private_spend_with_fee(
             query.merchant_amount,
             relayer_gas_cost,
-            relayer_markup_bps,
+            gas_overhead_bps,
             fee_bps,
         ),
     };
@@ -231,7 +231,7 @@ pub async fn compute_quote(
             relayer_gas_cost,
             ccip_network_fee,
             destination_chain_selector,
-            relayer_markup_bps,
+            gas_overhead_bps,
             "quote amount overflow",
         ));
     };
@@ -267,7 +267,7 @@ pub async fn compute_quote(
                         relayer_gas_cost,
                         ccip_network_fee,
                         destination_chain_selector,
-                        relayer_markup_bps,
+                        gas_overhead_bps,
                         "EIP-712 signing domain unavailable: target chain and contract domain required",
                     ));
                 }
@@ -283,7 +283,7 @@ pub async fn compute_quote(
                 relayer_gas_cost,
                 ccip_network_fee,
                 destination_chain_selector,
-                relayer_markup_bps,
+                gas_overhead_bps,
                 "Invalid contract address configured for EIP-712 signing domain",
             ));
         }
@@ -294,7 +294,7 @@ pub async fn compute_quote(
         assetId: 1,
         targetContract: contract_addr,
         baseGasFee: relayer_gas_cost,
-        relayerMarkupFee: quote.relayer_markup,
+        executionOverheadFee: quote.execution_overhead,
         totalExecutionFee: quote.execution_fee,
         expiry: quote_expiry,
         chainId: U256::from(chain_id),
@@ -310,11 +310,11 @@ pub async fn compute_quote(
         contract_amount: quote.contract_amount,
         protocol_fee: quote.protocol_fee,
         gas_cost: quote.gas_cost,
-        relayer_markup: quote.relayer_markup,
+        execution_overhead: quote.execution_overhead,
         execution_fee: quote.execution_fee,
         user_total_debit: quote.user_total_debit,
         fee_bps,
-        relayer_markup_bps,
+        gas_overhead_bps,
         relayer_gas_cost: Some(relayer_gas_cost),
         ccip_network_fee,
         destination_chain_selector,
@@ -336,11 +336,11 @@ fn default_gas_cost() -> u64 {
         .unwrap_or(0)
 }
 
-fn default_relayer_markup_bps() -> u64 {
-    std::env::var("ZELTRA_RELAYER_MARKUP_BPS")
+fn default_gas_overhead_bps() -> u64 {
+    std::env::var("ZELTRA_GAS_OVERHEAD_BPS")
         .ok()
         .and_then(|value| value.parse::<u64>().ok())
-        .unwrap_or(zeltra_core::DEFAULT_RELAYER_MARKUP_BPS)
+        .unwrap_or(zeltra_core::DEFAULT_EXECUTION_OVERHEAD_BPS)
 }
 
 /// Generate a random 32-byte quote ID as hex string
@@ -354,18 +354,18 @@ fn error_response(
     relayer_gas_cost: u64,
     ccip_network_fee: Option<u64>,
     destination_chain_selector: Option<u64>,
-    relayer_markup_bps: u64,
+    gas_overhead_bps: u64,
     message: &str,
 ) -> PrivateSpendQuoteResponse {
-    let (relayer_markup, execution_fee) = match ccip_network_fee {
+    let (execution_overhead, execution_fee) = match ccip_network_fee {
         Some(ccip_fee) => zeltra_core::quote_execution_fee_with_pass_through(
             relayer_gas_cost,
             ccip_fee,
-            relayer_markup_bps,
+            gas_overhead_bps,
         )
         .unwrap_or((0, 0)),
         None => {
-            zeltra_core::quote_execution_fee(relayer_gas_cost, relayer_markup_bps).unwrap_or((0, 0))
+            zeltra_core::quote_execution_fee(relayer_gas_cost, gas_overhead_bps).unwrap_or((0, 0))
         }
     };
     let gas_cost = relayer_gas_cost.saturating_add(ccip_network_fee.unwrap_or(0));
@@ -375,11 +375,11 @@ fn error_response(
         contract_amount: 0,
         protocol_fee: 0,
         gas_cost,
-        relayer_markup,
+        execution_overhead,
         execution_fee,
         user_total_debit: 0,
         fee_bps: zeltra_core::PRIVATE_SPEND_FEE_BPS,
-        relayer_markup_bps,
+        gas_overhead_bps,
         relayer_gas_cost: Some(relayer_gas_cost),
         ccip_network_fee,
         destination_chain_selector,
@@ -426,7 +426,7 @@ mod tests {
             Query(PrivateSpendQuoteRequest {
                 merchant_amount: 100_000_000,
                 estimated_gas_cost: Some(20_000),
-                relayer_markup_bps: Some(1_500),
+                gas_overhead_bps: Some(1_500),
                 association_root: None,
                 destination_chain_selector: None,
             }),
@@ -437,7 +437,7 @@ mod tests {
         assert_eq!(response.0.contract_amount, 100_000_000);
         assert_eq!(response.0.protocol_fee, 450_000);
         assert_eq!(response.0.gas_cost, 20_000);
-        assert_eq!(response.0.relayer_markup, 3_000);
+        assert_eq!(response.0.execution_overhead, 3_000);
         assert_eq!(response.0.execution_fee, 23_000);
         assert_eq!(response.0.user_total_debit, 100_473_000);
         assert_eq!(response.0.relayer_gas_cost, Some(20_000));
@@ -459,7 +459,7 @@ mod tests {
             Query(PrivateSpendQuoteRequest {
                 merchant_amount: 100_000_000,
                 estimated_gas_cost: Some(20_000),
-                relayer_markup_bps: Some(1_500),
+                gas_overhead_bps: Some(1_500),
                 association_root: None,
                 destination_chain_selector: Some(base_sepolia_selector),
             }),
@@ -478,8 +478,8 @@ mod tests {
             Some(base_sepolia_selector)
         );
         assert_eq!(response.0.gas_cost, 820_000);
-        // Relayer markup applies ONLY to relayer gas (15% of 20_000 = 3_000), NOT to CCIP fee!
-        assert_eq!(response.0.relayer_markup, 3_000);
+        // Gas overhead buffer applies ONLY to relayer gas (15% of 20_000 = 3_000), NOT to CCIP fee!
+        assert_eq!(response.0.execution_overhead, 3_000);
         assert_eq!(response.0.execution_fee, 20_000 + 3_000 + 800_000);
         assert_eq!(
             response.0.user_total_debit,
@@ -498,7 +498,7 @@ mod tests {
             Query(PrivateSpendQuoteRequest {
                 merchant_amount: 0,
                 estimated_gas_cost: Some(0),
-                relayer_markup_bps: Some(1_500),
+                gas_overhead_bps: Some(1_500),
                 association_root: None,
                 destination_chain_selector: None,
             }),
@@ -525,7 +525,7 @@ mod tests {
             Query(PrivateSpendQuoteRequest {
                 merchant_amount: 100_000_000,
                 estimated_gas_cost: Some(20_000),
-                relayer_markup_bps: Some(1_500),
+                gas_overhead_bps: Some(1_500),
                 association_root: None,
                 destination_chain_selector: None,
             }),
@@ -565,7 +565,7 @@ mod tests {
             Query(PrivateSpendQuoteRequest {
                 merchant_amount: 100_000_000,
                 estimated_gas_cost: Some(20_000),
-                relayer_markup_bps: Some(1_500),
+                gas_overhead_bps: Some(1_500),
                 association_root: None,
                 destination_chain_selector: None,
             }),
@@ -605,12 +605,12 @@ mod tests {
         assert_eq!(weth_resp.0.asset_id, 0);
         assert!(weth_resp.0.base_gas_fee > 0);
         assert_eq!(
-            weth_resp.0.relayer_markup_fee,
+            weth_resp.0.execution_overhead_fee,
             (weth_resp.0.base_gas_fee * 15).div_ceil(100)
         );
         assert_eq!(
             weth_resp.0.total_execution_fee,
-            weth_resp.0.base_gas_fee + weth_resp.0.relayer_markup_fee
+            weth_resp.0.base_gas_fee + weth_resp.0.execution_overhead_fee
         );
         assert!(weth_resp.0.quote_hash.starts_with("0x"));
         assert!(weth_resp.0.relayer_signature.starts_with("0x"));
@@ -627,12 +627,12 @@ mod tests {
         assert_eq!(usdc_resp.0.asset_id, 1);
         assert!(usdc_resp.0.base_gas_fee >= 20_000);
         assert_eq!(
-            usdc_resp.0.relayer_markup_fee,
+            usdc_resp.0.execution_overhead_fee,
             (usdc_resp.0.base_gas_fee * 15).div_ceil(100)
         );
         assert_eq!(
             usdc_resp.0.total_execution_fee,
-            usdc_resp.0.base_gas_fee + usdc_resp.0.relayer_markup_fee
+            usdc_resp.0.base_gas_fee + usdc_resp.0.execution_overhead_fee
         );
         assert!(usdc_resp.0.quote_hash.starts_with("0x"));
         assert!(usdc_resp.0.relayer_signature.starts_with("0x"));
@@ -655,7 +655,7 @@ mod tests {
             assetId: 0,
             targetContract: contract_addr,
             baseGasFee: weth_resp.0.base_gas_fee,
-            relayerMarkupFee: weth_resp.0.relayer_markup_fee,
+            executionOverheadFee: weth_resp.0.execution_overhead_fee,
             totalExecutionFee: weth_resp.0.total_execution_fee,
             expiry: weth_resp.0.expiry,
             chainId: U256::from(421614),

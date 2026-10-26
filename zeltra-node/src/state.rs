@@ -20,7 +20,7 @@ pub struct AppState {
     /// Relayer wallet balance in ETH (for gas fee tracking)
     pub relayer_wallet_balance_eth: Arc<Mutex<f64>>,
 
-    /// Accumulated profit in USDC from batching markup fees
+    /// Operational gas reserves in USDC retained for infrastructure liveness and failover RPC sponsorship (DEC-054)
     pub relayer_accumulated_profit_usdc: Arc<Mutex<f64>>,
 
     /// EVM client for broadcasting real transactions (replaces mock tx hashes)

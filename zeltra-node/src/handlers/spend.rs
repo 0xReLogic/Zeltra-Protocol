@@ -807,7 +807,7 @@ mod tests {
             assetId: 1,
             targetContract: contract_addr,
             baseGasFee: 43478,
-            relayerMarkupFee: 6522,
+            executionOverheadFee: 6522,
             totalExecutionFee: 50_000,
             expiry: 0,
             chainId: U256::from(chain_id),
@@ -1262,7 +1262,7 @@ mod tests {
         let usdc_quote = crate::dto::ExecutionQuoteResponse {
             asset_id: 1,
             base_gas_fee: 20_000,
-            relayer_markup_fee: 3_000,
+            execution_overhead_fee: 3_000,
             total_execution_fee: 23_000,
             quote_hash: "0xabcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890"
                 .to_string(),
