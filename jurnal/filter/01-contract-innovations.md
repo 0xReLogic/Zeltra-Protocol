@@ -40,16 +40,17 @@ Dokumen ini memetakan paper terpilih untuk arsitektur smart contract Zeltra ([`z
 
 ---
 
-## 4. ammBoost: State Growth Control for Accumulators (IACR ePrint 2024/1021)
+## 4. ammBoost: State Growth Control for AMMs & L2 Storage Eviction (IACR ePrint 2024/1021)
 * **File Jurnal / PDF:** [`jurnal/pdf/2024-1021.pdf`](file:///workspaces/Zeltra-Protocol/jurnal/pdf/2024-1021.pdf)
-* **Penulis:** Nicolas Michel, Mohamed E. Najd, Ghada Almashaqbeh (2024/2025)
+* **Penulis:** Nicolas Michel, Mohamed E. Najd, Ghada Almashaqbeh (University of Connecticut, IEEE / IACR 2024/1021)
 * **Problem di Sistem Klasik:**
-  Pertumbuhan pohon Merkle dan state accumulator on-chain yang tak terbatas menyebabkan pembengkakan storage kontrak dan degradasi performa sinkronisasi node.
+  Pertumbuhan state accumulator dan riwayat transaksi L2 on-chain yang tak terbatas menyebabkan pembengkakan storage kontrak (`SSTORE` bloat) dan degradasi performa sinkronisasi node. Di Zeltra, mapping `accepted_note_roots` sebelumnya tidak pernah di-prune saat penambahan daun baru, menyebabkan alokasi storage tak terbatas ($O(N)$ memory leak).
 * **Inovasi Paper:**
-  Mekanisme *bounded historical root window* dan *cryptographic state pruning* terverifikasi: membatasi kedalaman riwayat root yang disimpan on-chain tanpa merusak verifikasi bukti keanggotaan Merkle.
-* **Implementasi di Zeltra Stylus:**
-  * Komponen: [`zeltra-contracts/src/merkle.rs`](file:///workspaces/Zeltra-Protocol/zeltra-contracts/src/merkle.rs) (ring buffer `root_history` size 100 dan `accepted_note_roots` mapping).
-  * Menjaga ukuran storage Stylus WASM tetap terkendali dan hemat gas, mencegah memory bloat pada validator Arbitrum.
+  Paradigma *State Growth Control* via *block suppression* dan *checkpoint pruning*: mengeksekusi beban kerja tinggi secara ephemeral dan mem-prune riwayat status begitu checkpoint permanen terkonfirmasi. Mampu memangkas pertumbuhan state sebesar 93.42% dan menghemat gas 96.05%. *(Catatan Penting: Paper ini murni arsitektur storage & pruning L2, tanpa gerbang/wires sirkuit ZK)*.
+* **Implementasi di Zeltra Stylus (DEC-053):**
+  * Komponen: [`zeltra-contracts/src/merkle.rs`](file:///workspaces/Zeltra-Protocol/zeltra-contracts/src/merkle.rs) (`_mmr_insert` ring buffer eviction & `_is_accepted_note_root`).
+  * Menerapkan eviksi ring-buffer bounded storage: ketika buffer `root_history` (100 slot) berputar penuh (`hist_idx >= 100`), root lama pada slot tersebut otomatis di-prune dari `accepted_note_roots` (`accepted_note_roots[old_root] = 0`).
+  * Mengunci ukuran storage aktif kontrak Stylus tepat pada batas konstan $O(1)$ secara permanen, mengeliminasi celah kerentanan `AUD-28`.
 
 ---
 

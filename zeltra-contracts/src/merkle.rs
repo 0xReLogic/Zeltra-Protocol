@@ -239,9 +239,18 @@ impl Zeltra {
         let timestamp = U256::from(self.block_timestamp());
         self.accepted_note_roots.insert(new_root_bytes, timestamp);
 
-        // Record in ring buffer history (native u64 modulo)
+        // Record in ring buffer history (native u64 modulo) with ammBoost-style bounded eviction (DEC-053)
         let hist_idx = self.root_history_index.get();
         let slot = U256::from(hist_idx.to::<u64>() % (ROOT_HISTORY_SIZE as u64));
+
+        // If ring buffer has completed a cycle, prune the evicted root from accepted_note_roots
+        if hist_idx >= U256::from(ROOT_HISTORY_SIZE as u64) {
+            let old_root = self.root_history.get(slot);
+            if old_root != FixedBytes::ZERO && old_root != new_root_bytes {
+                self.accepted_note_roots.insert(old_root, U256::ZERO);
+            }
+        }
+
         self.root_history.insert(slot, new_root_bytes);
         self.root_history_index.set(hist_idx + U256::from(1));
 

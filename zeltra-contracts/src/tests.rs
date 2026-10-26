@@ -2878,14 +2878,14 @@ fn test_usdc_revert_leaves_weth_solvent() {
 // ═══════════════════════════════════════════════════════════════════════
 
 #[test]
-fn test_dec052_contract_sanitizes_infinity_point() {
+fn test_contract_sanitizes_infinity_point() {
     let inf_point: Bytes = vec![0u8; 128].into();
     let err = crate::types::sanitize_g1_point(&inf_point).unwrap_err();
     assert_eq!(err, b"PointAtInfinityNotAllowed".to_vec());
 }
 
 #[test]
-fn test_dec052_contract_sanitizes_non_canonical_coordinates() {
+fn test_contract_sanitizes_non_canonical_coordinates() {
     let mut bytes = vec![0u8; 128];
     bytes[63] = 1;
     bytes[127] = 1;
@@ -2896,7 +2896,7 @@ fn test_dec052_contract_sanitizes_non_canonical_coordinates() {
 }
 
 #[test]
-fn test_dec052_contract_sanitizes_off_curve_point() {
+fn test_contract_sanitizes_off_curve_point() {
     // Canonical coordinates but not on curve
     let mut bytes = [0u8; 128];
     bytes[63] = 1; // x = 1
@@ -2906,7 +2906,7 @@ fn test_dec052_contract_sanitizes_off_curve_point() {
 }
 
 #[test]
-fn test_dec052_contract_sanitizes_small_subgroup_order3_point() {
+fn test_contract_sanitizes_small_subgroup_order3_point() {
     // (0, 2) is on curve y^2 = x^3 + 4 but has small order 3 (divides cofactor h1)
     let mut bytes = [0u8; 128];
     bytes[127] = 2; // y = 2, x = 0
@@ -2915,7 +2915,7 @@ fn test_dec052_contract_sanitizes_small_subgroup_order3_point() {
 }
 
 #[test]
-fn test_dec052_contract_spend_private_note_rejects_subgroup_injected_proof() {
+fn test_contract_spend_private_note_rejects_subgroup_injected_proof() {
     reset_test_state();
     let owner = address!("1111111111111111111111111111111111111111");
     let merchant = address!("2222222222222222222222222222222222222222");
@@ -2958,4 +2958,145 @@ fn test_dec052_contract_spend_private_note_rejects_subgroup_injected_proof() {
     );
 
     assert_eq!(res, Err(b"SubgroupCheckFailed".to_vec()));
+}
+
+#[test]
+fn test_ammboost_bounded_ring_buffer_eviction_pos() {
+    reset_test_state();
+    set_block_timestamp(1_700_000_000);
+    let owner = Address::repeat_byte(0x01);
+    set_msg_sender(owner);
+    let mut contract = Zeltra::default();
+    contract
+        .init(
+            owner,
+            Address::repeat_byte(0x03),
+            Address::repeat_byte(0x04),
+        )
+        .unwrap();
+
+    let mut roots = Vec::new();
+    for i in 1..=105u64 {
+        let mut leaf_bytes = [0u8; 32];
+        leaf_bytes[24..32].copy_from_slice(&i.to_be_bytes());
+        let leaf = FixedBytes::<32>::from(leaf_bytes);
+        let (_, new_root) = contract._mmr_insert(leaf, vec![]).unwrap();
+        roots.push(new_root);
+    }
+
+    // Root 0 (at index 0) was evicted when leaf 101 (index 100) wrapped around slot 0
+    let root_0 = roots[0];
+    assert!(
+        !contract._is_accepted_note_root(root_0),
+        "Root 0 must be evicted after ring-buffer wrap-around per DEC-053"
+    );
+
+    // Root 1 (at index 1) was evicted when leaf 102 (index 101) wrapped around slot 1
+    let root_1 = roots[1];
+    assert!(
+        !contract._is_accepted_note_root(root_1),
+        "Root 1 must be evicted after ring-buffer wrap-around per DEC-053"
+    );
+
+    // Recent roots (indices 5..104) must remain accepted
+    let recent_root = roots[104];
+    assert!(
+        contract._is_accepted_note_root(recent_root),
+        "Recent root 104 must be accepted"
+    );
+    let root_100 = roots[100];
+    assert!(
+        contract._is_accepted_note_root(root_100),
+        "Root 100 must be accepted"
+    );
+}
+
+#[test]
+fn test_ammboost_eviction_no_premature_eviction() {
+    reset_test_state();
+    set_block_timestamp(1_700_000_000);
+    let owner = Address::repeat_byte(0x01);
+    set_msg_sender(owner);
+    let mut contract = Zeltra::default();
+    contract
+        .init(
+            owner,
+            Address::repeat_byte(0x03),
+            Address::repeat_byte(0x04),
+        )
+        .unwrap();
+
+    let mut roots = Vec::new();
+    // Insert 50 leaves (half of ring buffer)
+    for i in 1..=50u64 {
+        let mut leaf_bytes = [0u8; 32];
+        leaf_bytes[24..32].copy_from_slice(&i.to_be_bytes());
+        let leaf = FixedBytes::<32>::from(leaf_bytes);
+        let (_, new_root) = contract._mmr_insert(leaf, vec![]).unwrap();
+        roots.push(new_root);
+    }
+
+    // None of the first 50 roots should be evicted prematurely
+    for (idx, r) in roots.iter().enumerate() {
+        assert!(
+            contract._is_accepted_note_root(*r),
+            "Root {} must remain accepted before buffer wrap-around",
+            idx
+        );
+    }
+}
+
+#[test]
+fn test_ammboost_evicted_root_spend_rejected() {
+    reset_test_state();
+    set_block_timestamp(1_700_000_000);
+    let owner = Address::repeat_byte(0x01);
+    let merchant = Address::repeat_byte(0x02);
+    set_msg_sender(owner);
+    let mut contract = Zeltra::default();
+    contract
+        .init(
+            owner,
+            Address::repeat_byte(0x03),
+            Address::repeat_byte(0x04),
+        )
+        .unwrap();
+
+    let mut roots = Vec::new();
+    for i in 1..=105u64 {
+        let mut leaf_bytes = [0u8; 32];
+        leaf_bytes[24..32].copy_from_slice(&i.to_be_bytes());
+        let leaf = FixedBytes::<32>::from(leaf_bytes);
+        let (_, new_root) = contract._mmr_insert(leaf, vec![]).unwrap();
+        roots.push(new_root);
+    }
+
+    let evicted_root = roots[0];
+    assert!(!contract._is_accepted_note_root(evicted_root));
+
+    // Attempting to spend against an evicted root must fail with UNACCEPTED_NOTE_ROOT
+    let canonical_nullifier = FixedBytes::<32>::from_slice(&[0x0a; 32]);
+    let canonical_change_cm = FixedBytes::<32>::from_slice(&[0x0b; 32]);
+    let res = contract.spend_private_note(
+        evicted_root,
+        U256::from(1),
+        canonical_nullifier,
+        U256::ZERO,
+        canonical_change_cm,
+        merchant,
+        U256::from(5_000_000),
+        U256::from(22_500),
+        U256::from(23_000),
+        U256::from(25_000),
+        FixedBytes::ZERO,
+        U256::from(1_700_000_000 + 3600),
+        U256::from(1),
+        U256::ZERO,
+        valid_test_g1(),
+        valid_test_g2(),
+        valid_test_g1(),
+        vec![].into(),
+    );
+
+    assert_eq!(res, Err(b"UNACCEPTED_NOTE_ROOT".to_vec()));
 }
