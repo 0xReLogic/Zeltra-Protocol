@@ -360,7 +360,7 @@ mod tests {
     }
 
     #[test]
-    fn test_scalar_omega_cubic_roots_properties() {
+    fn test_dec052_scalar_omega_cubic_roots_properties() {
         let omega = scalar_omega();
         let omega_sq = scalar_omega_sq();
 
@@ -389,7 +389,7 @@ mod tests {
     }
 
     #[test]
-    fn test_eisenstein_scalar_evaluation_on_g1() {
+    fn test_dec052_eisenstein_scalar_evaluation_on_g1() {
         let mut rng = ark_std::rand::thread_rng();
         let p_proj = G1Projective::rand(&mut rng);
         let p_aff = p_proj.into_affine();
@@ -407,7 +407,7 @@ mod tests {
     }
 
     #[test]
-    fn test_fast_s_pow_gt_memoization() {
+    fn test_dec052_fast_s_pow_gt_memoization() {
         use ark_bls12_381::{Bls12_381, G2Affine};
         use ark_ec::pairing::Pairing;
 

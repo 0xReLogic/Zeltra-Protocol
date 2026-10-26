@@ -346,7 +346,7 @@ mod tests {
     }
 
     #[test]
-    fn test_sanitize_evm_g1_gates() {
+    fn test_dec052_sanitize_evm_g1_gates() {
         let gen = G1Affine::generator();
         let gen_bytes: [u8; 128] = to_evm_g1(&gen).try_into().unwrap();
 
@@ -405,7 +405,7 @@ mod tests {
     }
 
     #[test]
-    fn test_sanitize_evm_g2_gates() {
+    fn test_dec052_sanitize_evm_g2_gates() {
         let gen = G2Affine::generator();
         let gen_bytes: [u8; 256] = to_evm_g2(&gen).try_into().unwrap();
 
@@ -452,7 +452,7 @@ mod tests {
     }
 
     #[test]
-    fn test_proof_sanitation_adversarial() {
+    fn test_dec052_proof_sanitation_adversarial() {
         let a = G1Affine::generator();
         let a_neg = -a;
         let b = G2Affine::generator();
