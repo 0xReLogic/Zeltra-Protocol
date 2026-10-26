@@ -87,4 +87,19 @@ Dokumentasi arsitektur formal dan keputusan teknis permanen untuk inovasi ini te
     - Argo randomized invalidity encoder & $O(1)$ fraud slashing decoder di [`zeltra-sdk/src/compliance/argo.rs`](../../zeltra-sdk/src/compliance/argo.rs).
   * Teruji 100% lolos verifikasi aljabar & empiris di [`scripts/test_dec052_argo_verification.py`](../../scripts/test_dec052_argo_verification.py) dan seluruh test suite workspace (80 contract tests, 288 core tests, 117 sdk tests, 117 node tests).
 * **Arsitektur Referensi:** [`DEC-052`](../../research/dec/DEC-052-argo-groth16-invalidity-encoding-and-curve-point-sanitation.md).
+---
+
+## 6. ammBoost: State Growth Control for AMMs & L2 Storage Eviction (IACR ePrint 2024/1021)
+* **File Jurnal / PDF:** [`jurnal/pdf/2024-1021.pdf`](../../jurnal/pdf/2024-1021.pdf)
+* **Penulis:** Nicolas Michel, Mohamed E. Najd, Ghada Almashaqbeh (University of Connecticut, IEEE / IACR 2024/1021)
+* **Problem Kritis:**
+  Pertumbuhan state accumulator dan riwayat transaksi L2 on-chain yang tak terbatas menyebabkan pembengkakan storage kontrak (`SSTORE` bloat) dan degradasi performa sinkronisasi node. Di Zeltra, mapping `accepted_note_roots` sebelumnya tidak pernah di-prune saat penambahan daun baru, menyebabkan alokasi storage tak terbatas ($O(N)$ memory leak).
+* **Inovasi Paper:**
+  Paradigma *State Growth Control* via *block suppression* dan *checkpoint pruning*: mengeksekusi beban kerja tinggi secara ephemeral dan mem-prune riwayat status begitu checkpoint permanen terkonfirmasi. Mampu memangkas pertumbuhan state sebesar 93.42% dan menghemat gas 96.05%. *(Catatan: Murni arsitektur storage & pruning L2, tanpa gerbang/wires sirkuit ZK)*.
+* **Implementasi di Zeltra Stylus (SELESAI & TERVERIFIKASI [x] — DEC-053):**
+  * Komponen: [`zeltra-contracts/src/merkle.rs`](../../zeltra-contracts/src/merkle.rs) (`_mmr_insert` ring buffer eviction & `_is_accepted_note_root`).
+  * Menerapkan eviksi ring-buffer bounded storage: ketika buffer `root_history` (100 slot) berputar penuh (`hist_idx >= 100`), root lama pada slot tersebut otomatis di-prune dari `accepted_note_roots` (`accepted_note_roots[old_root] = 0`).
+  * Mengunci ukuran storage aktif kontrak Stylus tepat pada batas konstan $O(1)$ secara permanen, mengeliminasi celah kerentanan `AUD-28`.
+  * Teruji 100% lolos verifikasi di test suite `zeltra-contracts/src/tests.rs` (`test_ammboost_bounded_ring_buffer_eviction_pos`, `test_ammboost_eviction_no_premature_eviction`, `test_ammboost_evicted_root_spend_rejected`).
+* **Arsitektur Referensi:** [`DEC-053`](../../research/dec/DEC-053-ammboost-state-growth-control-and-ephemeral-pruning.md).
 

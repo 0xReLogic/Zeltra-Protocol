@@ -40,21 +40,7 @@ Dokumen ini memetakan paper terpilih untuk arsitektur smart contract Zeltra ([`z
 
 ---
 
-## 4. ammBoost: State Growth Control for AMMs & L2 Storage Eviction (IACR ePrint 2024/1021)
-* **File Jurnal / PDF:** [`jurnal/pdf/2024-1021.pdf`](file:///workspaces/Zeltra-Protocol/jurnal/pdf/2024-1021.pdf)
-* **Penulis:** Nicolas Michel, Mohamed E. Najd, Ghada Almashaqbeh (University of Connecticut, IEEE / IACR 2024/1021)
-* **Problem di Sistem Klasik:**
-  Pertumbuhan state accumulator dan riwayat transaksi L2 on-chain yang tak terbatas menyebabkan pembengkakan storage kontrak (`SSTORE` bloat) dan degradasi performa sinkronisasi node. Di Zeltra, mapping `accepted_note_roots` sebelumnya tidak pernah di-prune saat penambahan daun baru, menyebabkan alokasi storage tak terbatas ($O(N)$ memory leak).
-* **Inovasi Paper:**
-  Paradigma *State Growth Control* via *block suppression* dan *checkpoint pruning*: mengeksekusi beban kerja tinggi secara ephemeral dan mem-prune riwayat status begitu checkpoint permanen terkonfirmasi. Mampu memangkas pertumbuhan state sebesar 93.42% dan menghemat gas 96.05%. *(Catatan Penting: Paper ini murni arsitektur storage & pruning L2, tanpa gerbang/wires sirkuit ZK)*.
-* **Implementasi di Zeltra Stylus (DEC-053):**
-  * Komponen: [`zeltra-contracts/src/merkle.rs`](file:///workspaces/Zeltra-Protocol/zeltra-contracts/src/merkle.rs) (`_mmr_insert` ring buffer eviction & `_is_accepted_note_root`).
-  * Menerapkan eviksi ring-buffer bounded storage: ketika buffer `root_history` (100 slot) berputar penuh (`hist_idx >= 100`), root lama pada slot tersebut otomatis di-prune dari `accepted_note_roots` (`accepted_note_roots[old_root] = 0`).
-  * Mengunci ukuran storage aktif kontrak Stylus tepat pada batas konstan $O(1)$ secara permanen, mengeliminasi celah kerentanan `AUD-28`.
-
----
-
-## 5. ZK Email (NFA-based Regex): Identity & Recovery Engine (IACR ePrint 2026)
+## 4. ZK Email (NFA-based Regex): Identity & Recovery Engine (IACR ePrint 2026)
 * **File Jurnal:** [`jurnal/ZK-Proofs-Regex-Email-Verification.md`](file:///workspaces/Zeltra-Protocol/jurnal/ZK-Proofs-Regex-Email-Verification.md)
 * **Problem di Sistem Klasik:**
   Verifikasi bukti kepemilikan email DKIM secara on-chain di EVM/Stylus konvensional membutuhkan evaluasi string regex yang memakan jutaan gas dan puluhan ribu constraint sirkuit jika menggunakan automata DFA naif.
@@ -66,7 +52,7 @@ Dokumen ini memetakan paper terpilih untuk arsitektur smart contract Zeltra ([`z
 
 ---
 
-## 6. Faster Incremental Authenticated Dictionaries: Removing the Query Bottleneck (IACR ePrint 2026/2098)
+## 5. Faster Incremental Authenticated Dictionaries: Removing the Query Bottleneck (IACR ePrint 2026/2098)
 * **File Jurnal / ePrint:** IACR ePrint 2026/2098 (September 2026)
 * **Penulis:** Michael A. Bender, John Kuszmaul, William Kuszmaul
 * **Problem di Sistem Klasik:**
@@ -82,7 +68,7 @@ Dokumen ini memetakan paper terpilih untuk arsitektur smart contract Zeltra ([`z
 
 ---
 
-## 7. DelegProof: Machine-Checked Security Analysis of EIP-7702 Delegation (IACR ePrint 2026/2060)
+## 6. DelegProof: Machine-Checked Security Analysis of EIP-7702 Delegation (IACR ePrint 2026/2060)
 * **File Jurnal / ePrint:** IACR ePrint 2026/2060 (September 2026)
 * **Penulis:** Rong Qian, Yu Cheng, Lingyu Gao, Yuchang Zhang, Zengli Guo
 * **Problem Kritis:**
@@ -97,3 +83,4 @@ Dokumen ini memetakan paper terpilih untuk arsitektur smart contract Zeltra ([`z
   * Memberikan validasi keamanan formal bagi smart contract Stylus Zeltra:
     - Penegakan ketat binding domain `chain_id` pada seluruh verifikasi Groth16 dan quote eksekusi ([`DEC-035B`](file:///workspaces/Zeltra-Protocol/research/decisions/DEC-035B-formal-scope-binding-and-groth16-proof-malleability-hardening.md)), menutup celah replay lintas chain secara mutlak.
     - Struktur penyimpanan `sol_storage!` Zeltra mengadopsi namespaced layout terisolasi untuk data multi-aset, riwayat MMR, dan generational nullifiers, menjamin kekebalan penuh terhadap *storage confusion* jika kontrak Zeltra dipanggil oleh akun EOA yang didelegasikan via EIP-7702 atau ERC-4337 smart account.
+
