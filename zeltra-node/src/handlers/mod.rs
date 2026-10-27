@@ -1,5 +1,6 @@
 //! HTTP request handlers
 
+pub mod ccip;
 pub mod health;
 pub mod mmr;
 pub mod quote;
@@ -7,6 +8,9 @@ pub mod spend;
 pub mod tx_status;
 pub mod x402;
 
+pub use ccip::{
+    handle_ccip_deposit_status, handle_ccip_spend_status, handle_ccip_universal_status,
+};
 pub use health::{health_check, liveness_check, readiness_check};
 pub use mmr::{get_bulk_leaves, get_mmr_proof, handle_mmr_tip, handle_notes_sync};
 pub use quote::{create_quote, handle_private_spend_quote};

@@ -49,6 +49,18 @@ pub const CCIP_RECEIVER_INTERFACE_ID: [u8; 4] = [0x8a, 0x92, 0xdc, 0xed];
 pub const ERC165_INTERFACE_ID: [u8; 4] = [0x01, 0xff, 0xc9, 0xa7];
 
 impl Zeltra {
+    /// Computes the storage mapping key for allowlisted CCIP source selector and sender
+    pub(crate) fn ccip_allowlist_key(
+        &self,
+        source_chain_selector: u64,
+        sender: &[u8],
+    ) -> FixedBytes<32> {
+        let mut bytes = Vec::with_capacity(8 + sender.len());
+        bytes.extend_from_slice(&source_chain_selector.to_be_bytes());
+        bytes.extend_from_slice(sender);
+        keccak256(&bytes)
+    }
+
     /// Standard ERC-165 interface query
     pub fn _supports_interface(&self, interface_id: FixedBytes<4>) -> bool {
         let id = interface_id.0;

@@ -41,6 +41,13 @@ impl Zeltra {
         Ok(self.ccip_allowed_senders.get(key))
     }
 
+    pub fn _is_ccip_message_processed(
+        &self,
+        message_id: FixedBytes<32>,
+    ) -> Result<bool, Vec<u8>> {
+        Ok(self.ccip_processed_messages.get(message_id))
+    }
+
     // --- Liabilities, Fees & Yield Queries ---
 
     pub fn _deposit_fee_bps(&self) -> Result<U256, Vec<u8>> {

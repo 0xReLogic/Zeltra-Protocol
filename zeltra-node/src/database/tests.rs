@@ -541,3 +541,124 @@ async fn test_get_notes_memo_chunk_pagination() {
     let chunk_empty = db.get_notes_memo_chunk(50, 10).await.unwrap();
     assert!(chunk_empty.is_empty());
 }
+
+#[tokio::test]
+async fn test_ccip_inbound_deposit_lifecycle() {
+    std::env::set_var("ZELTRA_DB_KEY", "test-encryption-key");
+    let tmp = TempDir::new().unwrap();
+    let db_path = tmp.path().join("ccip_deposit.db");
+    let db = Database::new(&db_path).await.unwrap();
+
+    let record = crate::database::ccip::CcipInboundDepositRecord {
+        message_id: "0x1111222233334444555566667777888899990000aaaabbbbccccddddeeeeffff".to_string(),
+        source_chain_selector: 16015286601757825753, // Ethereum Sepolia
+        asset_id: 1, // USDC
+        amount: 25_000_000, // 25 USDC
+        leaf_index: None,
+        note_commitment: "0xabcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789".to_string(),
+        status: "in_flight".to_string(),
+        tx_hash: None,
+        block_number: None,
+        updated_at: 0,
+    };
+
+    // 1. Record deposit in pending state
+    db.record_ccip_inbound_deposit(&record).await.unwrap();
+
+    let fetched = db
+        .get_ccip_inbound_deposit(&record.message_id)
+        .await
+        .unwrap()
+        .expect("Deposit must exist");
+    assert_eq!(fetched.status, "in_flight");
+    assert_eq!(fetched.amount, 25_000_000);
+    assert_eq!(fetched.source_chain_selector, 16015286601757825753);
+
+    // 2. Pending list should include this deposit
+    let pending = db.get_pending_ccip_deposits().await.unwrap();
+    assert_eq!(pending.len(), 1);
+    assert_eq!(pending[0].message_id, record.message_id);
+
+    // 3. Confirm deposit upon on-chain Stylus execution
+    db.confirm_ccip_inbound_deposit(&record.message_id, 42, "0xtxhash123", 98765)
+        .await
+        .unwrap();
+
+    let confirmed = db
+        .get_ccip_inbound_deposit(&record.message_id)
+        .await
+        .unwrap()
+        .expect("Deposit must exist");
+    assert_eq!(confirmed.status, "confirmed_in_pool");
+    assert_eq!(confirmed.leaf_index, Some(42));
+    assert_eq!(confirmed.tx_hash.as_deref(), Some("0xtxhash123"));
+    assert_eq!(confirmed.block_number, Some(98765));
+
+    // 4. Pending list should now be empty
+    let pending_after = db.get_pending_ccip_deposits().await.unwrap();
+    assert!(pending_after.is_empty());
+}
+
+#[tokio::test]
+async fn test_ccip_spend_tracking_and_refund_guards() {
+    std::env::set_var("ZELTRA_DB_KEY", "test-encryption-key");
+    let tmp = TempDir::new().unwrap();
+    let db_path = tmp.path().join("ccip_spend.db");
+    let db = Database::new(&db_path).await.unwrap();
+
+    let nullifier = "0xdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef";
+    let req = crate::dto::SpendRequest {
+        nullifier: nullifier.to_string(),
+        sig_hex: "0xsig".to_string(),
+        recipient: "0xmerchant".to_string(),
+        amount: 50_000_000,
+        cross_chain: Some(crate::dto::CrossChainParams {
+            destination_chain_selector: 10344971235874465080, // Base Sepolia
+            destination_contract: "0xdest".to_string(),
+        }),
+        ..Default::default()
+    };
+
+    let queue_id = db.enqueue_spend(&req).await.unwrap().unwrap();
+    let msg_id = "0xccipmsg1234567890abcdef1234567890abcdef1234567890abcdef1234567890";
+
+    // Set CCIP tracking
+    db.set_ccip_tracking(queue_id, msg_id, 10344971235874465080)
+        .await
+        .unwrap();
+
+    let fetched = db
+        .get_ccip_spend_by_message_id(msg_id)
+        .await
+        .unwrap()
+        .expect("Spend must exist");
+    assert_eq!(fetched.destination_status, "pending");
+    assert_eq!(fetched.destination_chain_selector, 10344971235874465080);
+
+    // NEGATIVE TEST 1: Refund rejected while status is still 'pending'
+    let refund_res1 = db.authorize_ccip_refund(nullifier, 0).await.unwrap();
+    assert!(!refund_res1, "Refund must NOT be authorized while pending");
+
+    // Update status to 'delivered'
+    db.update_destination_status(queue_id, "delivered", None)
+        .await
+        .unwrap();
+
+    // NEGATIVE TEST 2: Refund rejected when status is 'delivered'
+    let refund_res2 = db.authorize_ccip_refund(nullifier, 0).await.unwrap();
+    assert!(!refund_res2, "Refund must NOT be authorized when delivered");
+
+    // Simulate failure
+    db.update_destination_status(queue_id, "failed", Some("destination out of gas"))
+        .await
+        .unwrap();
+
+    // NEGATIVE TEST 3: Refund rejected when timeout has not elapsed (timeout = 100,000s)
+    let refund_res3 = db.authorize_ccip_refund(nullifier, 100_000).await.unwrap();
+    assert!(!refund_res3, "Refund must NOT be authorized before timeout elapsed");
+
+    // POSITIVE TEST: Refund authorized when status is 'failed' and timeout has elapsed
+    let refund_res4 = db.authorize_ccip_refund(nullifier, 0).await.unwrap();
+    assert!(refund_res4, "Refund must be authorized when failed and timed out");
+}
+

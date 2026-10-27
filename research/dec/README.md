@@ -86,6 +86,7 @@ Folder `research/dec/` memuat seluruh catatan keputusan arsitektur resmi (*Archi
 | **DEC-053** | [`DEC-053-ammboost-state-growth-control-and-ephemeral-pruning.md`](file:///workspaces/Zeltra-Protocol/research/dec/DEC-053-ammboost-state-growth-control-and-ephemeral-pruning.md) | ammBoost State Growth Control & Ephemeral Settlement Pruning (Bounded Ring-Buffer Storage) | 2026-10-26 |
 | **DEC-054** | [`DEC-054-zero-custody-safe-harbor-and-direct-self-broadcast.md`](file:///workspaces/Zeltra-Protocol/research/dec/DEC-054-zero-custody-safe-harbor-and-direct-self-broadcast.md) | Zero-Custody Regulatory Safe Harbor & Direct Self-Broadcast Architecture (Unhosted Wallet Path & Gas Overhead Sanitization) | 2026-10-26 |
 | **DEC-055** | [`DEC-055-cross-chain-ccip-programmable-inbound-deposit-and-mmr-minting.md`](file:///workspaces/Zeltra-Protocol/research/dec/DEC-055-cross-chain-ccip-programmable-inbound-deposit-and-mmr-minting.md) | Cross-Chain CCIP Programmable Inbound Deposit, Direct MMR Ingestion & Interface Standardization | 2026-10-27 |
+| **DEC-056** | [`DEC-056-cross-chain-ccip-spend-sanitation-and-unified-lifecycle-monitor.md`](file:///workspaces/Zeltra-Protocol/research/dec/DEC-056-cross-chain-ccip-spend-sanitation-and-unified-lifecycle-monitor.md) | Cross-Chain CCIP Spend Sanitation, Double-Spend Bypass Elimination & Unified Multi-Chain Lifecycle Monitor | 2026-10-27 |
 
 ---
 
@@ -131,3 +132,4 @@ Folder `research/dec/` memuat seluruh catatan keputusan arsitektur resmi (*Archi
 ### 6. Cross-Chain Infrastructure & Inbound Settlement
 - **DEC-015**: CCIP Cross-Chain Message Security Validations (Archived Early Concept).
 - **DEC-055**: Cross-Chain CCIP Programmable Inbound Deposit, Direct MMR Ingestion & Interface Standardization (PTT Inflow Rail).
+- **DEC-056**: Cross-Chain CCIP Spend Sanitation, Double-Spend Bypass Elimination & Unified Multi-Chain Lifecycle Monitor.

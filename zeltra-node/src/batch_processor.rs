@@ -149,21 +149,6 @@ async fn process_single_spend(state: &AppState, item: QueuedSpend) {
                 request.change_encrypted_memo.as_deref(),
             )
             .await
-    } else if let Some(cc) = &request.cross_chain {
-        let stablecoin_addr = std::env::var("ZELTRA_STABLECOIN_ADDRESS")
-            .unwrap_or_else(|_| "0x75faf114eafb1bdbe2f0316df893fd58ce46aa4d".to_string());
-        evm_client
-            .broadcast_ccip_transaction(
-                cc.destination_chain_selector,
-                &cc.destination_contract,
-                &request.nullifier,
-                &request.recipient,
-                &stablecoin_addr,
-                request.amount,
-                request.expiry.unwrap_or(0),
-                request.nonce_hex.as_deref().unwrap_or(ZERO_WORD),
-            )
-            .await
     } else {
         eprintln!(
             "SETTLEMENT: unrecognized spend type for item {} (nullifier={})",
@@ -171,16 +156,10 @@ async fn process_single_spend(state: &AppState, item: QueuedSpend) {
         );
         let _ = state
             .db
-            .fail_spend(item.id, None, "unrecognized spend type")
+            .fail_spend(item.id, None, "unrecognized spend type: valid private note proof required")
             .await;
         return;
     };
-
-    let is_ccip = request.cross_chain.is_some();
-    let ccip_chain_selector = request
-        .cross_chain
-        .as_ref()
-        .map(|cc| cc.destination_chain_selector);
 
     match result {
         Ok(outcome) if outcome.success => {
@@ -189,48 +168,65 @@ async fn process_single_spend(state: &AppState, item: QueuedSpend) {
                 .mark_spend_submitted(item.id, &outcome.tx_hash)
                 .await;
 
-            if is_ccip {
-                // CCIP cross-chain: track destination, don't mark confirmed yet
-                if let Some(message_id) = &outcome.ccip_message_id {
-                    let chain_sel = ccip_chain_selector.unwrap_or(0);
-                    if let Err(e) = state
-                        .db
-                        .set_ccip_tracking(item.id, message_id, chain_sel)
-                        .await
-                    {
+            // Always mark spend confirmed on Arbitrum since nullifier is burned on-chain
+            let _ = state
+                .db
+                .mark_spend_confirmed(
+                    item.id,
+                    &request.nullifier,
+                    &outcome.tx_hash,
+                    outcome.block_number,
+                )
+                .await;
+
+            if let Some(cc) = &request.cross_chain {
+                // On-chain spend succeeded on Arbitrum. Now dispatch cross-chain payment via CCIP.
+                let stablecoin_addr = std::env::var("ZELTRA_STABLECOIN_ADDRESS")
+                    .unwrap_or_else(|_| "0x75faf114eafb1bdbe2f0316df893fd58ce46aa4d".to_string());
+                match evm_client
+                    .broadcast_ccip_transaction(
+                        cc.destination_chain_selector,
+                        &cc.destination_contract,
+                        &request.nullifier,
+                        &request.recipient,
+                        &stablecoin_addr,
+                        request.amount,
+                        request.expiry.unwrap_or(0),
+                        request.nonce_hex.as_deref().unwrap_or(ZERO_WORD),
+                    )
+                    .await
+                {
+                    Ok(ccip_outcome) => {
+                        if let Some(message_id) = &ccip_outcome.ccip_message_id {
+                            if let Err(e) = state
+                                .db
+                                .set_ccip_tracking(item.id, message_id, cc.destination_chain_selector)
+                                .await
+                            {
+                                eprintln!(
+                                    "CCIP_TRACKING: Failed to set tracking for id={}: {}",
+                                    item.id, e
+                                );
+                            }
+                            println!(
+                                "CCIP: Spend {} dispatched to destination chain {} (msg_id={})",
+                                item.id, cc.destination_chain_selector, message_id
+                            );
+                        }
+                    }
+                    Err(e) => {
                         eprintln!(
-                            "CCIP_TRACKING: Failed to set tracking for id={}: {}",
+                            "CCIP_OUTFLOW_ERROR: Failed to broadcast CCIP tx for spend {}: {}",
                             item.id, e
                         );
+                        let _ = state
+                            .db
+                            .update_destination_status(item.id, "failed", Some(&e.to_string()))
+                            .await;
                     }
-                    // Also insert nullifier to prevent double-spend while awaiting destination
-                    let _ = state
-                        .db
-                        .mark_spend_confirmed(
-                            item.id,
-                            &request.nullifier,
-                            &outcome.tx_hash,
-                            outcome.block_number,
-                        )
-                        .await;
-                    println!(
-                        "CCIP: Spend {} queued for destination tracking (msg_id={})",
-                        item.id, message_id
-                    );
-                } else {
-                    // No message ID parsed — fall back to immediate confirm (graceful degradation)
-                    let _ = state
-                        .db
-                        .mark_spend_confirmed(
-                            item.id,
-                            &request.nullifier,
-                            &outcome.tx_hash,
-                            outcome.block_number,
-                        )
-                        .await;
                 }
             } else {
-                // Same-chain: mark confirmed immediately
+                // Same-chain spend: confirmed directly
                 let _ = state
                     .db
                     .mark_spend_confirmed(

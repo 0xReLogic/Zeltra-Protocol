@@ -3,6 +3,7 @@
 //! This library exposes internal modules for testing purposes.
 
 pub mod batch_processor;
+pub mod ccip_monitor;
 pub mod config;
 pub mod database;
 pub mod dto;

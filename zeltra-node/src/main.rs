@@ -242,10 +242,10 @@ async fn main() {
     });
 
     // Spawn CCIP destination monitor (if configured)
-    let ccip_db = state.db.clone();
+    let ccip_state = state.clone();
     let ccip_config = config::CcipDestinationConfig::from_env();
     tokio::spawn(async move {
-        ccip_monitor::ccip_monitor_loop(ccip_db, ccip_config).await;
+        ccip_monitor::ccip_monitor_loop(ccip_state, ccip_config).await;
     });
 
     // Spawn execution fee claimer background worker
