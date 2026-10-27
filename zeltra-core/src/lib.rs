@@ -49,7 +49,8 @@ pub use fees::{
     quote_private_spend, quote_private_spend_with_fee, quote_standalone_rollover,
     spend_fee_bps_for_holding, wei_to_gwei, SpendQuote, DEFAULT_EXECUTION_OVERHEAD_BPS,
     DEPOSIT_FEE_BPS, FEE_DENOMINATOR_BPS, MIN_STANDALONE_ROLLOVER_THRESHOLD_USDC,
-    PRIVATE_SPEND_FEE_BPS, SPEND_FEE_30DAY_BPS, THIRTY_DAYS_SECS, WEI_PER_GWEI,
+    MIN_STANDALONE_ROLLOVER_THRESHOLD_WETH_GWEI, PRIVATE_SPEND_FEE_BPS, SPEND_FEE_30DAY_BPS,
+    THIRTY_DAYS_SECS, WEI_PER_GWEI,
 };
 
 // Re-export Poseidon hash & canonical Grain LFSR (DEC-021)
