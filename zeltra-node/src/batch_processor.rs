@@ -1,4 +1,4 @@
-//! Background batching logic with slippage protection and balance checks
+//! Asynchronous mempool queue processor with slippage protection and balance checks (DEC-027 / DEC-038C)
 
 use crate::database::QueuedSpend;
 use crate::state::AppState;
@@ -8,7 +8,7 @@ const GAS_LIMIT_PRIVATE_NOTE: f64 = 2_500_000.0;
 const GAS_LIMIT_CROSS_CHAIN: f64 = 1_200_000.0;
 const GAS_LIMIT_STANDARD: f64 = 1_500_000.0;
 
-// Background batching logic with slippage protection and balance checks
+// Asynchronous mempool queue processor with slippage protection and balance checks
 pub const DEFAULT_MEMPOOL_LEASE_SECS: i64 = 900; // 15 minutes default (DEC-027)
 
 pub async fn process_spend_batch(state: &AppState) {
