@@ -1,6 +1,6 @@
 pub const FEE_DENOMINATOR_BPS: u64 = 10_000;
 pub const DEPOSIT_FEE_BPS: u64 = 0; // 0% Deposit Fee (Immutable Zero-Friction Inflow)
-pub const PRIVATE_SPEND_FEE_BPS: u64 = 45; // 0.45% (< 30 days)
+pub const PRIVATE_SPEND_FEE_BPS: u64 = 45; // 0.45%
 pub const DEFAULT_EXECUTION_OVERHEAD_BPS: u64 = 1_500; // 15% execution gas volatility & DA buffer (DEC-054)
 
 pub const THIRTY_DAYS_SECS: u64 = 30 * 24 * 60 * 60;
@@ -118,6 +118,9 @@ pub fn quote_private_spend(
 /// Minimum note value eligible for standalone rollover (DEC-033: $2.00 USDC).
 /// Prevents spam bot DoS that drains relayer mempool and CPU quota.
 pub const MIN_STANDALONE_ROLLOVER_THRESHOLD_USDC: u64 = 2_000_000; // 2.00 USDC
+
+/// Minimum note value eligible for standalone rollover in WETH (DEC-033 / DEC-034A: 0.001 WETH = 10^6 Gwei).
+pub const MIN_STANDALONE_ROLLOVER_THRESHOLD_WETH_GWEI: u64 = 1_000_000; // 0.001 WETH (1,000,000 Gwei)
 
 /// Number of Wei in 1 Gwei (10^9) for WETH 9-decimal normalization (DEC-034A §6).
 pub const WEI_PER_GWEI: u128 = 1_000_000_000;
@@ -321,6 +324,7 @@ mod tests {
     #[test]
     fn dust_rollover_threshold_matches_dec033() {
         assert_eq!(MIN_STANDALONE_ROLLOVER_THRESHOLD_USDC, 2_000_000); // Exactly $2.00 USDC
+        assert_eq!(MIN_STANDALONE_ROLLOVER_THRESHOLD_WETH_GWEI, 1_000_000); // Exactly 0.001 WETH (10^6 Gwei)
     }
 
     #[test]

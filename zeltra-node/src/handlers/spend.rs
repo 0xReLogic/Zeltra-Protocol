@@ -719,6 +719,42 @@ mod tests {
         let resp = handle_private_note_spend(State(state), Json(req)).await;
         assert_eq!(resp.0.status, "REJECTED");
         assert!(resp.0.message.contains("DUST_NOTE_ROLLOVER_REJECTED"));
+        assert!(resp.0.message.contains("$2.00 USDC"));
+    }
+
+    #[tokio::test]
+    async fn test_handle_private_note_spend_reject_dust_rollover_weth() {
+        let (state, _tmp) = setup_test_state().await;
+        let mut req = sample_valid_private_note_request();
+        req.idempotency_key = Some("idem_dust_rollover_weth".to_string());
+        // WETH asset (0), rollover mode (flags_packed = 1)
+        req.asset_id = Some(0);
+        req.is_rollover = Some(1);
+        req.public_inputs[15] = format!("0x{:064x}", 1);
+        req.merchant_amount = 0;
+        req.public_inputs[6] = format!("0x{:064x}", 0);
+        req.protocol_fee = 0;
+        req.public_inputs[7] = format!("0x{:064x}", 0);
+        req.input_value = Some(500_000); // 0.0005 WETH < 0.001 WETH (1,000,000 Gwei)
+
+        let resp = handle_private_note_spend(State(state), Json(req)).await;
+        assert_eq!(resp.0.status, "REJECTED");
+        assert!(resp.0.message.contains("DUST_NOTE_ROLLOVER_REJECTED"));
+        assert!(resp.0.message.contains("0.001 WETH"));
+    }
+
+    #[tokio::test]
+    async fn test_handle_private_note_spend_reject_amount_below_min_spend() {
+        let (state, _tmp) = setup_test_state().await;
+        let mut req = sample_valid_private_note_request();
+        req.idempotency_key = Some("idem_min_spend_sub_5".to_string());
+        // Sub-5 USDC spend (e.g., $1.00 USDC or micro-spend $0.001)
+        req.merchant_amount = 1_000_000; // $1.00 < $5.00 min spend
+        req.public_inputs[6] = format!("0x{:064x}", 1_000_000);
+
+        let resp = handle_private_note_spend(State(state), Json(req)).await;
+        assert_eq!(resp.0.status, "REJECTED");
+        assert!(resp.0.message.contains("AmountTooSmall"));
     }
 
     #[tokio::test]
@@ -1328,5 +1364,19 @@ mod tests {
             "Expected zero address error, got: {}",
             resp.0.message
         );
+    }
+
+    #[tokio::test]
+    async fn test_handle_spend_joinsplit_reject_mode_3_amount_below_min_spend() {
+        let (state, _tmp) = setup_test_state().await;
+        let mut req = sample_valid_joinsplit_request();
+        // Mode 3 spend with non-zero recipient but amount < 5 USDC ($5,000,000)
+        req.recipient = "0x0000000000000000000000000000000000001234".to_string();
+        req.merchant_amount = 2_000_000; // $2.00 < $5.00 min spend
+        req.public_inputs[9] = format!("0x{:064x}", 2_000_000);
+
+        let resp = handle_spend_joinsplit(State(state), Json(req)).await;
+        assert_eq!(resp.0.status, "REJECTED");
+        assert!(resp.0.message.contains("AmountTooSmall"));
     }
 }

@@ -117,6 +117,19 @@ pub async fn validate_private_note_spend_preflight(
         });
     }
 
+    let limits = crate::validation::SafetyLimits::default();
+    if req_asset_id == 1 && !is_rollover_req && payload.merchant_amount < limits.min_spend_usdc {
+        return Err(PrivateNoteSpendResponse {
+            status: "REJECTED".to_string(),
+            message: format!(
+                "AmountTooSmall: merchant_amount ({}) is below minimum allowed ({})",
+                payload.merchant_amount, limits.min_spend_usdc
+            ),
+            queue_position: 0,
+            estimated_gas_usdc: None,
+        });
+    }
+
     if payload.execution_fee > payload.max_execution_fee {
         return Err(PrivateNoteSpendResponse {
             status: "REJECTED".to_string(),
@@ -658,10 +671,19 @@ pub async fn validate_private_note_spend_preflight(
             });
         }
         if let Some(input_val) = payload.input_value {
-            if input_val < zeltra_core::fees::MIN_STANDALONE_ROLLOVER_THRESHOLD_USDC {
+            if req_asset_id == 1 {
+                if input_val < zeltra_core::fees::MIN_STANDALONE_ROLLOVER_THRESHOLD_USDC {
+                    return Err(PrivateNoteSpendResponse {
+                        status: "REJECTED".to_string(),
+                        message: "DUST_NOTE_ROLLOVER_REJECTED: Note value is below $2.00 USDC minimum threshold".to_string(),
+                        queue_position: 0,
+                        estimated_gas_usdc: None,
+                    });
+                }
+            } else if req_asset_id == 0 && input_val < zeltra_core::fees::MIN_STANDALONE_ROLLOVER_THRESHOLD_WETH_GWEI {
                 return Err(PrivateNoteSpendResponse {
                     status: "REJECTED".to_string(),
-                    message: "DUST_NOTE_ROLLOVER_REJECTED: Note value is below $2.00 USDC minimum threshold".to_string(),
+                    message: "DUST_NOTE_ROLLOVER_REJECTED: Note value is below 0.001 WETH (1,000,000 Gwei) minimum threshold".to_string(),
                     queue_position: 0,
                     estimated_gas_usdc: None,
                 });
@@ -1124,6 +1146,19 @@ pub async fn validate_joinsplit_spend_preflight(
             return Err(JoinSplitSpendResponse {
                 status: "REJECTED".to_string(),
                 message: "Public spend cannot have zero recipient address".to_string(),
+                tx_hash: None,
+                queue_position: 0,
+                estimated_gas_usdc: None,
+            });
+        }
+        let limits = crate::validation::SafetyLimits::default();
+        if req_asset_id == 1 && payload.merchant_amount < limits.min_spend_usdc {
+            return Err(JoinSplitSpendResponse {
+                status: "REJECTED".to_string(),
+                message: format!(
+                    "AmountTooSmall: merchant_amount ({}) is below minimum allowed ({})",
+                    payload.merchant_amount, limits.min_spend_usdc
+                ),
                 tx_hash: None,
                 queue_position: 0,
                 estimated_gas_usdc: None,

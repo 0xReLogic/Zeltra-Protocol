@@ -81,9 +81,12 @@ sol! {
     function getAccumulatedFees() external view returns (uint256);
     function stablecoin() external view returns (address);
     function note_tree_root() external view returns (bytes32);
+    function isCcipMessageProcessed(bytes32 messageId) external view returns (bool);
 
     interface IERC20 {
         function balanceOf(address account) external view returns (uint256);
+        function allowance(address owner, address spender) external view returns (uint256);
+        function approve(address spender, uint256 amount) external returns (bool);
     }
 
     struct EVMTokenAmount {
@@ -107,6 +110,7 @@ sol! {
     interface IRouterClient {
         function ccipSend(uint64 destinationChainSelector, EVM2AnyMessage calldata message) external payable returns (bytes32);
         function getFee(uint64 destinationChainSelector, EVM2AnyMessage calldata message) external view returns (uint256);
+        function isChainSupported(uint64 chainSelector) external view returns (bool);
     }
 
     interface IAggregatorV3 {
@@ -1060,16 +1064,42 @@ impl EvmClient {
         let mut receiver_bytes = vec![0u8; 32];
         receiver_bytes[12..32].copy_from_slice(dest_addr.as_slice());
 
-        // 4. Construct EVM2AnyMessage
+        // 4. Construct EVM2AnyMessage with actual tokenAmounts if amount > 0
+        let token_amounts = if amount > 0 {
+            vec![EVMTokenAmount {
+                token: collateral_addr,
+                amount: amount_u256,
+            }]
+        } else {
+            vec![]
+        };
+
         let message = EVM2AnyMessage {
             receiver: receiver_bytes.into(),
             data: payload.into(),
-            tokenAmounts: vec![],
+            tokenAmounts: token_amounts,
             feeToken: Address::ZERO, // Pay in native gas token (ETH)
             extraArgs: extra_args.into(),
         };
 
-        // 5. Query CCIP Fee from the Router Contract
+        // 5. Verify chain support on Router (DEC-056 / CCIP v2 Invariant)
+        let is_supported_call = IRouterClient::isChainSupportedCall {
+            chainSelector: destination_chain_selector,
+        }
+        .abi_encode();
+        let check_tx = TransactionRequest::default()
+            .with_to(self.ccip_router_address)
+            .with_input(Bytes::from(is_supported_call));
+        if let Ok(res) = self.provider.call(check_tx).await {
+            if !res.is_empty() && res.last().copied().unwrap_or(0) == 0 {
+                anyhow::bail!(
+                    "CCIP Router does not support destination chain selector {}",
+                    destination_chain_selector
+                );
+            }
+        }
+
+        // 6. Query CCIP Fee from the Router Contract
         println!(
             "RELAYER: Querying CCIP fee from Router at {}...",
             self.ccip_router_address
@@ -1223,6 +1253,39 @@ impl EvmClient {
 
         if !result.is_empty() {
             // ABI bool is decoded as a 32-byte word with last byte 0 or 1
+            Ok(result.last().copied().unwrap_or(0) != 0)
+        } else {
+            Ok(false)
+        }
+    }
+
+    /// Check if a CCIP message ID has already been executed on-chain (DEC-055 / DEC-056)
+    pub async fn is_ccip_message_processed(&self, message_id_hex: &str) -> Result<bool> {
+        let clean_hex = message_id_hex.trim_start_matches("0x");
+        let msg_bytes =
+            hex::decode(clean_hex).map_err(|e| anyhow::anyhow!("Invalid message_id hex: {}", e))?;
+        if msg_bytes.len() != 32 {
+            anyhow::bail!("Message ID must be 32 bytes, got {}", msg_bytes.len());
+        }
+        let mut msg_id = [0u8; 32];
+        msg_id.copy_from_slice(&msg_bytes);
+
+        let call_data = isCcipMessageProcessedCall {
+            messageId: msg_id.into(),
+        }
+        .abi_encode();
+
+        let tx = TransactionRequest::default()
+            .with_to(self.contract_address)
+            .with_input(Bytes::from(call_data));
+
+        let result = self
+            .provider
+            .call(tx)
+            .await
+            .context("Failed to call isCcipMessageProcessed on-chain")?;
+
+        if !result.is_empty() {
             Ok(result.last().copied().unwrap_or(0) != 0)
         } else {
             Ok(false)

@@ -310,6 +310,11 @@ impl Zeltra {
         self._is_ccip_sender_allowed(source_chain_selector, sender)
     }
 
+    /// Returns whether a CCIP message ID has already been executed on-chain (DEC-055 / DEC-056).
+    pub fn is_ccip_message_processed(&self, message_id: FixedBytes<32>) -> Result<bool, Vec<u8>> {
+        self._is_ccip_message_processed(message_id)
+    }
+
     // --- Liability Invariant Check ---
 
     /// Verifies the invariant: contract_assets >= outstanding_liabilities for a given asset (DEC-034B)

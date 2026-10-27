@@ -230,6 +230,21 @@ impl Database {
                     hash TEXT NOT NULL
                 );
                 CREATE INDEX IF NOT EXISTS idx_mmr_nodes_pos ON mmr_nodes(pos);
+
+                -- CCIP Inbound Programmable Deposits (DEC-055 / DEC-056)
+                CREATE TABLE IF NOT EXISTS ccip_inbound_deposits (
+                    message_id TEXT PRIMARY KEY,
+                    source_chain_selector INTEGER NOT NULL,
+                    asset_id INTEGER NOT NULL,
+                    amount INTEGER NOT NULL,
+                    leaf_index INTEGER,
+                    note_commitment TEXT NOT NULL,
+                    status TEXT NOT NULL,
+                    tx_hash TEXT,
+                    block_number INTEGER,
+                    updated_at INTEGER NOT NULL
+                );
+                CREATE INDEX IF NOT EXISTS idx_ccip_deposits_status ON ccip_inbound_deposits(status);
             ",
             )?;
 

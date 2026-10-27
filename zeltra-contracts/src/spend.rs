@@ -4,7 +4,7 @@
 //! and Chainlink CCIP cross-chain message handling.
 
 use alloc::vec::Vec;
-use alloy_primitives::{keccak256, Address, FixedBytes, U256};
+use alloy_primitives::{Address, FixedBytes, U256};
 use ark_bls12_381::G2Affine;
 use ark_ec::AffineRepr;
 use stylus_sdk::abi::Bytes;
@@ -16,53 +16,6 @@ use crate::interfaces::IErc20;
 use crate::storage::Zeltra;
 
 impl Zeltra {
-    pub(crate) fn ccip_allowlist_key(
-        &self,
-        source_chain_selector: u64,
-        sender: &[u8],
-    ) -> FixedBytes<32> {
-        let mut bytes = Vec::with_capacity(8 + sender.len());
-        bytes.extend_from_slice(&source_chain_selector.to_be_bytes());
-        bytes.extend_from_slice(sender);
-        keccak256(&bytes)
-    }
-
-    /// Receives a cross-chain payload via Chainlink CCIP (Fase B).
-    pub fn _ccip_receive(
-        &mut self,
-        message_id: FixedBytes<32>,
-        source_chain_selector: u64,
-        sender: Bytes,
-        _payload: Bytes,
-    ) -> Result<(), Vec<u8>> {
-        let caller = self.msg_sender();
-        let configured_router = self.ccip_router.get();
-        if configured_router == Address::ZERO {
-            return Err(b"CCIP_ROUTER_NOT_CONFIGURED".to_vec());
-        }
-        if caller != configured_router {
-            return Err(b"ONLY_CCIP_ROUTER_ALLOWED".to_vec());
-        }
-        if message_id == FixedBytes::ZERO {
-            return Err(b"INVALID_CCIP_MESSAGE_ID".to_vec());
-        }
-        if self.ccip_processed_messages.get(message_id) {
-            return Err(b"CCIP_MESSAGE_ALREADY_PROCESSED".to_vec());
-        }
-        if source_chain_selector == 0 {
-            return Err(b"INVALID_SOURCE_CHAIN_SELECTOR".to_vec());
-        }
-        if sender.is_empty() {
-            return Err(b"EMPTY_CCIP_SENDER".to_vec());
-        }
-        let key = self.ccip_allowlist_key(source_chain_selector, &sender);
-        if !self.ccip_allowed_senders.get(key) {
-            return Err(b"CCIP_SENDER_NOT_ALLOWED".to_vec());
-        }
-
-        self.ccip_processed_messages.insert(message_id, true);
-        Ok(())
-    }
 
     /// Executes a private note spend using Groth16 proof verification for PrivateNoteCircuit (Gate D).
     ///

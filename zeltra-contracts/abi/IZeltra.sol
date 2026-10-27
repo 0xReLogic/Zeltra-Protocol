@@ -93,6 +93,7 @@ interface IZeltra {
     function setCcipSenderAllowlist(uint64 source_chain_selector, bytes calldata sender, bool allowed) external;
 
     function isCcipSenderAllowed(uint64 source_chain_selector, bytes calldata sender) external view returns (bool);
+    function isCcipMessageProcessed(bytes32 message_id) external view returns (bool);
 
     function checkLiabilityInvariant() external view;
 
