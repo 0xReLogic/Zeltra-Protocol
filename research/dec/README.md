@@ -85,6 +85,7 @@ Folder `research/dec/` memuat seluruh catatan keputusan arsitektur resmi (*Archi
 | **DEC-052** | [`DEC-052-argo-groth16-invalidity-encoding-and-curve-point-sanitation.md`](file:///workspaces/Zeltra-Protocol/research/dec/DEC-052-argo-groth16-invalidity-encoding-and-curve-point-sanitation.md) | Argo Randomized Encoding for Groth16 Invalidity, Permissionless Fraud Gating & Strict Subgroup Defense | 2026-10-25 |
 | **DEC-053** | [`DEC-053-ammboost-state-growth-control-and-ephemeral-pruning.md`](file:///workspaces/Zeltra-Protocol/research/dec/DEC-053-ammboost-state-growth-control-and-ephemeral-pruning.md) | ammBoost State Growth Control & Ephemeral Settlement Pruning (Bounded Ring-Buffer Storage) | 2026-10-26 |
 | **DEC-054** | [`DEC-054-zero-custody-safe-harbor-and-direct-self-broadcast.md`](file:///workspaces/Zeltra-Protocol/research/dec/DEC-054-zero-custody-safe-harbor-and-direct-self-broadcast.md) | Zero-Custody Regulatory Safe Harbor & Direct Self-Broadcast Architecture (Unhosted Wallet Path & Gas Overhead Sanitization) | 2026-10-26 |
+| **DEC-055** | [`DEC-055-cross-chain-ccip-programmable-inbound-deposit-and-mmr-minting.md`](file:///workspaces/Zeltra-Protocol/research/dec/DEC-055-cross-chain-ccip-programmable-inbound-deposit-and-mmr-minting.md) | Cross-Chain CCIP Programmable Inbound Deposit, Direct MMR Ingestion & Interface Standardization | 2026-10-27 |
 
 ---
 
@@ -125,3 +126,8 @@ Folder `research/dec/` memuat seluruh catatan keputusan arsitektur resmi (*Archi
 - **DEC-041**: In-Browser WebAssembly SDK Prover & Disposable Web Worker (anti-OOM).
 - **DEC-042**: Pure ZK-UTXO HTTP 402 AI Agent Facilitator (x402 Micropayments).
 - **DEC-044**: Surgical Refactoring Methodology & Zero-Regression Pipeline.
+- **DEC-054**: Zero-Custody Regulatory Safe Harbor & Direct Self-Broadcast Architecture.
+
+### 6. Cross-Chain Infrastructure & Inbound Settlement
+- **DEC-015**: CCIP Cross-Chain Message Security Validations (Archived Early Concept).
+- **DEC-055**: Cross-Chain CCIP Programmable Inbound Deposit, Direct MMR Ingestion & Interface Standardization (PTT Inflow Rail).

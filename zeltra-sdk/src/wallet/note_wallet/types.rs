@@ -78,6 +78,35 @@ pub struct DirectDepositPayload {
     pub encrypted_memo: Vec<u8>,
 }
 
+/// CCIP Inbound Programmable Deposit Payload (DEC-055)
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct CcipInboundDepositPayload {
+    pub amount: u64,
+    pub asset_id: u8,
+    pub commitment_bytes: [u8; 32],
+    pub encrypted_memo: Vec<u8>,
+    pub wire_payload_128: Vec<u8>,
+    pub destination_chain_selector: u64,
+    pub destination_contract: [u8; 20],
+    pub source_token: [u8; 20],
+}
+
+impl CcipInboundDepositPayload {
+    /// Builds the 128-byte wire payload: [32B commitment || 96B memo]
+    pub fn build_wire_payload(commitment: &[u8; 32], memo: &[u8]) -> Result<Vec<u8>, WalletError> {
+        if memo.len() != 96 {
+            return Err(WalletError::CryptoError(format!(
+                "Invalid memo length for CCIP deposit: expected 96, got {}",
+                memo.len()
+            )));
+        }
+        let mut wire = vec![0u8; 128];
+        wire[0..32].copy_from_slice(commitment);
+        wire[32..128].copy_from_slice(memo);
+        Ok(wire)
+    }
+}
+
 mod fr_serde {
     use serde::{Deserialize, Deserializer, Serializer};
     use zeltra_core::{fr_to_be_bytes, Fr};

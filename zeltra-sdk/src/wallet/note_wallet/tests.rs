@@ -1493,3 +1493,107 @@ fn test_exact_shielded_transfer_without_change() {
     assert_eq!(rec_alice.recovered_notes.len(), 0);
     assert_eq!(alice.balance(), 0);
 }
+
+#[test]
+fn test_ccip_inbound_deposit_usdc_preparation_and_staging() {
+    let seed = [21u8; 32];
+    let mut wallet = PrivateNoteWallet::new(&seed);
+    let dest_contract = [0x11u8; 20];
+    let base_usdc = [0x22u8; 20];
+    let base_chain_selector = 10344971235874465080u64;
+
+    // 100 USDC = 100_000_000 micro-units
+    let deposit = wallet
+        .prepare_ccip_inbound_deposit(
+            100_000_000,
+            1, // USDC
+            base_chain_selector,
+            dest_contract,
+            base_usdc,
+            None,
+        )
+        .unwrap();
+
+    // Verify wire payload structure (DEC-055 exact 128 bytes)
+    assert_eq!(deposit.wire_payload_128.len(), 128);
+    assert_eq!(&deposit.wire_payload_128[0..32], &deposit.commitment_bytes);
+    assert_eq!(&deposit.wire_payload_128[32..128], &deposit.encrypted_memo[..]);
+    assert_eq!(deposit.encrypted_memo.len(), 96);
+    assert_eq!(deposit.destination_chain_selector, base_chain_selector);
+    assert_eq!(deposit.destination_contract, dest_contract);
+    assert_eq!(deposit.source_token, base_usdc);
+
+    // Note must be staged as PendingDeposit (not affecting spendable balance)
+    assert_eq!(wallet.balance(), 0);
+    let cm_hex = hex::encode(deposit.commitment_bytes);
+    let note = wallet.notes.get(&cm_hex).expect("Staged note must exist");
+    assert_eq!(note.status, NoteStatus::PendingDeposit);
+    assert_eq!(note.value, 100_000_000);
+    assert_eq!(note.asset_id, 1);
+
+    // Once mined on Arbitrum and confirmed via event, note transitions to Unspent
+    let path = dummy_merkle_path();
+    wallet
+        .confirm_deposit(&cm_hex, 0, path, "0xmmr_root")
+        .unwrap();
+    assert_eq!(wallet.balance(), 100_000_000);
+    let confirmed_note = wallet.notes.get(&cm_hex).unwrap();
+    assert_eq!(confirmed_note.status, NoteStatus::Unspent);
+}
+
+#[test]
+fn test_ccip_inbound_deposit_weth_and_negative_bounds() {
+    let seed = [22u8; 32];
+    let mut wallet = PrivateNoteWallet::new(&seed);
+    let dest_contract = [0x33u8; 20];
+    let eth_token = [0x44u8; 20];
+    let eth_chain_selector = 16015286601757825753u64;
+
+    // 0.5 ETH = 500_000_000 Gwei (valid)
+    let deposit = wallet
+        .prepare_ccip_inbound_deposit(
+            500_000_000,
+            0, // WETH
+            eth_chain_selector,
+            dest_contract,
+            eth_token,
+            None,
+        )
+        .unwrap();
+    assert_eq!(deposit.wire_payload_128.len(), 128);
+    assert_eq!(deposit.asset_id, 0);
+
+    // Negative: USDC amount too small (< 10 USDC)
+    let too_small_usdc = wallet.prepare_ccip_inbound_deposit(
+        5_000_000,
+        1,
+        eth_chain_selector,
+        dest_contract,
+        eth_token,
+        None,
+    );
+    assert!(too_small_usdc.is_err());
+
+    // Negative: WETH amount too small (< 0.005 ETH = 5_000_000 Gwei)
+    let too_small_weth = wallet.prepare_ccip_inbound_deposit(
+        4_999_999,
+        0,
+        eth_chain_selector,
+        dest_contract,
+        eth_token,
+        None,
+    );
+    assert!(too_small_weth.is_err());
+
+    // Negative: Unsupported asset_id
+    let invalid_asset = wallet.prepare_ccip_inbound_deposit(
+        100_000_000,
+        2,
+        eth_chain_selector,
+        dest_contract,
+        eth_token,
+        None,
+    );
+    assert!(invalid_asset.is_err());
+}
+

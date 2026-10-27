@@ -7,6 +7,19 @@
 pragma solidity ^0.8.23;
 
 interface IZeltra {
+    struct EVMTokenAmount {
+        address token;
+        uint256 amount;
+    }
+
+    struct Any2EVMMessage {
+        bytes32 messageId;
+        uint64 sourceChainSelector;
+        bytes sender;
+        bytes data;
+        EVMTokenAmount[] destTokenAmounts;
+    }
+
     function init(address owner, address stablecoin_addr, address fee_recipient_addr) external;
 
     function stablecoin() external view returns (address);
@@ -97,7 +110,9 @@ interface IZeltra {
 
     function rotateEpoch() external returns (uint32);
 
-    function ccipReceive(bytes32 message_id, uint64 source_chain_selector, bytes calldata sender, bytes calldata payload) external;
+    function supportsInterface(bytes4 interface_id) external view returns (bool);
+
+    function ccipReceive(Any2EVMMessage calldata message) external;
 
     function verifyGroth16Proof(bytes calldata proof_a_neg_bytes, bytes calldata proof_b_bytes, bytes calldata proof_c_bytes, bytes calldata public_inputs_g1_bytes, bytes calldata vk_alpha_bytes, bytes calldata vk_beta_bytes, bytes calldata vk_gamma_bytes, bytes calldata vk_delta_bytes) external view returns (bool);
 
