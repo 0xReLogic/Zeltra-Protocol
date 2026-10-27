@@ -58,6 +58,75 @@ impl PrivateNoteWallet {
         })
     }
 
+    /// Prepares a cross-chain inbound CCIP deposit payload and stages pending note in local wallet (DEC-055).
+    pub fn prepare_ccip_inbound_deposit(
+        &mut self,
+        amount: u64,
+        asset_id: u8,
+        destination_chain_selector: u64,
+        destination_contract: [u8; 20],
+        source_token: [u8; 20],
+        recipient_key: Option<Fr>,
+    ) -> Result<CcipInboundDepositPayload, WalletError> {
+        if asset_id > 1 {
+            return Err(WalletError::UnsupportedAssetId(asset_id));
+        }
+        // Min deposit check (10 USDC or 0.005 ETH = 5_000_000 Gwei)
+        if asset_id == 1 && amount < 10_000_000 {
+            return Err(WalletError::CryptoError(
+                "Amount too small for USDC deposit (min 10 USDC)".into(),
+            ));
+        } else if asset_id == 0 && amount < 5_000_000 {
+            return Err(WalletError::CryptoError(
+                "Amount too small for WETH deposit (min 0.005 ETH / 5,000,000 Gwei)".into(),
+            ));
+        }
+
+        let spending_key = match recipient_key {
+            Some(key) => key,
+            None => self.spending_key()?,
+        };
+        let mut rng = OsRng;
+        let rho = Fr::rand(&mut rng);
+        let r = zeltra_core::derive_note_randomness(spending_key, rho);
+        let cm = note_commitment(amount, asset_id, spending_key, rho, r);
+
+        let ivk = match recipient_key {
+            Some(key) => {
+                let sk_bytes = fr_to_be_bytes(&key);
+                let (ivk, _) = derive_viewing_keys(&sk_bytes);
+                ivk
+            }
+            None => self.incoming_viewing_key()?,
+        };
+
+        let memo = encrypt_note_memo_optional(amount, rho, asset_id as u64, &ivk)
+            .ok_or_else(|| WalletError::CryptoError("Failed to encrypt note memo".into()))?;
+
+        if memo.len() != 96 {
+            return Err(WalletError::CryptoError(format!(
+                "Encrypted memo must be exactly 96 bytes, got {}",
+                memo.len()
+            )));
+        }
+
+        let cm_bytes = fr_to_be_bytes(&cm);
+        let wire_payload = CcipInboundDepositPayload::build_wire_payload(&cm_bytes, &memo)?;
+
+        self.stage_pending_deposit_note_asset(cm, amount, asset_id, rho, r)?;
+
+        Ok(CcipInboundDepositPayload {
+            amount,
+            asset_id,
+            commitment_bytes: cm_bytes,
+            encrypted_memo: memo,
+            wire_payload_128: wire_payload,
+            destination_chain_selector,
+            destination_contract,
+            source_token,
+        })
+    }
+
     /// Stages a pending direct deposit note locally with NoteStatus::PendingDeposit (DEC-038C), defaulting to USDC (asset_id = 1).
     pub fn stage_pending_deposit_note(
         &mut self,

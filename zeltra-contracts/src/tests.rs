@@ -285,30 +285,83 @@ fn test_mocked_groth16_verification() {
 }
 
 #[test]
-fn test_ccip_receive_decoding_and_execution() {
+fn test_erc165_supports_interface() {
+    reset_test_state();
+    let contract = Zeltra::default();
+
+    // ERC-165 interface ID: 0x01ffc9a7
+    assert_eq!(
+        contract.supports_interface(FixedBytes::from(ERC165_INTERFACE_ID)),
+        Ok(true)
+    );
+
+    // CCIP Receiver interface ID: 0x8a92dced
+    assert_eq!(
+        contract.supports_interface(FixedBytes::from(CCIP_RECEIVER_INTERFACE_ID)),
+        Ok(true)
+    );
+
+    // Random non-matching interface ID: 0x12345678
+    assert_eq!(
+        contract.supports_interface(FixedBytes::from([0x12, 0x34, 0x56, 0x78])),
+        Ok(false)
+    );
+}
+
+#[test]
+fn test_ccip_receive_programmable_deposit_usdc_success() {
     reset_test_state();
     let owner = address!("1111111111111111111111111111111111111111");
     let router = address!("2222222222222222222222222222222222222222");
+    let usdc_token = address!("3333333333333333333333333333333333333333");
     let valid_sender: Bytes = alloc::vec![0xaa; 20].into();
     set_msg_sender(owner);
 
-    let mut zeltra_contract = Zeltra::default();
-    zeltra_contract
-        .init(owner, Address::ZERO, Address::ZERO)
+    let mut contract = Zeltra::default();
+    contract.init(owner, usdc_token, Address::ZERO).unwrap();
+    contract.set_asset_token(U256::from(1), usdc_token).unwrap();
+    contract.set_ccip_router(router).unwrap();
+    contract
+        .set_ccip_sender_allowlist(10344971235874465080, valid_sender.clone(), true)
         .unwrap();
 
-    zeltra_contract.set_ccip_router(router).unwrap();
-    zeltra_contract
-        .set_ccip_sender_allowlist(1, valid_sender.clone(), true)
-        .unwrap();
+    // Prepare 128-byte wire payload: 32B canonical note commitment + 96B encrypted memo
+    let mut payload = vec![0u8; 128];
+    payload[31] = 0x42; // canonical note commitment < r
+    payload[32..128].copy_from_slice(&[0xee; 96]); // 96B memo
 
+    let message_id = FixedBytes::repeat_byte(0x77);
+    let amount = U256::from(100_000_000u64); // 100 USDC
+
+    // Ensure mock contract balance satisfies solvency
+    set_mock_asset_balance(1, amount);
+
+    let msg = CcipAny2EVMMessage {
+        messageId: message_id,
+        sourceChainSelector: 10344971235874465080,
+        sender: valid_sender.clone(),
+        data: payload.into(),
+        destTokenAmounts: vec![CcipEVMTokenAmount {
+            token: usdc_token,
+            amount,
+        }],
+    };
+
+    // Caller is CCIP router
     set_msg_sender(router);
-    let message_id = FixedBytes::repeat_byte(0x99);
-    let result = zeltra_contract.ccip_receive(message_id, 1, valid_sender.clone(), vec![].into());
-    assert!(result.is_ok());
+    let result = contract.ccip_receive(msg.clone());
+    assert!(result.is_ok(), "CCIP USDC deposit failed: {:?}", result);
 
-    // Test Replay protection
-    let replay_result = zeltra_contract.ccip_receive(message_id, 1, valid_sender, vec![].into());
+    // Verify state effects
+    assert!(contract.ccip_processed_messages.get(message_id));
+    assert_eq!(
+        contract.user_note_liabilities.get(U256::from(1)),
+        amount
+    );
+    assert_eq!(contract.mmr_leaf_count.get(), U256::from(1));
+
+    // Replay attack must fail
+    let replay_result = contract.ccip_receive(msg);
     assert_eq!(
         replay_result,
         Err(b"CCIP_MESSAGE_ALREADY_PROCESSED".to_vec())
@@ -316,84 +369,135 @@ fn test_ccip_receive_decoding_and_execution() {
 }
 
 #[test]
+fn test_ccip_receive_programmable_deposit_weth_success() {
+    reset_test_state();
+    let owner = address!("1111111111111111111111111111111111111111");
+    let router = address!("2222222222222222222222222222222222222222");
+    let weth_token = address!("4444444444444444444444444444444444444444");
+    let valid_sender: Bytes = alloc::vec![0xbb; 20].into();
+    set_msg_sender(owner);
+
+    let mut contract = Zeltra::default();
+    contract.init(owner, Address::ZERO, Address::ZERO).unwrap();
+    contract.set_asset_token(U256::ZERO, weth_token).unwrap();
+    contract.set_ccip_router(router).unwrap();
+    contract
+        .set_ccip_sender_allowlist(16015286601757825753, valid_sender.clone(), true)
+        .unwrap();
+
+    let mut payload = vec![0u8; 128];
+    payload[31] = 0x99;
+    payload[32..128].copy_from_slice(&[0xdd; 96]);
+
+    let message_id = FixedBytes::repeat_byte(0x88);
+    let amount_wei = U256::from(500_000_000_000_000_000u64); // 0.5 ETH in wei
+    let amount_gwei = U256::from(500_000_000u64); // normalized liability
+
+    set_mock_asset_balance(0, amount_wei);
+
+    let msg = CcipAny2EVMMessage {
+        messageId: message_id,
+        sourceChainSelector: 16015286601757825753,
+        sender: valid_sender,
+        data: payload.into(),
+        destTokenAmounts: vec![CcipEVMTokenAmount {
+            token: weth_token,
+            amount: amount_wei,
+        }],
+    };
+
+    set_msg_sender(router);
+    let result = contract.ccip_receive(msg);
+    assert!(result.is_ok(), "CCIP WETH deposit failed: {:?}", result);
+
+    assert_eq!(
+        contract.user_note_liabilities.get(U256::ZERO),
+        amount_gwei
+    );
+    assert_eq!(contract.mmr_leaf_count.get(), U256::from(1));
+}
+
+#[test]
 fn test_ccip_receive_negative_cases() {
     reset_test_state();
     let owner = address!("1111111111111111111111111111111111111111");
     let router = address!("2222222222222222222222222222222222222222");
-    let valid_sender: Bytes = alloc::vec![0xbb; 20].into();
+    let usdc_token = address!("3333333333333333333333333333333333333333");
+    let valid_sender: Bytes = alloc::vec![0xaa; 20].into();
     set_msg_sender(owner);
 
-    let mut zeltra_contract = Zeltra::default();
-    zeltra_contract
-        .init(owner, Address::ZERO, Address::ZERO)
-        .unwrap();
+    let mut contract = Zeltra::default();
+    contract.init(owner, usdc_token, Address::ZERO).unwrap();
+    contract.set_asset_token(U256::from(1), usdc_token).unwrap();
 
-    let payload = vec![0u8; 584].into();
-    let message_id = FixedBytes::repeat_byte(0x88);
+    let mut payload = vec![0u8; 128];
+    payload[31] = 0x01;
+    let message_id = FixedBytes::repeat_byte(0x55);
+    let amount = U256::from(50_000_000u64);
 
-    // Case 1: CCIP router not configured (is ZERO)
-    assert_eq!(
-        zeltra_contract.ccip_receive(message_id, 1, valid_sender.clone(), payload),
-        Err(b"CCIP_ROUTER_NOT_CONFIGURED".to_vec())
-    );
+    let make_msg = |data: Vec<u8>, token: Address, amt: U256, sel: u64, snd: Bytes, id: FixedBytes<32>| CcipAny2EVMMessage {
+        messageId: id,
+        sourceChainSelector: sel,
+        sender: snd,
+        data: data.into(),
+        destTokenAmounts: vec![CcipEVMTokenAmount { token, amount: amt }],
+    };
 
-    // Router cannot be set to Address::ZERO
-    assert_eq!(
-        zeltra_contract.set_ccip_router(Address::ZERO),
-        Err(b"INVALID_ROUTER_ADDRESS".to_vec())
-    );
+    // Case 1: Router not configured
+    set_msg_sender(router);
+    let msg = make_msg(payload.clone(), usdc_token, amount, 1, valid_sender.clone(), message_id);
+    assert_eq!(contract.ccip_receive(msg.clone()), Err(b"CCIP_ROUTER_NOT_CONFIGURED".to_vec()));
 
-    // Configure router
-    zeltra_contract.set_ccip_router(router).unwrap();
+    // Case 2: Router set to ZERO rejected
+    set_msg_sender(owner);
+    assert_eq!(contract.set_ccip_router(Address::ZERO), Err(b"INVALID_ROUTER_ADDRESS".to_vec()));
+    contract.set_ccip_router(router).unwrap();
+    contract.set_ccip_sender_allowlist(1, valid_sender.clone(), true).unwrap();
 
-    // Case 2: Caller is not the router (caller is owner)
-    let payload = vec![0u8; 584].into();
-    assert_eq!(
-        zeltra_contract.ccip_receive(message_id, 1, valid_sender.clone(), payload),
-        Err(b"ONLY_CCIP_ROUTER_ALLOWED".to_vec())
-    );
+    // Case 3: Caller is not router (caller is owner)
+    assert_eq!(contract.ccip_receive(msg.clone()), Err(b"ONLY_CCIP_ROUTER_ALLOWED".to_vec()));
 
-    // Set caller to router
+    // Switch to router caller
     set_msg_sender(router);
 
-    // Case 3: Message ID is ZERO
-    let payload = vec![0u8; 584].into();
-    assert_eq!(
-        zeltra_contract.ccip_receive(FixedBytes::ZERO, 1, valid_sender.clone(), payload),
-        Err(b"INVALID_CCIP_MESSAGE_ID".to_vec())
-    );
+    // Case 4: Message ID is ZERO
+    let zero_id_msg = make_msg(payload.clone(), usdc_token, amount, 1, valid_sender.clone(), FixedBytes::ZERO);
+    assert_eq!(contract.ccip_receive(zero_id_msg), Err(b"INVALID_CCIP_MESSAGE_ID".to_vec()));
 
-    // Case 4: Source chain selector is 0
-    let payload = vec![0u8; 584].into();
-    assert_eq!(
-        zeltra_contract.ccip_receive(message_id, 0, valid_sender.clone(), payload),
-        Err(b"INVALID_SOURCE_CHAIN_SELECTOR".to_vec())
-    );
+    // Case 5: Source chain selector is 0
+    let zero_sel_msg = make_msg(payload.clone(), usdc_token, amount, 0, valid_sender.clone(), message_id);
+    assert_eq!(contract.ccip_receive(zero_sel_msg), Err(b"INVALID_SOURCE_CHAIN_SELECTOR".to_vec()));
 
-    // Case 5: Sender is empty
-    let payload = vec![0u8; 584].into();
-    assert_eq!(
-        zeltra_contract.ccip_receive(message_id, 1, vec![].into(), payload),
-        Err(b"EMPTY_CCIP_SENDER".to_vec())
-    );
+    // Case 6: Sender is empty
+    let empty_sender_msg = make_msg(payload.clone(), usdc_token, amount, 1, vec![].into(), message_id);
+    assert_eq!(contract.ccip_receive(empty_sender_msg), Err(b"EMPTY_CCIP_SENDER".to_vec()));
 
-    // Case 6: Sender is not allowlisted
-    let payload = vec![0u8; 584].into();
-    assert_eq!(
-        zeltra_contract.ccip_receive(message_id, 1, valid_sender.clone(), payload),
-        Err(b"CCIP_SENDER_NOT_ALLOWED".to_vec())
-    );
+    // Case 7: Sender is not allowlisted
+    let unallowlisted_msg = make_msg(payload.clone(), usdc_token, amount, 2, valid_sender.clone(), message_id);
+    assert_eq!(contract.ccip_receive(unallowlisted_msg), Err(b"CCIP_SENDER_NOT_ALLOWED".to_vec()));
 
-    // Case 7: Allowlist rejects chain selector 0 or empty sender
-    set_msg_sender(owner);
-    assert_eq!(
-        zeltra_contract.set_ccip_sender_allowlist(0, valid_sender.clone(), true),
-        Err(b"INVALID_SOURCE_CHAIN_SELECTOR".to_vec())
-    );
-    assert_eq!(
-        zeltra_contract.set_ccip_sender_allowlist(1, vec![].into(), true),
-        Err(b"EMPTY_CCIP_SENDER".to_vec())
-    );
+    // Case 8: Invalid payload length != 128 (e.g. 96 bytes)
+    let bad_len_msg = make_msg(vec![0u8; 96], usdc_token, amount, 1, valid_sender.clone(), message_id);
+    assert_eq!(contract.ccip_receive(bad_len_msg), Err(b"INVALID_CCIP_PAYLOAD_LENGTH_EXPECTED_128".to_vec()));
+
+    // Case 9: Zero commitment rejected
+    let zero_cm_payload = vec![0u8; 128];
+    let zero_cm_msg = make_msg(zero_cm_payload, usdc_token, amount, 1, valid_sender.clone(), message_id);
+    assert_eq!(contract.ccip_receive(zero_cm_msg), Err(b"ZERO_COMMITMENT_REJECTED".to_vec()));
+
+    // Case 10: Non-canonical scalar overflow (>= r)
+    let overflow_payload = vec![0xff; 128]; // 0xff...ff >= BLS12-381 Fr modulus
+    let overflow_msg = make_msg(overflow_payload, usdc_token, amount, 1, valid_sender.clone(), message_id);
+    assert_eq!(contract.ccip_receive(overflow_msg), Err(b"INVALID_NOTE_COMMITMENT_SCALAR".to_vec()));
+
+    // Case 11: Unsupported token
+    let random_token = address!("9999999999999999999999999999999999999999");
+    let unsupp_token_msg = make_msg(payload.clone(), random_token, amount, 1, valid_sender.clone(), message_id);
+    assert_eq!(contract.ccip_receive(unsupp_token_msg), Err(b"UNSUPPORTED_CCIP_TOKEN".to_vec()));
+
+    // Case 12: Amount too small for USDC (< 10 USDC)
+    let too_small_msg = make_msg(payload.clone(), usdc_token, U256::from(5_000_000u64), 1, valid_sender.clone(), message_id);
+    assert_eq!(contract.ccip_receive(too_small_msg), Err(b"AMOUNT_TOO_SMALL_MIN_10_USDC".to_vec()));
 }
 
 #[test]

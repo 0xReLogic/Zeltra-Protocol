@@ -100,6 +100,16 @@ sol! {
         bytes32 output_cm_2,
         uint256 flags_packed
     );
+
+    /// Emitted when a cross-chain deposit is executed via Chainlink CCIP (DEC-055).
+    event CCIPDepositExecuted(
+        bytes32 indexed message_id,
+        uint64 indexed source_chain_selector,
+        bytes32 indexed sender_hash,
+        bytes32 note_commitment,
+        uint8 asset_id,
+        uint256 normalized_amount
+    );
 }
 
 /// Safe event emission helper that logs to EVM in production and operates safely in unit tests.

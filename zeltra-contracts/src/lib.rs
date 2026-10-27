@@ -18,6 +18,7 @@ fn reject_runtime_randomness(_: &mut [u8]) -> Result<(), getrandom::Error> {
 #[cfg(target_arch = "wasm32")]
 getrandom::register_custom_getrandom!(reject_runtime_randomness);
 
+mod ccip_deposit;
 mod constants;
 mod deposit;
 mod events;
@@ -41,6 +42,10 @@ pub(crate) mod tests;
 use alloc::vec::Vec;
 use alloy_primitives::{Address, FixedBytes};
 use stylus_sdk::{abi::Bytes, alloy_primitives::U256, prelude::*};
+
+pub use ccip_deposit::{
+    CcipAny2EVMMessage, CcipEVMTokenAmount, CCIP_RECEIVER_INTERFACE_ID, ERC165_INTERFACE_ID,
+};
 
 pub use constants::*;
 pub use interfaces::*;
@@ -468,14 +473,14 @@ impl Zeltra {
         self._rotate_epoch()
     }
 
-    pub fn ccip_receive(
-        &mut self,
-        message_id: FixedBytes<32>,
-        source_chain_selector: u64,
-        sender: Bytes,
-        payload: Bytes,
-    ) -> Result<(), Vec<u8>> {
-        self._ccip_receive(message_id, source_chain_selector, sender, payload)
+    /// ERC-165 Standard Interface Detection
+    pub fn supports_interface(&self, interface_id: FixedBytes<4>) -> Result<bool, Vec<u8>> {
+        Ok(self._supports_interface(interface_id))
+    }
+
+    /// Receives a cross-chain programmable deposit via Chainlink CCIP (DEC-055 / IAny2EVMMessageReceiver).
+    pub fn ccip_receive(&mut self, message: CcipAny2EVMMessage) -> Result<(), Vec<u8>> {
+        self._ccip_receive_programmable(message)
     }
 
     pub fn verify_groth16_proof(
