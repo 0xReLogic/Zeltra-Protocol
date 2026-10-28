@@ -535,8 +535,4 @@ impl Zeltra {
     pub fn total_assets(&mut self) -> Result<U256, Vec<u8>> {
         self._total_assets()
     }
-
-    pub fn claim_accumulated_yield(&mut self) -> Result<U256, Vec<u8>> {
-        self._claim_accumulated_yield()
-    }
 }

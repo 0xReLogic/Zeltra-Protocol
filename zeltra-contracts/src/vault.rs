@@ -134,32 +134,4 @@ impl Zeltra {
 
         Ok(())
     }
-
-    /// Claims any yield accumulated in the vault for USDC (total assets - total principal).
-    pub fn _claim_accumulated_yield(&mut self) -> Result<U256, Vec<u8>> {
-        self.check_owner()?;
-        let total = self._total_assets_of(1)?;
-        let principal = self.total_deposited_principals.get(U256::from(1));
-        if total <= principal {
-            return Ok(U256::ZERO);
-        }
-        let yield_amount = total - principal;
-
-        self.ensure_asset_liquidity(1, yield_amount)?;
-
-        let usdc_addr = self.asset_tokens.get(U256::from(1));
-        if usdc_addr != Address::ZERO {
-            let recipient = self.fee_recipient.get();
-            self.asset_safe_transfer(usdc_addr, recipient, yield_amount)?;
-        }
-
-        // Emit FeeClaim event
-        crate::events::emit_event(crate::events::FeeClaim {
-            recipient: self.fee_recipient.get(),
-            amount: yield_amount,
-            fee_type: alloy_primitives::keccak256(b"YIELD"),
-        });
-
-        Ok(yield_amount)
-    }
 }
