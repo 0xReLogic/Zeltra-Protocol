@@ -47,7 +47,7 @@ sol! {
         bytes encrypted_memo
     );
 
-    /// Emitted when accrued execution fees or protocol yields are claimed.
+    /// Emitted when accrued execution fees are claimed by the relayer.
     event FeeClaim(
         address indexed recipient,
         uint256 amount,
