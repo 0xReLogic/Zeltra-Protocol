@@ -63,9 +63,6 @@ sol_storage! {
         // Pointer index in the root history ring buffer (0 .. 99)
         uint256 root_history_index;
 
-        // --- Namespaced Private Note Nullifiers (DEC-016 & DEC-033) ---
-        mapping(bytes32 => bool) note_nullifiers;
-
         // --- Dynamic Deposit Fee Configuration (docs/todos/fee-policy-zero-deposit.md) ---
         // Configurable deposit fee in basis points (e.g. 0 for 0%, 20 for 0.20%)
         uint256 deposit_fee_bps;

@@ -152,8 +152,7 @@ impl Zeltra {
         let slot_prev = (current_epoch.saturating_sub(1) % 2) as u8;
         let gen_key_prev = crate::storage::generational_nullifier_key(slot_prev, nullifier);
         Ok(self.generation_nullifiers.get(gen_key_current)
-            || self.generation_nullifiers.get(gen_key_prev)
-            || self.note_nullifiers.get(nullifier))
+            || self.generation_nullifiers.get(gen_key_prev))
     }
 
     pub fn _is_generational_nullifier_spent(
@@ -166,7 +165,7 @@ impl Zeltra {
             return Ok(false);
         }
         let gen_key = crate::storage::generational_nullifier_key(slot as u8, nullifier);
-        Ok(self.generation_nullifiers.get(gen_key) || self.note_nullifiers.get(nullifier))
+        Ok(self.generation_nullifiers.get(gen_key))
     }
 
     // --- Epoch & Clean Roots Queries ---
