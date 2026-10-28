@@ -196,6 +196,9 @@ impl Zeltra {
         while (idx & 1) == 1 {
             let height_u256 = U256::from(height);
             let left_bytes = self.mmr_peaks.get(height_u256);
+            if left_bytes == FixedBytes::ZERO {
+                return Err(b"CORRUPTED_PEAK".to_vec());
+            }
             let left_fr =
                 from_evm_scalar(&left_bytes.0).ok_or_else(|| b"CORRUPTED_PEAK".to_vec())?;
             current = merkle_hash(left_fr, current, &rc, &mds, domain_node);
@@ -217,6 +220,9 @@ impl Zeltra {
         for h in (0..64).rev() {
             if (new_count_u64 >> h) & 1 == 1 {
                 let p_bytes = self.mmr_peaks.get(U256::from(h));
+                if p_bytes == FixedBytes::ZERO {
+                    return Err(b"CORRUPTED_PEAK".to_vec());
+                }
                 let p_fr = from_evm_scalar(&p_bytes.0).ok_or_else(|| b"CORRUPTED_PEAK".to_vec())?;
                 active_peaks.push(p_fr);
             }
