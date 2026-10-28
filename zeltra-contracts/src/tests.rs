@@ -1166,7 +1166,8 @@ fn test_spend_private_note_success_with_change() {
     );
 
     assert_eq!(result, Ok(true));
-    assert!(contract.note_nullifiers.get(nullifier));
+    let gk = crate::storage::generational_nullifier_key(0, nullifier);
+    assert!(contract.generation_nullifiers.get(gk));
     // Remaining liability = 100M - 5M - 22.5k - 23k = 94_954_500
     assert_eq!(
         contract.user_note_liabilities.get(U256::ZERO),
@@ -2189,8 +2190,10 @@ fn test_spend_joinsplit_success_1_in_dummy_change() {
     );
 
     assert_eq!(result, Ok(true));
-    assert!(contract.note_nullifiers.get(nullifier_1));
-    assert!(contract.note_nullifiers.get(nullifier_2));
+    let gk1 = crate::storage::generational_nullifier_key(0, nullifier_1);
+    let gk2 = crate::storage::generational_nullifier_key(0, nullifier_2);
+    assert!(contract.generation_nullifiers.get(gk1));
+    assert!(contract.generation_nullifiers.get(gk2));
     // Remaining liability = 100M - 5M - 22.5k - 23k = 94_954_500
     assert_eq!(
         contract.user_note_liabilities.get(U256::ZERO),
@@ -2260,7 +2263,8 @@ fn test_spend_joinsplit_singularity_aliasing_rejected() {
     );
 
     assert_eq!(result, Err(b"DuplicateNullifierInSameTx".to_vec()));
-    assert!(!contract.note_nullifiers.get(same_nullifier));
+    let gk = crate::storage::generational_nullifier_key(0, same_nullifier);
+    assert!(!contract.generation_nullifiers.get(gk));
     assert_eq!(
         contract.user_note_liabilities.get(U256::ZERO),
         U256::from(100_000_000)
@@ -2292,8 +2296,9 @@ fn test_spend_joinsplit_double_spend_nullifier_1_rejected() {
     let nf1 = FixedBytes::<32>::from_slice(&[0x88; 32]);
     let nf2 = FixedBytes::<32>::from_slice(&[0x89; 32]);
 
-    // Pre-mark nullifier 1 as spent
-    contract.note_nullifiers.insert(nf1, true);
+    // Pre-mark nullifier 1 as spent in active generational slot (DEC-033)
+    let gen_key1 = crate::storage::generational_nullifier_key(0, nf1);
+    contract.generation_nullifiers.insert(gen_key1, true);
 
     let result = contract.spend_joinsplit(
         vec![0x11; 128].into(),
@@ -2321,7 +2326,8 @@ fn test_spend_joinsplit_double_spend_nullifier_1_rejected() {
     );
 
     assert_eq!(result, Err(b"Nullifier1AlreadySpent".to_vec()));
-    assert!(!contract.note_nullifiers.get(nf2));
+    let gen_key2 = crate::storage::generational_nullifier_key(0, nf2);
+    assert!(!contract.generation_nullifiers.get(gen_key2));
     assert_eq!(
         contract.user_note_liabilities.get(U256::ZERO),
         U256::from(100_000_000)
@@ -2352,8 +2358,9 @@ fn test_spend_joinsplit_double_spend_nullifier_2_rejected() {
     let nf1 = FixedBytes::<32>::from_slice(&[0x98; 32]);
     let nf2 = FixedBytes::<32>::from_slice(&[0x99; 32]);
 
-    // Pre-mark nullifier 2 as spent
-    contract.note_nullifiers.insert(nf2, true);
+    // Pre-mark nullifier 2 as spent in active generational slot (DEC-033)
+    let gen_key2 = crate::storage::generational_nullifier_key(0, nf2);
+    contract.generation_nullifiers.insert(gen_key2, true);
 
     let result = contract.spend_joinsplit(
         vec![0x11; 128].into(),
@@ -2381,7 +2388,8 @@ fn test_spend_joinsplit_double_spend_nullifier_2_rejected() {
     );
 
     assert_eq!(result, Err(b"Nullifier2AlreadySpent".to_vec()));
-    assert!(!contract.note_nullifiers.get(nf1));
+    let gen_key1 = crate::storage::generational_nullifier_key(0, nf1);
+    assert!(!contract.generation_nullifiers.get(gen_key1));
     assert_eq!(
         contract.user_note_liabilities.get(U256::ZERO),
         U256::from(100_000_000)
@@ -3264,4 +3272,281 @@ fn test_ammboost_evicted_root_spend_rejected() {
     );
 
     assert_eq!(res, Err(b"UNACCEPTED_NOTE_ROOT".to_vec()));
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// RED TEAM: Purged note_nullifiers & Pure DEC-033 Generational Attacks
+// ═══════════════════════════════════════════════════════════════════════
+
+#[test]
+fn test_redteam_recycle_slot_ghost_replay_rejected() {
+    reset_test_state();
+    let owner = address!("1111111111111111111111111111111111111111");
+    let merchant = address!("2222222222222222222222222222222222222222");
+    set_msg_sender(owner);
+    set_block_timestamp(1_700_000_000);
+
+    let mut contract = Zeltra::default();
+    contract.init(owner, Address::ZERO, Address::ZERO).unwrap();
+
+    let root = FixedBytes::<32>::from_slice(&crate::poseidon_w5_constants::EMPTY_TREE_ROOT_BYTES);
+    contract.accepted_note_roots.insert(root, U256::from(1000));
+    contract
+        .user_note_liabilities
+        .setter(U256::ZERO)
+        .set(U256::from(100_000_000));
+
+    let nf = FixedBytes::<32>::from_slice(&[0x1a; 32]);
+    let change_cm = FixedBytes::<32>::from_slice(&[0x2b; 32]);
+
+    // 1. Spend Note in Epoch 0 (Slot 0)
+    let res = contract.spend_private_note(
+        root,
+        U256::from(1),
+        nf,
+        U256::ZERO, // note_epoch_id = 0
+        change_cm,
+        merchant,
+        U256::from(5_000_000),
+        U256::from(22_500),
+        U256::from(23_000),
+        U256::from(25_000),
+        FixedBytes::ZERO,
+        U256::from(1_700_000_000 + 3600),
+        U256::from(1),
+        U256::ZERO,
+        valid_test_g1(),
+        valid_test_g2(),
+        valid_test_g1(),
+        vec![].into(),
+    );
+    assert_eq!(res, Ok(true));
+
+    // Confirm slot 0 burned
+    let gk = crate::storage::generational_nullifier_key(0, nf);
+    assert!(contract.generation_nullifiers.get(gk));
+
+    // 2. Fast forward time and rotate epochs:
+    // Epoch 0 -> Epoch 1 (grace window)
+    set_block_timestamp(1_700_000_000 + 90 * 86400 + 1);
+    contract.rotate_epoch().unwrap();
+    assert_eq!(contract.current_epoch.get(), U256::from(1));
+
+    // Epoch 1 -> Epoch 2 (Slot 0 is recycled for Epoch 2!)
+    set_block_timestamp(1_700_000_000 + 180 * 86400 + 2);
+    contract.rotate_epoch().unwrap();
+    assert_eq!(contract.current_epoch.get(), U256::from(2));
+    assert_eq!(contract.generation_epoch_id.get(U256::ZERO), U256::from(2));
+
+    // 3. Attacker attempts to replay Note (Epoch 0) now that Slot 0 was recycled!
+    let replay_res = contract.spend_private_note(
+        root,
+        U256::from(1),
+        nf,
+        U256::ZERO, // note_epoch_id = 0 (expired!)
+        change_cm,
+        merchant,
+        U256::from(5_000_000),
+        U256::from(22_500),
+        U256::from(23_000),
+        U256::from(25_000),
+        FixedBytes::ZERO,
+        U256::from(1_700_000_000 + 200 * 86400),
+        U256::from(1),
+        U256::ZERO,
+        valid_test_g1(),
+        valid_test_g2(),
+        valid_test_g1(),
+        vec![].into(),
+    );
+
+    // Strictly blocked because min_active_epoch = 1, note_epoch = 0!
+    assert_eq!(replay_res, Err(b"EPOCH_EXPIRED_REQUIRE_ROLLOVER".to_vec()));
+}
+
+#[test]
+fn test_redteam_future_epoch_spoofing_rejected() {
+    reset_test_state();
+    let owner = address!("1111111111111111111111111111111111111111");
+    let merchant = address!("2222222222222222222222222222222222222222");
+    set_msg_sender(owner);
+    set_block_timestamp(1_700_000_000);
+
+    let mut contract = Zeltra::default();
+    contract.init(owner, Address::ZERO, Address::ZERO).unwrap();
+
+    let root = FixedBytes::<32>::from_slice(&crate::poseidon_w5_constants::EMPTY_TREE_ROOT_BYTES);
+    contract.accepted_note_roots.insert(root, U256::from(1000));
+    contract
+        .user_note_liabilities
+        .setter(U256::ZERO)
+        .set(U256::from(100_000_000));
+
+    let nf1 = FixedBytes::<32>::from_slice(&[0x11; 32]);
+    let nf2 = FixedBytes::<32>::from_slice(&[0x22; 32]);
+
+    // Attacker crafts spend with future epoch_id = 999
+    let res = contract.spend_joinsplit(
+        vec![0x11; 128].into(),
+        vec![0x22; 256].into(),
+        vec![0x33; 128].into(),
+        root,
+        U256::from(1),
+        nf1,
+        nf2,
+        U256::from(999), // FUTURE EPOCH!
+        U256::ZERO,
+        FixedBytes::ZERO,
+        FixedBytes::ZERO,
+        merchant,
+        U256::from(5_000_000),
+        U256::from(22_500),
+        U256::from(23_000),
+        U256::from(25_000),
+        FixedBytes::ZERO,
+        U256::from(1_700_000_000 + 3600),
+        U256::ZERO,
+        U256::ZERO,
+        vec![0u8; 96].into(),
+        vec![0u8; 96].into(),
+    );
+
+    assert_eq!(res, Err(b"EPOCH_IN_FUTURE".to_vec()));
+}
+
+#[test]
+fn test_redteam_asymmetric_epoch_joinsplit_replay_rejected() {
+    reset_test_state();
+    let owner = address!("1111111111111111111111111111111111111111");
+    let merchant = address!("2222222222222222222222222222222222222222");
+    set_msg_sender(owner);
+    set_block_timestamp(1_700_000_000);
+
+    let mut contract = Zeltra::default();
+    contract.init(owner, Address::ZERO, Address::ZERO).unwrap();
+
+    let root = FixedBytes::<32>::from_slice(&crate::poseidon_w5_constants::EMPTY_TREE_ROOT_BYTES);
+    contract.accepted_note_roots.insert(root, U256::from(1000));
+    contract
+        .user_note_liabilities
+        .setter(U256::ZERO)
+        .set(U256::from(100_000_000));
+
+    // Rotate to Epoch 2 (min_active_epoch = 1)
+    set_block_timestamp(1_700_000_000 + 90 * 86400 + 1);
+    contract.rotate_epoch().unwrap(); // Epoch 1
+    set_block_timestamp(1_700_000_000 + 180 * 86400 + 2);
+    contract.rotate_epoch().unwrap(); // Epoch 2
+
+    let nf1 = FixedBytes::<32>::from_slice(&[0x33; 32]);
+    let nf2 = FixedBytes::<32>::from_slice(&[0x44; 32]);
+
+    // Input 1 is from active Epoch 2, but Input 2 is from dead Epoch 0!
+    let res = contract.spend_joinsplit(
+        vec![0x11; 128].into(),
+        vec![0x22; 256].into(),
+        vec![0x33; 128].into(),
+        root,
+        U256::from(1),
+        nf1,
+        nf2,
+        U256::from(2), // Active
+        U256::from(0), // DEAD / EXPIRED!
+        FixedBytes::ZERO,
+        FixedBytes::ZERO,
+        merchant,
+        U256::from(5_000_000),
+        U256::from(22_500),
+        U256::from(23_000),
+        U256::from(25_000),
+        FixedBytes::ZERO,
+        U256::from(1_700_000_000 + 200 * 86400),
+        U256::ZERO,
+        U256::ZERO,
+        vec![0u8; 96].into(),
+        vec![0u8; 96].into(),
+    );
+
+    assert_eq!(res, Err(b"EPOCH_EXPIRED_REQUIRE_ROLLOVER".to_vec()));
+}
+
+#[test]
+fn test_redteam_slot_key_isolation_no_false_positive() {
+    let nf = FixedBytes::<32>::from_slice(&[0x77; 32]);
+    let key_slot0 = crate::storage::generational_nullifier_key(0, nf);
+    let key_slot1 = crate::storage::generational_nullifier_key(1, nf);
+
+    // Cryptographic proof of slot separation
+    assert_ne!(
+        key_slot0, key_slot1,
+        "Generational keys across slot 0 and slot 1 must be strictly distinct"
+    );
+}
+
+#[test]
+fn test_redteam_sequential_double_spend_same_epoch_blocked() {
+    reset_test_state();
+    let owner = address!("1111111111111111111111111111111111111111");
+    let merchant = address!("2222222222222222222222222222222222222222");
+    set_msg_sender(owner);
+    set_block_timestamp(1_700_000_000);
+
+    let mut contract = Zeltra::default();
+    contract.init(owner, Address::ZERO, Address::ZERO).unwrap();
+
+    let root = FixedBytes::<32>::from_slice(&crate::poseidon_w5_constants::EMPTY_TREE_ROOT_BYTES);
+    contract.accepted_note_roots.insert(root, U256::from(1000));
+    contract
+        .user_note_liabilities
+        .setter(U256::ZERO)
+        .set(U256::from(100_000_000));
+
+    let nf = FixedBytes::<32>::from_slice(&[0x55; 32]);
+    let change_cm = FixedBytes::<32>::from_slice(&[0x66; 32]);
+
+    // 1st spend succeeds
+    let res1 = contract.spend_private_note(
+        root,
+        U256::from(1),
+        nf,
+        U256::ZERO,
+        change_cm,
+        merchant,
+        U256::from(5_000_000),
+        U256::from(22_500),
+        U256::from(23_000),
+        U256::from(25_000),
+        FixedBytes::ZERO,
+        U256::from(1_700_000_000 + 3600),
+        U256::from(1),
+        U256::ZERO,
+        valid_test_g1(),
+        valid_test_g2(),
+        valid_test_g1(),
+        vec![].into(),
+    );
+    assert_eq!(res1, Ok(true));
+
+    // 2nd spend with same nullifier in same epoch MUST be rejected by generation_nullifiers
+    let res2 = contract.spend_private_note(
+        root,
+        U256::from(1),
+        nf,
+        U256::ZERO,
+        change_cm,
+        merchant,
+        U256::from(5_000_000),
+        U256::from(22_500),
+        U256::from(23_000),
+        U256::from(25_000),
+        FixedBytes::ZERO,
+        U256::from(1_700_000_000 + 3600),
+        U256::from(1),
+        U256::ZERO,
+        valid_test_g1(),
+        valid_test_g2(),
+        valid_test_g1(),
+        vec![].into(),
+    );
+    assert_eq!(res2, Err(b"NOTE_ALREADY_SPENT".to_vec()));
 }

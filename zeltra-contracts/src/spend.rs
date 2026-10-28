@@ -25,12 +25,12 @@ impl Zeltra {
     /// 3. merchant_amount > 0.
     /// 4. has_change in {0, 1} and output_commitment consistency.
     /// 5. Note root is valid and recorded in accepted_note_roots.
-    /// 6. Nullifier is unspent (note_nullifiers).
+    /// 6. Nullifier is unspent (generation_nullifiers DEC-033).
     /// 7. 12 public input scalars are canonical (< Fr modulus).
     /// 8. Groth16 proof verifies against NOTE_VK via EIP-2537 precompiles.
     ///
     /// Effects:
-    /// - Marks nullifier as spent in note_nullifiers.
+    /// - Marks nullifier as spent in bounded generational mapping (DEC-033).
     /// - If has_change == 1, inserts output_commitment into MMR via _mmr_insert.
     /// - Transfers merchant_amount to recipient (ERC-20).
     /// - Decreases user_note_liability by (merchant_amount + protocol_fee + execution_fee).
@@ -141,7 +141,7 @@ impl Zeltra {
         }
 
         let gen_key = crate::storage::generational_nullifier_key(slot, input_nullifier);
-        if self.generation_nullifiers.get(gen_key) || self.note_nullifiers.get(input_nullifier) {
+        if self.generation_nullifiers.get(gen_key) {
             return Err(b"NOTE_ALREADY_SPENT".to_vec());
         }
 
@@ -230,9 +230,8 @@ impl Zeltra {
         }
 
         // 2. EFFECTS
-        // Mark nullifier spent in both generational map and persistent fallback
+        // Mark nullifier spent in bounded generational mapping (DEC-033 O(1) state)
         self.generation_nullifiers.insert(gen_key, true);
-        self.note_nullifiers.insert(input_nullifier, true);
 
         // If has_change == 1, insert output_commitment into MMR (which emits NoteCommitmentAppended & ChangeCommitment)
         if has_change == U256::from(1) {
@@ -359,15 +358,7 @@ impl Zeltra {
             return Err(b"DuplicateNullifierInSameTx".to_vec());
         }
 
-        // On-chain nullifier spent guard (C4.4)
-        if self.note_nullifiers.get(nullifier_1) {
-            return Err(b"Nullifier1AlreadySpent".to_vec());
-        }
-        if self.note_nullifiers.get(nullifier_2) {
-            return Err(b"Nullifier2AlreadySpent".to_vec());
-        }
-
-        // Generational nullifiers guard (DEC-033)
+        // Generational nullifiers guard (DEC-033 Bounded O(1) State)
         let current_epoch_u256 = self.current_epoch.get();
         if epoch_id_1 > current_epoch_u256 || epoch_id_2 > current_epoch_u256 {
             return Err(b"EPOCH_IN_FUTURE".to_vec());
@@ -531,11 +522,9 @@ impl Zeltra {
         }
 
         // 2. EFFECTS
-        // C5.1: Nullifier Burning State Update
+        // C5.1: Nullifier Burning State Update (DEC-033 O(1) Generational State)
         self.generation_nullifiers.insert(gen_key1, true);
         self.generation_nullifiers.insert(gen_key2, true);
-        self.note_nullifiers.insert(nullifier_1, true);
-        self.note_nullifiers.insert(nullifier_2, true);
 
         // C5.2: Direction B Constant-Arity MMR Appends with Real Memos (DEC-043B)
         self._mmr_insert(output_cm_1, encrypted_memo_1.to_vec())?;
@@ -693,8 +682,10 @@ mod tests {
         );
 
         assert_eq!(result, Ok(true));
-        assert!(contract.note_nullifiers.get(nullifier_1));
-        assert!(contract.note_nullifiers.get(nullifier_2));
+        let gk1 = crate::storage::generational_nullifier_key(0, nullifier_1);
+        let gk2 = crate::storage::generational_nullifier_key(0, nullifier_2);
+        assert!(contract.generation_nullifiers.get(gk1));
+        assert!(contract.generation_nullifiers.get(gk2));
 
         // MMR leaf count incremented by 2
         assert_eq!(contract.mmr_leaf_count.get(), U256::from(2));
@@ -789,8 +780,10 @@ mod tests {
         );
 
         assert_eq!(result, Ok(true));
-        assert!(contract.note_nullifiers.get(nullifier_1));
-        assert!(contract.note_nullifiers.get(nullifier_2));
+        let gk1 = crate::storage::generational_nullifier_key(0, nullifier_1);
+        let gk2 = crate::storage::generational_nullifier_key(0, nullifier_2);
+        assert!(contract.generation_nullifiers.get(gk1));
+        assert!(contract.generation_nullifiers.get(gk2));
         assert_eq!(contract.mmr_leaf_count.get(), U256::from(2));
 
         assert_eq!(
@@ -858,8 +851,10 @@ mod tests {
             result,
             Err(b"RECIPIENT_MUST_BE_ZERO_FOR_IN_POOL_TRANSFER".to_vec())
         );
-        assert!(!contract.note_nullifiers.get(nf1));
-        assert!(!contract.note_nullifiers.get(nf2));
+        let gk1 = crate::storage::generational_nullifier_key(0, nf1);
+        let gk2 = crate::storage::generational_nullifier_key(0, nf2);
+        assert!(!contract.generation_nullifiers.get(gk1));
+        assert!(!contract.generation_nullifiers.get(gk2));
         assert_eq!(contract.mmr_leaf_count.get(), U256::ZERO);
     }
 
@@ -921,8 +916,10 @@ mod tests {
             result,
             Err(b"PROTOCOL_FEE_MUST_BE_ZERO_FOR_IN_POOL_TRANSFER".to_vec())
         );
-        assert!(!contract.note_nullifiers.get(nf1));
-        assert!(!contract.note_nullifiers.get(nf2));
+        let gk1 = crate::storage::generational_nullifier_key(0, nf1);
+        let gk2 = crate::storage::generational_nullifier_key(0, nf2);
+        assert!(!contract.generation_nullifiers.get(gk1));
+        assert!(!contract.generation_nullifiers.get(gk2));
         assert_eq!(contract.mmr_leaf_count.get(), U256::ZERO);
     }
 
@@ -982,8 +979,10 @@ mod tests {
         );
 
         assert_eq!(result, Err(b"IN_POOL_TRANSFER_REQUIRES_OUTPUT_1".to_vec()));
-        assert!(!contract.note_nullifiers.get(nf1));
-        assert!(!contract.note_nullifiers.get(nf2));
+        let gk1 = crate::storage::generational_nullifier_key(0, nf1);
+        let gk2 = crate::storage::generational_nullifier_key(0, nf2);
+        assert!(!contract.generation_nullifiers.get(gk1));
+        assert!(!contract.generation_nullifiers.get(gk2));
         assert_eq!(contract.mmr_leaf_count.get(), U256::ZERO);
     }
 
@@ -1043,8 +1042,10 @@ mod tests {
         );
 
         assert_eq!(result, Err(b"ZERO_RECIPIENT_ON_PUBLIC_SPEND".to_vec()));
-        assert!(!contract.note_nullifiers.get(nf1));
-        assert!(!contract.note_nullifiers.get(nf2));
+        let gk1 = crate::storage::generational_nullifier_key(0, nf1);
+        let gk2 = crate::storage::generational_nullifier_key(0, nf2);
+        assert!(!contract.generation_nullifiers.get(gk1));
+        assert!(!contract.generation_nullifiers.get(gk2));
         assert_eq!(contract.mmr_leaf_count.get(), U256::ZERO);
     }
 
