@@ -1566,6 +1566,67 @@ fn test_mmr_wrap_around_scalar_rejected() {
     assert_eq!(result, Err(b"INVALID_LEAF_SCALAR".to_vec()));
 }
 
+#[test]
+fn test_mmr_corrupted_peak_non_canonical_rejected() {
+    reset_test_state();
+    let mut contract = Zeltra::default();
+    let owner = address!("1111111111111111111111111111111111111111");
+    contract.init(owner, Address::ZERO, Address::ZERO).unwrap();
+
+    // Set leaf_count = 1 (bit 0 is 1). Next insert (leaf_index=1) will carry and load mmr_peaks[0]
+    contract.mmr_leaf_count.set(U256::from(1));
+    // Inject non-canonical bytes (>= r) into peak height 0
+    contract.mmr_peaks.insert(U256::ZERO, FixedBytes::repeat_byte(0xff));
+
+    let valid_leaf = FixedBytes::from(alloy_primitives::hex!(
+        "46d1b90c8a28c364fefdbb95bd709956e2f39a411750e6797fe1112b27635c59"
+    ));
+    let result = contract._mmr_insert(valid_leaf, vec![]);
+    assert_eq!(result, Err(b"CORRUPTED_PEAK".to_vec()));
+}
+
+#[test]
+fn test_mmr_corrupted_peak_empty_slot_rejected() {
+    reset_test_state();
+    let mut contract = Zeltra::default();
+    let owner = address!("1111111111111111111111111111111111111111");
+    contract.init(owner, Address::ZERO, Address::ZERO).unwrap();
+
+    // Set leaf_count = 1. A peak at height 0 is mathematically REQUIRED because bit 0 of 1 is 1.
+    // However, storage slot mmr_peaks[0] is empty (FixedBytes::ZERO).
+    contract.mmr_leaf_count.set(U256::from(1));
+    assert_eq!(contract.mmr_peaks.get(U256::ZERO), FixedBytes::ZERO);
+
+    let valid_leaf = FixedBytes::from(alloy_primitives::hex!(
+        "46d1b90c8a28c364fefdbb95bd709956e2f39a411750e6797fe1112b27635c59"
+    ));
+    let result = contract._mmr_insert(valid_leaf, vec![]);
+    // With zero-check guard in place, empty peak slot is strictly rejected as CORRUPTED_PEAK!
+    assert_eq!(result, Err(b"CORRUPTED_PEAK".to_vec()));
+}
+
+#[test]
+fn test_mmr_corrupted_peak_empty_active_peak_in_bagging_rejected() {
+    reset_test_state();
+    let mut contract = Zeltra::default();
+    let owner = address!("1111111111111111111111111111111111111111");
+    contract.init(owner, Address::ZERO, Address::ZERO).unwrap();
+
+    // Set leaf_count = 2 (binary 10). Next insert will be idx = 2 (bit 0 is 0),
+    // so it puts new peak at height 0 and does not carry.
+    // New leaf count will be 3 (binary 11: peaks at height 1 and height 0).
+    // But height 1 is empty (FixedBytes::ZERO)!
+    contract.mmr_leaf_count.set(U256::from(2));
+    assert_eq!(contract.mmr_peaks.get(U256::from(1)), FixedBytes::ZERO);
+
+    let valid_leaf = FixedBytes::from(alloy_primitives::hex!(
+        "46d1b90c8a28c364fefdbb95bd709956e2f39a411750e6797fe1112b27635c59"
+    ));
+    let result = contract._mmr_insert(valid_leaf, vec![]);
+    // Phase 2 peak bagging loop detects missing active peak at height 1 and reverts with CORRUPTED_PEAK!
+    assert_eq!(result, Err(b"CORRUPTED_PEAK".to_vec()));
+}
+
 // ═══════════════════════════════════════════════════════════════════════
 // DEC-033: Generational Epoch Window & Rollover Tests (Positive & Negative)
 // ═══════════════════════════════════════════════════════════════════════
