@@ -87,7 +87,6 @@ Folder `research/dec/` memuat seluruh catatan keputusan arsitektur resmi (*Archi
 | **DEC-054** | [`DEC-054-zero-custody-safe-harbor-and-direct-self-broadcast.md`](file:///workspaces/Zeltra-Protocol/research/dec/DEC-054-zero-custody-safe-harbor-and-direct-self-broadcast.md) | Zero-Custody Regulatory Safe Harbor & Direct Self-Broadcast Architecture (Unhosted Wallet Path & Gas Overhead Sanitization) | 2026-10-26 |
 | **DEC-055** | [`DEC-055-cross-chain-ccip-programmable-inbound-deposit-and-mmr-minting.md`](file:///workspaces/Zeltra-Protocol/research/dec/DEC-055-cross-chain-ccip-programmable-inbound-deposit-and-mmr-minting.md) | Cross-Chain CCIP Programmable Inbound Deposit, Direct MMR Ingestion & Interface Standardization | 2026-10-27 |
 | **DEC-056** | [`DEC-056-cross-chain-ccip-spend-sanitation-and-unified-lifecycle-monitor.md`](file:///workspaces/Zeltra-Protocol/research/dec/DEC-056-cross-chain-ccip-spend-sanitation-and-unified-lifecycle-monitor.md) | Cross-Chain CCIP Spend Sanitation, Double-Spend Bypass Elimination & Unified Multi-Chain Lifecycle Monitor | 2026-10-27 |
-| **DEC-057** | [`DEC-057-merkle-mountain-belt-evaluation-and-selective-incrementality-synthesis.md`](file:///workspaces/Zeltra-Protocol/research/dec/DEC-057-merkle-mountain-belt-evaluation-and-selective-incrementality-synthesis.md) | Merkle Mountain Belt (MMB) Architectural Evaluation, Benchmark Grounding & Selective Off-Chain Incrementality Synthesis | 2026-10-29 |
 
 ---
 
@@ -115,7 +114,6 @@ Folder `research/dec/` memuat seluruh catatan keputusan arsitektur resmi (*Archi
 - **DEC-038 (A/B/C)**: Pure ZK-UTXO Migration, Direct MMR Deposit (0 bps fee), dan Zero-Legacy Purge.
 - **DEC-045 (A/B/C)**: In-Memory Flat MMR Array Peter Todd ($O(\log N)$ proof), Concurrent Accumulator, dan 1B View Tag Scan Acceleration.
 - **DEC-053**: ammBoost State Growth Control & Ephemeral Settlement Pruning ($O(1)$ Bounded Storage Eviction).
-- **DEC-057**: Merkle Mountain Belt (MMB) Architectural Evaluation, Benchmark Grounding & Selective Off-Chain Incrementality Synthesis.
 
 ### 4. Privacy, Memos & Side-Channel Defenses
 - **DEC-037 & DEC-039**: 96-Byte Note Encryption Memo Protocol & Integrity Defense.

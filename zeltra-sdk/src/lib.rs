@@ -19,9 +19,6 @@ pub use wallet::*;
 pub use wasm_types::*;
 pub use zk_wasm::*;
 
-// Re-export MMB frontier increment sync structures (DEC-057)
-pub use zeltra_core::{MmbFrontier, MmbIncrementProof, MmbPeak};
-
 pub use zeroize::{Zeroize, ZeroizeOnDrop, Zeroizing};
 
 /// Securely zero out memory of a value to prevent sensitive data leakage.

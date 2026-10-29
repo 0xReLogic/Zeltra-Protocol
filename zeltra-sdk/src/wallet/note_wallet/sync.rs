@@ -860,20 +860,4 @@ impl PrivateNoteWallet {
 
         Ok(self.mmr.leaf_count as u64)
     }
-
-    /// O(log k) Instant Light-Client Frontier Increment Sync (DEC-057 Selective Synthesis).
-    ///
-    /// Verifies and applies a log(k) increment proof to fast-forward the wallet's
-    /// frontier accumulator without replaying all individual leaf commitments.
-    pub fn sync_frontier_increment(
-        &mut self,
-        frontier: &mut zeltra_core::MmbFrontier,
-        proof: &zeltra_core::MmbIncrementProof,
-    ) -> Result<(), WalletError> {
-        frontier
-            .verify_and_sync(proof)
-            .map_err(|e| WalletError::CryptoError(format!("Frontier increment sync failed: {e}")))?;
-        self.current_merkle_root_hex = Some(format!("0x{}", hex::encode(zeltra_core::fr_to_be_bytes(&frontier.root))));
-        Ok(())
-    }
 }
