@@ -9,6 +9,7 @@ pub mod keys;
 pub mod memo;
 pub mod memo_ct;
 pub mod merkle;
+pub mod mmb;
 pub mod note;
 pub mod note_circuit;
 pub mod poseidon;
@@ -68,6 +69,8 @@ pub use memo::*;
 pub use memo_ct::*;
 #[allow(unused_imports)]
 pub use merkle::*;
+#[allow(unused_imports)]
+pub use mmb::*;
 pub use note::*;
 
 // Re-export accounting state machine (DEC-016A Gate B)
