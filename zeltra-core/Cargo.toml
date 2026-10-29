@@ -23,7 +23,7 @@ hex = "0.4.3"
 hkdf = "0.12.4"
 chacha20poly1305 = { version = "0.10.1", default-features = false, features = ["alloc"] }
 chacha20 = { version = "0.9.1", default-features = false }
-hmac = "0.12.1"
+hmac = "0.13.0"
 subtle = "2.6.1"
 x25519-dalek = { version = "2.0.1", default-features = false, features = ["static_secrets"] }
 zeroize = { version = "1.8.2", default-features = false, features = ["alloc"] }
