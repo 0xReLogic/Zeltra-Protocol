@@ -168,7 +168,7 @@ impl Zeltra {
         Ok(self.generation_nullifiers.get(gen_key))
     }
 
-    // --- Epoch & Clean Roots Queries ---
+    // --- Epoch Queries ---
 
     pub fn _get_current_epoch(&self) -> Result<u32, Vec<u8>> {
         Ok(self.current_epoch.get().to::<u32>())
@@ -176,9 +176,5 @@ impl Zeltra {
 
     pub fn _epoch_start_timestamp(&self) -> Result<u64, Vec<u8>> {
         Ok(self.epoch_start_timestamp.get().to::<u64>())
-    }
-
-    pub fn _get_clean_root_timestamp(&self, root: FixedBytes<32>) -> Result<U256, Vec<u8>> {
-        Ok(self.clean_association_roots.get(root))
     }
 }

@@ -246,26 +246,6 @@ impl Zeltra {
         self._set_ccip_router(router)
     }
 
-    /// Pause the contract.
-    pub fn pause(&mut self) -> Result<(), Vec<u8>> {
-        self._pause()
-    }
-
-    /// Unpause the contract.
-    pub fn unpause(&mut self) -> Result<(), Vec<u8>> {
-        self._unpause()
-    }
-
-    /// Registers a new clean association set Merkle root (Admin/Compliance Oracle).
-    pub fn register_clean_root(&mut self, root: FixedBytes<32>) -> Result<(), Vec<u8>> {
-        self._register_clean_root(root)
-    }
-
-    /// Returns the registration timestamp for a clean association root (0 if unregistered).
-    pub fn get_clean_root_timestamp(&self, root: FixedBytes<32>) -> Result<U256, Vec<u8>> {
-        self._get_clean_root_timestamp(root)
-    }
-
     /// Returns whether a nullifier has already been spent on-chain (DEC-019, DEC-025, DEC-033).
     pub fn is_nullifier_spent(&self, nullifier: FixedBytes<32>) -> Result<bool, Vec<u8>> {
         self._is_nullifier_spent(nullifier)
@@ -359,10 +339,11 @@ impl Zeltra {
     #[payable]
     pub fn deposit_direct_native_eth(
         &mut self,
+        expected_amount_gwei: U256,
         note_commitment: FixedBytes<32>,
         encrypted_memo: Bytes,
     ) -> Result<(), Vec<u8>> {
-        self._deposit_direct_native_eth(note_commitment, encrypted_memo)
+        self._deposit_direct_native_eth(expected_amount_gwei, note_commitment, encrypted_memo)
     }
 
     /// Executes a private spend or rollover using a Groth16 zero-knowledge proof for PrivateNoteCircuit (Gate D, DEC-032, DEC-033, DEC-034B).
@@ -508,27 +489,6 @@ impl Zeltra {
             vk_beta_bytes,
             vk_gamma_bytes,
             vk_delta_bytes,
-        )
-    }
-
-    pub fn verify_compliance(
-        &self,
-        root: FixedBytes<32>,
-        nullifier: FixedBytes<32>,
-        recipient: Address,
-        amount: U256,
-        proof_a_neg_bytes: Bytes,
-        proof_b_bytes: Bytes,
-        proof_c_bytes: Bytes,
-    ) -> Result<bool, Vec<u8>> {
-        self._verify_compliance(
-            root,
-            nullifier,
-            recipient,
-            amount,
-            proof_a_neg_bytes,
-            proof_b_bytes,
-            proof_c_bytes,
         )
     }
 

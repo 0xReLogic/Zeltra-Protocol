@@ -524,59 +524,6 @@ fn test_initialization() {
 }
 
 #[test]
-fn test_pause_unpause() {
-    reset_test_state();
-    let owner = address!("1111111111111111111111111111111111111111");
-    let non_owner = address!("2222222222222222222222222222222222222222");
-
-    set_msg_sender(owner);
-    let mut contract = Zeltra::default();
-    contract.init(owner, Address::ZERO, Address::ZERO).unwrap();
-
-    // Non-owner pausing should fail
-    set_msg_sender(non_owner);
-    assert_eq!(contract.pause(), Err(b"NOT_OWNER".to_vec()));
-
-    // Owner pausing should succeed
-    set_msg_sender(owner);
-    assert!(contract.pause().is_ok());
-    assert!(contract.paused.get());
-
-    // Non-owner unpausing should fail
-    set_msg_sender(non_owner);
-    assert_eq!(contract.unpause(), Err(b"NOT_OWNER".to_vec()));
-
-    // Owner unpausing should succeed
-    set_msg_sender(owner);
-    assert!(contract.unpause().is_ok());
-    assert!(!contract.paused.get());
-}
-
-#[test]
-fn test_guarded_functions_fail_when_paused() {
-    reset_test_state();
-    let owner = address!("1111111111111111111111111111111111111111");
-    set_msg_sender(owner);
-
-    let mut contract = Zeltra::default();
-    contract.init(owner, Address::ZERO, Address::ZERO).unwrap();
-    contract.pause().unwrap();
-
-    assert_eq!(
-        contract.deposit_direct_note(
-            U256::from(10_000_000),
-            FixedBytes::repeat_byte(0x01),
-            vec![0u8; 64].into()
-        ),
-        Err(b"CONTRACT_PAUSED".to_vec())
-    );
-    assert_eq!(
-        contract.register_clean_root(FixedBytes::ZERO),
-        Err(b"CONTRACT_PAUSED".to_vec())
-    );
-}
-
-#[test]
 fn test_deposit_direct_note_pos1_success() {
     reset_test_state();
     let owner = Address::repeat_byte(0x01);
@@ -792,39 +739,6 @@ fn test_deposit_direct_note_with_empty_memo() {
 }
 
 #[test]
-fn test_deposit_direct_note_neg5_paused() {
-    reset_test_state();
-    let owner = Address::repeat_byte(0x01);
-    set_msg_sender(owner);
-    let mut contract = Zeltra::default();
-    contract
-        .init(
-            owner,
-            Address::repeat_byte(0x03),
-            Address::repeat_byte(0x04),
-        )
-        .unwrap();
-    contract.pause().unwrap();
-
-    let res = contract.deposit_direct_note(
-        U256::from(10_000_000),
-        FixedBytes::repeat_byte(0x01),
-        vec![0xaa; 96].into(),
-    );
-    assert_eq!(res, Err(b"CONTRACT_PAUSED".to_vec()));
-    assert_eq!(
-        contract.user_note_liabilities.get(U256::from(1)),
-        U256::ZERO
-    );
-    assert_eq!(
-        contract.total_deposited_principals.get(U256::from(1)),
-        U256::ZERO
-    );
-    assert_eq!(contract.mmr_leaf_count.get(), U256::ZERO);
-    assert_eq!(contract.note_tree_root.get(), FixedBytes::ZERO);
-}
-
-#[test]
 fn test_deposit_direct_note_neg6_erc20_transfer_from_fails() {
     reset_test_state();
     let owner = Address::repeat_byte(0x01);
@@ -999,6 +913,50 @@ fn test_claim_execution_fees_no_recipient_set() {
     set_msg_sender(owner);
     let result = contract.claim_execution_fees(1, U256::from(1000));
     assert_eq!(result, Err(b"NO_RECIPIENT_SET".to_vec()));
+}
+
+#[test]
+fn test_set_asset_token_blocked_when_active_liabilities_exist() {
+    reset_test_state();
+    let mut contract = Zeltra::default();
+    let owner = Address::repeat_byte(0x01);
+    let weth9 = Address::repeat_byte(0x02);
+    let usdc = Address::repeat_byte(0x03);
+
+    contract.init_multi_asset(owner, weth9, usdc, Address::repeat_byte(0x04)).unwrap();
+
+    // 1. Initially liabilities are zero: owner can reconfigure tokens
+    set_msg_sender(owner);
+    let new_usdc = Address::repeat_byte(0x09);
+    contract.set_asset_token(U256::from(1), new_usdc).unwrap();
+    assert_eq!(contract.asset_tokens.get(U256::from(1)), new_usdc);
+
+    // 2. Deposit creates active liabilities for USDC (Asset 1)
+    let user = Address::repeat_byte(0x05);
+    set_msg_sender(user);
+    let memo: Bytes = vec![0x77; 96].into();
+    contract.deposit_direct_note(U256::from(10_000_000), FixedBytes::repeat_byte(0x01), memo).unwrap();
+    assert_eq!(contract.user_note_liabilities(U256::from(1)).unwrap(), U256::from(10_000_000));
+
+    // 3. Attempting to change USDC token address now MUST fail closed (Pola Resolv / MixBytes Audit)
+    set_msg_sender(owner);
+    let rogue_token = Address::repeat_byte(0x66);
+    let err = contract.set_asset_token(U256::from(1), rogue_token);
+    assert_eq!(err, Err(b"ACTIVE_LIABILITIES_EXIST".to_vec()));
+
+    // 4. Same protection applies to WETH / weth9_address
+    set_msg_sender(user);
+    set_msg_value(U256::from(5_000_000_000_000_000u64));
+    let memo_weth: Bytes = vec![0x77; 96].into();
+    contract.deposit_direct_native_eth(U256::from(5_000_000), FixedBytes::repeat_byte(0x02), memo_weth).unwrap();
+    assert_eq!(contract.user_note_liabilities(U256::ZERO).unwrap(), U256::from(5_000_000));
+
+    set_msg_sender(owner);
+    let rogue_weth = Address::repeat_byte(0x77);
+    let err_weth = contract.set_asset_token(U256::ZERO, rogue_weth);
+    assert_eq!(err_weth, Err(b"ACTIVE_LIABILITIES_EXIST".to_vec()));
+    let err_weth9 = contract.set_weth9_address(rogue_weth);
+    assert_eq!(err_weth9, Err(b"ACTIVE_LIABILITIES_EXIST".to_vec()));
 }
 
 #[test]
@@ -2717,7 +2675,9 @@ fn test_weth_payable_wrap_success_cei_order() {
     assert_eq!(contract.mmr_leaf_count.get(), U256::ZERO);
 
     // Execute payable native ETH auto-wrap deposit
-    contract.deposit_direct_native_eth(note_cm, memo).unwrap();
+    contract
+        .deposit_direct_native_eth(amount_gwei, note_cm, memo)
+        .unwrap();
 
     // Verify post-conditions
     assert_eq!(
@@ -2756,8 +2716,14 @@ fn test_unaligned_gwei_wei_rejection() {
     // 1. Unaligned Native ETH: 0.005 ETH + 1 wei = 5_000_000_000_000_001 Wei
     let unaligned_eth = U256::from(5_000_000_000_000_001u64);
     set_msg_value(unaligned_eth);
-    let err_eth = contract.deposit_direct_native_eth(note_cm, memo.clone());
+    let err_eth = contract.deposit_direct_native_eth(U256::from(5_000_000), note_cm, memo.clone());
     assert_eq!(err_eth, Err(b"ETH_VALUE_NOT_GWEI_ALIGNED".to_vec()));
+
+    // 1b. Mismatched Expected Amount: msg_value has 0.005 ETH (5_000_000 Gwei) but user expected 0.010 ETH (10_000_000 Gwei)
+    let aligned_eth = U256::from(5_000_000_000_000_000u64);
+    set_msg_value(aligned_eth);
+    let err_mismatch = contract.deposit_direct_native_eth(U256::from(10_000_000), note_cm, memo.clone());
+    assert_eq!(err_mismatch, Err(b"ETH_VALUE_MISMATCH".to_vec()));
 
     // 2. Unaligned WETH ERC-20: 5_000_000_000_000_999 Wei
     let unaligned_weth = U256::from(5_000_000_000_000_999u64);
@@ -3023,7 +2989,7 @@ fn test_usdc_revert_leaves_weth_solvent() {
     let note_cm = FixedBytes::repeat_byte(0x05);
     let memo: Bytes = vec![0x77; 96].into();
     contract
-        .deposit_direct_native_eth(note_cm, memo.clone())
+        .deposit_direct_native_eth(U256::from(10_000_000), note_cm, memo.clone())
         .unwrap();
 
     // 2. Simulate Circle freezing / blacklisting USDC transfers

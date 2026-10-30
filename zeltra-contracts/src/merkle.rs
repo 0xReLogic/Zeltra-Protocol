@@ -173,8 +173,6 @@ impl Zeltra {
         leaf: FixedBytes<32>,
         encrypted_memo: Vec<u8>,
     ) -> Result<(U256, FixedBytes<32>), Vec<u8>> {
-        self.check_not_paused()?;
-
         // Leaf must be a valid Fr scalar (anti-wrap-around security check)
         let leaf_fr = from_evm_scalar(&leaf.0).ok_or_else(|| b"INVALID_LEAF_SCALAR".to_vec())?;
 

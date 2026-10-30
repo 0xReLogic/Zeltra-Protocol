@@ -26,7 +26,6 @@ impl Zeltra {
         note_commitment: FixedBytes<32>,
         encrypted_memo: Bytes,
     ) -> Result<(), Vec<u8>> {
-        self.check_not_paused()?;
         if amount_micro < U256::from(10_000_000u64) {
             return Err(b"AMOUNT_TOO_SMALL".to_vec());
         }
@@ -49,7 +48,6 @@ impl Zeltra {
         note_commitment: FixedBytes<32>,
         encrypted_memo: Bytes,
     ) -> Result<(), Vec<u8>> {
-        self.check_not_paused()?;
         // Min 0.005 WETH (5_000_000 Gwei = 5 * 10^15 Wei)
         if amount_wei < U256::from(5_000_000_000_000_000u64) {
             return Err(b"AMOUNT_TOO_SMALL".to_vec());
@@ -129,11 +127,11 @@ impl Zeltra {
     /// 3. Direct Native ETH Auto-Wrap Deposit (Payable - Asset ID 0) — Strict CEI Compliant
     pub fn _deposit_direct_native_eth(
         &mut self,
+        expected_amount_gwei: U256,
         note_commitment: FixedBytes<32>,
         encrypted_memo: Bytes,
     ) -> Result<(), Vec<u8>> {
         // --- 1. CHECKS ---
-        self.check_not_paused()?;
         let amount_wei = self.msg_value();
 
         // Min 0.005 ETH (5 * 10^15 Wei = 5_000_000 Gwei)
@@ -147,6 +145,11 @@ impl Zeltra {
         let amount_gwei = amount_wei / gwei_scale;
         if amount_gwei > U256::from(u64::MAX) {
             return Err(b"AMOUNT_EXCEEDS_U64_CIRCUIT_BOUND".to_vec());
+        }
+
+        // Strict guard against fat-finger / mismatched value (Pola Bebop DEX / MixBytes Audit)
+        if expected_amount_gwei != amount_gwei {
+            return Err(b"ETH_VALUE_MISMATCH".to_vec());
         }
 
         if note_commitment == FixedBytes::<32>::ZERO {
