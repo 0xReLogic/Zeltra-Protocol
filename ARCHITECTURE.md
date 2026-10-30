@@ -23,7 +23,7 @@ Dokumen ini memetakan struktur kode riil, crate, dan hirarki direktori di seluru
 │   ├── src/verification.rs          — Wrapper pemanggilan host precompile EIP-2537 (call_msm_g1 0x0c, call_pairing 0x0f)
 │   ├── src/vault.rs                  — Akuntansi solvensi multi-aset terisolasi (_check_asset_solvency_invariant, total_assets)
 │   ├── src/views.rs                  — View/getter functions untuk status on-chain
-│   ├── src/governance.rs             — Pause, unpause, dan pengaturan parameter darurat
+│   ├── src/governance.rs             — Manajemen owner 2-step, token registry, execution fee claims, dan rotasi epoch (unstoppable/no pause backdoor)
 │   ├── src/events.rs                 — Event NoteCommitmentAppended (memo 96B), JoinSplitSpendExecuted, dll.
 │   ├── src/poseidon_w5_constants.rs  — Konstanta round constants & MDS matrix Poseidon width-5 in-contract
 │   ├── src/interfaces.rs, types.rs, constants.rs, helpers.rs — Interface ERC-20 / CCIP, tipe EVM & fungsi sanitasi titik G1/G2 (DEC-052)
