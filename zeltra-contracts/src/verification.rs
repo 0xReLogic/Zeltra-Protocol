@@ -294,49 +294,4 @@ impl Zeltra {
             }
         }
     }
-
-    /// Combined compliance check: ZK Proof of innocence (containing Merkle membership check inside the ZK circuit)
-    /// Validates the proof using the registered clean root, spent nullifier, recipient address, and amount.
-    ///
-    /// NOTE (Ephemeral Agent Identifiers Pathway):
-    /// To support stealth-identity-based AI Agents (Roadmap Section 10) and thwart Address Clustering Attacks,
-    /// future upgrades will verify that the spent nullifier and ephemeral public key are derived via Blind
-    /// Signature Derivation from a valid master identity, while keeping the master identity hidden on-chain.
-    pub fn _verify_compliance(
-        &self,
-        root: FixedBytes<32>,
-        nullifier: FixedBytes<32>,
-        recipient: Address,
-        amount: U256,
-        proof_a_neg_bytes: Bytes,
-        proof_b_bytes: Bytes,
-        proof_c_bytes: Bytes,
-    ) -> Result<bool, Vec<u8>> {
-        // 1. Verify clean root is registered on-chain
-        if self.clean_association_roots.get(root) == U256::ZERO {
-            return Ok(false);
-        }
-
-        // 2. Load the compliance Verifying Key (VK)
-        let (vk_alpha, vk_beta, vk_gamma, vk_delta, vk_ic) = self.get_compliance_vk();
-
-        // 3. Compute the public inputs G1 linear combination on-chain (binds the parameters)
-        let public_inputs_g1_bytes = self
-            .compute_public_inputs_g1(&vk_ic, root, nullifier, recipient, amount)?
-            .to_vec();
-
-        // 4. Verify ZK Proof (Groth16) using EIP-2537 pairing precompile
-        let is_zk_valid = self._verify_groth16_proof(
-            proof_a_neg_bytes,
-            proof_b_bytes,
-            proof_c_bytes,
-            Bytes::from(public_inputs_g1_bytes),
-            Bytes::from(vk_alpha.to_vec()),
-            Bytes::from(vk_beta.to_vec()),
-            Bytes::from(vk_gamma.to_vec()),
-            Bytes::from(vk_delta.to_vec()),
-        )?;
-
-        Ok(is_zk_valid)
-    }
 }

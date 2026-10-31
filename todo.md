@@ -34,10 +34,13 @@ Ref: [`docs/roadmap.md`](file:///workspaces/Zeltra-Protocol/docs/roadmap.md) (Fa
 > [!NOTE]
 > **Status Fleksibilitas:** Mengingat deploy Arbitrum sedang jeda/freeze (Oktober 2026), **sirkuit ZK BELUM DIKUNCI**. Tim bebas mengembangkan fitur inovatif (SBM Prover, MinMandate, iSimplePIR) dan memperkuat aljabar sirkuit tanpa terburu-buru melakukan *circuit freeze*.
 
-- [ ] **Studi Komparasi Desain Privasi & Tooling Ekosistem (Fairblock, ZeroStyl, Renegade):**
+- [ ] **ATMI Ekosistem & Peningkatan Fitur (Renegade, Tornado, Fairblock, ZeroStyl):**
+  - **Renegade:**
+    * [ ] **ATMI-1 (Node Sidecar & Fast Snapshot):** Tiru arsitektur `snapshot-sidecar` Renegade untuk isolasi checkpoint flat post-order MMR di SQLite agar daemon relayer `zeltra-node` restart dalam hitungan milidetik saat pohon note membesar.
+    * [ ] **ATMI-2 (Permit2 Witness Binding SDK Helper):** Tiru pola `permitWitnessTransferFrom` pada Zeltra Checkout widget untuk opsi deposit gasless yang mengikat `note_commitment` langsung ke signature EIP-712 pengguna.
+    * [ ] **ATMI-3 (Relayer Metrics & Tracing Dashboard):** Tiru model instrumentasi metrik Prometheus (`renegade-metrics`) untuk memonitor latency pembuktian Groth16, MMR sync drift, dan gas overhead secara real-time.
   - **Fairblock:** Analisis arsitektur *conditional confidentiality* (FHE/t-IBE/decentralized MPC) untuk inspirasi batasan perlindungan transaksi privat Zeltra.
   - **ZeroStyl:** Evaluasi *tooling ZK di Arbitrum Stylus* untuk optimasi pipeline verifikasi dan interop host WASM.
-  - **Renegade:** Analisis strategi produk & UX *dark pool MPC-ZK* dalam mengubah konsep privasi abstrak menjadi produk dengan use case nyata dan daya tarik pasar tinggi.
 
 - [ ] **Circuit ABI & Constraints Freeze (Ditangguhkan hingga R&D Lengkap):**
   - Kunci mati parameter R1CS dan public-input ABI pada 16 PI (`PrivateNoteCircuit`) dan 19 PI (`JoinSplitCircuit`) ketika seluruh fitur siap ke mainnet.

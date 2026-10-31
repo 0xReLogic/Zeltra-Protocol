@@ -12,7 +12,7 @@ Setiap laporan audit wajib menyertakan **metodologi evaluasi**, **PoC pengujian 
 |---|---|---|---|---|---|---|---|
 | **SEC-001** | [`SEC-001-null-branch-soundness-poc.md`](SEC-001-null-branch-soundness-poc.md) | `zeltra-core` | Null-Branch Floating Witness Attack pada R1CS JoinSplit Circuit | **CRITICAL** | Security Research Team | `VERIFIED_CLOSED` | 2026-10-24 |
 | **SEC-002** | [`SEC-002-selective-disclosure-unconstrained-owner-key.md`](SEC-002-selective-disclosure-unconstrained-owner-key.md) | `zeltra-core` | Underconstrained Public Input & Missing Identity Binding in SelectiveDisclosureCircuit | **CRITICAL** | Security Research Team | `VERIFIED_CLOSED` | 2026-10-25 |
-| **AUD-001** | *In Preparation* | `Full-Stack` | Full-Scope Protocol Security Audit (Circuits, Stylus Contracts, Relayer, SDK) | *Scheduled* | Tier-1 Security Audit Firm | `SCHEDULED` | *Q4 2026* |
+| **AUD-001** | [`AUD-001-core-circuits-and-stylus-contracts-security-audit.md`](AUD-001-core-circuits-and-stylus-contracts-security-audit.md) | `zeltra-core & zeltra-contracts` | Comprehensive Security Audit of Core Circuits and Stylus Contracts (Soundness, Solvency, & Cross-Epoch Invariants) | **CRITICAL** | Zeltra Security & Verification Team | `VERIFIED_CLOSED` | 2026-10-30 |
 
 ---
 
@@ -22,10 +22,11 @@ Setiap laporan audit wajib menyertakan **metodologi evaluasi**, **PoC pengujian 
 Fokus: Sinyal tak berkendala (*underconstrained*), manipulasi saksi privat (*witness malleability*), *finite field modular overflow*, kekakuan Jacobian (*tangent rigidity*), dan kendala dekomposisi bit.
 - **SEC-001**: Null-Branch Floating Witness Attack & Companion Constraints Verification.
 - **SEC-002**: Missing Identity-to-SpendingKey Binding & Underconstrained Public Input in Selective Disclosure.
+- **AUD-001**: Decoupled Leaf Index & Merkle Path Bit Binding Breakdown (`ZCORE-CRIT-01`), Missing Inactive MMR Peak & Sibling Companion Constraints (`ZCORE-HIGH-01`).
 
 ### 2. Smart Contract Arbitrum Stylus (`zeltra-contracts`)
 Fokus: Solvensi multi-asset (*contract balance $\ge$ total liabilities*), integrasi precompile EIP-2537 (`0x0c` MSM & `0x0f` pairing), *re-entrancy*, *storage layout collision*, dan profiling gas Stylus WASM.
-- *Laporan mendatang dijadwalkan pada milestone AUD-001.*
+- **AUD-001**: Generational Nullifier Architecture Flaw (`ZCON-CRIT-01`), Expired Note Rollover Revert Trap (`ZCON-HIGH-01`), Missing Generation Epoch Slot Parity (`ZCON-HIGH-02`), Missing Protocol Fee Claim Function (`ZCON-HIGH-03`), and Solvency Invariant Defenses.
 
 ### 3. Relayer Sequencer & Ingress Pipeline (`zeltra-node`)
 Fokus: *Mempool double-spend race condition*, pemalsuan tanda tangan EIP-712 quote, serangan *griefing* kuota gas, konsistensi transaksi SQLite/SQLCipher WAL, dan proteksi DoS.

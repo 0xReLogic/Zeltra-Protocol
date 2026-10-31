@@ -69,13 +69,6 @@ impl Zeltra {
         Ok(())
     }
 
-    pub(crate) fn check_not_paused(&self) -> Result<(), Vec<u8>> {
-        if self.paused.get() {
-            return Err(b"CONTRACT_PAUSED".to_vec());
-        }
-        Ok(())
-    }
-
     #[inline(always)]
     pub(crate) fn msg_value(&self) -> alloy_primitives::U256 {
         #[cfg(test)]

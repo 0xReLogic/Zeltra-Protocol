@@ -73,7 +73,6 @@ impl Zeltra {
         message: Any2EVMMessage,
     ) -> Result<(), Vec<u8>> {
         // 1. CHECKS KEAMANAN ROUTER & AKSES
-        self.check_not_paused()?;
         let caller = self.msg_sender();
         let configured_router = self.ccip_router.get();
 

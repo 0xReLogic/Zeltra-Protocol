@@ -60,8 +60,6 @@ impl Zeltra {
         encrypted_memo: Bytes,
     ) -> Result<bool, Vec<u8>> {
         // 1. CHECKS
-        self.check_not_paused()?;
-
         // Execution fee validation
         if execution_fee > max_execution_fee {
             return Err(b"EXECUTION_FEE_EXCEEDS_MAX".to_vec());
@@ -335,8 +333,6 @@ impl Zeltra {
         encrypted_memo_2: Bytes,
     ) -> Result<bool, Vec<u8>> {
         // 1. CHECKS
-        self.check_not_paused()?;
-
         // Calldata Length Guard (AUD-5 - Anti Relayer Gas Griefing)
         if encrypted_memo_1.len() != 96 || encrypted_memo_2.len() != 96 {
             return Err(b"INVALID_MEMO_LENGTH".to_vec());

@@ -21,7 +21,6 @@ impl Zeltra {
             return Err(b"INVALID_OWNER".to_vec());
         }
         self.owner.set(owner);
-        self.paused.set(false);
         let default_token = if stablecoin_addr == Address::ZERO {
             Address::repeat_byte(0xee)
         } else {
@@ -60,6 +59,11 @@ impl Zeltra {
         if token_addr == Address::ZERO {
             return Err(b"INVALID_TOKEN_ADDRESS".to_vec());
         }
+        // Protect depositors: token address cannot be altered while active liabilities exist for this asset
+        let liab = self.user_note_liabilities.get(asset_id);
+        if liab > U256::ZERO {
+            return Err(b"ACTIVE_LIABILITIES_EXIST".to_vec());
+        }
         self.asset_tokens.setter(asset_id).set(token_addr);
         if asset_id == U256::ZERO {
             self.weth9_address.set(token_addr);
@@ -73,6 +77,10 @@ impl Zeltra {
         self.check_owner()?;
         if weth9 == Address::ZERO {
             return Err(b"INVALID_WETH9_ADDRESS".to_vec());
+        }
+        let liab = self.user_note_liabilities.get(U256::ZERO);
+        if liab > U256::ZERO {
+            return Err(b"ACTIVE_LIABILITIES_EXIST".to_vec());
         }
         self.weth9_address.set(weth9);
         self.asset_tokens.setter(U256::ZERO).set(weth9);
@@ -226,13 +234,13 @@ impl Zeltra {
             amount
         };
 
-        // Transfer token to recipient
-        self.asset_safe_transfer(token_addr, recipient, raw_transfer_amount)?;
-
-        // Deduct liability
+        // Deduct liability first (Strict CEI: state effect precedes external interaction)
         self.accrued_execution_fee_liabilities
             .setter(asset_key)
             .set(accrued - amount);
+
+        // Transfer token to recipient
+        self.asset_safe_transfer(token_addr, recipient, raw_transfer_amount)?;
 
         // Emit FeeClaim event
         crate::events::emit_event(crate::events::FeeClaim {
@@ -245,28 +253,6 @@ impl Zeltra {
         self._check_asset_solvency_invariant(asset_id)?;
 
         Ok(true)
-    }
-
-    // --- Circuit Breaker (Pause/Unpause) & Clean Roots ---
-
-    pub fn _pause(&mut self) -> Result<(), Vec<u8>> {
-        self.check_owner()?;
-        self.paused.set(true);
-        Ok(())
-    }
-
-    pub fn _unpause(&mut self) -> Result<(), Vec<u8>> {
-        self.check_owner()?;
-        self.paused.set(false);
-        Ok(())
-    }
-
-    pub fn _register_clean_root(&mut self, root: FixedBytes<32>) -> Result<(), Vec<u8>> {
-        self.check_not_paused()?;
-        self.check_owner()?;
-        let current_time = U256::from(self.block_timestamp());
-        self.clean_association_roots.insert(root, current_time);
-        Ok(())
     }
 
     // --- CCIP Configuration ---
@@ -301,7 +287,6 @@ impl Zeltra {
     // --- Epoch Rotation ---
 
     pub fn _rotate_epoch(&mut self) -> Result<u32, Vec<u8>> {
-        self.check_not_paused()?;
         self.check_owner()?;
 
         let old_epoch = self.current_epoch.get().to::<u32>();

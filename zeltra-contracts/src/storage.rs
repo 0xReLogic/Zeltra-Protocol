@@ -5,12 +5,8 @@ use stylus_sdk::prelude::*;
 sol_storage! {
     #[entrypoint]
     pub struct Zeltra {
-        // Mapping of valid Merkle roots of clean association sets to their registration timestamp (Fase A: ZK-Compliance)
-        mapping(bytes32 => uint256) clean_association_roots;
-
         // Owner address for admin operations (Fase E: Security)
         address owner;
-        bool paused;
 
         // The ERC-20 stablecoin contract address (kept for backwards-compatibility)
         address stablecoin;

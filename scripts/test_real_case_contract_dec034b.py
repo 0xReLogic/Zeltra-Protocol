@@ -63,7 +63,6 @@ def assert_test(condition: bool, name: str, details: str = ""):
 class MockZeltraContract:
     def __init__(self, owner: str, usdc_addr: str, weth9_addr: str, fee_recipient: str):
         self.owner = Web3.to_checksum_address(owner)
-        self.paused = False
         self.execution_fee_recipient = Web3.to_checksum_address(fee_recipient)
         self.weth9_address = Web3.to_checksum_address(weth9_addr)
         self.stablecoin = Web3.to_checksum_address(usdc_addr)
@@ -124,8 +123,6 @@ class MockZeltraContract:
 
     # --- 1. Direct USDC Deposit ---
     def deposit_direct_note(self, sender: str, amount_micro: int, note_commitment: bytes, memo: bytes):
-        if self.paused:
-            raise ValueError("CONTRACT_PAUSED")
         if amount_micro < MIN_USDC_DEPOSIT_MICRO:
             raise ValueError("AMOUNT_TOO_SMALL")
         if amount_micro > U64_MAX:
@@ -154,8 +151,6 @@ class MockZeltraContract:
 
     # --- 2. Direct WETH Deposit (ERC-20 Inflow) ---
     def deposit_direct_weth(self, sender: str, amount_wei: int, note_commitment: bytes, memo: bytes):
-        if self.paused:
-            raise ValueError("CONTRACT_PAUSED")
         if amount_wei < MIN_WETH_DEPOSIT_WEI:
             raise ValueError("AMOUNT_TOO_SMALL")
         if amount_wei % WEI_PER_GWEI != 0:
@@ -187,9 +182,7 @@ class MockZeltraContract:
         self.check_asset_solvency_invariant(0)
 
     # --- 3. Direct Native ETH Auto-Wrap Deposit (Payable) ---
-    def deposit_direct_native_eth(self, sender: str, msg_value_wei: int, note_commitment: bytes, memo: bytes):
-        if self.paused:
-            raise ValueError("CONTRACT_PAUSED")
+    def deposit_direct_native_eth(self, sender: str, msg_value_wei: int, expected_amount_gwei: int, note_commitment: bytes, memo: bytes):
         if msg_value_wei < MIN_WETH_DEPOSIT_WEI:
             raise ValueError("AMOUNT_TOO_SMALL")
         if msg_value_wei % WEI_PER_GWEI != 0:
@@ -198,6 +191,8 @@ class MockZeltraContract:
         amount_gwei = msg_value_wei // WEI_PER_GWEI
         if amount_gwei > U64_MAX:
             raise ValueError("AMOUNT_EXCEEDS_U64_CIRCUIT_BOUND")
+        if expected_amount_gwei != amount_gwei:
+            raise ValueError("ETH_VALUE_MISMATCH")
         if len(note_commitment) != 32 or int.from_bytes(note_commitment, "big") >= FR_MODULUS:
             raise ValueError("INVALID_NOTE_COMMITMENT_SCALAR")
         if int.from_bytes(note_commitment, "big") == 0:
@@ -230,9 +225,6 @@ class MockZeltraContract:
         change_commitment: bytes,
         flags_packed: int,
     ):
-        if self.paused:
-            raise ValueError("CONTRACT_PAUSED")
-            
         # Strict bit-bounds check (PATCH AUDIT KRITIS #2)
         if flags_packed > 3:
             raise ValueError("FLAGS_PACKED_MALLEABLE_BITS")
@@ -332,7 +324,7 @@ def test_full_lifecycle_multi_asset_bank():
     
     # 2. Bob deposits 2.5 ETH native auto-wrap (2,500,000,000 Gwei = 2.5 * 10^18 Wei)
     bob_comm = b"\x02" * 32
-    contract.deposit_direct_native_eth(bob, 2_500_000_000_000_000_000, bob_comm, b"\xbb" * 96)
+    contract.deposit_direct_native_eth(bob, 2_500_000_000_000_000_000, 2_500_000_000, bob_comm, b"\xbb" * 96)
     assert_test(contract.user_note_liabilities[0] == 2_500_000_000, "Bob WETH Gwei Liability Recorded")
     assert_test(contract.mock_erc20_balances[contract.weth9_address] == 2_500_000_000_000_000_000, "WETH9 Contract Balance Verified")
     
@@ -401,7 +393,7 @@ def test_relayer_fee_claims_scaling_and_bounds():
     
     # Deposit funds to seed the contract
     contract.deposit_direct_note(alice, 100_000_000, b"\x01"*32, b"")
-    contract.deposit_direct_native_eth(alice, 1_000_000_000_000_000_000, b"\x02"*32, b"")
+    contract.deposit_direct_native_eth(alice, 1_000_000_000_000_000_000, 1_000_000_000, b"\x02"*32, b"")
     
     # Spends to accrue fees
     contract.spend_private_note(b"\x11"*32, merchant, 20_000_000, 90_000, 1_500_000, 1, b"\x13"*32, 2) # USDC fee 1.5 USDC
@@ -462,7 +454,7 @@ def test_attack_unaligned_wei_dust():
     malicious_wei = MIN_WETH_DEPOSIT_WEI + 1
     failed = False
     try:
-        contract.deposit_direct_native_eth("0xAA", malicious_wei, b"\x01"*32, b"")
+        contract.deposit_direct_native_eth("0xAA", malicious_wei, malicious_wei // WEI_PER_GWEI, b"\x01"*32, b"")
     except ValueError as e:
         failed = "ETH_VALUE_NOT_GWEI_ALIGNED" in str(e)
     assert_test(failed, "Payable Native ETH Unaligned Wei Reverted (No dust allowed)")
@@ -557,7 +549,7 @@ def test_failure_containment_circle_freeze():
     
     # Seed both pools
     contract.deposit_direct_note(alice, 100_000_000, b"\x01"*32, b"")
-    contract.deposit_direct_native_eth(bob, 1_000_000_000_000_000_000, b"\x02"*32, b"")
+    contract.deposit_direct_native_eth(bob, 1_000_000_000_000_000_000, 1_000_000_000, b"\x02"*32, b"")
     
     # CIRCLE FREEZES USDC CONTRACT!
     contract.token_frozen[contract.stablecoin] = True
@@ -586,7 +578,7 @@ def test_raw_eth_inflation_griefing_defense():
     )
     
     # Legitimate deposit: 1 WETH
-    contract.deposit_direct_native_eth("0xAA", 1_000_000_000_000_000_000, b"\x01"*32, b"")
+    contract.deposit_direct_native_eth("0xAA", 1_000_000_000_000_000_000, 1_000_000_000, b"\x01"*32, b"")
     
     # Attacker forces 100 ETH into Zeltra contract address via selfdestruct(target)
     contract.mock_raw_native_eth_balance += 100 * (10**18)
@@ -605,7 +597,7 @@ def test_web3_calldata_and_selectors():
     expected_selectors = {
         "deposit_direct_note(uint256,bytes32,bytes)": "99c43b6f",
         "deposit_direct_weth(uint256,bytes32,bytes)": "07e0237f",
-        "deposit_direct_native_eth(bytes32,bytes)": "659bac9e",
+        "deposit_direct_native_eth(uint256,bytes32,bytes)": "7a8ac527",
         "claim_execution_fees(uint8,uint256)": "96c181c2",
         "user_note_liabilities(uint256)": "25feac90",
         "accrued_execution_fee_liabilities(uint256)": "57d39dab",
