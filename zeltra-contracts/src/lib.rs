@@ -38,6 +38,8 @@ mod views;
 
 #[cfg(test)]
 pub(crate) mod tests;
+#[cfg(test)]
+pub(crate) mod security_audit_poc_tests;
 
 use alloc::vec::Vec;
 use alloy_primitives::{Address, FixedBytes};
