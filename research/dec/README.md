@@ -42,7 +42,7 @@ Folder `research/dec/` memuat seluruh catatan keputusan arsitektur resmi (*Archi
 | **DEC-030** | [`DEC-030-multi-utxo-joinsplit-coin-selection-zeroize-and-aead-backup.md`](file:///workspaces/Zeltra-Protocol/research/dec/DEC-030-multi-utxo-joinsplit-coin-selection-zeroize-and-aead-backup.md) | Multi-UTXO 2-in-2-out JoinSplit Architecture, Privacy-Preserving Stochastic Coin Selection, Zeroize Memory Defense, and AEAD Wallet Backup | - |
 | **DEC-031** | [`DEC-031-relayer-reconciliation-solvency-observability-quote-domain-binding.md`](file:///workspaces/Zeltra-Protocol/research/dec/DEC-031-relayer-reconciliation-solvency-observability-quote-domain-binding.md) | Relayer Three-Way Reconciliation, Privacy-Preserving Solvency Observability, and Strict Fail-Closed Quote Domain Binding | - |
 | **DEC-032** | [`DEC-032-merkle-mountain-range-commitment-accumulator.md`](file:///workspaces/Zeltra-Protocol/research/dec/DEC-032-merkle-mountain-range-commitment-accumulator.md) | Merkle Mountain Range (MMR) Note Commitment Accumulator — Eliminating the 1M-Leaf Capacity Wall, Slashing On-Chain Insertion Gas by 85%, and Hardening Against Peak Bagging & Boundary Exploits | - |
-| **DEC-033** | [`DEC-033-epoch-windowed-nullifier-pruning-in-flight-rollover.md`](file:///workspaces/Zeltra-Protocol/research/dec/DEC-033-epoch-windowed-nullifier-pruning-in-flight-rollover.md) | Epoch-Windowed Nullifier Registry, In-Flight Rollover Economics, and Anti-Griefing Relayer Guardrails — Pruning $O(N)$ State Bloat, Protecting Client UX with Transparent Maintenance Disclosure, and Guaranteeing Mathematical Solvency without Relayer Subsidy Drain | - |
+| **DEC-033** | [`DEC-033-epoch-windowed-nullifier-pruning-in-flight-rollover.md`](file:///workspaces/Zeltra-Protocol/research/dec/DEC-033-epoch-windowed-nullifier-pruning-in-flight-rollover.md) | ~~Epoch-Windowed Nullifier Registry, In-Flight Rollover Economics~~ *(DEPRECATED & SUPERSEDED by DEC-057)* | - |
 | **DEC-034** | [`DEC-034-dual-asset-architecture-usdc-weth-sovereign-commerce-rails.md`](file:///workspaces/Zeltra-Protocol/research/dec/DEC-034-dual-asset-architecture-usdc-weth-sovereign-commerce-rails.md) | Dual-Asset Architecture (USDC & WETH) — The Sovereign-Shield and High-Velocity Commerce Rails: Solvency Isolation, Censorship-Resistance Defense, 2024–2026 Multi-Asset Postmortems, and Pragmatic L2 Liquidity Convergence | - |
 | **DEC-034A** | [`DEC-034A-canonical-field-bit-packing-and-intra-asset-circuit-constraints.md`](file:///workspaces/Zeltra-Protocol/research/dec/DEC-034A-canonical-field-bit-packing-and-intra-asset-circuit-constraints.md) | Canonical Field Bit-Packing, Intra-Asset Circuit Soundness, and DEC-037 Plaintext Extension | - |
 | **DEC-034B** | [`DEC-034B-stylus-siloed-solvency-payable-weth-wrap-and-multi-asset-settlement.md`](file:///workspaces/Zeltra-Protocol/research/dec/DEC-034B-stylus-siloed-solvency-payable-weth-wrap-and-multi-asset-settlement.md) | Stylus Smart Contract Siloed Solvency, Payable Native ETH Auto-Wrap, and Multi-Asset Settlement Execution | - |
@@ -87,6 +87,7 @@ Folder `research/dec/` memuat seluruh catatan keputusan arsitektur resmi (*Archi
 | **DEC-054** | [`DEC-054-zero-custody-safe-harbor-and-direct-self-broadcast.md`](file:///workspaces/Zeltra-Protocol/research/dec/DEC-054-zero-custody-safe-harbor-and-direct-self-broadcast.md) | Zero-Custody Regulatory Safe Harbor & Direct Self-Broadcast Architecture (Unhosted Wallet Path & Gas Overhead Sanitization) | 2026-10-26 |
 | **DEC-055** | [`DEC-055-cross-chain-ccip-programmable-inbound-deposit-and-mmr-minting.md`](file:///workspaces/Zeltra-Protocol/research/dec/DEC-055-cross-chain-ccip-programmable-inbound-deposit-and-mmr-minting.md) | Cross-Chain CCIP Programmable Inbound Deposit, Direct MMR Ingestion & Interface Standardization | 2026-10-27 |
 | **DEC-056** | [`DEC-056-cross-chain-ccip-spend-sanitation-and-unified-lifecycle-monitor.md`](file:///workspaces/Zeltra-Protocol/research/dec/DEC-056-cross-chain-ccip-spend-sanitation-and-unified-lifecycle-monitor.md) | Cross-Chain CCIP Spend Sanitation, Double-Spend Bypass Elimination & Unified Multi-Chain Lifecycle Monitor | 2026-10-27 |
+| **DEC-057** | [`DEC-057-pure-flat-utxo-epoch-purge-and-global-nullifier-registry.md`](file:///workspaces/Zeltra-Protocol/research/dec/DEC-057-pure-flat-utxo-epoch-purge-and-global-nullifier-registry.md) | Pure Flat-UTXO Architecture, Generational Epoch Purge & Permanent Global Nullifier Registry (Eliminating DEC-033 Overengineering) | 2026-10-31 |
 
 ---
 
@@ -109,11 +110,12 @@ Folder `research/dec/` memuat seluruh catatan keputusan arsitektur resmi (*Archi
 
 ### 3. Dual-Asset (USDC & WETH) & Merkle Mountain Range (MMR)
 - **DEC-032**: Merkle Mountain Range (MMR) Commitment Accumulator.
-- **DEC-033**: Epoch-Windowed Nullifier Pruning & In-Flight Rollover.
+- **DEC-033**: ~~Epoch-Windowed Nullifier Pruning & In-Flight Rollover~~ *(SUPERSEDED by DEC-057)*.
 - **DEC-034 (A/B/C)**: Dual-Asset Architecture, Siloed Solvency, Payable Native ETH Wrapping, dan Zero-Oracle Gas Reimbursement.
 - **DEC-038 (A/B/C)**: Pure ZK-UTXO Migration, Direct MMR Deposit (0 bps fee), dan Zero-Legacy Purge.
 - **DEC-045 (A/B/C)**: In-Memory Flat MMR Array Peter Todd ($O(\log N)$ proof), Concurrent Accumulator, dan 1B View Tag Scan Acceleration.
 - **DEC-053**: ammBoost State Growth Control & Ephemeral Settlement Pruning ($O(1)$ Bounded Storage Eviction).
+- **DEC-057**: Pure Flat-UTXO Architecture, Generational Epoch Purge & Permanent Global Nullifier Registry.
 
 ### 4. Privacy, Memos & Side-Channel Defenses
 - **DEC-037 & DEC-039**: 96-Byte Note Encryption Memo Protocol & Integrity Defense.
